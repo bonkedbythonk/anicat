@@ -12,7 +12,7 @@ APP_NAME = os.environ.get(f"{CLI_NAME}_APP_NAME", CLI_NAME_LOWER)
 USER_NAME = os.environ.get("USERNAME", os.environ.get("USER", "User"))
 
 
-__version__ = metadata.version("anicat_media")
+__version__ = metadata.version("anicat")
 
 AUTHOR = "bonkedbythonk"
 GIT_REPO = "github.com"

@@ -301,6 +301,7 @@ class MpvIPCPlayer(BaseIPCPlayer):
     player_state: PlayerState
     player_fetching: bool = False
     player_first_run: bool = True
+    auto_next_triggered: bool = False
     event_handlers: Dict[str, List[Callable]] = {}
     property_observers: Dict[str, List[Callable]] = {}
     key_bindings: Dict[str, Callable] = {}
@@ -503,7 +504,9 @@ class MpvIPCPlayer(BaseIPCPlayer):
                 self.stream_config.auto_next
                 and data >= self.stream_config.episode_complete_at
                 and not self.player_fetching
+                and not self.auto_next_triggered
             ):
+                self.auto_next_triggered = True
                 self._auto_next_episode()
 
     def _handle_client_message(self, message: Dict[str, Any]):
@@ -695,6 +698,8 @@ class MpvIPCPlayer(BaseIPCPlayer):
         if not self.ipc_client or self.player_first_run:
             self.player_first_run = False
             return
+        
+        self.auto_next_triggered = False
 
         self.ipc_client.send_command(["seek", 0, "absolute"])
         self.ipc_client.send_command(

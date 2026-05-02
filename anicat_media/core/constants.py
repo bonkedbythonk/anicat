@@ -40,7 +40,9 @@ GRAPHQL_DIR = ASSETS_DIR / "graphql"
 ICONS_DIR = ASSETS_DIR / "icons"
 
 ICON_PATH = ICONS_DIR / ("logo.ico" if PLATFORM == "Win32" else "logo.png")
-APP_ASCII_ART = "[ anicat ]"
+APP_ASCII_ART = r"""      /\_/\
+     ( o.o )
+      > ^ <  [ a n i c a t ]"""
 
 try:
     import click

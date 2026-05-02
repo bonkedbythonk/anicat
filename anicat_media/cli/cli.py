@@ -26,8 +26,6 @@ if TYPE_CHECKING:
         log: bool | None
         rich_traceback: bool | None
         rich_traceback_theme: str
-        debug_update: bool
-        force_update_notice: bool
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +36,6 @@ commands = {
     "anilist": "anilist.anilist",
     "download": "download.download",
     "login": "login.login",
-    "update": "update.update",
     "registry": "registry.registry",
     "worker": "worker.worker",
     "queue": "queue.queue",
@@ -70,19 +67,12 @@ commands = {
     default="github-dark",
     help="Controls Whether to display a rich traceback",
 )
-@click.option("--debug-update", is_flag=True, hidden=True, help="Show debug information for the updater")
-@click.option("--force-update-notice", is_flag=True, hidden=True, help="Force the update notice to appear in the menu")
 @options_from_model(AppConfig)
 @click.pass_context
 def cli(ctx: click.Context, **options: "Unpack[Options]"):
     """
     The main entry point for the Anicat CLI.
     """
-    if options.get("force_update_notice"):
-        import os
-        os.environ["ANICAT_FORCE_UPDATE"] = "1"
-        print("Debug: Force update notice enabled.")
-
     setup_logging(options["log"])
     setup_exceptions_handler(
         options["trace"],
@@ -91,14 +81,6 @@ def cli(ctx: click.Context, **options: "Unpack[Options]"):
         options["rich_traceback_theme"],
     )
     
-    # Silent background update check
-    try:
-        from ..core.updater import check_for_updates
-        import threading
-        threading.Thread(target=check_for_updates, args=(True, options.get("debug_update")), daemon=True).start()
-    except Exception:
-        pass
-
     logger.info(f"Current Command: {' '.join(sys.argv)}")
     cli_overrides = {}
     param_lookup = {p.name: p for p in ctx.command.params}

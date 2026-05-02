@@ -134,3 +134,4 @@ class State(StateModel):
     menu_name: MenuName
     media_api: MediaApiState = Field(default_factory=MediaApiState)
     provider: ProviderState = Field(default_factory=ProviderState)
+    update_available: bool = False

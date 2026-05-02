@@ -51,11 +51,5 @@ Just type `anicat` and press **Enter** to start browsing!
 
 ---
 
-## Self-Update
-Anicat is updated frequently. To get the latest features, just run:
-```bash
-anicat update
-```
-
 ## Credits
 Anicat is a specialized macOS fork of the [Viu](https://github.com/viu-media/viu) project. I am deeply grateful to the original creators for their incredible architecture!

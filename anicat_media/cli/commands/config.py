@@ -129,15 +129,6 @@ def config_update(user_config: AppConfig):
     print("Update successful")
 
 
-@config.command(
-    name="clear-update-cache",
-    help="Force Anicat to check for updates again immediately",
-)
-def config_clear_update_cache():
-    from ...core.updater import clear_update_cache
-
-    clear_update_cache()
-    print("Update cache cleared. Fresh check will occur on next startup.")
 
 
 

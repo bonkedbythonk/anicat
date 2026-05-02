@@ -25,11 +25,6 @@ class InquirerSelector(BaseSelector):
             header_color = self.config.fzf.header_color.split(",")
             color_str = f"rgb({header_color[0]},{header_color[1]},{header_color[2]})"
             lines.append(f"[{color_str}]{self.config.fzf.header_ascii_art}[/]")
-            
-            from ....core.updater import is_update_available
-            if is_update_available():
-                lines.append("\n✨ [bold yellow]A new update is available![/]\n[dim]Run 'anicat update' to get the latest features.[/]")
-            
             lines.append("") # Spacing
 
         if header:
@@ -49,7 +44,6 @@ class InquirerSelector(BaseSelector):
         return FuzzyPrompt(
             message=prompt,
             choices=choices,
-            height="70%",
             border=False,
             validate=lambda result: result in choices,
             wrap_around=True,
@@ -86,7 +80,6 @@ class InquirerSelector(BaseSelector):
         return FuzzyPrompt(
             message=prompt,
             choices=choices,
-            height="70%",
             multiselect=True,
             border=False,
             wrap_around=True,
@@ -110,7 +103,6 @@ class InquirerSelector(BaseSelector):
         return FuzzyPrompt(
             message=prompt,
             choices=initial_results or [],
-            height="70%",
             border=False,
             wrap_around=True,
             keybindings={

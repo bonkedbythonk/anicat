@@ -69,6 +69,7 @@ def main(ctx: Context, state: State) -> State | InternalDirective:
         ),
         f"{' ' if icons else ''}Edit Config": lambda: InternalDirective.CONFIG_EDIT,
         f"{'⚙️ ' if icons else ''}Manage Categories": _manage_categories_action(ctx, state),
+        f"{'✨ ' if state.update_available else ''}Check for Updates": _check_for_updates_action(ctx, state),
         f"{' ' if icons else ''}Exit": lambda: InternalDirective.EXIT,
     }
 
@@ -336,4 +337,22 @@ def _manage_categories_action(ctx: Context, state: State) -> MenuAction:
                 ctx.feedback.error(f"Failed to save categories: {e}")
             
         return InternalDirective.RELOAD
+    return action
+
+def _check_for_updates_action(ctx: Context, state: State) -> MenuAction:
+    """Action to manually check for updates."""
+
+    def action():
+        feedback = ctx.feedback
+        with feedback.progress("Checking for updates..."):
+            is_available = ctx.updater.check_version()
+        
+        if is_available:
+            feedback.success("A new version is available! Run 'pip install --upgrade anicat' to update.")
+            # Return updated state so the ✨ appears immediately
+            return state.model_copy(update={"update_available": True})
+        else:
+            feedback.info("You are already on the latest version.")
+            return state.model_copy(update={"update_available": False})
+            
     return action

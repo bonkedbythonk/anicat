@@ -91,3 +91,4 @@ USER_CONFIG = APP_DATA_DIR / "config.toml"
 
 LOG_FILE = LOG_FOLDER / "app.log"
 SUPPORT_PROJECT_URL = "https://github.com/bonkedbythonk/anicat"
+UPDATE_STATUS_FILE = APP_CACHE_DIR / ".update_status"

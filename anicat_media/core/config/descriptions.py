@@ -24,11 +24,6 @@ GENERAL_IMAGE_RENDERER = (
     "The command-line tool to use for rendering images in the terminal."
 )
 GENERAL_MANGA_VIEWER = "The external application to use for viewing manga pages."
-GENERAL_CHECK_FOR_UPDATES = "Automatically check for new versions of Anicat on startup."
-GENERAL_SHOW_NEW_RELEASE = (
-    "Whether to show release notes after every  update when running the new version"
-)
-GENERAL_UPDATE_CHECK_INTERVAL = "The interval in hours to check for updates"
 GENERAL_CACHE_REQUESTS = (
     "Enable caching of network requests to speed up subsequent operations."
 )

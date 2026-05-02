@@ -6,7 +6,7 @@ Anicat is a minimalist, high-performance tool that lets you search, stream, and 
 
 ---
 
-## 🚀 Quick Start in 2 Steps
+## Quick Start in 2 Steps
 
 ### 1. Install
 Copy and paste these commands in order:
@@ -32,7 +32,7 @@ Follow the link provided, paste your token, and you're ready to go!
 
 ---
 
-## 🎮 Basic Usage
+## Basic Usage
 
 Just type `anicat` and press **Enter** to start browsing!
 
@@ -43,7 +43,7 @@ Just type `anicat` and press **Enter** to start browsing!
 
 ---
 
-## ✨ Features
+## Features
 - **Auto-Next**: Automatically plays the next episode when you finish one.
 - **Sync**: Your progress is automatically saved to your AniList profile.
 - **High Quality**: Supports up to 1080p streaming.
@@ -51,7 +51,7 @@ Just type `anicat` and press **Enter** to start browsing!
 
 ---
 
-## 🛠️ Self-Update
+## Self-Update
 Anicat is updated frequently. To get the latest features, just run:
 ```bash
 anicat update

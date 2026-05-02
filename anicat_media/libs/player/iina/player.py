@@ -53,11 +53,11 @@ class IinaPlayer(BasePlayer):
             "IINA",
         ]
         
+        commands.append(params.url)
+        
         if iina_args:
             commands.append("--args")
             commands.extend(iina_args)
-        
-        commands.append(params.url)
 
         logger.info(f"Launching IINA: {' '.join(commands)}")
 
@@ -67,18 +67,16 @@ class IinaPlayer(BasePlayer):
             
             # Since IINA doesn't have an IPC returned to us easily, we just return a stub result
             return PlayerResult(
-                status="completed",
-                last_position="0:00",
-                duration="0:00",
-                percent_pos=0.0
+                episode=params.episode,
+                stop_time="0:00",
+                total_time="0:00"
             )
         except Exception as e:
             logger.error(f"Failed to launch IINA: {e}")
             return PlayerResult(
-                status="failed",
-                last_position="0:00",
-                duration="0:00",
-                percent_pos=0.0
+                episode=params.episode,
+                stop_time="0:00",
+                total_time="0:00"
             )
 
     def play_with_ipc(self, params: PlayerParams, socket_path: str) -> subprocess.Popen:

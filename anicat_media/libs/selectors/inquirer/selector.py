@@ -16,7 +16,6 @@ class InquirerSelector(BaseSelector):
             validate=lambda result: result in choices,
             wrap_around=True,
             keybindings={
-                "answer": [{"key": "enter"}, {"key": "right"}],
                 "accept": [{"key": "enter"}, {"key": "right"}],
             },
         ).execute()
@@ -38,7 +37,6 @@ class InquirerSelector(BaseSelector):
             border=True,
             wrap_around=True,
             keybindings={
-                "answer": [{"key": "enter"}, {"key": "right"}],
                 "accept": [{"key": "enter"}, {"key": "right"}],
             },
         ).execute()
@@ -66,7 +64,6 @@ class InquirerSelector(BaseSelector):
             border=True,
             wrap_around=True,
             keybindings={
-                "answer": [{"key": "enter"}, {"key": "right"}],
                 "accept": [{"key": "enter"}, {"key": "right"}],
             },
         ).execute()

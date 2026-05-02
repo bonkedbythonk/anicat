@@ -98,7 +98,6 @@ class InteractiveConfigEditor:
                 long_instruction=help_text,
                 wrap_around=True,
                 keybindings={
-                    "answer": [{"key": "enter"}, {"key": "right"}],
                     "accept": [{"key": "enter"}, {"key": "right"}],
                 },
             )
@@ -141,7 +140,6 @@ class InteractiveConfigEditor:
                     long_instruction=help_text,
                     wrap_around=True,
                     keybindings={
-                        "answer": [{"key": "enter"}, {"key": "right"}],
                         "accept": [{"key": "enter"}, {"key": "right"}],
                     },
                 )

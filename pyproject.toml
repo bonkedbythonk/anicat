@@ -27,7 +27,7 @@ Homepage = "https://github.com/bonkedbythonk/anicat"
 packages = ["anicat_media"]
 
 [project.scripts]
-anicat = 'anicat_media.cli.main:main'
+anicat = 'anicat_media.cli.cli:cli'
 
 [project.optional-dependencies]
 standard = [

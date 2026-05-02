@@ -28,18 +28,15 @@ class IinaPlayer(BasePlayer):
         iina_args = []
         
         if params.headers:
-            other_headers = []
+            header_fields = []
             for k, v in params.headers.items():
-                if k.lower() == "user-agent":
-                    iina_args.append(f"--user-agent={v}")
-                elif k.lower() == "referer":
-                    iina_args.append(f"--referrer={v}")
-                else:
-                    # mpv format for multiple headers is k1:v1,k2:v2
-                    other_headers.append(f"{k}:{v}")
+                # mpv/IINA prefers "Field: Value" format in http-header-fields
+                # We use "Referer" instead of "Referrer" for the header field name
+                header_key = "Referer" if k.lower() == "referer" else k
+                header_fields.append(f"{header_key}: {v}")
             
-            if other_headers:
-                iina_args.append(f"--http-header-fields={','.join(other_headers)}")
+            if header_fields:
+                iina_args.append(f'--http-header-fields="{",".join(header_fields)}"')
 
         if params.title:
             iina_args.append(f"--title={params.title}")
@@ -54,10 +51,13 @@ class IinaPlayer(BasePlayer):
             "-n",  # Open a new instance of the application
             "-a",
             "IINA",
-            "--args",
-            *iina_args,
-            params.url
         ]
+        
+        if iina_args:
+            commands.append("--args")
+            commands.extend(iina_args)
+        
+        commands.append(params.url)
 
         logger.info(f"Launching IINA: {' '.join(commands)}")
 

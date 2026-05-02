@@ -265,17 +265,12 @@ class Session:
 
     def _login(self):
         """Triggers the login flow and reloads the context."""
-        from ..commands.login import login
+        from ..commands.login import login_flow
         
-        # We invoke the login command callback directly
+        # We invoke the login flow directly
         # It handles browser opening, editor opening, and waiting for user.
         try:
-            # login is a click command, its callback is the function itself if not decorated with @click.command,
-            # but it is decorated. So we use login.callback if available or just the function if we can.
-            # In our case, login is the decorated command.
-            # We can use click.Context to invoke it if needed, but calling it directly with config works 
-            # if we pass the right object.
-            login.callback(self._context.config) # type: ignore
+            login_flow(self._context.config)
             
             # After login, we must reload the config as it was saved to disk
             from ..config import ConfigLoader

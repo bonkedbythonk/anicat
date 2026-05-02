@@ -16,6 +16,12 @@ def login(config: AppConfig):
     """
     Login to AniList by opening the token URL and config file.
     """
+    login_flow(config)
+
+def login_flow(config: AppConfig):
+    """
+    The core logic for the AniList login process.
+    """
     from anicat_media.core.constants import ANILIST_AUTH
     
     rprint("[bold cyan]AniList Login[/]")

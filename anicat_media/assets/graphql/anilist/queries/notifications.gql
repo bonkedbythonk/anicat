@@ -1,0 +1,28 @@
+query {
+  Page(perPage: 5) {
+    pageInfo {
+      total
+    }
+    notifications(resetNotificationCount: true, type: AIRING) {
+      ... on AiringNotification {
+        id
+        type
+        episode
+        contexts
+        createdAt
+        media {
+          id
+          idMal
+          title {
+            romaji
+            english
+          }
+          coverImage {
+            medium
+            large
+          }
+        }
+      }
+    }
+  }
+}

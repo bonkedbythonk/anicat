@@ -1,0 +1,31 @@
+query ($id: Int, $type: MediaType) {
+  Page {
+    media(id: $id, type: $type) {
+      characters {
+        nodes {
+          name {
+            first
+            middle
+            last
+            full
+            native
+          }
+          image {
+            medium
+            large
+          }
+          description
+          gender
+          dateOfBirth {
+            year
+            month
+            day
+          }
+          age
+          bloodType
+          favourites
+        }
+      }
+    }
+  }
+}

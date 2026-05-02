@@ -1,0 +1,32 @@
+mutation (
+  $mediaId: Int
+  $scoreRaw: Int
+  $repeat: Int
+  $progress: Int
+  $status: MediaListStatus
+) {
+  SaveMediaListEntry(
+    mediaId: $mediaId
+    scoreRaw: $scoreRaw
+    progress: $progress
+    repeat: $repeat
+    status: $status
+  ) {
+    id
+    status
+    mediaId
+    score
+    progress
+    repeat
+    startedAt {
+      year
+      month
+      day
+    }
+    completedAt {
+      year
+      month
+      day
+    }
+  }
+}

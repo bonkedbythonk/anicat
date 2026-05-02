@@ -1,0 +1,18 @@
+query ($id: Int) {
+  Page {
+    pageInfo {
+      total
+    }
+    reviews(mediaId: $id) {
+      summary
+      user {
+        name
+        avatar {
+          large
+          medium
+        }
+      }
+      body
+    }
+  }
+}

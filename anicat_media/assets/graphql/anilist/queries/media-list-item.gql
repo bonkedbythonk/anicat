@@ -1,0 +1,5 @@
+query ($mediaId: Int) {
+  MediaList(mediaId: $mediaId) {
+    id
+  }
+}

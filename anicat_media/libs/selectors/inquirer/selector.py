@@ -18,20 +18,31 @@ class InquirerSelector(BaseSelector):
     def __init__(self, config: Optional["AppConfig"] = None):
         self.config = config
 
-    def _print_header(self, header: Optional[str] = None):
+    def _get_header_text(self, header: Optional[str] = None) -> str:
+        """Constructs the header text including logo and update notification."""
+        lines = []
         if self.config and self.config.fzf.show_header_ascii_art:
             header_color = self.config.fzf.header_color.split(",")
             color_str = f"rgb({header_color[0]},{header_color[1]},{header_color[2]})"
-            console.print(self.config.fzf.header_ascii_art, style=color_str, highlight=False)
-            print()  # Vertical spacing after logo
+            lines.append(f"[{color_str}]{self.config.fzf.header_ascii_art}[/]")
+            
+            from ....core.updater import is_update_available
+            if is_update_available():
+                lines.append("\n✨ [bold yellow]A new update is available![/]\n[dim]Run 'anicat update' to get the latest features.[/]")
+            
+            lines.append("") # Spacing
 
         if header:
-            console.print(f"[bold cyan]{header}[/bold cyan]")
+            lines.append(f"[bold cyan]{header}[/bold cyan]")
+            
+        return "\n".join(lines)
 
     def choose(self, prompt, choices, *, preview=None, header=None):
-        self._print_header(header)
+        header_text = self._get_header_text(header)
+        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        
         return FuzzyPrompt(
-            message=prompt,
+            message=full_message,
             choices=choices,
             height="100%",
             border=False,
@@ -43,9 +54,10 @@ class InquirerSelector(BaseSelector):
         ).execute()
 
     def confirm(self, prompt, *, default=False):
-        self._print_header()
+        header_text = self._get_header_text()
+        full_message = f"{header_text}\n{prompt}" if header_text else prompt
         return inquirer.confirm(
-            message=prompt,
+            message=full_message,
             default=default,
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
@@ -53,9 +65,10 @@ class InquirerSelector(BaseSelector):
         ).execute()
 
     def ask(self, prompt, *, default=None):
-        self._print_header()
+        header_text = self._get_header_text()
+        full_message = f"{header_text}\n{prompt}" if header_text else prompt
         return inquirer.text(
-            message=prompt,
+            message=full_message,
             default=default or "",
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
@@ -65,9 +78,10 @@ class InquirerSelector(BaseSelector):
     def choose_multiple(
         self, prompt: str, choices: list[str], preview: str | None = None
     ) -> list[str]:
-        self._print_header()
+        header_text = self._get_header_text()
+        full_message = f"{header_text}\n{prompt}" if header_text else prompt
         return FuzzyPrompt(
-            message=prompt,
+            message=full_message,
             choices=choices,
             height="100%",
             multiselect=True,
@@ -88,13 +102,11 @@ class InquirerSelector(BaseSelector):
         initial_query: str | None = None,
         initial_results: list[str] | None = None,
     ) -> str | None:
-        self._print_header(header)
+        header_text = self._get_header_text(header)
+        full_message = f"{header_text}\n{prompt}" if header_text else prompt
         
-        # InquirerPy doesn't have a native dynamic search/reload like fzf,
-        # so we fallback to a static fuzzy selection of initial results if provided,
-        # or we just provide the fuzzy prompt.
         return FuzzyPrompt(
-            message=prompt,
+            message=full_message,
             choices=initial_results or [],
             height="100%",
             border=False,

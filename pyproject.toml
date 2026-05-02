@@ -8,9 +8,6 @@ authors = [
 license = "UNLICENSE"
 readme = "README.md"
 
-[project.urls]
-Repository = "https://github.com/bonkedbythonk/anicat"
-Homepage = "https://github.com/bonkedbythonk/anicat"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1.7",
@@ -21,6 +18,10 @@ dependencies = [
     "requests>=2.33.1",
     "rich>=13.9.2",
 ]
+
+[project.urls]
+Repository = "https://github.com/bonkedbythonk/anicat"
+Homepage = "https://github.com/bonkedbythonk/anicat"
 
 [project.scripts]
 anicat = 'anicat_media.cli.main:main'

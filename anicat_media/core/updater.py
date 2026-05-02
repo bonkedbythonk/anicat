@@ -14,30 +14,37 @@ UPDATE_AVAILABLE_FILE = APP_CACHE_DIR / ".update_available"
 LAST_COMMIT_FILE = APP_CACHE_DIR / ".last_commit"
 
 
+_UPDATE_CACHE: bool = False
+
 def check_for_updates(silent: bool = True) -> bool:
     """
     Checks if there's a new commit on the GitHub main branch.
     Returns True if an update is available.
     """
+    global _UPDATE_CACHE
     try:
-        with httpx.Client(timeout=5.0) as client:
+        # Use a very short timeout for background checks
+        timeout = 2.0 if silent else 10.0
+        with httpx.Client(timeout=timeout) as client:
             response = client.get(GITHUB_API_URL)
             if response.status_code == 200:
                 remote_hash = response.json().get("sha")
                 
                 if not LAST_COMMIT_FILE.exists():
-                    # Initialize the commit file with the current remote hash
-                    # (assuming the user just installed/is on the latest)
+                    LAST_COMMIT_FILE.parent.mkdir(parents=True, exist_ok=True)
                     LAST_COMMIT_FILE.write_text(remote_hash)
                     UPDATE_AVAILABLE_FILE.write_text("0")
+                    _UPDATE_CACHE = False
                     return False
 
                 local_hash = LAST_COMMIT_FILE.read_text().strip()
                 if remote_hash != local_hash:
                     UPDATE_AVAILABLE_FILE.write_text("1")
+                    _UPDATE_CACHE = True
                     return True
                 else:
                     UPDATE_AVAILABLE_FILE.write_text("0")
+                    _UPDATE_CACHE = False
                     return False
     except Exception as e:
         if not silent:
@@ -48,9 +55,18 @@ def check_for_updates(silent: bool = True) -> bool:
 
 
 def is_update_available() -> bool:
-    """Quick check for the cached update flag."""
+    """Quick check for the cached update flag (in-memory first)."""
+    global _UPDATE_CACHE
+    if _UPDATE_CACHE:
+        return True
+        
     if UPDATE_AVAILABLE_FILE.exists():
-        return UPDATE_AVAILABLE_FILE.read_text().strip() == "1"
+        try:
+            val = UPDATE_AVAILABLE_FILE.read_text().strip() == "1"
+            _UPDATE_CACHE = val
+            return val
+        except Exception:
+            return False
     return False
 
 

@@ -37,14 +37,19 @@ class InquirerSelector(BaseSelector):
             
         return "\n".join(lines)
 
-    def choose(self, prompt, choices, *, preview=None, header=None):
+    def _render_header(self, header: Optional[str] = None):
+        """Prints the header to the console."""
         header_text = self._get_header_text(header)
-        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        if header_text:
+            console.print(header_text)
+
+    def choose(self, prompt, choices, *, preview=None, header=None):
+        self._render_header(header)
         
         return FuzzyPrompt(
-            message=full_message,
+            message=prompt,
             choices=choices,
-            height="100%",
+            height="70%",
             border=False,
             validate=lambda result: result in choices,
             wrap_around=True,
@@ -54,10 +59,9 @@ class InquirerSelector(BaseSelector):
         ).execute()
 
     def confirm(self, prompt, *, default=False):
-        header_text = self._get_header_text()
-        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        self._render_header()
         return inquirer.confirm(
-            message=full_message,
+            message=prompt,
             default=default,
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
@@ -65,10 +69,9 @@ class InquirerSelector(BaseSelector):
         ).execute()
 
     def ask(self, prompt, *, default=None):
-        header_text = self._get_header_text()
-        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        self._render_header()
         return inquirer.text(
-            message=full_message,
+            message=prompt,
             default=default or "",
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
@@ -78,12 +81,11 @@ class InquirerSelector(BaseSelector):
     def choose_multiple(
         self, prompt: str, choices: list[str], preview: str | None = None
     ) -> list[str]:
-        header_text = self._get_header_text()
-        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        self._render_header()
         return FuzzyPrompt(
-            message=full_message,
+            message=prompt,
             choices=choices,
-            height="100%",
+            height="70%",
             multiselect=True,
             border=False,
             wrap_around=True,
@@ -102,13 +104,12 @@ class InquirerSelector(BaseSelector):
         initial_query: str | None = None,
         initial_results: list[str] | None = None,
     ) -> str | None:
-        header_text = self._get_header_text(header)
-        full_message = f"{header_text}\n{prompt}" if header_text else prompt
+        self._render_header(header)
         
         return FuzzyPrompt(
-            message=full_message,
+            message=prompt,
             choices=initial_results or [],
-            height="100%",
+            height="70%",
             border=False,
             wrap_around=True,
             keybindings={
@@ -118,12 +119,11 @@ class InquirerSelector(BaseSelector):
 
 
 if __name__ == "__main__":
-    selector = InquirerSelector()
-    choice = selector.ask("Hello dev :)")
-    print(choice)
-    choice = selector.confirm("Hello dev :)")
-    print(choice)
-    choice = selector.choose_multiple("What comes first", ["a", "b"])
-    print(choice)
-    choice = selector.choose("What comes first", ["a", "b"])
-    print(choice)
+    import sys
+    try:
+        selector = InquirerSelector()
+        choice = selector.choose("Test", ["a", "b"])
+        print(choice)
+    finally:
+        # Ensure terminal is reset on exit
+        sys.exit(0)

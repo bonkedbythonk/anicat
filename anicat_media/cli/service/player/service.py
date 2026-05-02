@@ -1,8 +1,8 @@
 import logging
 from typing import Optional
 
-from ....core.config import AppConfig
-from ....core.exceptions import AnicatError
+from anicat_media.core.config import AppConfig
+from anicat_media.core.exceptions import AnicatError
 from ....libs.media_api.types import MediaItem
 from ....libs.player.base import BasePlayer
 from ....libs.player.params import PlayerParams

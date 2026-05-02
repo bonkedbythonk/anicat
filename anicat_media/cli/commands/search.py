@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 import click
 
 
-from ...core.config import AppConfig
-from ...core.exceptions import AnicatError
+from anicat_media.core.config import AppConfig
+from anicat_media.core.exceptions import AnicatError
 from ..utils.completion import anime_titles_shell_complete
 from . import examples
 
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 def search(config: AppConfig, **options: "Unpack[Options]"):
     from anicat_media.cli.service.feedback.service import FeedbackService
 
-    from ...core.exceptions import AnicatError
+    from anicat_media.core.exceptions import AnicatError
     from ...libs.provider.anime.params import (
         AnimeParams,
         SearchParams,

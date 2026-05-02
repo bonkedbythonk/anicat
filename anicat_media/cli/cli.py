@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 import click
 from click.core import ParameterSource
 
-from ..core.config import AppConfig
-from ..core.constants import CLI_NAME, USER_CONFIG, __version__
+from anicat_media.core.config import AppConfig
+from anicat_media.core.constants import CLI_NAME, USER_CONFIG, __version__
 from .config import ConfigLoader
 from .options import options_from_model
 from .utils.exception import setup_exceptions_handler

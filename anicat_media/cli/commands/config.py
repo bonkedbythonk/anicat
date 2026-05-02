@@ -1,6 +1,6 @@
 import click
 
-from ...core.config import AppConfig
+from anicat_media.core.config import AppConfig
 
 
 @click.group(
@@ -33,14 +33,14 @@ def config(ctx: click.Context):
     Manage your configuration. If no subcommand is provided, it opens the config in your default terminal editor.
     """
     if ctx.invoked_subcommand is None:
-        from ...core.constants import USER_CONFIG
+        from anicat_media.core.constants import USER_CONFIG
 
         click.edit(filename=str(USER_CONFIG))
 
 
 @config.command(name="path", help="Print the config location and exit")
 def config_path():
-    from ...core.constants import USER_CONFIG
+    from anicat_media.core.constants import USER_CONFIG
 
     print(USER_CONFIG)
 
@@ -78,7 +78,7 @@ def config_view_json(user_config: AppConfig):
 @config.command(name="edit", help="Start the interactive configuration wizard")
 @click.pass_obj
 def config_edit(user_config: AppConfig):
-    from ...core.constants import USER_CONFIG
+    from anicat_media.core.constants import USER_CONFIG
     from ..config.editor import InteractiveConfigEditor
     from ..config.generate import generate_config_toml_from_app_model
 
@@ -95,15 +95,27 @@ def config_edit(user_config: AppConfig):
     name="open", help="Open the config file in your default system editor (macOS)"
 )
 def config_open():
+    import sys
     import subprocess
 
-    from ...core.constants import USER_CONFIG
+    from anicat_media.core.constants import USER_CONFIG
 
     print(f"Opening config at: {USER_CONFIG}")
-    try:
-        subprocess.run(["open", str(USER_CONFIG)], check=True)
-    except Exception as e:
-        click.echo(f"Failed to open config: {e}", err=True)
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(["open", "-t", str(USER_CONFIG)], check=True)
+        except Exception as e:
+            click.echo(f"Failed to open config with 'open -t': {e}. Falling back to 'open'...", err=True)
+            try:
+                subprocess.run(["open", str(USER_CONFIG)], check=True)
+            except Exception as e2:
+                click.echo(f"Failed to open config: {e2}", err=True)
+    else:
+        try:
+            # Fallback for non-macOS or if open fails
+            click.launch(str(USER_CONFIG))
+        except Exception as e:
+            click.echo(f"Failed to open config: {e}", err=True)
 
 
 @config.command(
@@ -120,7 +132,7 @@ def config_desktop_entry(user_config: AppConfig):
 )
 @click.pass_obj
 def config_update(user_config: AppConfig):
-    from ...core.constants import USER_CONFIG
+    from anicat_media.core.constants import USER_CONFIG
     from ..config.generate import generate_config_toml_from_app_model
 
     USER_CONFIG.write_text(
@@ -145,7 +157,7 @@ def _generate_desktop_entry(config: AppConfig):
 
     from ...libs.selectors.selector import create_selector
 
-    from ...core.constants import (
+    from anicat_media.core.constants import (
         CLI_NAME,
         ICON_PATH,
         PLATFORM,

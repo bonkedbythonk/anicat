@@ -6,9 +6,9 @@ from typing import Dict
 import click
 from pydantic import ValidationError
 
-from ...core.config import AppConfig
-from ...core.constants import USER_CONFIG
-from ...core.exceptions import ConfigError
+from anicat_media.core.config import AppConfig
+from anicat_media.core.constants import USER_CONFIG
+from anicat_media.core.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from rich.progress import (
     TextColumn,
 )
 
-from ....core.config import AppConfig
+from anicat_media.core.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class FeedbackService:
             try:
                 from plyer import notification
 
-                from ....core.constants import CLI_NAME, ICON_PATH
+                from anicat_media.core.constants import CLI_NAME, ICON_PATH
 
                 notification.notify(  # type: ignore
                     title=f"{CLI_NAME} notification".title(),
@@ -60,7 +60,7 @@ class FeedbackService:
             try:
                 from plyer import notification
 
-                from ....core.constants import CLI_NAME, ICON_PATH
+                from anicat_media.core.constants import CLI_NAME, ICON_PATH
 
                 notification.notify(  # type: ignore
                     title=f"{CLI_NAME} notification".title(),
@@ -87,7 +87,7 @@ class FeedbackService:
             try:
                 from plyer import notification
 
-                from ....core.constants import CLI_NAME, ICON_PATH
+                from anicat_media.core.constants import CLI_NAME, ICON_PATH
 
                 notification.notify(  # type: ignore
                     title=f"{CLI_NAME} notification".title(),
@@ -113,7 +113,7 @@ class FeedbackService:
             try:
                 from plyer import notification
 
-                from ....core.constants import CLI_NAME, ICON_PATH
+                from anicat_media.core.constants import CLI_NAME, ICON_PATH
 
                 notification.notify(  # type: ignore
                     title=f"{CLI_NAME} notification".title(),
@@ -169,7 +169,7 @@ class FeedbackService:
             try:
                 from plyer import notification
 
-                from ....core.constants import CLI_NAME, ICON_PATH
+                from anicat_media.core.constants import CLI_NAME, ICON_PATH
 
                 notification.notify(  # type: ignore
                     title=f"{CLI_NAME} notification".title(),

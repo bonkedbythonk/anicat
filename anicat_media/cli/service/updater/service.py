@@ -1,6 +1,6 @@
 import logging
 import httpx
-from ....core.constants import VERSION, UPDATE_STATUS_FILE, LAST_COMMIT_FILE
+from anicat_media.core.constants import VERSION, UPDATE_STATUS_FILE, LAST_COMMIT_FILE
 
 logger = logging.getLogger(__name__)
 

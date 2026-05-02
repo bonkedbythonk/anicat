@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import click
 
-from ...core.config import AppConfig
-from ...core.constants import APP_DIR, USER_CONFIG
-from ...core.utils.concurrency import thread_manager
+from anicat_media.core.config import AppConfig
+from anicat_media.core.constants import APP_DIR, USER_CONFIG
+from anicat_media.core.utils.concurrency import thread_manager
 from .state import InternalDirective, MenuName, State
 
 if TYPE_CHECKING:
@@ -247,8 +247,11 @@ class Session:
         from ..config import ConfigLoader
 
         if sys.platform == "darwin":
-            subprocess.run(["open", str(USER_CONFIG)])
-            click.pause("Config opened in your default editor. Press Enter here after you have saved your changes...")
+            import subprocess
+            rprint(f"\n[bold yellow]Opening your config file in your text editor...[/]")
+            rprint(f"[dim]If it doesn't open, please find it at: {USER_CONFIG}[/]")
+            subprocess.run(["open", "-t", str(USER_CONFIG)])
+            click.pause("Press Enter here after you have saved your changes...")
         elif sys.platform == "win32":
             subprocess.run(["start", str(USER_CONFIG)], shell=True)
             click.pause("Config opened in your default editor. Press Enter here after you have saved your changes...")

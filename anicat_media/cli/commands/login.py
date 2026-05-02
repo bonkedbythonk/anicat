@@ -4,9 +4,11 @@ from pathlib import Path
 import os
 import shutil
 
-from ...core.config import AppConfig
-from ...core.constants import USER_CONFIG
-from ..config.loader import ConfigLoader
+import sys
+import subprocess
+from anicat_media.core.config import AppConfig
+from anicat_media.core.constants import USER_CONFIG
+from anicat_media.cli.config.loader import ConfigLoader
 
 @click.command(help="Login to your AniList account")
 @click.pass_obj
@@ -14,14 +16,22 @@ def login(config: AppConfig):
     """
     Login to AniList by opening the token URL and config file.
     """
-    from ...core.constants import ANILIST_AUTH
+    from anicat_media.core.constants import ANILIST_AUTH
     
     rprint("[bold cyan]AniList Login[/]")
     rprint(f"Opening your browser for authentication: [link={ANILIST_AUTH}]{ANILIST_AUTH}[/link]")
     click.launch(ANILIST_AUTH)
     
-    rprint("\n[bold yellow]Opening your config file in your default text editor...[/]")
-    click.launch(str(USER_CONFIG))
+    rprint(f"\n[bold yellow]Opening your config file in your text editor...[/]")
+    rprint(f"[dim]If it doesn't open, please find it at: {USER_CONFIG}[/]")
+    
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(['open', '-t', str(USER_CONFIG)], check=False)
+        except Exception:
+            click.launch(str(USER_CONFIG))
+    else:
+        click.launch(str(USER_CONFIG))
     
     rprint("\n[bold green]Instructions:[/]")
     rprint("1. Copy the 'access_token' from the URL after authorizing.")

@@ -297,7 +297,7 @@ def _manage_categories_action(ctx: Context, state: State) -> MenuAction:
     """Action to interactively manage hidden categories."""
 
     def action():
-        from .....core.constants import USER_CONFIG
+        from anicat_media.core.constants import USER_CONFIG
         from ....config.generate import generate_config_toml_from_app_model
         from InquirerPy import inquirer
 
@@ -350,7 +350,7 @@ def _check_for_updates_action(ctx: Context, state: State) -> MenuAction:
         
         from ....service.feedback.service import console
         from rich.table import Table
-        from ....core.constants import VERSION
+        from anicat_media.core.constants import VERSION
 
         # Get values from updater service
         remote_version = ctx.updater.remote_version or "Unknown"

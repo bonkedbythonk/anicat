@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING, List
 
 from anicat_media.cli.utils.search import find_best_match_title
 
-from ....core.config.model import AppConfig
-from ....core.constants import APP_CACHE_DIR
-from ....core.downloader import DownloadParams, create_downloader
-from ....core.utils.concurrency import ManagedBackgroundWorker, thread_manager
-from ....core.utils.normalizer import normalize_title
+from anicat_media.core.config.model import AppConfig
+from anicat_media.core.constants import APP_CACHE_DIR
+from anicat_media.core.downloader import DownloadParams, create_downloader
+from anicat_media.core.utils.concurrency import ManagedBackgroundWorker, thread_manager
+from anicat_media.core.utils.normalizer import normalize_title
 from ....libs.media_api.types import MediaItem
 from ....libs.provider.anime.params import (
     AnimeParams,

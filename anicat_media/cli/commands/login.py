@@ -14,9 +14,10 @@ def login(config: AppConfig):
     """
     Login to AniList by providing an OAuth token.
     """
+    from ...core.constants import ANILIST_AUTH
     rprint("[bold cyan]AniList Login[/]")
-    rprint("Please visit this link to generate your token: [link=https://anilist.co/settings/developer]https://anilist.co/settings/developer[/]")
-    rprint("[dim](Create a 'New Client' if you haven't, then use the redirect link to get your token)[/]")
+    rprint(f"Please visit this link to generate your token: [link={ANILIST_AUTH}]{ANILIST_AUTH}[/link]")
+    rprint("[dim](Authorize the app and then copy the 'access_token' from the URL you are redirected to)[/]")
     
     token = click.prompt("Paste your token here", hide_input=True).strip()
     

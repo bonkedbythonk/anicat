@@ -78,6 +78,11 @@ def cli(ctx: click.Context, **options: "Unpack[Options]"):
     """
     The main entry point for the Anicat CLI.
     """
+    if options.get("force_update_notice"):
+        import os
+        os.environ["ANICAT_FORCE_UPDATE"] = "1"
+        print("Debug: Force update notice enabled.")
+
     setup_logging(options["log"])
     setup_exceptions_handler(
         options["trace"],
@@ -88,10 +93,6 @@ def cli(ctx: click.Context, **options: "Unpack[Options]"):
     
     # Silent background update check
     try:
-        if options.get("force_update_notice"):
-            import os
-            os.environ["ANICAT_FORCE_UPDATE"] = "1"
-
         from ..core.updater import check_for_updates
         import threading
         threading.Thread(target=check_for_updates, args=(True, options.get("debug_update")), daemon=True).start()

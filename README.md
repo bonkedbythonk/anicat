@@ -1,53 +1,77 @@
 # Anicat: The Beginner's Guide to Terminal Anime
 
-Welcome to **Anicat**! If you’ve never used a "terminal" before, don't worry. This guide is written specifically for you. 
+Welcome to **Anicat**! If you’ve never used a "terminal" before, don't worry. This guide is written specifically to help you get up and running in minutes.
 
 Anicat is a minimalist, high-performance tool that lets you search, stream, and track your favorite Anime and Manga directly from your computer's command line. No browser ads, no distractions—just pure content.
 
 ---
 
-## Quick Start in 2 Steps
+## What are you installing?
 
-### 1. Install
-Copy and paste these commands in order:
+Before we run any commands, it helps to understand the three core tools that make Anicat work:
 
-1.  **Install Homebrew:**  
+-   **Homebrew**: Think of this as the "App Store" for developers. It handles the downloading and updating of all the background tools we need.
+-   **Kitty Terminal**: This is the "window" where you will run Anicat. We use Kitty because it is one of the few terminals that can display high-quality images and anime covers directly in your workspace.
+-   **MPV Media Player**: This is the "engine" that actually plays the video. It's lightweight, fast, and stays out of your way.
+
+---
+
+## Installation Guide
+
+### Step 1: The Tools (Engines)
+First, we need to install the foundation. Copy and paste these commands into your current terminal:
+
+1.  **Install Homebrew** (if you don't have it):  
     `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-2.  **Install Engines:**  
-    `brew install mpv fzf kitty`
-3.  **Install UV:**  
+
+2.  **Install the Engines** (Kitty, MPV, and FZF):  
+    `brew install kitty mpv fzf`
+
+> [!TIP]
+> After running `brew install kitty`, you will find **Kitty** in your **Applications** folder just like any other app (Spotify, Chrome, etc.). **From now on, you should always use Kitty to run Anicat!**
+
+---
+
+### Step 2: The App (Anicat)
+Now that we have the engines, let's install the actual app.
+
+1.  **Install UV** (The installer):  
     `curl -LsSf https://astral.sh/uv/install.sh | sh`
-4.  **Install Anicat:**  
+
+2.  **Install Anicat**:  
     `uv tool install git+https://github.com/bonkedbythonk/anicat.git`
 
-> [!IMPORTANT]
-> **You MUST use the Kitty Terminal!** Standard Apple Terminal cannot show images. Always open the **Kitty** app to run Anicat.
+---
 
-### 2. Setup
+## Getting Started
+
+### 1. Launch Kitty
+Open your **Applications** folder and launch **Kitty**. 
+
+> [!IMPORTANT]
+> **Stop using the default Apple Terminal!** It cannot show images. Always open the **Kitty** app to enjoy the full Anicat experience.
+
+### 2. Login
 Run the login command to link your AniList account:
 ```bash
 anicat login
 ```
 Anicat will open your browser and your config file automatically. Just paste the token into the file, save, and you're ready to go!
 
----
-
-## Basic Usage
-
+### 3. Browse!
 Just type `anicat` and press **Enter** to start browsing!
 
-- **Arrow Keys**: Move up/down in menus.
-- **Enter**: Select an item.
-- **Escape / Backspace**: Go back.
-- **Right Arrow**: Quick select (in some menus).
+-   **Arrow Keys**: Move up/down in menus.
+-   **Enter**: Select an item.
+-   **Escape / Backspace**: Go back.
 
 ---
 
 ## Features
-- **Auto-Next**: Automatically plays the next episode when you finish one.
-- **Sync**: Your progress is automatically saved to your AniList profile.
-- **High Quality**: Supports up to 1080p streaming.
-- **Minimalist**: Beautiful ASCII interface with zero distractions.
+-   **✨ Manual Updates**: Check for the latest features manually from the main menu whenever you want.
+-   **🔄 Auto-Next**: Automatically plays the next episode when you finish one.
+-   **☁️ Sync**: Your progress is automatically saved to your AniList profile.
+-   **📺 High Quality**: Supports up to 1080p streaming.
 
 ---
 

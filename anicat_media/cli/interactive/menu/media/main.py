@@ -9,6 +9,7 @@ from .....libs.media_api.types import (
     MediaType,
     UserMediaListStatus,
 )
+from rich.panel import Panel
 from ...session import Context, session
 from ...state import InternalDirective, MediaApiState, MenuName, State
 
@@ -347,12 +348,30 @@ def _check_for_updates_action(ctx: Context, state: State) -> MenuAction:
         with feedback.progress("Checking for updates..."):
             is_available = ctx.updater.check_version()
         
+        from ....service.feedback.service import console
+        
         if is_available:
-            feedback.success("A new version is available! Run 'pip install --upgrade anicat' to update.")
+            panel = Panel(
+                "[bold green]✨ A new version is available![/bold green]\n\n"
+                "Run [bold yellow]pip install --upgrade anicat[/bold yellow] to update.",
+                title="Update Check",
+                border_style="yellow",
+                expand=False
+            )
+            console.print(panel)
+            feedback.pause_for_user("return to menu")
             # Return updated state so the ✨ appears immediately
             return state.model_copy(update={"update_available": True})
         else:
-            feedback.info("You are already on the latest version.")
+            panel = Panel(
+                "[bold blue]You are already on the latest version.[/bold blue]\n"
+                "Everything is current.",
+                title="Update Check",
+                border_style="green",
+                expand=False
+            )
+            console.print(panel)
+            feedback.pause_for_user("return to menu")
             return state.model_copy(update={"update_available": False})
             
     return action

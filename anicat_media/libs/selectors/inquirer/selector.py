@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 from InquirerPy import inquirer
 from InquirerPy.prompts import FuzzyPrompt  # pyright: ignore[reportPrivateImportUsage]
 from rich.console import Console
+from rich.text import Text
 
 from ..base import BaseSelector
 
@@ -38,8 +39,19 @@ class InquirerSelector(BaseSelector):
         if header_text:
             console.print(header_text)
 
+    def _get_clean_prompt(self, prompt: str) -> str:
+        """Handles prompts that might contain Rich markup."""
+        if "[" in prompt and "]" in prompt:
+            rich_text = Text.from_markup(prompt)
+            if rich_text.plain != prompt:
+                # If it has markup, print the styled version and return the plain version
+                console.print(rich_text)
+                return " -> "  # Simple indicator since the message was already printed
+        return prompt
+
     def choose(self, prompt, choices, *, preview=None, header=None):
         self._render_header(header)
+        prompt = self._get_clean_prompt(prompt)
         
         return FuzzyPrompt(
             message=prompt,
@@ -54,6 +66,7 @@ class InquirerSelector(BaseSelector):
 
     def confirm(self, prompt, *, default=False):
         self._render_header()
+        prompt = self._get_clean_prompt(prompt)
         return inquirer.confirm(
             message=prompt,
             default=default,
@@ -64,6 +77,7 @@ class InquirerSelector(BaseSelector):
 
     def ask(self, prompt, *, default=None):
         self._render_header()
+        prompt = self._get_clean_prompt(prompt)
         return inquirer.text(
             message=prompt,
             default=default or "",
@@ -77,6 +91,7 @@ class InquirerSelector(BaseSelector):
         self, prompt: str, choices: list[str], preview: str | None = None
     ) -> list[str]:
         self._render_header()
+        prompt = self._get_clean_prompt(prompt)
         return FuzzyPrompt(
             message=prompt,
             choices=choices,

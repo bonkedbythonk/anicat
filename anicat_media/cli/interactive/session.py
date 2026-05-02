@@ -289,6 +289,11 @@ class Session:
         history: Optional[List[State]] = None,
     ):
         self._load_context(config)
+        
+        from rich.console import Console
+        from ...core.constants import USER_NAME
+        Console().print(f"[bold green]Welcome back, {USER_NAME}![/bold green]")
+
         if resume:
             if history := self._context.session.get_default_session_history():
                 self._history = history

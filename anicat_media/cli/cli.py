@@ -110,42 +110,6 @@ def cli(ctx: click.Context, **options: "Unpack[Options]"):
     )
     ctx.obj = config
 
-    if config.general.welcome_screen:
-        import time
-
-        from ..core.constants import APP_CACHE_DIR, USER_NAME, SUPPORT_PROJECT_URL
-
-        last_welcomed_at_file = APP_CACHE_DIR / ".last_welcome"
-        should_welcome = False
-        if last_welcomed_at_file.exists():
-            try:
-                last_welcomed_at = float(
-                    last_welcomed_at_file.read_text(encoding="utf-8")
-                )
-                # runs once a month
-                if (time.time() - last_welcomed_at) > 30 * 24 * 3600:
-                    should_welcome = True
-
-            except Exception as e:
-                logger.warning(f"Failed to read welcome screen timestamp: {e}")
-
-        else:
-            should_welcome = True
-        if should_welcome:
-            last_welcomed_at_file.write_text(str(time.time()), encoding="utf-8")
-
-            from ..libs.selectors.selector import create_selector
-
-            selector = create_selector(config)
-            if selector.confirm(f"""\
-[green]How are you, {USER_NAME} 🙂?
-If you enjoy the project and would like to support it, you can give it a star at {SUPPORT_PROJECT_URL}.
-Would you like to open the project page? Select yes to continue — otherwise, enjoy your terminal-anime browsing experience 😁.[/]
-You can disable this message by turning off the welcome_screen option in the config, if you don't disable it, the cli will show it again the next month.
-"""):
-                from webbrowser import open
-
-                open(SUPPORT_PROJECT_URL)
 
     if ctx.invoked_subcommand is None:
         from .commands.anilist import cmd

@@ -33,17 +33,9 @@ class AuthenticationError(AnicatError):
 
     def __init__(self, reason: str = ""):
         lines = [
-            reason or "No AniList token found.",
+            reason or "You are not logged in.",
             "",
-            "To authenticate, provide your token using one of these methods (in priority order):",
-            "  1. CLI flag:     anicat anilist auth --token <your_token>",
-            "  2. CLI argument: anicat anilist auth /path/to/token.txt",
-            "  3. Env var:      export ANILIST_TOKEN='<your_token>'",
-            "  4. Token file:   Save your token to ~/.config/anicat/token.txt",
-            "  5. Config file:  Add 'token = \"<your_token>\"' under [anilist] in config.toml",
-            "",
-            "To obtain a token, visit:",
-            "  https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token",
+            "Please run 'anicat login' to authenticate with your AniList account.",
         ]
         super().__init__("\n".join(lines))
 

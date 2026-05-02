@@ -148,13 +148,7 @@ main = """
   # ---- login ----
 \b
   # To sign in just run
-  anicat anilist auth
-\b
-  # To check your login status
-  anicat anilist auth --status
-\b
-  # To log out and erase credentials
-  anicat anilist auth --logout
+  anicat login
 \b
   # ---- notifier ----
 \b

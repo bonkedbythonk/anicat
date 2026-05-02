@@ -99,3 +99,5 @@ Once installed, simply type **anicat** in your **Kitty Terminal**.
 
 ## Credits
 Anicat is a specialized macOS fork of the [Viu](https://github.com/viu-media/viu) project. I am deeply grateful to the original creators for their incredible architecture!
+
+<!-- Update Test: 1.0.1 -->

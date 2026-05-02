@@ -26,6 +26,8 @@ if TYPE_CHECKING:
         log: bool | None
         rich_traceback: bool | None
         rich_traceback_theme: str
+        debug_update: bool
+        force_update_notice: bool
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,8 @@ commands = {
     default="github-dark",
     help="Controls Whether to display a rich traceback",
 )
+@click.option("--debug-update", is_flag=True, hidden=True, help="Show debug information for the updater")
+@click.option("--force-update-notice", is_flag=True, hidden=True, help="Force the update notice to appear in the menu")
 @options_from_model(AppConfig)
 @click.pass_context
 def cli(ctx: click.Context, **options: "Unpack[Options]"):
@@ -84,9 +88,13 @@ def cli(ctx: click.Context, **options: "Unpack[Options]"):
     
     # Silent background update check
     try:
+        if options.get("force_update_notice"):
+            import os
+            os.environ["ANICAT_FORCE_UPDATE"] = "1"
+
         from ..core.updater import check_for_updates
         import threading
-        threading.Thread(target=check_for_updates, args=(True,), daemon=True).start()
+        threading.Thread(target=check_for_updates, args=(True, options.get("debug_update")), daemon=True).start()
     except Exception:
         pass
 

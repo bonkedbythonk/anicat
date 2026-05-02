@@ -48,6 +48,8 @@ class InternalDirective(Enum):
     CONFIG_EDIT = "CONFIG_EDIT"
 
     RELOAD = "RELOAD"
+    
+    LOGIN = "LOGIN"
 
 
 class StateModel(BaseModel):

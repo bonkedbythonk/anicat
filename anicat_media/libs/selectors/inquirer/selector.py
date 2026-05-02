@@ -73,6 +73,7 @@ class InquirerSelector(BaseSelector):
         return inquirer.text(
             message=prompt,
             default=default or "",
+            validate=lambda result: len(result.strip()) > 0 or "Input cannot be empty. Please try again.",
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },

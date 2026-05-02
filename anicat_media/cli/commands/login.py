@@ -38,7 +38,7 @@ def login(config: AppConfig):
         if new_config.anilist.token:
             rprint("\n[bold green]Login successful! Enjoy Anicat.[/bold green]")
         else:
-            rprint("\n[bold red]Error: Token not found in config. Please try again.[/bold red]")
+            rprint("\n[bold red]No token detected in config.toml. Please try the login process again.[/bold red]")
             
     except Exception as e:
         rprint(f"\n[bold red]Failed to reload config: {e}[/bold red]")

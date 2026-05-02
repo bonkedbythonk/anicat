@@ -72,6 +72,12 @@ def main(ctx: Context, state: State) -> State | InternalDirective:
         f"{' ' if icons else ''}Exit": lambda: InternalDirective.EXIT,
     }
 
+    if not ctx.config.anilist.token:
+        login_label = f"{'🔑 ' if icons else '-> '}Login to AniList"
+        new_options = {login_label: lambda: InternalDirective.LOGIN}
+        new_options.update(options)
+        options = new_options
+
     # Filter out hidden categories from the menu
     hidden = ctx.config.general.hidden_categories
     if hidden:

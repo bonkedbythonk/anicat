@@ -250,6 +250,28 @@ class Session:
         config = loader.load()
         self._load_context(config)
 
+    def _login(self):
+        """Triggers the login flow and reloads the context."""
+        from ..commands.login import login
+        
+        # We invoke the login command callback directly
+        # It handles browser opening, editor opening, and waiting for user.
+        try:
+            # login is a click command, its callback is the function itself if not decorated with @click.command,
+            # but it is decorated. So we use login.callback if available or just the function if we can.
+            # In our case, login is the decorated command.
+            # We can use click.Context to invoke it if needed, but calling it directly with config works 
+            # if we pass the right object.
+            login.callback(self._context.config) # type: ignore
+            
+            # After login, we must reload the config as it was saved to disk
+            from ..config import ConfigLoader
+            loader = ConfigLoader()
+            config = loader.load()
+            self._load_context(config)
+        except Exception as e:
+            self._context.feedback.error(f"Login failed: {e}")
+
     def run(
         self,
         config: AppConfig,
@@ -305,6 +327,9 @@ class Session:
                     continue
                 elif next_step == InternalDirective.CONFIG_EDIT:
                     self._edit_config()
+                elif next_step == InternalDirective.LOGIN:
+                    self._login()
+                    continue
                 elif next_step == InternalDirective.BACK:
                     if len(self._history) > 1:
                         self._history.pop()

@@ -54,7 +54,12 @@ def search(config: AppConfig, **options: "Unpack[Options]"):
     from ...libs.selectors.selector import create_selector
 
     if not options["anime_title"]:
-        raw = click.prompt("What are you in the mood for? (comma-separated)")
+        raw = ""
+        while not raw.strip():
+            raw = click.prompt("What are you in the mood for? (comma-separated)", default="", show_default=False)
+            if not raw.strip():
+                click.echo(click.style("Input cannot be empty. Please try again.", fg="red"))
+        
         options["anime_title"] = [a.strip() for a in raw.split(",") if a.strip()]
 
     feedback = FeedbackService(config)

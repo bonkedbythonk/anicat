@@ -33,15 +33,10 @@ For the full experience, the following tools are recommended:
 
 1.  **Launch the Interactive TUI:**
     ```bash
-    anicat anilist
+    anicat
     ```
 
-2.  **Browse & Read Manga:**
-    ```bash
-    anicat manga search "Berserk"
-    ```
-
-3.  **Keyboard Shortcuts (Manga Viewer):**
+2.  **Keyboard Shortcuts (Manga Viewer):**
     *   `l` / `Right Arrow`: Next Page
     *   `h` / `Left Arrow`: Previous Page
     *   `s`: Toggle Spread Mode (Double Page View)

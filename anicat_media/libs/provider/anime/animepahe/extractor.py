@@ -4,6 +4,9 @@ import re
 def animepahe_key_creator(c: int, a: int):
     from ...scraping.utils import encode_base_n
 
+    if a == 0:
+        return ""
+
     if c < a:
         val_a = ""
     else:

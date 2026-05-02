@@ -6,7 +6,7 @@ from pathlib import Path
 PLATFORM = sys.platform
 CLI_NAME = "ANICAT"
 CLI_NAME_LOWER = "anicat"
-PROJECT_NAME = "anicat-media"
+PROJECT_NAME = "anicat_media"
 APP_NAME = os.environ.get(f"{CLI_NAME}_APP_NAME", CLI_NAME_LOWER)
 
 USER_NAME = os.environ.get("USERNAME", os.environ.get("USER", "User"))

@@ -7,7 +7,7 @@ This module provides a factory for instantiating the correct player implementati
 from ...core.config import AppConfig
 from .base import BasePlayer
 
-PLAYERS = ["mpv", "vlc", "syncplay"]
+PLAYERS = ["mpv", "vlc"]
 
 
 class PlayerFactory:

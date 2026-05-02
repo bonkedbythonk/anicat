@@ -36,7 +36,7 @@ class IinaPlayer(BasePlayer):
                 header_fields.append(f"{header_key}: {v}")
             
             if header_fields:
-                iina_args.append(f'--http-header-fields="{",".join(header_fields)}"')
+                iina_args.append(f'--http-header-fields={",".join(header_fields)}')
 
         if params.title:
             iina_args.append(f"--title={params.title}")

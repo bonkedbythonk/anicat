@@ -69,10 +69,11 @@ AniList is a website that tracks what you watch. By connecting it to Anicat, the
     ```
 3.  Your browser will open to the [AniList Developer Settings](https://anilist.co/settings/developer). Click **"Authorize"** and copy the long code (the "Token") that appears.
 4.  **Save the Token (The Easiest Way):** 
-    Copy and paste this command into your terminal, but replace **YOUR_TOKEN_HERE** with the code you just copied:
+    Copy and paste this command into your terminal (replace **YOUR_TOKEN_HERE** with your actual code):
     ```bash
     echo 'export ANILIST_TOKEN="YOUR_TOKEN_HERE"' >> ~/.zshrc
     ```
+    *(**What does this do?** It's a shortcut that saves the token to your Mac's hidden settings file so Anicat remembers you **permanently**, even after you restart your computer!)*
 5.  **Restart your Terminal** (close Kitty and open it again), and you’re all set! Now when you type `anicat`, your progress will be saved.
 
 *Note: The `export` method is the most reliable for macOS users. You can also try adding it directly to your config file, but we recommend the steps above for a hassle-free setup.*

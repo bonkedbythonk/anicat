@@ -6,33 +6,39 @@ import shutil
 
 from ...core.config import AppConfig
 from ...core.constants import USER_CONFIG
-from ..config.generate import generate_config_toml_from_app_model
+from ..config.loader import ConfigLoader
 
 @click.command(help="Login to your AniList account")
 @click.pass_obj
 def login(config: AppConfig):
     """
-    Login to AniList by providing an OAuth token.
+    Login to AniList by opening the token URL and config file.
     """
     from ...core.constants import ANILIST_AUTH
+    
     rprint("[bold cyan]AniList Login[/]")
-    rprint(f"Please visit this link to generate your token: [link={ANILIST_AUTH}]{ANILIST_AUTH}[/link]")
-    rprint("[dim](Authorize the app and then copy the 'access_token' from the URL you are redirected to)[/]")
+    rprint(f"Opening your browser for authentication: [link={ANILIST_AUTH}]{ANILIST_AUTH}[/link]")
+    click.launch(ANILIST_AUTH)
     
-    token = click.prompt("Paste your token here", hide_input=True).strip()
+    rprint("\n[bold yellow]Opening your config file in your default text editor...[/]")
+    click.launch(str(USER_CONFIG))
     
-    if not token:
-        rprint("[red]Error: Token cannot be empty.[/]")
-        return
-
-    # Update config object
-    config.anilist.token = token
+    rprint("\n[bold green]Instructions:[/]")
+    rprint("1. Copy the 'access_token' from the URL after authorizing.")
+    rprint(f"2. Paste it in the file behind [bold white]token = [/] (located under the [bold white][[anilist]][/] section).")
+    rprint("3. Save ([bold white]Cmd+S[/]) and close the editor.")
     
-    # Save to config.toml
+    input("\nPress Enter here once you have saved and closed the file...")
+    
+    # Reload config to verify
     try:
-        toml_content = generate_config_toml_from_app_model(config)
-        USER_CONFIG.write_text(toml_content, encoding="utf-8")
-        rprint("[bold green]Login successful![/bold green]")
-        rprint("[dim]Your token has been saved to your config.toml[/]")
+        loader = ConfigLoader(config_path=USER_CONFIG)
+        new_config = loader.load()
+        
+        if new_config.anilist.token:
+            rprint("\n[bold green]Login successful! Enjoy Anicat.[/bold green]")
+        else:
+            rprint("\n[bold red]Error: Token not found in config. Please try again.[/bold red]")
+            
     except Exception as e:
-        rprint(f"[red]Failed to save token to config: {e}[/]")
+        rprint(f"\n[bold red]Failed to reload config: {e}[/bold red]")

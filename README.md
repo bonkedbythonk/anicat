@@ -24,11 +24,11 @@ Copy and paste these commands in order:
 > **You MUST use the Kitty Terminal!** Standard Apple Terminal cannot show images. Always open the **Kitty** app to run Anicat.
 
 ### 2. Setup
-Run the login command to link your AniList account (this is how your progress is saved):
+Run the login command to link your AniList account:
 ```bash
 anicat login
 ```
-Follow the link provided, paste your token, and you're ready to go!
+Anicat will open your browser and your config file automatically. Just paste the token into the file, save, and you're ready to go!
 
 ---
 

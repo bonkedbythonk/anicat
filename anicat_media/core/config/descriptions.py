@@ -5,7 +5,7 @@ GENERAL_PYGMENT_STYLE = "The pygment style to use"
 GENERAL_PREFERRED_SPINNER = "The spinner to use"
 GENERAL_API_CLIENT = "The media database API to use (e.g., 'anilist', 'jikan')."
 GENERAL_PREFERRED_TRACKER = (
-    "The preferred watch history tracker (local,remote) in cases of conflicts"
+    "The preferred watch history tracker (local,anilist) in cases of conflicts"
 )
 GENERAL_DESKTOP_NOTIFICATION_DURATION = "The duration desktop notifications should be displayed before they disappear in minutes"
 GENERAL_PROVIDER = "The default anime provider to use for scraping."

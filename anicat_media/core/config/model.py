@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...libs.media_api.types import MediaSort, UserMediaListSort
 from ...libs.provider.anime.types import ProviderName, ProviderServer
@@ -10,14 +10,23 @@ from . import defaults
 from . import descriptions as desc
 
 
-class GeneralConfig(BaseModel):
+class BaseConfig(BaseModel):
+    @field_validator("*", mode="before")
+    @classmethod
+    def expand_path(cls, v, info):
+        if isinstance(v, str) and "~" in v:
+            return Path(v).expanduser()
+        return v
+
+
+class GeneralConfig(BaseConfig):
     """Configuration for general application behavior and integrations."""
 
     desktop_notification_duration: int = Field(
         default=defaults.GENERAL_DESKTOP_NOTIFICATION_DURATION,
         description=desc.GENERAL_DESKTOP_NOTIFICATION_DURATION,
     )
-    preferred_tracker: Literal["local", "remote"] = Field(
+    preferred_tracker: Literal["local", "remote", "anilist"] = Field(
         default=defaults.GENERAL_PREFERRED_TRACKER,
         description=desc.GENERAL_PREFERRED_TRACKER,
     )
@@ -160,7 +169,7 @@ class GeneralConfig(BaseModel):
         default=defaults.GENERAL_WELCOME_SCREEN, description=desc.GENERAL_WELCOME_SCREEN
     )
     provider: ProviderName = Field(
-        default=ProviderName.ALLANIME,
+        default=ProviderName.ANIMEPAHE,
         description=desc.GENERAL_PROVIDER,
     )
     selector: Literal["default", "fzf", "rofi"] = Field(
@@ -218,7 +227,7 @@ class GeneralConfig(BaseModel):
     )
 
 
-class StreamConfig(BaseModel):
+class StreamConfig(BaseConfig):
     """Configuration specific to video streaming and playback."""
 
     player: Literal["mpv"] = Field(
@@ -282,7 +291,10 @@ class StreamConfig(BaseModel):
     )
 
 
-class OtherConfig(BaseModel):
+
+
+
+class OtherConfig(BaseConfig):
     pass
 
 
@@ -496,7 +508,7 @@ class MediaRegistryConfig(OtherConfig):
     )
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseConfig):
     """The root configuration model for the Anicat application."""
 
     general: GeneralConfig = Field(

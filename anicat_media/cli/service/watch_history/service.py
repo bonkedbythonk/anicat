@@ -108,6 +108,7 @@ class WatchHistoryService:
             if self.config.general.preferred_tracker == "local":
                 episode = current_local_episode
             else:
+                # remote or anilist
                 episode = current_remote_episode
         else:
             episode = current_local_episode

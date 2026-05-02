@@ -96,6 +96,7 @@ class InteractiveConfigEditor:
                 choices=choices,
                 default=current_value,
                 long_instruction=help_text,
+                wrap_around=True,
                 keybindings={
                     "answer": [{"key": "enter"}, {"key": "right"}],
                 },

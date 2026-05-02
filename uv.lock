@@ -12,6 +12,110 @@ wheels = [
 ]
 
 [[package]]
+name = "anicat"
+version = "3.3.7"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "httpx" },
+    { name = "inquirerpy" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "rich" },
+]
+
+[package.optional-dependencies]
+discord = [
+    { name = "pypresence" },
+]
+download = [
+    { name = "pycryptodomex" },
+    { name = "yt-dlp" },
+]
+lxml = [
+    { name = "lxml" },
+]
+mpv = [
+    { name = "mpv" },
+]
+notifications = [
+    { name = "dbus-python", marker = "sys_platform == 'linux'" },
+    { name = "plyer" },
+    { name = "pyobjc", marker = "sys_platform == 'darwin'" },
+    { name = "pypiwin32", marker = "sys_platform == 'win32'" },
+]
+standard = [
+    { name = "dbus-python", marker = "sys_platform == 'linux'" },
+    { name = "lxml" },
+    { name = "plyer" },
+    { name = "pycryptodomex" },
+    { name = "pyobjc", marker = "sys_platform == 'darwin'" },
+    { name = "pypiwin32", marker = "sys_platform == 'win32'" },
+    { name = "thefuzz" },
+    { name = "yt-dlp" },
+]
+torrent = [
+    { name = "libtorrent" },
+]
+torrents = [
+    { name = "libtorrent" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pre-commit" },
+    { name = "pyinstaller" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-httpx" },
+    { name = "ruff" },
+    { name = "types-lxml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.7" },
+    { name = "dbus-python", marker = "sys_platform == 'linux' and extra == 'notifications'", specifier = ">=1.4.0" },
+    { name = "dbus-python", marker = "sys_platform == 'linux' and extra == 'standard'" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "inquirerpy", specifier = ">=0.3.4" },
+    { name = "libtorrent", marker = "extra == 'torrent'", specifier = ">=2.0.11" },
+    { name = "libtorrent", marker = "extra == 'torrents'", specifier = ">=2.0.11" },
+    { name = "lxml", marker = "extra == 'lxml'", specifier = ">=6.0.0" },
+    { name = "lxml", marker = "extra == 'standard'", specifier = ">=6.0.0" },
+    { name = "mpv", marker = "extra == 'mpv'", specifier = ">=1.0.7" },
+    { name = "pillow", specifier = ">=12.2.0" },
+    { name = "plyer", marker = "extra == 'notifications'", specifier = ">=2.1.0" },
+    { name = "plyer", marker = "extra == 'standard'", specifier = ">=2.1.0" },
+    { name = "pycryptodomex", marker = "extra == 'download'", specifier = ">=3.23.0" },
+    { name = "pycryptodomex", marker = "extra == 'standard'", specifier = ">=3.23.0" },
+    { name = "pydantic", specifier = ">=2.11.7" },
+    { name = "pyobjc", marker = "sys_platform == 'darwin' and extra == 'notifications'" },
+    { name = "pyobjc", marker = "sys_platform == 'darwin' and extra == 'standard'" },
+    { name = "pypiwin32", marker = "sys_platform == 'win32' and extra == 'notifications'" },
+    { name = "pypiwin32", marker = "sys_platform == 'win32' and extra == 'standard'" },
+    { name = "pypresence", marker = "extra == 'discord'", specifier = ">=4.3.0" },
+    { name = "requests", specifier = ">=2.33.1" },
+    { name = "rich", specifier = ">=13.9.2" },
+    { name = "thefuzz", marker = "extra == 'standard'", specifier = ">=0.22.1" },
+    { name = "yt-dlp", marker = "extra == 'download'", specifier = ">=2025.7.21" },
+    { name = "yt-dlp", marker = "extra == 'standard'", specifier = ">=2025.7.21" },
+]
+provides-extras = ["standard", "notifications", "mpv", "torrent", "lxml", "discord", "download", "torrents"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pre-commit", specifier = ">=4.0.1" },
+    { name = "pyinstaller", specifier = ">=6.11.1" },
+    { name = "pyright", specifier = ">=1.1.384" },
+    { name = "pytest", specifier = ">=8.3.3" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "ruff", specifier = ">=0.6.9" },
+    { name = "types-lxml", specifier = ">=2026.2.16" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4006,110 +4110,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/20/28/e6f1a6f655d620846bd9df527390ecc26b3805a0c5989048c210e22c5ca9/virtualenv-20.35.4.tar.gz", hash = "sha256:643d3914d73d3eeb0c552cbb12d7e82adf0e504dbf86a3182f8771a153a1971c", size = 6028799, upload-time = "2025-10-29T06:57:40.511Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/0c/c05523fa3181fdf0c9c52a6ba91a23fbf3246cc095f26f6516f9c60e6771/virtualenv-20.35.4-py3-none-any.whl", hash = "sha256:c21c9cede36c9753eeade68ba7d523529f228a403463376cf821eaae2b650f1b", size = 6005095, upload-time = "2025-10-29T06:57:37.598Z" },
-]
-
-[[package]]
-name = "anicat-media"
-version = "3.3.7"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "httpx" },
-    { name = "inquirerpy" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "requests" },
-    { name = "rich" },
-]
-
-[package.optional-dependencies]
-discord = [
-    { name = "pypresence" },
-]
-download = [
-    { name = "pycryptodomex" },
-    { name = "yt-dlp" },
-]
-lxml = [
-    { name = "lxml" },
-]
-mpv = [
-    { name = "mpv" },
-]
-notifications = [
-    { name = "dbus-python", marker = "sys_platform == 'linux'" },
-    { name = "plyer" },
-    { name = "pyobjc", marker = "sys_platform == 'darwin'" },
-    { name = "pypiwin32", marker = "sys_platform == 'win32'" },
-]
-standard = [
-    { name = "dbus-python", marker = "sys_platform == 'linux'" },
-    { name = "lxml" },
-    { name = "plyer" },
-    { name = "pycryptodomex" },
-    { name = "pyobjc", marker = "sys_platform == 'darwin'" },
-    { name = "pypiwin32", marker = "sys_platform == 'win32'" },
-    { name = "thefuzz" },
-    { name = "yt-dlp" },
-]
-torrent = [
-    { name = "libtorrent" },
-]
-torrents = [
-    { name = "libtorrent" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pre-commit" },
-    { name = "pyinstaller" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-httpx" },
-    { name = "ruff" },
-    { name = "types-lxml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.7" },
-    { name = "dbus-python", marker = "sys_platform == 'linux' and extra == 'notifications'", specifier = ">=1.4.0" },
-    { name = "dbus-python", marker = "sys_platform == 'linux' and extra == 'standard'" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "inquirerpy", specifier = ">=0.3.4" },
-    { name = "libtorrent", marker = "extra == 'torrent'", specifier = ">=2.0.11" },
-    { name = "libtorrent", marker = "extra == 'torrents'", specifier = ">=2.0.11" },
-    { name = "lxml", marker = "extra == 'lxml'", specifier = ">=6.0.0" },
-    { name = "lxml", marker = "extra == 'standard'", specifier = ">=6.0.0" },
-    { name = "mpv", marker = "extra == 'mpv'", specifier = ">=1.0.7" },
-    { name = "pillow", specifier = ">=12.2.0" },
-    { name = "plyer", marker = "extra == 'notifications'", specifier = ">=2.1.0" },
-    { name = "plyer", marker = "extra == 'standard'", specifier = ">=2.1.0" },
-    { name = "pycryptodomex", marker = "extra == 'download'", specifier = ">=3.23.0" },
-    { name = "pycryptodomex", marker = "extra == 'standard'", specifier = ">=3.23.0" },
-    { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pyobjc", marker = "sys_platform == 'darwin' and extra == 'notifications'" },
-    { name = "pyobjc", marker = "sys_platform == 'darwin' and extra == 'standard'" },
-    { name = "pypiwin32", marker = "sys_platform == 'win32' and extra == 'notifications'" },
-    { name = "pypiwin32", marker = "sys_platform == 'win32' and extra == 'standard'" },
-    { name = "pypresence", marker = "extra == 'discord'", specifier = ">=4.3.0" },
-    { name = "requests", specifier = ">=2.33.1" },
-    { name = "rich", specifier = ">=13.9.2" },
-    { name = "thefuzz", marker = "extra == 'standard'", specifier = ">=0.22.1" },
-    { name = "yt-dlp", marker = "extra == 'download'", specifier = ">=2025.7.21" },
-    { name = "yt-dlp", marker = "extra == 'standard'", specifier = ">=2025.7.21" },
-]
-provides-extras = ["standard", "notifications", "mpv", "torrent", "lxml", "discord", "download", "torrents"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pre-commit", specifier = ">=4.0.1" },
-    { name = "pyinstaller", specifier = ">=6.11.1" },
-    { name = "pyright", specifier = ">=1.1.384" },
-    { name = "pytest", specifier = ">=8.3.3" },
-    { name = "pytest-httpx", specifier = ">=0.35.0" },
-    { name = "ruff", specifier = ">=0.6.9" },
-    { name = "types-lxml", specifier = ">=2026.2.16" },
 ]
 
 [[package]]

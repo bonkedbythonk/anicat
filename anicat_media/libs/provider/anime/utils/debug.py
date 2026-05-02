@@ -36,7 +36,7 @@ def test_anime_provider(AnimeProvider: Type[BaseAnimeProvider]):
     anime_provider = AnimeProvider(
         Client(headers={"User-Agent": random_user_agent(), **AnimeProvider.HEADERS})
     )
-    print(APP_ASCII_ART.read_text(encoding="utf-8"))
+    print(APP_ASCII_ART)
     query = input("What anime would you like to stream: ")
     search_results = anime_provider.search(SearchParams(query=query))
     if not search_results:

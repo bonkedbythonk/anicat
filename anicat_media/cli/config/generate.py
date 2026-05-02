@@ -1,6 +1,5 @@
 def generate_config_toml_from_app_model(*args, **kwargs) -> str:
-    return """#  ▄▀█ █▄░█ █ █▀▀ ▄▀█ ▀█▀
-#  █▀█ █░▀█ █ █▄▄ █▀█ ░█░
+    return """#  [ anicat ]
 
 [general]
 provider = "animepahe"
@@ -26,4 +25,5 @@ downloads_dir = "~/Movies/anicat"
 
 [fzf]
 opts = "--layout=reverse --border=rounded --info=inline --ansi"
+show_header_ascii_art = true
 """

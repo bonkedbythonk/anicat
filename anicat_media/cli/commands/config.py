@@ -3,9 +3,10 @@ import click
 from ...core.config import AppConfig
 
 
-@click.command(
+@click.group(
     help="Manage your config with ease",
-    short_help="Edit your config",
+    short_help="Manage your config",
+    invoke_without_command=True,
     epilog="""
 \b
 \b\bExamples:
@@ -14,102 +15,119 @@ from ...core.config import AppConfig
   anicat config
 \b
   # Start the interactive configuration wizard
-  anicat config --interactive
+  anicat config edit
 \b
   # get the path of the config file
-  anicat config --path
+  anicat config path
 \b
-  # print desktop entry info
-  anicat config --generate-desktop-entry
-\b
-  # update your config without opening an editor
-  anicat --icons --selector fzf --preview full config --update
-\b 
-  # interactively define your config
-  anicat config --interactive
+  # open the config file in your default system editor (macOS)
+  anicat config open
 \b 
   # view the current contents of your config
-  anicat config --view
+  anicat config view
 """,
 )
-@click.option("--path", "-p", help="Print the config location and exit", is_flag=True)
-@click.option(
-    "--view", "-v", help="View the current contents of your config", is_flag=True
-)
-@click.option(
-    "--view-json",
-    "-vj",
-    help="View the current contents of your config in json format",
-    is_flag=True,
-)
-@click.option(
-    "--generate-desktop-entry",
-    "-d",
-    help="Generate the desktop entry of anicat",
-    is_flag=True,
-)
-@click.option(
-    "--update",
-    "-u",
-    help="Persist all the config options passed to anicat to your config file",
-    is_flag=True,
-)
-@click.option(
-    "--interactive",
-    "-i",
-    is_flag=True,
-    help="Start the interactive configuration wizard.",
+@click.pass_context
+def config(ctx: click.Context):
+    """
+    Manage your configuration. If no subcommand is provided, it opens the config in your default terminal editor.
+    """
+    if ctx.invoked_subcommand is None:
+        from ...core.constants import USER_CONFIG
+
+        click.edit(filename=str(USER_CONFIG))
+
+
+@config.command(name="path", help="Print the config location and exit")
+def config_path():
+    from ...core.constants import USER_CONFIG
+
+    print(USER_CONFIG)
+
+
+@config.command(name="view", help="View the current contents of your config")
+@click.pass_obj
+def config_view(user_config: AppConfig):
+    from rich.console import Console
+    from rich.syntax import Syntax
+
+    from ..config.generate import generate_config_toml_from_app_model
+
+    console = Console()
+    config_toml = generate_config_toml_from_app_model(user_config)
+    syntax = Syntax(
+        config_toml,
+        "ini",
+        theme=user_config.general.pygment_style,
+        line_numbers=True,
+        word_wrap=True,
+    )
+    console.print(syntax)
+
+
+@config.command(
+    name="view-json", help="View the current contents of your config in json format"
 )
 @click.pass_obj
-def config(
-    user_config: AppConfig,
-    path,
-    view,
-    view_json,
-    generate_desktop_entry,
-    update,
-    interactive,
-):
+def config_view_json(user_config: AppConfig):
+    import json
+
+    print(json.dumps(user_config.model_dump(mode="json")))
+
+
+@config.command(name="edit", help="Start the interactive configuration wizard")
+@click.pass_obj
+def config_edit(user_config: AppConfig):
     from ...core.constants import USER_CONFIG
     from ..config.editor import InteractiveConfigEditor
     from ..config.generate import generate_config_toml_from_app_model
 
-    if path:
-        print(USER_CONFIG)
-    elif view:
-        from rich.console import Console
-        from rich.syntax import Syntax
+    print(f"Editing config at: {USER_CONFIG}")
+    editor = InteractiveConfigEditor(current_config=user_config)
+    new_config = editor.run()
+    USER_CONFIG.write_text(
+        generate_config_toml_from_app_model(new_config), encoding="utf-8"
+    )
+    click.echo(f"Configuration saved successfully to {USER_CONFIG}")
 
-        console = Console()
-        config_toml = generate_config_toml_from_app_model(user_config)
-        syntax = Syntax(
-            config_toml,
-            "ini",
-            theme=user_config.general.pygment_style,
-            line_numbers=True,
-            word_wrap=True,
-        )
-        console.print(syntax)
-    elif view_json:
-        import json
 
-        print(json.dumps(user_config.model_dump(mode="json")))
-    elif generate_desktop_entry:
-        _generate_desktop_entry(user_config)
-    elif interactive:
-        editor = InteractiveConfigEditor(current_config=user_config)
-        new_config = editor.run()
-        USER_CONFIG.write_text(
-            generate_config_toml_from_app_model(new_config), encoding="utf-8"
-        )
-        click.echo(f"Configuration saved successfully to {USER_CONFIG}")
-    elif update:
-        USER_CONFIG.write_text(
-            generate_config_toml_from_app_model(user_config), encoding="utf-8"
-        )
-        print("update successfull")
-    else:
-        click.edit(filename=str(USER_CONFIG))
+@config.command(
+    name="open", help="Open the config file in your default system editor (macOS)"
+)
+def config_open():
+    import subprocess
+
+    from ...core.constants import USER_CONFIG
+
+    print(f"Opening config at: {USER_CONFIG}")
+    try:
+        subprocess.run(["open", str(USER_CONFIG)], check=True)
+    except Exception as e:
+        click.echo(f"Failed to open config: {e}", err=True)
+
+
+@config.command(
+    name="desktop-entry", help="Generate the desktop entry for anicat (Linux only)"
+)
+@click.pass_obj
+def config_desktop_entry(user_config: AppConfig):
+    _generate_desktop_entry(user_config)
+
+
+@config.command(
+    name="update",
+    help="Persist all the config options passed to anicat to your config file",
+)
+@click.pass_obj
+def config_update(user_config: AppConfig):
+    from ...core.constants import USER_CONFIG
+    from ..config.generate import generate_config_toml_from_app_model
+
+    USER_CONFIG.write_text(
+        generate_config_toml_from_app_model(user_config), encoding="utf-8"
+    )
+    print("Update successful")
+
 
 
 def _generate_desktop_entry(config: AppConfig):

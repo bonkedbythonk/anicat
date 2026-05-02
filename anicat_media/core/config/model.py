@@ -344,7 +344,7 @@ class FzfConfig(OtherConfig):
         default=defaults.FZF_HEADER_COLOR, description=desc.FZF_HEADER_COLOR
     )
     header_ascii_art: str = Field(
-        default_factory=lambda: APP_ASCII_ART.read_text(encoding="utf-8"),
+        default=APP_ASCII_ART,
         description=desc.FZF_HEADER_ASCII_ART,
     )
     show_header_ascii_art: bool = Field(

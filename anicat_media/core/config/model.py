@@ -233,7 +233,7 @@ class GeneralConfig(BaseModel):
 class StreamConfig(BaseModel):
     """Configuration specific to video streaming and playback."""
 
-    player: Literal["mpv", "vlc", "iina"] = Field(
+    player: Literal["mpv", "vlc"] = Field(
         default=defaults.STREAM_PLAYER,
         description=desc.STREAM_PLAYER,
     )

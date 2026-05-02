@@ -249,7 +249,14 @@ class MpvPlayer(BasePlayer):
         """
         mpv_args = []
         if params.headers:
-            header_str = ",".join([f"{k}:{v}" for k, v in params.headers.items()])
+            # mpv prefers no spaces after commas and colons in http-header-fields
+            headers_list = []
+            for k, v in params.headers.items():
+                # Clean value of newlines and extra spaces
+                clean_v = str(v).strip().replace("\n", "").replace("\r", "")
+                headers_list.append(f"{k}:{clean_v}")
+            
+            header_str = ",".join(headers_list)
             mpv_args.append(f"--http-header-fields={header_str}")
 
         if params.subtitles:

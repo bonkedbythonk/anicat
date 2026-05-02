@@ -11,7 +11,7 @@ hidden_categories = ["Planned", "Dropped", "Rewatching", "Paused"]
 icons = true
 
 [stream]
-player = "iina"
+player = "mpv"
 quality = "1080"
 translation_type = "sub"
 auto_next = true

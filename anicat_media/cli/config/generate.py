@@ -1,7 +1,7 @@
 def generate_config_toml_from_app_model(*args, **kwargs) -> str:
-    return """#      /\_/\
-#     ( o.o )
-#      > ^ <  [ a n i c a t ]
+    return """#/\_/\
+#( o.o )
+# > ^ <  [ a n i c a t ]
 
 [general]
 provider = "animepahe"

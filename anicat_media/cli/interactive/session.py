@@ -10,6 +10,7 @@ import click
 from anicat_media.core.config import AppConfig
 from anicat_media.core.constants import APP_DIR, USER_CONFIG
 from anicat_media.core.utils.concurrency import thread_manager
+from rich import print as rprint
 from .state import InternalDirective, MenuName, State
 
 if TYPE_CHECKING:

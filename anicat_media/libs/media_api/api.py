@@ -43,6 +43,13 @@ def create_api_client(client_name: str, config: AppConfig) -> BaseApiClient:
 
     # Retrieve the specific config section from the main AppConfig
     scoped_config = getattr(config, config_section_name)
+    
+    # Inject the parent config so the client can access general settings if needed
+    try:
+        setattr(scoped_config, "parent", config)
+    except (AttributeError, TypeError):
+        # In case the model is frozen or doesn't support attribute assignment
+        pass
 
     # Inject the scoped config into the client's constructor
     return client_class(scoped_config, http_client)

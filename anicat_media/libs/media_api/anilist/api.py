@@ -5,8 +5,10 @@ from typing import Any, List, Optional
 from httpx import Client
 
 from ....core.config import AnilistConfig
+from ....core.utils.converter import time_to_seconds
 from ....core.utils.graphql import (
     execute_graphql,
+    invalidate_graphql_cache,
 )
 from ..base import BaseApiClient
 from ..params import (
@@ -141,9 +143,36 @@ class AniListApi(BaseApiClient):
         # anime by default
         variables["type"] = params.type.value if params.type else "ANIME"
         response = execute_graphql(
-            ANILIST_ENDPOINT, self.http_client, gql.SEARCH_MEDIA, variables
+            ANILIST_ENDPOINT,
+            self.http_client,
+            gql.SEARCH_MEDIA,
+            variables,
+            use_cache=True,
+            ttl=time_to_seconds(self.config.parent.general.max_cache_lifetime)
+            if hasattr(self.config, "parent")
+            else 10800,
         )
         return mapper.to_generic_search_result(response.json())
+
+    def get_media_item(self, media_id: int) -> Optional[MediaItem]:
+        """Fetch a single media item by ID, bypassing long-term cache."""
+        variables = {
+            "id_in": [media_id],
+            "type": "ANIME",
+            "per_page": 1,
+        }
+        response = execute_graphql(
+            ANILIST_ENDPOINT,
+            self.http_client,
+            gql.SEARCH_MEDIA,
+            variables,
+            use_cache=True,
+            ttl=300,  # 5 minutes for individual item refresh
+        )
+        result = mapper.to_generic_search_result(response.json())
+        if result and result.media:
+            return result.media[0]
+        return None
 
     def search_media_list(
         self, params: UserMediaListSearchParams
@@ -165,7 +194,12 @@ class AniListApi(BaseApiClient):
             "type": params.type.value if params.type else "ANIME",
         }
         response = execute_graphql(
-            ANILIST_ENDPOINT, self.http_client, gql.SEARCH_USER_MEDIA_LIST, variables
+            ANILIST_ENDPOINT,
+            self.http_client,
+            gql.SEARCH_USER_MEDIA_LIST,
+            variables,
+            use_cache=True,
+            ttl=300,  # 5 minutes for user lists
         )
         return mapper.to_generic_user_list_result(response.json()) if response else None
 
@@ -183,7 +217,16 @@ class AniListApi(BaseApiClient):
         response = execute_graphql(
             ANILIST_ENDPOINT, self.http_client, gql.SAVE_MEDIA_LIST_ENTRY, variables
         )
-        return response.json() is not None and "errors" not in response.json()
+        success = response.json() is not None and "errors" not in response.json()
+        if success:
+            # Invalidate the user list cache because it's now stale
+            # We don't know the exact variables used for list fetching,
+            # but we can at least ensure future fetches for this media are fresh
+            # or just rely on the 5-minute TTL.
+            # For now, let's invalidate the specific list item if possible.
+            invalidate_graphql_cache(ANILIST_ENDPOINT, gql.GET_MEDIA_LIST_ITEM, {"mediaId": params.media_id})
+            
+        return success
 
     def delete_list_entry(self, media_id: int) -> bool:
         if not self.token:

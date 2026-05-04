@@ -55,23 +55,25 @@ class WatchHistoryService:
                 )
                 return
         if self.media_api and self.media_api.is_authenticated():
-            if not self.media_api.update_list_entry(
+            success = self.media_api.update_list_entry(
                 UpdateUserMediaListEntryParams(
                     media_id=media_item.id,
                     status=status,
                     progress=player_result.episode,
                 )
-            ):
+            )
+            if success:
                 logger.info(
-                    "successfully updated remote progress with {player_result.episode}"
+                    f"successfully updated remote progress with {player_result.episode}"
                 )
-
             else:
                 logger.warning(
-                    "failed to update remote progress with {player_result.episode}"
+                    f"failed to update remote progress with {player_result.episode}"
                 )
+            return success
         else:
             logger.warning("Not logged in")
+            return False
 
     def get_episode(self, media_item: MediaItem):
         index_entry = self.media_registry.get_media_index_entry(media_item.id)

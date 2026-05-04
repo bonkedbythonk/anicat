@@ -324,12 +324,9 @@ def _manage_user_media_list(ctx: Context, state: State) -> MenuAction:
             ):
                 print(f"Failed to update {media_item.title.english}")
             else:
-                # Refresh state
                 updated_item = ctx.media_api.get_media_item(media_item.id)
-                if updated_item:
-                    state.media_api.media_item = updated_item
-                    if updated_item.id in state.media_api.search_result:
-                        state.media_api.search_result[updated_item.id] = updated_item
+                if updated_item and state.media_api.search_result_ is not None:
+                    state.media_api.search_result_[updated_item.id] = updated_item
         return InternalDirective.RELOAD
 
     return action
@@ -475,12 +472,9 @@ def _score_anime(ctx: Context, state: State) -> MenuAction:
             if ctx.media_api.update_list_entry(
                 UpdateUserMediaListEntryParams(media_id=media_item.id, score=score)
             ):
-                # Refresh state
                 updated_item = ctx.media_api.get_media_item(media_item.id)
-                if updated_item:
-                    state.media_api.media_item = updated_item
-                    if updated_item.id in state.media_api.search_result:
-                        state.media_api.search_result[updated_item.id] = updated_item
+                if updated_item and state.media_api.search_result_ is not None:
+                    state.media_api.search_result_[updated_item.id] = updated_item
         except (ValueError, TypeError):
             feedback.error(
                 "Invalid score entered", "Please enter a number between 0.0 and 10.0"

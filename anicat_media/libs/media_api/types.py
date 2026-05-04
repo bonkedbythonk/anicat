@@ -76,7 +76,7 @@ class NotificationType(Enum):
 
 # MODELS
 class BaseMediaApiModel(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=False)
 
 
 class MediaImage(BaseMediaApiModel):

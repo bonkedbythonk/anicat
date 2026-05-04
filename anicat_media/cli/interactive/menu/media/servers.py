@@ -102,10 +102,9 @@ def servers(ctx: Context, state: State) -> State | InternalDirective:
             # Refresh the media item to reflect the new progress in the UI
             updated_item = ctx.media_api.get_media_item(media_item.id)
             if updated_item:
-                state.media_api.media_item = updated_item
-                # Also update it in the search results if present
-                if updated_item.id in state.media_api.search_result:
-                    state.media_api.search_result[updated_item.id] = updated_item
+                # Update search result in place
+                if state.media_api.search_result_ is not None:
+                    state.media_api.search_result_[updated_item.id] = updated_item
 
     return State(
         menu_name=MenuName.PLAYER_CONTROLS,

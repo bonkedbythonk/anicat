@@ -1,4 +1,4 @@
-# Anicat: The Beginner's Guide to Terminal Anime
+# Anicat: The Beginner's Guide to Terminal Anime and Manga
 
 Welcome to **Anicat**! If you’ve never used a "terminal" before, don't worry. This guide is written specifically to help you get up and running in minutes.
 

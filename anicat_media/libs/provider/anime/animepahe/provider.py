@@ -191,6 +191,7 @@ class AnimePahe(BaseAnimeProvider):
         translation_type = None
         stream_link = None
 
+        links = []
         for res_dict in res_dicts:
             # The actual attributes are data attributes prefixed with 'data-'
             # extract_attributes strips the 'data-' prefix
@@ -236,11 +237,23 @@ class AnimePahe(BaseAnimeProvider):
             stream_link = juicy_stream
 
             if translation_type and quality and stream_link:
-                headers = {
-                    "Referer": "https://kwik.cx/",
-                    "User-Agent": self.client.headers["User-Agent"]
-                }
-                yield map_to_server(episode, translation_type, quality, stream_link, headers)
+                from .mappers import translation_type_map
+                from ..types import EpisodeStream
+
+                links.append(
+                    EpisodeStream(
+                        link=stream_link,
+                        quality=quality,
+                        translation_type=translation_type_map[translation_type],
+                    )
+                )
+
+        if links:
+            headers = {
+                "Referer": "https://kwik.cx/",
+                "User-Agent": self.client.headers["User-Agent"]
+            }
+            yield Server(name="kwik", links=links, episode_title=episode.title, headers=headers)
 
     @lru_cache()
     def _get_episode_info(

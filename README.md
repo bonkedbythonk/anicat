@@ -25,10 +25,10 @@ First, we need to install the foundation. Copy and paste these commands into you
     `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 
 2.  **Install the Engines** (Kitty, MPV, and FZF):  
-    `brew install kitty mpv fzf`
+    `brew install --cask kitty && brew install mpv fzf`
 
 > [!TIP]
-> After running `brew install kitty`, you will find **Kitty** in your **Applications** folder just like any other app (Spotify, Chrome, etc.). **From now on, you should always use Kitty to run Anicat!**
+> After running `brew install --cask kitty`, you will find **Kitty** in your **Applications** folder just like any other app (Spotify, Chrome, etc.). **From now on, you should always use Kitty to run Anicat!**
 
 ---
 

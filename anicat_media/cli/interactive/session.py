@@ -305,7 +305,8 @@ class Session:
             self._history = history
         else:
             update_available = self._context.updater.get_cached_status()
-            self._history.append(State(menu_name=MenuName.MAIN, update_available=update_available))
+            main_state = State(menu_name=MenuName.MAIN, update_available=update_available)
+            self._history.append(main_state)
             
             # Trigger a background check for updates
             def background_check():
@@ -313,8 +314,8 @@ class Session:
                     if self._context.updater.check_version():
                         # If update found, update the initial state in history
                         if self._history and self._history[0].menu_name == MenuName.MAIN:
-                            self._history[0].update_available = True
-                            logger.info("Background update check found a new version!")
+                            self._history[0] = self._history[0].model_copy(update={"update_available": True})
+                            logger.info("Background update check found a new version! Update indicator set.")
                 except Exception as e:
                     logger.debug(f"Background update check failed: {e}")
 

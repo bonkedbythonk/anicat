@@ -86,12 +86,20 @@ def main(ctx: Context, state: State) -> State | InternalDirective:
         ),
         f"{ICONS.get('EDIT', icons)}Edit Config": lambda: InternalDirective.CONFIG_EDIT,
         f"{ICONS.get('MANAGE', icons)}Manage Categories": _manage_categories_action(ctx, state),
-        f"{ICONS.get('UPDATE', icons)}Check for Updates": _check_for_updates_action(ctx, state),
+    }
+
+    # Build the "Check for Updates" label with a visual indicator if update is available
+    update_label = f"{ICONS.get('UPDATE', icons)}Check for Updates"
+    if state.update_available:
+        update_label += " (UPDATE AVAILABLE)"
+    options[update_label] = _check_for_updates_action(ctx, state)
+
+    options.update({
         f"{ICONS.get('LOGOUT' if ctx.media_api.is_authenticated() else 'LOGIN', icons)}{'Logout' if ctx.media_api.is_authenticated() else 'Login'}": _auth_action(
             ctx, state
         ),
         f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
-    }
+    })
 
     if not ctx.config.anilist.token:
         login_label = f"{'🔑 ' if icons else '-> '}Login to AniList"

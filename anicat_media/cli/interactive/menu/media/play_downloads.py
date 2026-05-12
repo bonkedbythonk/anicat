@@ -176,7 +176,6 @@ def downloads_player_controls(
             ),
             f"{ICONS.get('TRAILER', icons)}Media Actions Menu": lambda: InternalDirective.BACKX2,
             f"{ICONS.get('HOME', icons)}Main Menu": lambda: InternalDirective.MAIN,
-            f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
         }
     )
 

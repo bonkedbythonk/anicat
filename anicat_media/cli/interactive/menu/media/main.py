@@ -44,6 +44,9 @@ def main(ctx: Context, state: State) -> State | InternalDirective:
         f"{ICONS.get('WATCHING', icons)}Watching": _create_user_list_action(
             ctx, state, UserMediaListStatus.WATCHING
         ),
+        f"{ICONS.get('READING', icons)}Reading": _create_user_list_action(
+            ctx, state, UserMediaListStatus.WATCHING, MediaType.MANGA
+        ),
         f"{ICONS.get('REWATCHING', icons)}Rewatching": _create_user_list_action(
             ctx, state, UserMediaListStatus.REPEATING
         ),
@@ -238,7 +241,7 @@ def _create_search_manga_list(ctx: Context, state: State) -> MenuAction:
     return action
 
 def _create_user_list_action(
-    ctx: Context, state: State, status: UserMediaListStatus
+    ctx: Context, state: State, status: UserMediaListStatus, type: MediaType | None = None
 ) -> MenuAction:
     """A factory to create menu actions for fetching user lists, handling authentication."""
 
@@ -248,7 +251,7 @@ def _create_user_list_action(
             feedback.error("You haven't logged in")
             return InternalDirective.MAIN
 
-        search_params = UserMediaListSearchParams(status=status)
+        search_params = UserMediaListSearchParams(status=status, type=type)
 
         loading_message = "Fetching media list"
         result = None
@@ -292,10 +295,10 @@ def _create_recent_media_action(ctx: Context, state: State) -> MenuAction:
 
 
 def _create_downloads_action(ctx: Context, state: State) -> MenuAction:
-    """Create action to navigate to the downloads menu."""
+    """Create action to navigate to the local library (downloads) menu."""
 
     def action():
-        return State(menu_name=MenuName.DOWNLOADS)
+        return State(menu_name=MenuName.LOCAL_LIBRARY)
 
     return action
 
@@ -319,7 +322,7 @@ def _manage_categories_action(ctx: Context, state: State) -> MenuAction:
 
         # All categories available in the main menu
         all_categories = [
-            "Trending", "Recent", "Watching", "Rewatching", "Paused", 
+            "Trending", "Recent", "Watching", "Reading", "Rewatching", "Paused", 
             "Planned", "Search", "Search Manga", "Dynamic Search", 
             "Downloads", "Recently Updated", "Popular", "Top Scored", 
             "Favourites", "Random", "Upcoming", "Completed", "Dropped"

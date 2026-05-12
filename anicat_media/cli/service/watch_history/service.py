@@ -41,6 +41,7 @@ class WatchHistoryService:
             total_duration=player_result.total_time,
             progress=player_result.episode,
             status=status,
+            is_synced=False,
         )
 
         if player_result.stop_time and player_result.total_time:
@@ -79,6 +80,10 @@ class WatchHistoryService:
             if success:
                 logger.info(
                     f"successfully updated remote progress with {player_result.episode}"
+                )
+                self.media_registry.update_media_index_entry(
+                    media_id=media_item.id,
+                    is_synced=True
                 )
             else:
                 logger.warning(

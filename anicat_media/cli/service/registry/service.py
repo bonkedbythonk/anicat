@@ -12,6 +12,7 @@ from ....libs.media_api.params import MediaSearchParams
 from ....libs.media_api.types import (
     MediaItem,
     MediaSearchResult,
+    MediaType,
     PageInfo,
     UserMediaListStatus,
 )
@@ -182,6 +183,7 @@ class MediaRegistryService:
         repeat: Optional[int] = None,
         notes: Optional[str] = None,
         last_notified_episode: Optional[str] = None,
+        is_synced: Optional[bool] = None,
     ):
         if media_item:
             self.get_or_create_record(media_item)
@@ -222,12 +224,15 @@ class MediaRegistryService:
         if watched:
             index_entry.last_watched = datetime.now()
 
+        if is_synced is not None:
+            index_entry.is_synced = is_synced
+
         index.media_index[f"{self._media_api}_{media_id}"] = index_entry
         self._save_index(index)
 
     # TODO: standardize params passed to this
-    def get_recently_watched(self, limit: Optional[int] = None) -> MediaSearchResult:
-        """Get recently watched anime."""
+    def get_recently_watched(self, limit: Optional[int] = None, type: Optional[MediaType] = None) -> MediaSearchResult:
+        """Get recently watched anime or read manga."""
         index = self._load_index()
 
         sorted_entries = sorted(
@@ -243,6 +248,9 @@ class MediaRegistryService:
             except Exception as e:
                 logger.warning(f"Failed to load media record {entry.media_id}: {e}")
                 
+        if type:
+            recent_media = [m for m in recent_media if m.type == type]
+
         if limit:
             recent_media = recent_media[:limit]
 

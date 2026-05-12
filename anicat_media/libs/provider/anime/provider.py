@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 PROVIDERS_AVAILABLE = {
     "allanime": "provider.AllAnime",
+    "allmanga": "provider.AllManga",
     "animepahe": "provider.AnimePahe",
     "hianime": "provider.HiAnime",
 }

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 # ENUMS
 class ProviderName(Enum):
     ALLANIME = "allanime"
+    ALLMANGA = "allmanga"
     ANIMEPAHE = "animepahe"
     HIANIME = "hianime"
 

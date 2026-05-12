@@ -1,0 +1,1 @@
+# AllManga anime provider package.

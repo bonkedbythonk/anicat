@@ -5,6 +5,7 @@ __all__ = [
     "download_episodes",
     "dynamic_search",
     "episodes",
+    "local_library",
     "main",
     "media_actions",
     "media_airing_schedule",

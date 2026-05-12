@@ -136,7 +136,7 @@ class YtDLPDownloader(BaseDownloader):
         # TODO: Confirm this type issues
         with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore
             info = ydl.extract_info(params.url, download=True)
-            if info:
+            if info and "requested_downloads" in info and info["requested_downloads"]:
                 _video_path = info["requested_downloads"][0]["filepath"]  # type: ignore
                 if _video_path.endswith(".unknown_video"):
                     print("Normalizing path...")
@@ -159,15 +159,15 @@ class YtDLPDownloader(BaseDownloader):
             response = self.client.get(sub)
             try:
                 response.raise_for_status()
-            except httpx.HTTPError:
-                raise AnicatError("Failed to download sub: {e}")
+            except httpx.HTTPError as e:
+                raise AnicatError(f"Failed to download sub: {e}")
 
             filename = get_remote_filename(response)
             if not filename:
                 filename = (
                     episode_title + ".srt"
-                    if len(params.subtitles)
-                    else str(i) + episode_title + ".srt"
+                    if len(params.subtitles) == 1
+                    else str(i) + "-" + episode_title + ".srt"
                 )
             sub_path = base / filename
             with open(sub_path, "w") as f:

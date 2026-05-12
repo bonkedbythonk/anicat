@@ -55,7 +55,6 @@ def media_actions(ctx: Context, state: State) -> State | InternalDirective:
             options = {
                 f"{ICONS.get('INFO', icons)}View Info": _view_info(ctx, state),
                 f"{ICONS.get('BACK', icons)}Back to Results": lambda: InternalDirective.BACK,
-                f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
             }
         else:
             if has_downloads:
@@ -67,7 +66,6 @@ def media_actions(ctx: Context, state: State) -> State | InternalDirective:
             options.update({
                 f"{ICONS.get('INFO', icons)}View Info": _view_info(ctx, state),
                 f"{ICONS.get('BACK', icons)}Back to Results": lambda: InternalDirective.BACK,
-                f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
             })
     elif is_manga:
         options = {
@@ -81,17 +79,17 @@ def media_actions(ctx: Context, state: State) -> State | InternalDirective:
             f"{ICONS.get('BROWSER', icons)}Open AniList Page": _open_anilist_page(ctx, state),
             f"{ICONS.get('INFO', icons)}View Info": _view_info(ctx, state),
             f"{ICONS.get('BACK', icons)}Back to Results": lambda: InternalDirective.BACK,
-            f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
         }
     else:
-        options = {
+        options = {}
+        if has_downloads:
+            options[f"{ICONS.get('PLAY', icons)}Play Downloaded"] = _stream_downloads(ctx, state)
+            options[f"{ICONS.get('EPISODES', icons)}Episodes (Downloaded)"] = _stream_downloads(ctx, state, force_episodes_menu=True)
+
+        options.update({
             f"{ICONS.get('PLAY', icons)}Stream {progress}": _stream(ctx, state),
             f"{ICONS.get('EPISODES', icons)}Episodes": _stream(ctx, state, force_episodes_menu=True),
-        }
-
-        if has_downloads:
-            options[f"{ICONS.get('SAVE', icons)}Stream (Downloads)"] = _stream_downloads(ctx, state)
-            options[f"{ICONS.get('PROVIDER', icons)}Episodes (Downloads)"] = _stream_downloads(ctx, state, force_episodes_menu=True)
+        })
 
         options.update(
             {
@@ -113,7 +111,6 @@ def media_actions(ctx: Context, state: State) -> State | InternalDirective:
                 f"{ICONS.get('TOGGLE', icons)}Toggle Continue From History (Current: {ctx.config.stream.continue_from_watch_history})": toggle_config_state(ctx, state, "CONTINUE_FROM_HISTORY"),
                 f"{ICONS.get('TOGGLE', icons)}Toggle Translation Type  (Current: {ctx.config.stream.translation_type.upper()})": toggle_config_state(ctx, state, "TRANSLATION_TYPE"),
                 f"{ICONS.get('BACK', icons)}Back to Results": lambda: InternalDirective.BACK,
-                f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
             }
         )
 
@@ -252,9 +249,36 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
                 )
                 ctx.watch_history.track(media_item, result)
                     
-            continue_reading = ctx.selector.choose("What next?", ["Select another chapter", "Exit"])
-            if not continue_reading or continue_reading == "Exit":
+            # Determine next/previous chapters
+            current_index = chapters.index(selected_chapter)
+            
+            # Since chapters are usually newest to oldest, "Next" is lower index
+            # and "Previous" is higher index. Let's make it clear.
+            next_chapter = chapters[current_index - 1] if current_index > 0 else None
+            prev_chapter = chapters[current_index + 1] if current_index < len(chapters) - 1 else None
+            
+            next_options = []
+            if next_chapter:
+                next_options.append(f"Next: {next_chapter['title']}")
+            if prev_chapter:
+                next_options.append(f"Prev: {prev_chapter['title']}")
+                
+            next_options.extend(["Select another chapter", "Finish"])
+            
+            continue_reading = ctx.selector.choose("What next?", next_options)
+            
+            if not continue_reading or continue_reading == "Finish":
                 break
+            elif continue_reading.startswith("Next:"):
+                selected_chapter = next_chapter
+                continue
+            elif continue_reading.startswith("Prev:"):
+                selected_chapter = prev_chapter
+                continue
+            # "Select another chapter" will fall through and restart the while loop
+            # because selected_chapter is reset at the top of the loop? 
+            # No, it's not. I should set selected_chapter to None if "Select another chapter" is chosen.
+            selected_chapter = None
                 
         return InternalDirective.RELOAD
 
@@ -530,9 +554,17 @@ def _view_info(ctx: Context, state: State) -> MenuAction:
         info_table.add_row(
             "Format", media_item.format.value if media_item.format else "N/A"
         )
-        info_table.add_row(
-            "Status", media_item.status.value if media_item.status else "N/A"
-        )
+        status = str(media_item.status.value) if media_item.status else "Unknown"
+        status_color = "white"
+        if status == "RELEASING":
+            status_color = "green"
+        elif status == "FINISHED":
+            status_color = "blue"
+        elif status == "CANCELLED":
+            status_color = "red"
+        elif status == "NOT_YET_RELEASED":
+            status_color = "yellow"
+        info_table.add_row("Status", f"[{status_color}]{status}[/]")
         info_table.add_row(
             "Episodes", str(media_item.episodes) if media_item.episodes else "Unknown"
         )

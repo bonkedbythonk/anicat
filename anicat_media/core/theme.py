@@ -7,6 +7,7 @@ class Icons:
     TRENDING: str = " "
     RECENT: str = " "
     WATCHING: str = " "
+    READING: str = " "
     REWATCHING: str = " "
     PAUSED: str = " "
     PLANNED: str = " "

@@ -318,8 +318,42 @@ class Session:
                 except Exception as e:
                     logger.debug(f"Background update check failed: {e}")
 
+            # Trigger a background sync for offline watches
+            def background_sync():
+                try:
+                    from ..commands.registry.commands.sync import _sync_upload
+                    
+                    if not self._context.is_offline and self._context.media_api.is_authenticated():
+                        # Only sync unsynced entries
+                        registry = self._context.media_registry
+                        api = self._context.media_api
+                        
+                        all_records = registry.get_all_media_records()
+                        uploaded_count = 0
+                        
+                        for record in all_records:
+                            index_entry = registry.get_media_index_entry(record.media_item.id)
+                            # Sync if is_synced is False or if it's an old entry without the field (it defaults to True so it won't be synced unnecessarily)
+                            if index_entry and getattr(index_entry, "is_synced", True) is False and index_entry.status:
+                                from .....libs.media_api.params import UpdateUserMediaListEntryParams
+                                update_params = UpdateUserMediaListEntryParams(
+                                    media_id=record.media_item.id,
+                                    status=index_entry.status,
+                                    progress=index_entry.progress,
+                                    score=index_entry.score,
+                                )
+                                if api.update_list_entry(update_params):
+                                    registry.update_media_index_entry(media_id=record.media_item.id, is_synced=True)
+                                    uploaded_count += 1
+                        
+                        if uploaded_count > 0:
+                            logger.info(f"Background sync uploaded {uploaded_count} offline watches.")
+                except Exception as e:
+                    logger.debug(f"Background sync failed: {e}")
+
             import threading
             threading.Thread(target=background_check, daemon=True).start()
+            threading.Thread(target=background_sync, daemon=True).start()
 
         try:
             self._run_main_loop()

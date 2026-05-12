@@ -70,7 +70,6 @@ def downloads(ctx: Context, state: State) -> State | InternalDirective:
             ctx, state, UserMediaListStatus.DROPPED
         ),
         f"{ICONS.get('BACK', icons)}Back to Main": lambda: InternalDirective.BACK,
-        f"{ICONS.get('EXIT', icons)}Exit": lambda: InternalDirective.EXIT,
     }
 
     choice = ctx.selector.choose(

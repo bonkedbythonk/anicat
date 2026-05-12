@@ -66,6 +66,8 @@ class MediaRegistryIndexEntry(BaseModel):
     notes: str = ""
 
     last_notified_episode: Optional[str] = None
+    
+    is_synced: bool = True
 
     # for first watch only
     start_date: datetime = Field(default_factory=datetime.now)

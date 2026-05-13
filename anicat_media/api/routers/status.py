@@ -121,9 +121,19 @@ async def trigger_update():
     import subprocess
     import os
     try:
-        # 1. Run git pull
-        # Use full path to git if possible, or just trust environment
-        result = subprocess.run(["git", "pull"], capture_output=True, text=True, timeout=60)
+        # Get the root of the repository
+        # This file is at: anicat_media/api/routers/status.py
+        # Root is 4 levels up
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        
+        # 1. Run git pull in the repo root
+        result = subprocess.run(
+            ["git", "pull"], 
+            capture_output=True, 
+            text=True, 
+            timeout=60,
+            cwd=repo_root
+        )
         
         if result.returncode != 0:
             return {"status": "error", "message": f"Git pull failed: {result.stderr or result.stdout}"}
@@ -133,7 +143,7 @@ async def trigger_update():
         
         # 2. Try to run uv sync if uv is available
         try:
-            subprocess.run(["uv", "sync"], capture_output=True, timeout=120)
+            subprocess.run(["uv", "sync"], capture_output=True, timeout=120, cwd=repo_root)
         except Exception:
             pass # Non-critical if uv is missing
             

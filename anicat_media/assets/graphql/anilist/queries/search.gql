@@ -60,6 +60,7 @@ query (
     ) {
       id
       idMal
+      type
       format
       title {
         romaji

@@ -1,10 +1,8 @@
 import webbrowser
 import time
 import subprocess
-import sys
-import os
 import socket
-from threading import Thread, Timer
+from threading import Thread
 from rich import print as rprint
 from ...session import Context, session
 from ...state import InternalDirective, State
@@ -28,7 +26,7 @@ def open_gui(ctx: Context, state: State) -> State | InternalDirective:
         return InternalDirective.MAIN
 
     rprint(f"\n[bold magenta]{ICONS.get('BROWSER', icons)}Starting Anicat Dashboard Server...[/]")
-    rprint(f"[dim]This will launch a background process to serve the web interface.[/]")
+    rprint("[dim]This will launch a background process to serve the web interface.[/]")
     
     try:
         # We use 'uv run' to ensure the environment is correct and dependencies are found

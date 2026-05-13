@@ -110,9 +110,9 @@ class DefaultDownloader(BaseDownloader):
             logger.info(f"File already exists: {video_path}")
             return video_path
         elif video_path.exists() and params.prompt:
-            from ..selectors.selector import create_selector
+            from ...libs.selectors.selector import create_selector
 
-            selector = create_selector(self.config)
+            selector = create_selector(self.app_config)
             if not selector.confirm(
                 f"File exists: {video_path.name}. Overwrite?", default=False
             ):
@@ -381,9 +381,9 @@ class DefaultDownloader(BaseDownloader):
 
                 # Handle existing file
                 if final_output_path.exists():
-                    from ..selectors.selector import create_selector
+                    from ...libs.selectors.selector import create_selector
 
-                    selector = create_selector(self.config)
+                    selector = create_selector(self.app_config)
                     if not params.prompt or selector.confirm(
                         f"File exists ({final_output_path}). Overwrite?",
                         default=True,

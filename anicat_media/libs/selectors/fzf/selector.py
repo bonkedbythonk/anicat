@@ -4,6 +4,7 @@ import shutil
 import subprocess
 
 from InquirerPy import inquirer
+from InquirerPy.validator import EmptyInputValidator
 
 from anicat_media.core.utils import detect
 
@@ -105,10 +106,13 @@ class FzfSelector(BaseSelector):
         result = self.choose(prompt, choices, header=f"Default: {default_choice}")
         return result == "Yes"
 
+ 
+
     def ask(self, prompt, *, default=None):
-        return inquirer.text(
+        return inquirer.text(  # type: ignore
             message=prompt,
             default=default or "",
+            validate=EmptyInputValidator("Input cannot be empty. Please try again."),
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },

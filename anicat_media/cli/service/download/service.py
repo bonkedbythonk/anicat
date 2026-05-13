@@ -39,7 +39,7 @@ class DownloadService:
         self.registry = registry_service
         self.media_api = media_api_service
         self.provider = provider_service
-        self.downloader = create_downloader(config.downloads)
+        self.downloader = create_downloader(config)
         # Track in-flight downloads to avoid duplicate queueing
         self._inflight: set[tuple[int, str]] = set()
 

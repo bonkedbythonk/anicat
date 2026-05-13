@@ -1,6 +1,7 @@
 "use client";
 
-import { Play } from "lucide-react";
+import { useState } from "react";
+import { Play, Loader2 } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 
 interface MediaCardProps {
@@ -9,13 +10,17 @@ interface MediaCardProps {
 }
 
 export default function MediaCard({ item, onSelect }: MediaCardProps) {
+  const [loading, setLoading] = useState(false);
   const handlePlay = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setLoading(true);
     try {
       await mediaApi.play(item.id);
     } catch (error) {
       console.error("Failed to trigger playback:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -41,9 +46,14 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10" style={{ transform: 'translateZ(1px)' }}>
           <button 
             onClick={handlePlay}
-            className="bg-accent p-3.5 rounded-full hover:scale-110 active:scale-95 transition-transform duration-200 shadow-xl shadow-accent/30 text-white"
+            disabled={loading}
+            className="bg-accent p-3.5 rounded-full hover:scale-110 active:scale-95 transition-transform duration-200 shadow-xl shadow-accent/30 text-white disabled:opacity-70 disabled:scale-100"
           >
-            <Play fill="currentColor" size={22} className="ml-0.5" />
+            {loading ? (
+              <Loader2 className="animate-spin" size={22} />
+            ) : (
+              <Play fill="currentColor" size={22} className="ml-0.5" />
+            )}
           </button>
         </div>
 

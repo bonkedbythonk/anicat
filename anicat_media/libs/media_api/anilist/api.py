@@ -148,7 +148,7 @@ class AniListApi(BaseApiClient):
             gql.SEARCH_MEDIA,
             variables,
             use_cache=True,
-            ttl=time_to_seconds(self.config.parent.general.max_cache_lifetime)
+            ttl=time_to_seconds(self.config.parent.general.max_cache_lifetime)  # type: ignore
             if hasattr(self.config, "parent")
             else 10800,
         )

@@ -1,4 +1,4 @@
-from typing import List, Literal, TypedDict
+from typing import TypedDict
 
 
 class HiAnimeEpisode(TypedDict):

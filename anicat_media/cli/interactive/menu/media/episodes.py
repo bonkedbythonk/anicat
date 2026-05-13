@@ -1,5 +1,5 @@
 from ...session import Context, session
-from ...state import InternalDirective, MenuName, ProviderState, State
+from ...state import InternalDirective, MenuName, State
 from anicat_media.core.theme import ICONS
 
 
@@ -14,11 +14,16 @@ def episodes(ctx: Context, state: State) -> State | InternalDirective:
     feedback.clear_console()
 
     provider_anime = state.provider.anime
-    media_item = state.media_api.media_item
+    media_api_state = state.media_api
+    media_item = media_api_state.media_item
 
     if not provider_anime or not media_item:
         feedback.error("Error: Anime details are missing.")
         return InternalDirective.BACK
+
+    # Explicitly narrowing for type checker
+    assert provider_anime is not None
+    assert media_item is not None
 
     available_episodes = getattr(
         provider_anime.episodes, config.stream.translation_type, []

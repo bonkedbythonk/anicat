@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview
 from ...libs.media_api.params import MediaSearchParams, MediaCharactersParams, MediaReviewsParams, MediaRecommendationParams
 
@@ -57,6 +57,7 @@ async def get_media_episodes(media_id: int):
         if not media:
             raise HTTPException(status_code=404, detail="Media not found")
         
+        assert media is not None
         # 1. Search provider
         title = media.title.romaji or media.title.english
         from ...libs.provider.anime.params import SearchParams as ProviderSearchParams

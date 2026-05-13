@@ -15,6 +15,9 @@ def servers(ctx: Context, state: State) -> State | InternalDirective:
     provider = ctx.provider
     selector = ctx.selector
 
+    if not state.media_api or not state.media_api.media_item:
+        return InternalDirective.BACK
+
     provider_anime = state.provider.anime
     media_item = state.media_api.media_item
 

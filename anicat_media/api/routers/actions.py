@@ -21,8 +21,8 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
 
         # 1. Determine next episode
         if not episode:
-            next_ep_info = ctx.watch_history.get_episode(media_item)
-            episode = str(next_ep_info.episode) if next_ep_info else "1"
+            episode, _ = ctx.watch_history.get_episode(media_item)
+            episode = str(episode) if episode else "1"
 
         # 2. Search provider
         title = media_item.title.romaji or media_item.title.english

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from ..config.model import DownloadsConfig
+from ..config.model import AppConfig
 from .model import DownloadResult
 from .params import DownloadParams
 
@@ -10,8 +10,9 @@ from .params import DownloadParams
 class BaseDownloader(ABC):
     client: httpx.Client
 
-    def __init__(self, config: DownloadsConfig):
-        self.config = config
+    def __init__(self, config: AppConfig):
+        self.config = config.downloads
+        self.app_config = config
 
         # Increase timeouts and add retries for robustness
         transport = httpx.HTTPTransport(retries=3)

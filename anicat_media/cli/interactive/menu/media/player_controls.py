@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Literal, Union
+from typing import Callable, Dict, Union
 
 from ...session import Context, session
 from ...state import InternalDirective, MenuName, State
@@ -221,6 +221,10 @@ def _change_quality(ctx: Context, state: State) -> MenuAction:
 
         if not server_map:
             feedback.error("Player state is incomplete. Returning.")
+            return InternalDirective.BACK
+
+        if not state.provider.server:
+            feedback.error("No server selected.")
             return InternalDirective.BACK
 
         new_quality = selector.choose(

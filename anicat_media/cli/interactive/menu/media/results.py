@@ -13,8 +13,14 @@ def results(ctx: Context, state: State) -> State | InternalDirective:
     feedback = ctx.feedback
     feedback.clear_console()
 
+    if not state.media_api:
+        return InternalDirective.BACK
+
     search_result = state.media_api.search_result
     page_info = state.media_api.page_info
+
+    if search_result is None:
+        return InternalDirective.BACK
 
     search_result_dict = {
         _format_title(ctx, media_item): media_item

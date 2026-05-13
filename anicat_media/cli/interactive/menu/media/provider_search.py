@@ -15,6 +15,8 @@ def provider_search(ctx: Context, state: State) -> State | InternalDirective:
     from .....core.utils.normalizer import normalize_title, update_user_normalizer_json
 
     feedback = ctx.feedback
+    if not state.media_api or not state.media_api.media_item:
+        return InternalDirective.BACK
     media_item = state.media_api.media_item
 
     provider = ctx.provider

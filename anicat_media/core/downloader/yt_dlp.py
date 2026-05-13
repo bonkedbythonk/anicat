@@ -230,7 +230,7 @@ class YtDLPDownloader(BaseDownloader):
                 if final_output_path.exists():
                     from ...libs.selectors.selector import create_selector
 
-                    selector = create_selector(self.config)
+                    selector = create_selector(self.app_config)
                     if not params.prompt or selector.confirm(
                         f"File exists({final_output_path}) would you like to overwrite it",
                         default=True,

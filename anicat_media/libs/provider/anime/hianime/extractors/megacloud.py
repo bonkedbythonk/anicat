@@ -3,11 +3,12 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import httpx
 
 from ...types import EpisodeStream, Server, Subtitle
+from .. import constants
 from ..types import HiAnimeSource
 
 logger = logging.getLogger(__name__)

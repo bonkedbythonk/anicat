@@ -207,7 +207,7 @@ def download_anime(
     from anicat_media.core.downloader import DownloadParams, create_downloader
     from ...libs.provider.anime.params import EpisodeStreamsParams
 
-    downloader = create_downloader(config.downloads)
+    downloader = create_downloader(config)
 
     with feedback.progress("Fetching episode streams"):
         streams = provider.episode_streams(

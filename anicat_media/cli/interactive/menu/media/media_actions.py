@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Literal, Optional
+from typing import Callable, Dict, Optional
 
 from .....libs.media_api.params import (
     MediaRecommendationParams,
@@ -29,11 +29,10 @@ def media_actions(ctx: Context, state: State) -> State | InternalDirective:
 
     icons = ctx.config.general.icons
 
-    media_item = state.media_api.media_item
-
-    if not media_item:
+    if not state.media_api or not state.media_api.media_item:
         feedback.error("Media item is not in state")
         return InternalDirective.BACK
+    media_item = state.media_api.media_item
     progress = _get_progress_string(ctx, state.media_api.media_item)
 
     # Check for downloaded episodes to conditionally show options
@@ -238,7 +237,7 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
         manga_url = selected_manga["url"]
         
         manga_info = None
-        with feedback.progress(f"Fetching chapters"):
+        with feedback.progress("Fetching chapters"):
             manga_info = manga_provider.get_manga(manga_url)
             
         if not manga_info or not manga_info.get("availableChapters"):

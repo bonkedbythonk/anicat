@@ -19,12 +19,14 @@ logger = logging.getLogger(__name__)
 
 # Try to import lxml
 HAS_LXML = False
+lxml_html: Any = None
 try:
     from lxml import etree, html as lxml_html
 
     HAS_LXML = True
     logger.debug("lxml is available and will be used for HTML parsing")
 except ImportError:
+    etree = None
     logger.debug("lxml not available, falling back to html.parser")
 
 
@@ -235,11 +237,11 @@ def get_element_by_id(element_id: str, html_content: str) -> Optional[str]:
         >>> get_element_by_id("test", html)
         '<div id="test">Content</div>'
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            element = parsed.xpath(f'//*[@id="{element_id}"]')
+            element = (parsed).xpath(f'//*[@id="{element_id}"]')
             if element:
                 return etree.tostring(element[0], encoding="unicode", method="html")
         except Exception as e:
@@ -264,11 +266,11 @@ def get_element_by_tag(tag_name: str, html_content: str) -> Optional[str]:
     Returns:
         HTML string of the element or None if not found
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            elements = parsed.xpath(f"//{tag_name}")
+            elements = (parsed).xpath(f"//{tag_name}")
             if elements:
                 return etree.tostring(elements[0], encoding="unicode", method="html")
         except Exception as e:
@@ -293,11 +295,11 @@ def get_element_by_class(class_name: str, html_content: str) -> Optional[str]:
     Returns:
         HTML string of the element or None if not found
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            elements = parsed.xpath(f'//*[contains(@class, "{class_name}")]')
+            elements = (parsed).xpath(f'//*[contains(@class, "{class_name}")]')
             if elements:
                 return etree.tostring(elements[0], encoding="unicode", method="html")
         except Exception as e:
@@ -322,12 +324,12 @@ def get_elements_by_tag(tag_name: str, html_content: str) -> List[str]:
     Returns:
         List of HTML strings for matching elements
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
     results = []
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            elements = parsed.xpath(f"//{tag_name}")
+            elements = (parsed).xpath(f"//{tag_name}")
             for element in elements:
                 results.append(
                     etree.tostring(element, encoding="unicode", method="html")
@@ -353,12 +355,12 @@ def get_elements_by_class(class_name: str, html_content: str) -> List[str]:
     Returns:
         List of HTML strings for matching elements
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
     results = []
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            elements = parsed.xpath(f'//*[contains(@class, "{class_name}")]')
+            elements = (parsed).xpath(f'//*[contains(@class, "{class_name}")]')
             for element in elements:
                 results.append(
                     etree.tostring(element, encoding="unicode", method="html")
@@ -407,11 +409,11 @@ def get_element_text_and_html_by_tag(
         >>> get_element_text_and_html_by_tag("script", html)
         ('alert("test");', '<script>alert("test");</script>')
     """
-    parsed = _default_parser.parse(html_content)
+    parsed: Any = _default_parser.parse(html_content)
 
-    if _default_parser.config.use_lxml and HAS_LXML:
+    if _default_parser.config.use_lxml and HAS_LXML and etree is not None:
         try:
-            elements = parsed.xpath(f"//{tag_name}")
+            elements = (parsed).xpath(f"//{tag_name}")
             if elements:
                 element = elements[0]
                 text = (

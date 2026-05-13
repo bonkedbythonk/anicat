@@ -1,10 +1,8 @@
-from dataclasses import asdict
 from typing import Callable, Dict, Union
 
 from .....libs.media_api.types import MediaItem, PageInfo
 from ...session import Context, session
 from ...state import InternalDirective, MediaApiState, MenuName, State
-from .....core.theme import ICONS
 
 
 @session.menu

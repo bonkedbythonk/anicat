@@ -1,10 +1,9 @@
 import logging
 import re
-from typing import Optional
 from urllib.parse import quote_plus
 
 from ..base import MangaProvider
-from .constants import BASE_URL, HEADERS, SEARCH_URL
+from .constants import HEADERS, SEARCH_URL
 
 logger = logging.getLogger(__name__)
 

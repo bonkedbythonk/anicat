@@ -1,9 +1,11 @@
 import json
 import logging
 import os
-import tomllib
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+ 
+if TYPE_CHECKING:
+    from ....core.config import AppConfig
 
 from ....core.constants import APP_DATA_DIR
 from ....core.utils.file import AtomicWriter, FileLock

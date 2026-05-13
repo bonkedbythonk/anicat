@@ -1,4 +1,4 @@
-from ..config.model import DownloadsConfig
+from ..config.model import AppConfig
 from ..exceptions import AnicatError
 from .base import BaseDownloader
 
@@ -7,11 +7,11 @@ DOWNLOADERS = ["auto", "default", "yt-dlp"]
 
 class DownloadFactory:
     @staticmethod
-    def create(config: DownloadsConfig) -> BaseDownloader:
+    def create(config: AppConfig) -> BaseDownloader:
         """
         Factory to create a downloader instance based on the configuration.
         """
-        downloader_name = config.downloader
+        downloader_name = config.downloads.downloader
         if downloader_name not in DOWNLOADERS:
             raise AnicatError(
                 f"Unsupported selector: '{downloader_name}'.Available selectors are: {DOWNLOADERS}"

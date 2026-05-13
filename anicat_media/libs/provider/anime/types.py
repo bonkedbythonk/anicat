@@ -95,7 +95,7 @@ class EpisodeStream(BaseAnimeProviderModel):
     # episode: str
     link: str
     title: Optional[str] = None
-    quality: Literal["360", "480", "720", "1080"] = "720"
+    quality: Literal["360", "480", "720", "1080", "auto"] = "auto"
     translation_type: MediaTranslationType = MediaTranslationType.SUB
     format: Optional[str] = None
     hls: Optional[bool] = None

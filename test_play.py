@@ -1,15 +1,12 @@
 import asyncio
-import logging
-from anicat_media.core.config import AppConfig
-from anicat_media.core.context import Context
-from anicat_media.cli.service.player.service import PlayerService
-from anicat_media.libs.media_api.types import MediaItem
-from anicat_media.libs.player.params import PlayerParams
 
 async def main():
     from anicat_media.api.main import ctx
     # Let's try calling play_media logic directly
     media_item = ctx.media_api.get_media_item(167143)
+    if not media_item:
+        print("Media item not found")
+        return
     episode = "1"
     
     title = media_item.title.romaji or media_item.title.english
@@ -22,6 +19,9 @@ async def main():
             translation_type=ctx.config.stream.translation_type
         )
     )
+    if not search_results or not search_results.results:
+        print("No search results found")
+        return
     
     from anicat_media.cli.utils.search import find_best_match_title
     results_map = {r.title: r for r in search_results.results}
@@ -42,6 +42,9 @@ async def main():
             translation_type=ctx.config.stream.translation_type
         )
     )
+    if not streams_iter:
+        print("No streams found")
+        return
     server = next(streams_iter)
     stream_link = server.links[0].link
     print(f"Stream link: {stream_link}")

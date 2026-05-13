@@ -251,7 +251,7 @@ class Session:
 
         if sys.platform == "darwin":
             import subprocess
-            rprint(f"\n[bold yellow]Opening your config file in your text editor...[/]")
+            rprint("\n[bold yellow]Opening your config file in your text editor...[/]")
             rprint(f"[dim]If it doesn't open, please find it at: {USER_CONFIG}[/]")
             subprocess.run(["open", "-t", str(USER_CONFIG)])
             click.pause("Press Enter here after you have saved your changes...")
@@ -324,7 +324,6 @@ class Session:
             # Trigger a background sync for offline watches
             def background_sync():
                 try:
-                    from ..commands.registry.commands.sync import _sync_upload
                     
                     if not self._context.is_offline and self._context.media_api.is_authenticated():
                         # Only sync unsynced entries

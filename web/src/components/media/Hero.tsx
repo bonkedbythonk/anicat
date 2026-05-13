@@ -1,6 +1,7 @@
 "use client";
 
-import { Play, Maximize } from "lucide-react";
+import { useState } from "react";
+import { Play, Maximize, Loader2 } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 
 interface HeroProps {
@@ -12,11 +13,15 @@ export default function Hero({ item, onSelect }: HeroProps) {
   const title = item.title.english || item.title.romaji || "Unknown";
   const nextEpisode = (item.user_status?.progress || 0) + 1;
 
+  const [loading, setLoading] = useState(false);
   const handlePlay = async () => {
+    setLoading(true);
     try {
       await mediaApi.play(item.id);
     } catch (error) {
       console.error("Failed to trigger playback:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -59,10 +64,15 @@ export default function Hero({ item, onSelect }: HeroProps) {
         <div className="flex items-center space-x-3 pt-2">
           <button 
             onClick={handlePlay}
-            className="flex items-center space-x-3 bg-white text-black px-8 py-3.5 rounded-xl hover:bg-accent hover:text-white transition-all duration-300 font-bold text-sm active:scale-95 shadow-xl"
+            disabled={loading}
+            className="flex items-center space-x-3 bg-white text-black px-8 py-3.5 rounded-xl hover:bg-accent hover:text-white transition-all duration-300 font-bold text-sm active:scale-95 shadow-xl disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            <Play fill="currentColor" size={18} />
-            <span>Resume</span>
+            {loading ? (
+              <Loader2 className="animate-spin" size={18} />
+            ) : (
+              <Play fill="currentColor" size={18} />
+            )}
+            <span>{loading ? "Starting..." : "Resume"}</span>
           </button>
           
           <button 

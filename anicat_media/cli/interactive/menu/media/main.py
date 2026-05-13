@@ -28,8 +28,8 @@ def main(ctx: Context, state: State) -> State | InternalDirective:
     # Visual indicator for updates
     if state.update_available:
         console.print(Panel(
-            f"[bold green]✨ A new update is available![/bold green]\n"
-            f"Please select [bold cyan]Check for Updates[/bold cyan] in the menu to install the latest version.",
+            "[bold green]✨ A new update is available![/bold green]\n"
+            "Please select [bold cyan]Check for Updates[/bold cyan] in the menu to install the latest version.",
             title="[yellow]Update Notification[/yellow]",
             border_style="yellow",
             expand=False,

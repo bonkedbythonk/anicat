@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING, Optional
 
 from InquirerPy import inquirer
-from InquirerPy.prompts import FuzzyPrompt  # pyright: ignore[reportPrivateImportUsage]
+from InquirerPy.prompts.fuzzy import FuzzyPrompt
+from InquirerPy.validator import EmptyInputValidator
 from rich.console import Console
 from rich.text import Text
 
@@ -12,7 +13,6 @@ if TYPE_CHECKING:
 
 console = Console()
 
-from ..base import BaseSelector
 
 
 class InquirerSelector(BaseSelector):
@@ -53,12 +53,11 @@ class InquirerSelector(BaseSelector):
         self._render_header(header)
         prompt = self._get_clean_prompt(prompt)
         
-        return FuzzyPrompt(
+        return inquirer.fuzzy(  # type: ignore
             message=prompt,
             choices=choices,
             border=False,
             validate=lambda result: result in choices,
-            wrap_around=True,
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },
@@ -67,7 +66,7 @@ class InquirerSelector(BaseSelector):
     def confirm(self, prompt, *, default=False):
         self._render_header()
         prompt = self._get_clean_prompt(prompt)
-        return inquirer.confirm(
+        return inquirer.confirm(  # type: ignore
             message=prompt,
             default=default,
             keybindings={
@@ -78,10 +77,10 @@ class InquirerSelector(BaseSelector):
     def ask(self, prompt, *, default=None):
         self._render_header()
         prompt = self._get_clean_prompt(prompt)
-        return inquirer.text(
+        return inquirer.text(  # type: ignore
             message=prompt,
             default=default or "",
-            validate=lambda result: len(result.strip()) > 0 or "Input cannot be empty. Please try again.",
+            validate=EmptyInputValidator("Input cannot be empty. Please try again."),
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },
@@ -92,12 +91,11 @@ class InquirerSelector(BaseSelector):
     ) -> list[str]:
         self._render_header()
         prompt = self._get_clean_prompt(prompt)
-        return FuzzyPrompt(
+        return inquirer.fuzzy(  # type: ignore
             message=prompt,
             choices=choices,
             multiselect=True,
             border=False,
-            wrap_around=True,
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },
@@ -115,11 +113,10 @@ class InquirerSelector(BaseSelector):
     ) -> str | None:
         self._render_header(header)
         
-        return FuzzyPrompt(
+        return inquirer.fuzzy(  # type: ignore
             message=prompt,
             choices=initial_results or [],
             border=False,
-            wrap_around=True,
             keybindings={
                 "answer": [{"key": "enter"}, {"key": "right"}],
             },

@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Literal, Union
+from typing import Callable, Dict, Union
 
 from .....libs.player.params import PlayerParams
 from ...session import Context, session
@@ -15,6 +15,8 @@ def play_downloads(ctx: Context, state: State) -> State | InternalDirective:
     from ....service.registry.models import DownloadStatus
 
     feedback = ctx.feedback
+    if not state.media_api or not state.media_api.media_item:
+        return InternalDirective.BACK
     media_item = state.media_api.media_item
     current_episode_num = state.provider.episode
 
@@ -99,6 +101,8 @@ def downloads_player_controls(
     config = ctx.config
     selector = ctx.selector
 
+    if not state.media_api or not state.media_api.media_item:
+        return InternalDirective.BACK
     media_item = state.media_api.media_item
     current_episode_num = state.provider.episode
     current_start_time = state.provider.start_time

@@ -16,7 +16,7 @@ from .constants import (
     SERVER_HEADERS,
 )
 from .extractor import process_animepahe_embed_page
-from .mappers import map_to_anime_result, map_to_search_results, map_to_server
+from .mappers import map_to_anime_result, map_to_search_results
 from .types import AnimePaheAnimePage, AnimePaheSearchPage
 
 logger = logging.getLogger(__name__)

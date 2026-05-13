@@ -1,8 +1,5 @@
 import click
 from rich import print as rprint
-from pathlib import Path
-import os
-import shutil
 
 import sys
 import subprocess
@@ -33,7 +30,7 @@ def login_flow(config: AppConfig):
     rprint(f"Opening your browser for authentication: [link={ANILIST_AUTH}]{ANILIST_AUTH}[/link]")
     click.launch(ANILIST_AUTH)
     
-    rprint(f"\n[bold yellow]Opening your config file in your text editor...[/]")
+    rprint("\n[bold yellow]Opening your config file in your text editor...[/]")
     rprint(f"[dim]If it doesn't open, please find it at: {USER_CONFIG}[/]")
     
     if sys.platform == "darwin":
@@ -46,7 +43,7 @@ def login_flow(config: AppConfig):
     
     rprint("\n[bold green]Instructions:[/]")
     rprint("1. Copy the 'access_token' from the URL after authorizing.")
-    rprint(f"2. Paste it in the file behind [bold white]token = [/] (located under the [bold white]\[anilist][/] section).")
+    rprint("2. Paste it in the file behind [bold white]token = [/] (located under the [bold white]\[anilist][/] section).")
     rprint("3. Save ([bold white]Cmd+S[/]) and close the editor.")
     
     input("\nPress Enter here once you have saved and closed the file...")

@@ -74,6 +74,12 @@ def sync(
     token = auth.resolve_token(config)
     if token:
         if not media_api_client.authenticate(token):
+            feedback.error(
+                "Authentication Required",
+                "You are not logged in. Please run 'anicat login' to continue.",
+            )
+            raise click.Abort()
+    else:
         feedback.error(
             "Authentication Required",
             "You are not logged in. Please run 'anicat login' to continue.",

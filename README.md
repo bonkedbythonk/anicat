@@ -15,39 +15,50 @@ brew install --cask kitty  # Required for terminal image support (covers/thumbna
 brew install mpv fzf       # Required for playback and terminal features
 ```
 
-### Setup Anicat
+### Install Anicat
 
-**Step 1:** Install with [uv](https://astral.sh/uv/) package manager:
+Install the package with [uv](https://astral.sh/uv/) package manager:
 ```bash
 uv tool install git+https://github.com/bonkedbythonk/anicat.git
 ```
 
-**Step 2:** Start the backend service:
-```bash
-anicat dashboard --no-browser
-```
-
-This starts the API backend on `localhost:8000`. Keep this running in the background.
+That's it! Now choose how you want to use it below.
 
 ---
 
 ## Getting Started
 
+Choose the setup that works best for you:
+
 ### Option 1: Web Dashboard (Recommended for Most Users)
 
-The easiest way to use Anicat is through the **Progressive Web App (PWA)** in your browser. No additional setup needed.
+Perfect for development, cross-platform, and maximum control.
 
-1. **Open your browser** and navigate to `http://localhost:3000`
-2. **Bookmark or Install as PWA**: 
+The easiest way to use Anicat is through the **Progressive Web App (PWA)** in your browser.
+
+1. **Start the backend first** (in a terminal, keep it running):
+   ```bash
+   anicat dashboard --no-browser
+   ```
+
+2. **Open your browser** and navigate to `http://localhost:3000`
+
+3. **Bookmark or Install as PWA**: 
    - **macOS Safari**: Press `Cmd+Shift+B` to bookmark, or use "Add to Dock" from the Share menu
    - **Any browser**: Look for the "Install" or "+" icon in the address bar to install as a standalone app
-3. **Enjoy**: Full Netflix-style dashboard with all features in your browser
+
+4. **Enjoy**: Full Netflix-style dashboard with all features in your browser
+
+**Advantages:** 
+- Works in any browser on any device on your network
+- No extra dependencies or installation scripts
+- Easy to update (changes reflect immediately)
 
 ---
 
 ### Option 2: macOS Desktop App (Optional)
 
-If you prefer a native-looking macOS application in your Launchpad:
+For a native macOS experience with everything in one click:
 
 ```bash
 bash ~/path/to/anicat/scripts/install.sh
@@ -56,9 +67,12 @@ bash ~/path/to/anicat/scripts/install.sh
 Then:
 1. **Open Launchpad**: Press `F4` or search for **Anicat** in Spotlight (`Cmd+Space`)
 2. **Add to Dock**: Drag the **Anicat** icon into your Dock
-3. **Click to Launch**: Opens the dashboard automatically
+3. **Click Once**: The app automatically:
+   - Starts the backend API server
+   - Launches your browser to `http://localhost:8000`
+   - You're ready to go—no terminal needed!
 
-**Note:** This is a convenience wrapper around the web dashboard—the PWA option in your browser provides the same experience without the extra setup.
+**Why use this?** Everything runs in the background with a single click. Perfect for non-technical users or quick access from your Dock.
 
 ---
 

@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { 
   Home, 
   Search, 
@@ -34,12 +33,11 @@ export default function Sidebar({ activeView, onNavigate }: SidebarProps) {
 
       {/* Logo */}
       <div className="flex justify-center lg:justify-start px-3 mb-8">
-        <Image 
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img 
           src="/logo.png" 
           alt="Anicat Logo" 
-          width={48} 
-          height={48} 
-          className="w-12 h-12 lg:w-16 lg:h-auto rounded-lg"
+          className="w-11 h-11 lg:w-13 lg:h-13 rounded-xl shadow-2xl shadow-accent/20 object-contain brightness-110"
         />
       </div>
 

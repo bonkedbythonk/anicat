@@ -1,9 +1,9 @@
-query {
+query($resetNotificationCount: Boolean = false) {
   Page(perPage: 5) {
     pageInfo {
       total
     }
-    notifications(resetNotificationCount: false, type: AIRING) {
+    notifications(resetNotificationCount: $resetNotificationCount, type: AIRING) {
       ... on AiringNotification {
         id
         type

@@ -667,6 +667,7 @@ function SettingsView() {
     { id: "downloads", label: "Downloads", icon: HardDrive },
     { id: "anilist", label: "AniList", icon: Globe },
     { id: "registry", label: "Registry", icon: Activity },
+    { id: "system", label: "System", icon: RotateCcw },
   ];
 
   return (
@@ -809,6 +810,47 @@ function SettingsView() {
                   className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
                 />
               </SettingField>
+            </div>
+          )}
+
+          {activeTab === "system" && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Application Update</h3>
+                    <p className="text-sm text-gray-500 mt-1">Check for the latest features and bug fixes.</p>
+                  </div>
+                  <div className="px-3 py-1 bg-white/[0.04] rounded-lg border border-white/[0.1] text-[10px] font-mono text-gray-400">
+                    v1.2.4
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-3 pt-2">
+                  <button
+                    onClick={async () => {
+                      const res = await mediaApi.triggerUpdate();
+                      alert(res.message);
+                      if (res.status === "success") window.location.reload();
+                    }}
+                    className="flex items-center justify-center space-x-2 py-3 bg-accent text-white rounded-xl font-bold hover:bg-accent-light transition-all shadow-lg shadow-accent/20"
+                  >
+                    <RotateCcw size={16} />
+                    <span>Check for Updates</span>
+                  </button>
+                  <p className="text-[10px] text-center text-gray-600">Current build: 2026.05.13.production</p>
+                </div>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
+                <h3 className="text-lg font-bold text-red-400/80">Danger Zone</h3>
+                <button
+                  onClick={() => confirm("Are you sure you want to clear your local cache?")}
+                  className="w-full py-3 border border-red-500/20 text-red-400/60 rounded-xl text-sm font-bold hover:bg-red-500/10 transition-all"
+                >
+                  Clear Local Registry
+                </button>
+              </div>
             </div>
           )}
 
@@ -1080,13 +1122,10 @@ export default function App() {
   useEffect(() => {
     async function checkSystem() {
       try {
-        const [status, notifications] = await Promise.all([
-          mediaApi.getHealthStatus(),
-          mediaApi.getNotifications()
-        ]);
+        const status = await mediaApi.getHealthStatus();
         setIsOffline(status.is_offline);
         if (!status.is_offline) setDismissedOffline(false);
-        setNotificationCount(notifications.length);
+        setNotificationCount(status.unread_notifications || 0);
       } catch {
         setIsOffline(true);
       }

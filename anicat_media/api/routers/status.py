@@ -20,6 +20,7 @@ class HealthInfo(BaseModel):
     worker_running: bool
     is_offline: bool
     update_available: bool = False
+    unread_notifications: int = 0
     current_version: str = "unknown"
 
 # Module-level storage for last playback event
@@ -87,12 +88,22 @@ async def get_health():
         except Exception:
             pass
 
+        # Get unread notification count
+        unread_notifications = 0
+        try:
+            profile = ctx.media_api.get_viewer_profile()
+            if profile and hasattr(profile, 'unread_notifications'):
+                unread_notifications = getattr(profile, 'unread_notifications') or 0
+        except Exception:
+            pass
+
         from ..core.constants import VERSION
         return HealthInfo(
             api_connected=ctx.media_api.is_authenticated(),
             worker_running=ctx._download is not None,
             is_offline=ctx.is_offline,
             update_available=update_available,
+            unread_notifications=unread_notifications,
             current_version=VERSION
         )
     except Exception:

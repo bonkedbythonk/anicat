@@ -111,6 +111,7 @@ export type UserProfile = {
   name: string;
   avatar_url?: string;
   banner_url?: string;
+  unread_notifications?: number;
 };
 
 export type PlaybackStatus = {
@@ -126,6 +127,7 @@ export type HealthStatus = {
   worker_running: boolean;
   is_offline: boolean;
   update_available?: boolean;
+  unread_notifications?: number;
   current_version?: string;
 };
 

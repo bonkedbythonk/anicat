@@ -340,11 +340,19 @@ class AniListApi(BaseApiClient):
         return None
 
     def mark_notifications_as_read(self) -> bool:
-        """Mark all notifications as read on AniList."""
+        """Mark all notifications as read on AniList by performing a reset fetch."""
         if not self.token:
             return False
+        
+        # We fetch a tiny page just to trigger the reset flag on AniList's end
+        variables = {
+            "resetNotificationCount": True,
+            "type": "AIRING",
+            "perPage": 1
+        }
+        
         response = execute_graphql(
-            ANILIST_ENDPOINT, self.http_client, gql.MARK_NOTIFICATIONS_AS_READ, {}
+            ANILIST_ENDPOINT, self.http_client, gql.GET_NOTIFICATIONS, variables
         )
         return response.json() is not None and "errors" not in response.json()
         """

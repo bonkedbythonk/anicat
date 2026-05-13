@@ -59,3 +59,7 @@ else:
         @app.get("/")
         async def root():
             return {"status": "ok", "message": "API is running, but frontend is not built. Run 'npm run build' in 'web' folder."}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

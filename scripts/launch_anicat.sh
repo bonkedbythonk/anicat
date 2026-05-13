@@ -26,12 +26,13 @@ cd "$PROJECT_DIR"
 # 2. Start Backend
 if ! lsof -i :$PORT > /dev/null; then
     echo "Starting Anicat Backend..."
-    uv run python -m anicat_media.api.main > backend.log 2>&1 &
+    # Use 'anicat dashboard' which is the proper way to start the uvicorn server
+    uv run anicat dashboard --no-browser > backend.log 2>&1 &
     
-    # Wait for startup
-    MAX_RETRIES=10
+    # Wait for startup (check if the API is actually responding)
+    MAX_RETRIES=15
     RETRY_COUNT=0
-    while ! lsof -i :$PORT > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    while ! curl -sf "http://127.0.0.1:$PORT/api/status/health" > /dev/null && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         sleep 1
         RETRY_COUNT=$((RETRY_COUNT + 1))
     done

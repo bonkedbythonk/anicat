@@ -26,7 +26,18 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
 
   const title = item.title.english || item.title.romaji || "Media";
   const progress = item.user_status?.progress || 0;
-  const totalEps = item.episodes || 1;
+  const totalEps = item.episodes || 0;
+  const nextEp = item.next_airing?.episode;
+  
+  // Calculate if there are new episodes available
+  let currentReleased = 0;
+  if (nextEp) {
+    currentReleased = nextEp - 1;
+  } else if (totalEps > 0) {
+    currentReleased = totalEps;
+  }
+  
+  const hasNewEpisodes = item.user_status && progress < currentReleased;
 
   return (
     <button 
@@ -57,6 +68,13 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           </button>
         </div>
 
+        {/* New badge */}
+        {hasNewEpisodes && (
+          <div className="absolute top-2 left-2 bg-accent text-white px-2 py-0.5 rounded-md text-[10px] font-black z-10 shadow-lg shadow-accent/40 animate-pulse-glow">
+            NEW
+          </div>
+        )}
+
         {/* Score badge */}
         {item.average_score && (
           <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-md text-[10px] font-bold text-accent z-10">
@@ -69,7 +87,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/60 z-10">
             <div 
               className="h-full bg-accent rounded-full" 
-              style={{ width: `${Math.min((progress / totalEps) * 100, 100)}%` }}
+              style={{ width: `${Math.min((progress / (totalEps || currentReleased || 1)) * 100, 100)}%` }}
             />
           </div>
         )}
@@ -80,9 +98,14 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           {title}
         </h3>
         {item.user_status && progress > 0 ? (
-          <p className="text-[11px] text-accent font-medium">
-            EP {progress} / {item.episodes || "?"}
-          </p>
+          <div className="flex items-center space-x-2">
+            <p className={`text-[11px] font-medium ${hasNewEpisodes ? "text-accent" : "text-gray-500"}`}>
+              EP {progress} / {totalEps || currentReleased || "?"}
+            </p>
+            {hasNewEpisodes && (
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+            )}
+          </div>
         ) : (
           <p className="text-[11px] text-gray-500 font-medium">
             {item.season && item.season.charAt(0) + item.season.slice(1).toLowerCase()} {item.seasonYear}

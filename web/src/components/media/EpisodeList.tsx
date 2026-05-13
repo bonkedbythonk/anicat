@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, ChevronDown } from "lucide-react";
+import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle } from "lucide-react";
 import { mediaApi, type Episode } from "@/lib/api";
 
 interface EpisodeListProps {
@@ -16,7 +16,6 @@ export default function EpisodeList({ mediaId, episodes, loading }: EpisodeListP
   const [batchStart, setBatchStart] = useState("");
   const [batchEnd, setBatchEnd] = useState("");
   const [batchQueuing, setBatchQueuing] = useState(false);
-  const [showDownloadActions, setShowDownloadActions] = useState(false);
 
   const handlePlay = async (epNum: string) => {
     setPlayingEp(epNum);
@@ -80,66 +79,11 @@ export default function EpisodeList({ mediaId, episodes, loading }: EpisodeListP
     );
   }
 
-  const remainingEps = episodes.filter(
-    ep => ep.download_status === "not_downloaded"
-  );
 
-  const handleDownloadRemaining = async () => {
-    if (remainingEps.length === 0) return;
-    setBatchQueuing(true);
-    try {
-      const eps = remainingEps.map(ep => String(ep.number));
-      await mediaApi.addToQueue(mediaId, eps);
-    } catch (error) {
-      console.error("Failed to queue remaining:", error);
-    } finally {
-      setBatchQueuing(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
-
-      {/* Download Actions Accordion */}
-      {remainingEps.length > 0 && (
-        <div className="space-y-2">
-          <button
-            onClick={() => setShowDownloadActions(!showDownloadActions)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.06] hover:border-white/[0.1] rounded-xl font-bold text-xs text-gray-400 hover:text-gray-300 transition-all"
-          >
-            <span>Download Options</span>
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${
-                showDownloadActions ? "rotate-180" : ""
-              }`}
-            />
-          </button>
-
-          {showDownloadActions && (
-            <div className="space-y-2 pl-2 border-l border-white/[0.06]">
-              <button
-                onClick={handleDownloadRemaining}
-                disabled={batchQueuing}
-                className="w-full flex items-center justify-center space-x-2 py-3 bg-white/[0.03] hover:bg-accent/10 border border-white/[0.06] hover:border-accent/30 rounded-xl font-bold text-xs text-gray-400 hover:text-accent transition-all"
-              >
-                {batchQueuing ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Download size={14} />
-                )}
-                <span>
-                  {batchQueuing
-                    ? "Queuing..."
-                    : `Download Remaining (${remainingEps.length} eps)`}
-                </span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Episode list */}
+      {/* Episode list */
       {episodes.length === 0 ? (
         <div className="text-center py-12 text-gray-600 text-sm">
           No episodes found from this provider.

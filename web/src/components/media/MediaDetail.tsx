@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, RotateCcw } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, RotateCcw, MoreVertical, Download } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import EpisodeList from "./EpisodeList";
 
@@ -27,6 +27,8 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [isDownloadingRemaining, setIsDownloadingRemaining] = useState(false);
 
   const title = fullItem.title.english || fullItem.title.romaji || "Unknown";
 
@@ -129,6 +131,28 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     }
   };
 
+  const handleDownloadRemaining = async () => {
+    const remainingEps = episodes.filter(
+      ep => ep.download_status === "not_downloaded"
+    );
+    if (remainingEps.length === 0) return;
+    setIsDownloadingRemaining(true);
+    try {
+      const eps = remainingEps.map(ep => String(ep.number));
+      await mediaApi.addToQueue(item.id, eps);
+      setIsDownloadMenuOpen(false);
+    } catch (error) {
+      console.error("Failed to queue remaining:", error);
+    } finally {
+      setIsDownloadingRemaining(false);
+    }
+  };
+
+  const canDownload = fullItem.status && !fullItem.status.includes("AIRING") && !fullItem.status.includes("NOT_YET_AIRED");
+  const remainingEps = episodes.filter(
+    ep => ep.download_status === "not_downloaded"
+  );
+
   const STATUS_OPTIONS = [
     { value: "watching", label: "Watching", icon: Monitor, color: "text-accent" },
     { value: "completed", label: "Completed", icon: CheckCircle2, color: "text-green-400" },
@@ -174,70 +198,105 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
                 className="w-full h-full object-cover"
               />
             </div>
-            <div className="space-y-2 min-w-0">
-              <div className="flex items-center space-x-2 text-xs font-semibold text-gray-300">
-                <span className="text-accent">{fullItem.format || "TV"}</span>
-                <span className="text-gray-600">•</span>
-                <span>{fullItem.status}</span>
-                {fullItem.episodes && (
-                  <>
-                    <span className="text-gray-600">•</span>
-                    <span>{fullItem.episodes} eps</span>
-                  </>
-                )}
-                {fullItem.average_score && (
-                  <>
-                    <span className="text-gray-600">•</span>
-                    <div className="flex items-center text-yellow-400">
-                      <Star size={10} fill="currentColor" className="mr-1" />
-                      <span>{fullItem.average_score}%</span>
-                    </div>
-                  </>
+            <div className="space-y-4 min-w-0 flex-1">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2 text-xs font-semibold text-gray-300">
+                  <span className="text-accent">{fullItem.format || "TV"}</span>
+                  <span className="text-gray-600">•</span>
+                  <span>{fullItem.status}</span>
+                  {fullItem.episodes && (
+                    <>
+                      <span className="text-gray-600">•</span>
+                      <span>{fullItem.episodes} eps</span>
+                    </>
+                  )}
+                  {fullItem.average_score && (
+                    <>
+                      <span className="text-gray-600">•</span>
+                      <div className="flex items-center text-yellow-400">
+                        <Star size={10} fill="currentColor" className="mr-1" />
+                        <span>{fullItem.average_score}%</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <h2 className="text-2xl lg:text-3xl font-extrabold text-white leading-tight line-clamp-2">
+                  {title}
+                </h2>
+                {fullItem.genres && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {fullItem.genres.slice(0, 4).map(g => (
+                      <span key={g} className="px-2 py-0.5 bg-white/[0.06] rounded-md text-[10px] font-semibold text-gray-400">
+                        {g}
+                      </span>
+                    ))}
+                    {fullItem.tags && fullItem.tags.slice(0, 3).map(tag => (
+                      <span key={tag.name} className="px-2 py-0.5 bg-accent/10 border border-accent/20 rounded-md text-[10px] font-semibold text-accent/80">
+                        #{tag.name}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
-              <h2 className="text-2xl lg:text-3xl font-extrabold text-white leading-tight line-clamp-2">
-                {title}
-              </h2>
-              {fullItem.genres && (
-                <div className="flex flex-wrap gap-1.5">
-                  {fullItem.genres.slice(0, 4).map(g => (
-                    <span key={g} className="px-2 py-0.5 bg-white/[0.06] rounded-md text-[10px] font-semibold text-gray-400">
-                      {g}
-                    </span>
-                  ))}
-                  {fullItem.tags && fullItem.tags.slice(0, 3).map(tag => (
-                    <span key={tag.name} className="px-2 py-0.5 bg-accent/10 border border-accent/20 rounded-md text-[10px] font-semibold text-accent/80">
-                      #{tag.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* Play and Download Buttons */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handlePlayNext}
+                  disabled={isPlayingNext}
+                  className="flex-1 flex items-center justify-center space-x-2 py-2.5 bg-accent hover:bg-accent-light text-white font-bold text-sm rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                >
+                  {isPlayingNext ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Play size={16} fill="currentColor" />
+                  )}
+                  <span>
+                    {isPlayingNext
+                      ? "Playing..."
+                      : fullItem.user_status?.progress
+                      ? `Continue (Ep ${(fullItem.user_status.progress || 0) + 1})`
+                      : "Play"}
+                  </span>
+                </button>
+                {/* Download Menu */}
+                {canDownload && remainingEps.length > 0 && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsDownloadMenuOpen(!isDownloadMenuOpen)}
+                      className="flex items-center justify-center p-2.5 bg-white/[0.1] hover:bg-white/[0.15] text-gray-300 hover:text-white rounded-lg transition-all"
+                      title="Download options"
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                    {isDownloadMenuOpen && (
+                      <div className="absolute top-full right-0 mt-2 bg-surface border border-white/[0.06] rounded-lg shadow-xl z-20 min-w-max">
+                        <button
+                          onClick={handleDownloadRemaining}
+                          disabled={isDownloadingRemaining}
+                          className="w-full flex items-center space-x-2 px-4 py-2.5 hover:bg-white/[0.03] text-gray-300 hover:text-accent text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed first:rounded-t-lg last:rounded-b-lg"
+                        >
+                          {isDownloadingRemaining ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Download size={14} />
+                          )}
+                          <span>
+                            {isDownloadingRemaining
+                              ? "Queuing..."
+                              : `Download Remaining (${remainingEps.length})`}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
         </div>
 
-        {/* Play Next Button */}
-        <div className="px-6 pt-4 pb-2">
-          <button
-            onClick={handlePlayNext}
-            disabled={isPlayingNext}
-            className="w-full flex items-center justify-center space-x-2 py-3 bg-accent hover:bg-accent-light text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-          >
-            {isPlayingNext ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Play size={16} fill="currentColor" />
-            )}
-            <span>
-              {isPlayingNext
-                ? "Playing..."
-                : fullItem.user_status?.progress
-                ? `Continue (Ep ${(fullItem.user_status.progress || 0) + 1})`
-                : "Start Watching"}
-            </span>
-          </button>
-        </div>
+
 
         {/* Content */}
         <div className="p-6 space-y-6">

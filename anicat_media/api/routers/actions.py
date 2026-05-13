@@ -8,6 +8,19 @@ def get_ctx():
     from ..main import ctx
     return ctx
 
+def _play_and_track(ctx, params, anime, media_item):
+    """Background task to play media and then track watch history."""
+    try:
+        player_result = ctx.player.play(params, anime=anime, media_item=media_item)
+        if player_result:
+            ctx.watch_history.track(media_item, player_result)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in background playback tracking: {e}")
+        import traceback
+        traceback.print_exc()
+
 @router.post("/play/{media_id}")
 async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: Optional[str] = None):
     """
@@ -91,7 +104,7 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             title=title,
             headers=server.headers
         )
-        background_tasks.add_task(ctx.player.play, params, anime=anime_ref, media_item=media_item)
+        background_tasks.add_task(_play_and_track, ctx, params, anime=anime_ref, media_item=media_item)
         
         # Track playback for Now Playing bar
         from .status import set_playback

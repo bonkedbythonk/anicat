@@ -16,9 +16,7 @@ Then copy and paste **all of this** into Terminal and press Enter:
 git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
 ```
 
-It will ask for your password—this is normal. Just type it in and press Enter.
-
-**That's it!** The app is now installed to your Applications folder.
+**That's it!** The app is now installed.
 
 ### Step 2: Launch
 
@@ -77,48 +75,24 @@ cd anicat && git pull
 
 ---
 
-## For Developers & Advanced Users
+## Two Ways to Use Anicat
 
-If you want to modify the code or understand how it works:
+### **Web Dashboard** (Most People Use This)
 
-### Prerequisites
+The web dashboard is the easy, visual way to use Anicat. It's what opens when you click the Anicat icon.
 
-You'll need:
-- macOS 12 or later
-- Homebrew (https://brew.sh/)
+- Search and browse anime visually
+- Click to play, download, or track shows
+- See your watch list and recommendations
+- Sync with AniList
 
-### Installation for Developers
+**You don't need to know anything else—just use it like a normal app.**
 
-```bash
-# 1. Install dependencies
-brew install mpv fzf
+### **Command Line (Optional)
 
-# 2. Clone the project
-git clone https://github.com/bonkedbythonk/anicat.git
-cd anicat
+If you want to use Anicat from Terminal, just type `anicat` and the rest speaks for itself.
 
-# 3. Install with uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install -e .
-
-# 4. Run the dashboard
-anicat dashboard
-```
-
-### Web Dashboard (Development)
-
-If you want to work on the web interface:
-
-```bash
-# Start backend (keep this running)
-anicat dashboard --no-browser
-
-# In another terminal, start frontend
-cd web
-npm run dev
-
-# Open http://localhost:3000 in your browser
-```
+**You don't need this to use Anicat. The web dashboard is easier for most people.**
 
 ---
 

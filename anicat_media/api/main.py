@@ -34,9 +34,9 @@ app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(config_router.router, prefix="/api/config", tags=["config"])
 
 # Serve Static Frontend Files
-# Path to the 'web/out' directory relative to the package
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-WEB_OUT_DIR = os.path.join(BASE_DIR, "web", "out")
+# Path to the 'static' directory within the package
+API_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_OUT_DIR = os.path.join(API_DIR, "static")
 
 if os.path.exists(WEB_OUT_DIR):
     app.mount("/", StaticFiles(directory=WEB_OUT_DIR, html=True), name="static")
@@ -45,6 +45,14 @@ if os.path.exists(WEB_OUT_DIR):
     async def not_found_handler(request, exc):
         return FileResponse(os.path.join(WEB_OUT_DIR, "index.html"))
 else:
-    @app.get("/")
-    async def root():
-        return {"status": "ok", "message": "API is running, but frontend is not built. Run 'npm run build' in 'web' folder."}
+    # Fallback for development if static folder doesn't exist yet
+    DEV_WEB_OUT = os.path.join(os.path.dirname(os.path.dirname(API_DIR)), "web", "out")
+    if os.path.exists(DEV_WEB_OUT):
+        app.mount("/", StaticFiles(directory=DEV_WEB_OUT, html=True), name="static")
+        @app.exception_handler(404)
+        async def dev_not_found_handler(request, exc):
+            return FileResponse(os.path.join(DEV_WEB_OUT, "index.html"))
+    else:
+        @app.get("/")
+        async def root():
+            return {"status": "ok", "message": "API is running, but frontend is not built. Run 'npm run build' in 'web' folder."}

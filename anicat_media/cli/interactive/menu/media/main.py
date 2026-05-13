@@ -418,6 +418,7 @@ def _check_for_updates_action(ctx: Context, state: State) -> MenuAction:
 
     def action():
         feedback = ctx.feedback
+        feedback.clear_console()
         with feedback.progress("Checking for updates..."):
             is_available = ctx.updater.check_version(force=True)
         

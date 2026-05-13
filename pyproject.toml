@@ -28,6 +28,7 @@ Homepage = "https://github.com/bonkedbythonk/anicat"
 
 [tool.hatch.build.targets.wheel]
 packages = ["anicat_media"]
+artifacts = ["anicat_media/api/static"]
 
 [project.scripts]
 anicat = 'anicat_media.cli.cli:cli'

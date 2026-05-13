@@ -36,10 +36,10 @@ export default function Sidebar({ activeView, onNavigate }: SidebarProps) {
         <button onClick={() => onNavigate("home")} className="relative group flex items-center">
           <div className="w-12 h-12 lg:w-48 lg:h-20 relative overflow-hidden rounded-xl">
             <Image
-              src="/logo.png"
-              alt="Anicat Logo"
+              src="/logo-dark.png"
+              alt="anicat"
               fill
-              className="object-contain filter invert brightness-[2] contrast-[1.1] transition-transform duration-300 group-hover:scale-105"
+              className="object-contain transition-transform duration-300 group-hover:scale-105"
             />
           </div>
         </button>

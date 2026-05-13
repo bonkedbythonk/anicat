@@ -41,7 +41,6 @@ export type MediaItem = {
   description?: string;
   episodes?: number;
   chapters?: number;
-  volumes?: number;
   status?: string;
   format?: string;
   genres?: string[];

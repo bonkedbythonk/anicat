@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from ._media_tags import MediaTag
@@ -214,8 +214,6 @@ class MediaItem(BaseMediaApiModel):
 
     description: Optional[str] = None
     episodes: Optional[int] = None
-    chapters: Optional[int] = None
-    volumes: Optional[int] = None
     duration: Optional[int] = None  # In minutes
     genres: List[MediaGenre] = Field(default_factory=list)
     tags: List[MediaTagItem] = Field(default_factory=list)

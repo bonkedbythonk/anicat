@@ -16,8 +16,6 @@ Then copy and paste **all of this** into Terminal and press Enter:
 git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
 ```
 
-It will ask for your password—this is normal. Just type it in and press Enter.
-
 **That's it!** The app is now installed to your Applications folder.
 
 ### Step 2: Launch

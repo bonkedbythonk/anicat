@@ -26,12 +26,15 @@ app.add_middleware(
 )
 
 # Include routers
-from .routers import media, user, actions, queue, config as config_router
+from .routers import media, user, actions, queue, config as config_router, notifications, status, registry as registry_router
 app.include_router(media.router, prefix="/api/media", tags=["media"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(actions.router, prefix="/api/actions", tags=["actions"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(config_router.router, prefix="/api/config", tags=["config"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(status.router, prefix="/api/status", tags=["status"])
+app.include_router(registry_router.router, prefix="/api/registry", tags=["registry"])
 
 # Serve Static Frontend Files
 # Path to the 'static' directory within the package

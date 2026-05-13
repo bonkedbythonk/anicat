@@ -43,11 +43,13 @@ export default function Hero({ item, onSelect }: HeroProps) {
         <div className="space-y-3">
           <div className="flex items-center space-x-3">
             <span className="px-3 py-1 bg-accent/90 text-white rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-accent/20">
-              Continue Watching
+              {item.user_status ? "Continue Watching" : "Featured"}
             </span>
-            <span className="text-gray-400 font-semibold text-xs uppercase tracking-wider">
-              Episode {nextEpisode}
-            </span>
+            {item.user_status && (
+              <span className="text-gray-400 font-semibold text-xs uppercase tracking-wider">
+                Episode {nextEpisode}
+              </span>
+            )}
           </div>
           <h1 className="text-3xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight leading-[1.05] text-white">
             {title}

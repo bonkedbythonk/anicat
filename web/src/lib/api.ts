@@ -24,6 +24,8 @@ export async function fetchFromApi(endpoint: string, options: RequestInit = {}) 
   return response.json();
 }
 
+// ─── Types ────────────────────────────────────────────
+
 export type MediaItem = {
   id: number;
   title: {
@@ -95,23 +97,94 @@ export type Review = {
   };
 };
 
+export type Notification = {
+  id: number;
+  type: string;
+  episode?: number;
+  contexts: string[];
+  created_at: string;
+  media: MediaItem;
+};
+
+export type UserProfile = {
+  id: number;
+  name: string;
+  avatar_url?: string;
+  banner_url?: string;
+};
+
+export type PlaybackStatus = {
+  media_id: number;
+  media_title: string;
+  episode: string;
+  started_at: string;
+  started_at_dt?: string;
+} | null;
+
+export type HealthStatus = {
+  api_connected: boolean;
+  worker_running: boolean;
+  is_offline: boolean;
+};
+
+export type SearchFilters = {
+  genre?: string;
+  year?: number;
+  min_score?: number;
+  status?: string;
+  format?: string;
+};
+
+export type MediaSearchResult = {
+  page_info: {
+    total: number;
+    current_page: number;
+    has_next_page: boolean;
+    per_page: number;
+  };
+  media: MediaItem[];
+};
+
+// ─── API Client ───────────────────────────────────────
+
 export const mediaApi = {
-  getRecent: (type?: 'ANIME' | 'MANGA', limit = 10) => 
+  // ─── Discovery ──────────────────────────────────────
+  getRecent: (type?: 'ANIME' | 'MANGA', limit = 10): Promise<MediaSearchResult> => 
     fetchFromApi(`/media/recent?limit=${limit}${type ? `&type=${type}` : ''}`),
   
+  getTrending: (type: 'ANIME' | 'MANGA' = 'ANIME', perPage = 15): Promise<MediaSearchResult> =>
+    fetchFromApi(`/media/trending?type=${type}&per_page=${perPage}`),
+
+  getSeasonal: (type: 'ANIME' | 'MANGA' = 'ANIME', perPage = 15): Promise<MediaSearchResult> =>
+    fetchFromApi(`/media/seasonal?type=${type}&per_page=${perPage}`),
+
+  // ─── Details ────────────────────────────────────────
   getDetails: (id: number): Promise<MediaItem> => 
     fetchFromApi(`/media/${id}`),
   
-  search: (query: string, type: 'ANIME' | 'MANGA' = 'ANIME', page = 1) => 
-    fetchFromApi(`/media/search?query=${encodeURIComponent(query)}&type=${type}&page=${page}`),
+  // ─── Search ─────────────────────────────────────────
+  search: (query: string, type: 'ANIME' | 'MANGA' = 'ANIME', page = 1, filters?: SearchFilters): Promise<MediaSearchResult> => {
+    const params = new URLSearchParams({
+      query,
+      type,
+      page: String(page),
+    });
+    if (filters?.genre) params.set('genre', filters.genre);
+    if (filters?.year) params.set('year', String(filters.year));
+    if (filters?.min_score) params.set('min_score', String(filters.min_score));
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.format) params.set('format', filters.format);
+    return fetchFromApi(`/media/search?${params.toString()}`);
+  },
     
   getEpisodes: (mediaId: number): Promise<Episode[]> =>
     fetchFromApi(`/media/${mediaId}/episodes`),
 
-  getUserList: (status?: string, type?: string, page = 1) => 
+  // ─── User Lists ─────────────────────────────────────
+  getUserList: (status?: string, type?: string, page = 1): Promise<MediaSearchResult> => 
     fetchFromApi(`/user/list?${status ? `status=${status}` : ''}${type ? `&type=${type}` : ''}&page=${page}`),
     
-  getProfile: () => 
+  getProfile: (): Promise<UserProfile> => 
     fetchFromApi('/user/profile'),
 
   updateStatus: (media_id: number, status?: string, score?: number, progress?: number) =>
@@ -120,6 +193,7 @@ export const mediaApi = {
       body: JSON.stringify({ media_id, status, score, progress })
     }),
 
+  // ─── Media Extras ───────────────────────────────────
   getCharacters: (mediaId: number): Promise<{ characters: Character[] }> =>
     fetchFromApi(`/media/${mediaId}/characters`),
 
@@ -129,9 +203,17 @@ export const mediaApi = {
   getRecommendations: (mediaId: number, page = 1): Promise<MediaItem[]> =>
     fetchFromApi(`/media/${mediaId}/recommendations?page=${page}`),
 
+  // ─── Playback ───────────────────────────────────────
   play: (mediaId: number, episode?: string) =>
     fetchFromApi(`/actions/play/${mediaId}${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
 
+  getPlaybackStatus: (): Promise<PlaybackStatus> =>
+    fetchFromApi('/status/playback'),
+
+  clearPlaybackStatus: () =>
+    fetchFromApi('/status/playback', { method: 'DELETE' }),
+
+  // ─── Download Queue ─────────────────────────────────
   getQueue: (): Promise<QueueItem[]> =>
     fetchFromApi('/queue/'),
 
@@ -147,6 +229,7 @@ export const mediaApi = {
   removeFromQueue: (mediaId: number, episode: string) =>
     fetchFromApi(`/queue/${mediaId}/${episode}`, { method: 'DELETE' }),
 
+  // ─── Config ─────────────────────────────────────────
   getConfig: () =>
     fetchFromApi('/config/'),
 
@@ -155,4 +238,18 @@ export const mediaApi = {
       method: 'PATCH',
       body: JSON.stringify(config)
     }),
+
+  // ─── Notifications ──────────────────────────────────
+  getNotifications: (): Promise<Notification[]> =>
+    fetchFromApi('/notifications/'),
+
+  // ─── Registry & Health ──────────────────────────────
+  getRegistryStats: () =>
+    fetchFromApi('/registry/stats'),
+
+  triggerBackup: () =>
+    fetchFromApi('/registry/backup', { method: 'POST' }),
+
+  getHealthStatus: (): Promise<HealthStatus> =>
+    fetchFromApi('/status/health'),
 };

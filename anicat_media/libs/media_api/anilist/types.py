@@ -130,6 +130,7 @@ class AnilistMediaList_(TypedDict):
     id: int
     progress: int
     status: AnilistMediaListStatus
+    score: float | int | None
 
 
 class AnilistMediaListProperties(TypedDict):

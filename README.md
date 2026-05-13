@@ -25,6 +25,20 @@ uv tool install git+https://github.com/bonkedbythonk/anicat.git
 
 ---
 
+## One-Click Desktop Setup (macOS)
+
+For the easiest experience, run this command in your terminal once to install the Anicat app to your Launchpad:
+
+```bash
+./scripts/install.sh
+```
+
+1. **Open Launchpad**: Press `F4` or search for **Anicat** in Spotlight (`Cmd+Space`).
+2. **Add to Dock**: Drag the **Anicat** icon into your Dock.
+3. **Enjoy**: Click the icon anytime to start the backend and open the Dashboard automatically.
+
+---
+
 ## Core Interfaces
 
 Anicat offers two primary ways to interact with your media library, both sharing a unified backend.

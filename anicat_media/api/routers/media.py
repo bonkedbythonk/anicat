@@ -1,6 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
-from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview
+from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview, MediaSort, MediaSeason, MediaGenre, MediaStatus, MediaFormat
 from ...libs.media_api.params import MediaSearchParams, MediaCharactersParams, MediaReviewsParams, MediaRecommendationParams
 
 router = APIRouter()
@@ -9,6 +9,21 @@ router = APIRouter()
 def get_ctx():
     from ..main import ctx
     return ctx
+
+def _get_current_anime_season() -> tuple[MediaSeason, int]:
+    """Determine the current anime season and year."""
+    from datetime import datetime
+    now = datetime.now()
+    month = now.month
+    year = now.year
+    if month in (1, 2, 3):
+        return MediaSeason.WINTER, year
+    elif month in (4, 5, 6):
+        return MediaSeason.SPRING, year
+    elif month in (7, 8, 9):
+        return MediaSeason.SUMMER, year
+    else:
+        return MediaSeason.FALL, year
 
 @router.get("/recent", response_model=MediaSearchResult)
 async def get_recent(
@@ -22,16 +37,82 @@ async def get_recent(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/trending", response_model=MediaSearchResult)
+async def get_trending(
+    type: MediaType = MediaType.ANIME,
+    page: int = 1,
+    per_page: int = 15
+):
+    """Get trending media sorted by current trending rank."""
+    try:
+        ctx = get_ctx()
+        params = MediaSearchParams(
+            type=type,
+            page=page,
+            per_page=per_page,
+            sort=MediaSort.TRENDING_DESC,
+        )
+        result = ctx.media_api.search_media(params)
+        return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/seasonal", response_model=MediaSearchResult)
+async def get_seasonal(
+    type: MediaType = MediaType.ANIME,
+    page: int = 1,
+    per_page: int = 15
+):
+    """Get media from the current anime season, sorted by popularity."""
+    try:
+        ctx = get_ctx()
+        season, year = _get_current_anime_season()
+        params = MediaSearchParams(
+            type=type,
+            page=page,
+            per_page=per_page,
+            sort=MediaSort.POPULARITY_DESC,
+            season=season,
+            seasonYear=year,
+        )
+        result = ctx.media_api.search_media(params)
+        return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/search", response_model=MediaSearchResult)
 async def search_media(
     query: str,
     type: MediaType = MediaType.ANIME,
-    page: int = 1
+    page: int = 1,
+    genre: Optional[str] = None,
+    year: Optional[int] = None,
+    min_score: Optional[int] = None,
+    status: Optional[MediaStatus] = None,
+    format: Optional[MediaFormat] = None,
 ):
-    """Search for media."""
+    """Search for media with optional filters."""
     try:
         ctx = get_ctx()
-        params = MediaSearchParams(query=query, type=type, page=page)
+        genre_list = None
+        if genre:
+            try:
+                genre_list = [MediaGenre(g.strip()) for g in genre.split(",")]
+            except ValueError:
+                pass
+
+        format_list = [format] if format else None
+
+        params = MediaSearchParams(
+            query=query,
+            type=type,
+            page=page,
+            genre_in=genre_list,
+            seasonYear=year,
+            averageScore_greater=min_score,
+            status=status,
+            format_in=format_list,
+        )
         return ctx.media_api.search_media(params)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

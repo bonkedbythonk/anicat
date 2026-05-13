@@ -211,7 +211,7 @@ class MediaRegistryService:
             index_entry.last_watch_position = last_watch_position
         if total_duration:
             index_entry.total_duration = total_duration
-        if score:
+        if score is not None:
             index_entry.score = score
         if repeat:
             index_entry.repeat = repeat

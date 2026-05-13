@@ -108,3 +108,31 @@ select option {
   background: #111116;
   color: #fff;
 }
+
+/* Slide up animation (Now Playing bar) */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Bounce once animation (notification badge) */
+@keyframes bounceOnce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+}
+.animate-bounce-once {
+  animation: bounceOnce 0.5s ease-out;
+}
+
+/* Offline banner */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-down {
+  animation: slideDown 0.35s ease-out;
+}
+

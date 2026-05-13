@@ -224,6 +224,7 @@ def _to_generic_user_status(
             if anilist_media["mediaListEntry"]["status"]
             else None,
             progress=anilist_media["mediaListEntry"]["progress"],
+            score=anilist_media["mediaListEntry"].get("score"),
         )
 
 

@@ -69,6 +69,11 @@ async def update_list_entry(req: ListUpdateRequest):
             score=req.score
         )
         
-        return {"status": "updated"}
+        if success:
+            # Clear playback status when updating entry (ensure Now Playing bar reflects changes)
+            from .status import clear_playback
+            await clear_playback()
+            
+        return {"status": "success" if success else "failed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

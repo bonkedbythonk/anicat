@@ -25,8 +25,14 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
   const [status, setStatus] = useState(item.user_status?.status || "");
   const [isUpdatingRating, setIsUpdatingRating] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [config, setConfig] = useState<any>(null);
+  const [isPlayingNext, setIsPlayingNext] = useState(false);
 
   const title = fullItem.title.english || fullItem.title.romaji || "Unknown";
+
+  useEffect(() => {
+    mediaApi.getConfig().then(setConfig).catch(console.error);
+  }, []);
 
   useEffect(() => {
     // Reset all states when item.id changes to prevent "glitching"
@@ -48,8 +54,9 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     // Load full details
     mediaApi.getDetails(item.id)
       .then(data => {
+        console.log("[MediaDetail] Fetched full data:", data.user_status);
         setFullItem(data);
-        if (data.user_status?.score) setRating(data.user_status.score);
+        if (data.user_status?.score !== undefined) setRating(data.user_status.score);
         if (data.user_status?.status) setStatus(data.user_status.status);
       })
       .catch(console.error);
@@ -107,6 +114,18 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
       console.error("Failed to update status:", err);
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  const handlePlayNext = async () => {
+    setIsPlayingNext(true);
+    try {
+      const nextEp = (fullItem.user_status?.progress || 0) + 1;
+      await mediaApi.play(item.id, String(nextEp));
+    } catch (error) {
+      console.error("Failed to play:", error);
+    } finally {
+      setIsPlayingNext(false);
     }
   };
 
@@ -196,60 +215,85 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
             </div>
           </div>
 
-          {/* User Score / Rating */}
-          <div className="absolute top-4 left-4 z-10 flex flex-col space-y-2">
-            <div className="flex items-center space-x-1 bg-black/60 backdrop-blur-md p-2 rounded-xl border border-white/10 group/rating">
-              {[...Array(10)].map((_, i) => (
-                <button
-                  key={i}
-                  disabled={isUpdatingRating}
-                  onClick={() => handleRate(i + 1)}
-                  className={`transition-all ${isUpdatingRating ? "opacity-50 cursor-not-allowed" : "hover:scale-125"}`}
-                >
-                  <Star
-                    size={14}
-                    fill={i < rating ? "#facc15" : "transparent"}
-                    className={i < rating ? "text-yellow-400" : "text-gray-500"}
-                  />
-                </button>
-              ))}
-              <span className="text-[10px] font-bold text-gray-400 ml-2 group-hover/rating:text-white transition-colors">
-                {rating > 0 ? `${rating}/10` : "Rate"}
-              </span>
-            </div>
+        </div>
 
-            {/* Status Selector */}
-            <div className="flex items-center bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10 overflow-hidden">
-              {STATUS_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  disabled={isUpdatingStatus}
-                  onClick={() => handleStatusChange(opt.value)}
-                  className={`p-2 rounded-lg transition-all relative group/status ${
-                    status === opt.value 
-                      ? "bg-white/10 text-white" 
-                      : "text-gray-500 hover:text-white hover:bg-white/5"
-                  }`}
-                  title={opt.label}
-                >
-                  {isUpdatingStatus && status === opt.value ? (
-                    <Loader2 size={16} className="animate-spin text-accent" />
-                  ) : (
-                    <opt.icon size={16} className={status === opt.value ? opt.color : ""} />
-                  )}
-                  
-                  {/* Tooltip-like label on hover */}
-                  <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-black/80 text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover/status:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
-                    {opt.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+        {/* Play Next Button */}
+        <div className="px-6 pt-4 pb-2">
+          <button
+            onClick={handlePlayNext}
+            disabled={isPlayingNext}
+            className="w-full flex items-center justify-center space-x-2 py-3 bg-accent hover:bg-accent-light text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+          >
+            {isPlayingNext ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Play size={16} fill="currentColor" />
+            )}
+            <span>
+              {isPlayingNext
+                ? "Playing..."
+                : fullItem.user_status?.progress
+                ? `Continue (Ep ${(fullItem.user_status.progress || 0) + 1})`
+                : "Start Watching"}
+            </span>
+          </button>
         </div>
 
         {/* Content */}
         <div className="p-6 space-y-6">
+
+          {/* User Actions Section */}
+          <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Your Status</h4>
+                <div className="flex flex-wrap gap-2">
+                  {STATUS_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      disabled={isUpdatingStatus}
+                      onClick={() => handleStatusChange(opt.value)}
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-xl transition-all border ${
+                        status === opt.value 
+                          ? "bg-accent/10 border-accent/30 text-white shadow-lg shadow-accent/5" 
+                          : "bg-white/[0.03] border-white/[0.06] text-gray-500 hover:text-white hover:bg-white/[0.08]"
+                      }`}
+                    >
+                      {isUpdatingStatus && status === opt.value ? (
+                        <Loader2 size={14} className="animate-spin text-accent" />
+                      ) : (
+                        <opt.icon size={14} className={status === opt.value ? opt.color : ""} />
+                      )}
+                      <span className="text-xs font-bold">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 shrink-0">
+                <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest text-left sm:text-right">Rate This Media</h4>
+                <div className="flex items-center space-x-1.5 bg-white/[0.03] border border-white/[0.06] p-2 rounded-xl group/rating">
+                  {[...Array(10)].map((_, i) => (
+                    <button
+                      key={i}
+                      disabled={isUpdatingRating}
+                      onClick={() => handleRate(i + 1)}
+                      className={`transition-all ${isUpdatingRating ? "opacity-50 cursor-not-allowed" : "hover:scale-125"}`}
+                    >
+                      <Star
+                        size={16}
+                        fill={i < (rating > 10 ? rating / 10 : rating) ? "#facc15" : "transparent"}
+                        className={i < (rating > 10 ? rating / 10 : rating) ? "text-yellow-400" : "text-gray-600"}
+                      />
+                    </button>
+                  ))}
+                  <span className="text-xs font-bold text-gray-400 min-w-[3rem] text-center group-hover/rating:text-white">
+                    {rating > 0 ? `${rating}/10` : "Rate"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Details Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 border-y border-white/[0.06]">
@@ -308,8 +352,27 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
                 </div>
                 <div>
                   <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
-                  <div className="text-sm text-gray-200 font-semibold">
-                    Episode {fullItem.next_airing.episode} airing soon
+                  <div className="flex flex-col">
+                    <span className="text-sm text-gray-200 font-semibold leading-tight">
+                      Episode {fullItem.next_airing.episode} airing {new Date(fullItem.next_airing.airing_at + "Z").toLocaleString([], { 
+                        dateStyle: 'short', 
+                        timeStyle: 'short',
+                        hour12: config?.general?.time_format !== '24h'
+                      })}
+                    </span>
+                    {fullItem.next_airing.airing_at && (
+                      <span className="text-[11px] text-accent font-bold">
+                        {(() => {
+                          const diff = new Date(fullItem.next_airing.airing_at + "Z").getTime() - new Date().getTime();
+                          const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                          const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                          if (days > 0) return `${days} days, ${hours} hours until airing`;
+                          if (hours > 0) return `${hours} hours, ${minutes} minutes until airing`;
+                          return `${minutes} minutes until airing`;
+                        })()}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

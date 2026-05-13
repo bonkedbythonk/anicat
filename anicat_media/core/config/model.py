@@ -227,7 +227,11 @@ class GeneralConfig(BaseConfig):
     )
     check_for_updates: bool = Field(
         default=defaults.GENERAL_CHECK_FOR_UPDATES,
-        description="Whether to automatically check for updates on startup.",
+        description=desc.GENERAL_CHECK_FOR_UPDATES,
+    )
+    time_format: Literal["12h", "24h"] = Field(
+        default=defaults.GENERAL_TIME_FORMAT,
+        description=desc.GENERAL_TIME_FORMAT,
     )
 
 

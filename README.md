@@ -34,8 +34,15 @@ Choose the setup that works best for you:
 
 **The absolute easiest way.** One click and everything starts.
 
+First, navigate to where you have the Anicat project:
 ```bash
-bash ~/path/to/anicat/scripts/install.sh
+cd ~/path/to/anicat  # e.g., cd ~/Documents/anicat or cd ~/Downloads/anicat
+bash ./scripts/install.sh
+```
+
+Or if you know the full path:
+```bash
+bash /full/path/to/anicat/scripts/install.sh
 ```
 
 Then:

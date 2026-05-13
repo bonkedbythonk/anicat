@@ -11,6 +11,7 @@ import {
   Bell,
   User,
   BookOpen,
+  RotateCcw,
 } from "lucide-react";
 import { mediaApi, type HealthStatus } from "@/lib/api";
 
@@ -143,7 +144,7 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
       
       {/* Footer — Sync Status & Updates */}
       <div className="px-5 py-3 mt-auto space-y-3">
-        {health?.update_available && (
+        {health?.update_available ? (
           <button 
             onClick={async () => {
               if (confirm("Update Anicat to the latest version?")) {
@@ -155,7 +156,20 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
             className="w-full flex items-center space-x-2 px-3 py-2 bg-accent/20 border border-accent/30 rounded-lg text-accent hover:bg-accent/30 transition-all group"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Update</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider">Update Available</span>
+          </button>
+        ) : (
+          <button 
+            disabled={health?.is_offline}
+            onClick={async () => {
+              // We just refresh the page or wait for the next health check
+              // But let's trigger a manual health check if possible
+              window.location.reload();
+            }}
+            className="w-full flex items-center space-x-2 px-3 py-2 bg-white/[0.03] border border-white/[0.06] rounded-lg text-gray-500 hover:text-white hover:bg-white/[0.06] transition-all group disabled:opacity-30"
+          >
+            <RotateCcw size={10} className="group-hover:rotate-180 transition-transform duration-500" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Check Updates</span>
           </button>
         )}
         

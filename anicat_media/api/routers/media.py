@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException
 from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview, MediaSort, MediaSeason, MediaGenre, MediaStatus, MediaFormat
 from ...libs.media_api.params import MediaSearchParams, MediaCharactersParams, MediaReviewsParams, MediaRecommendationParams
@@ -147,26 +147,22 @@ async def get_media_episodes(media_id: int):
         
         if is_manga:
             # --- Manga Logic ---
-            from ...libs.provider.manga.base import MangaSearchParams as MangaProviderParams
-            from ...libs.provider.manga.base import MangaParams
+            # The MangaProvider in MangaProvider.py doesn't use formal Param classes for search/get
+            search_results = ctx.manga_provider.search_for_manga(title)
             
-            search_results = ctx.manga_provider.search(
-                MangaProviderParams(
-                    query=normalize_title(title, ctx.config.general.manga_provider.value, True)
-                )
-            )
-            
-            if not search_results or not search_results.results:
+            if not search_results:
                 return []
             
-            results_map = {r.title: r for r in search_results.results}
+            results_map = {r["title"]: r for r in search_results}
             try:
+                # We reuse the anime matcher but for manga
+                from ...cli.utils.search import find_best_match_title
                 best_title = find_best_match_title(results_map, ctx.config.general.manga_provider, media)
                 manga_ref = results_map[best_title]
             except Exception:
-                manga_ref = search_results.results[0]
+                manga_ref = search_results[0]
                 
-            full_manga = ctx.manga_provider.get(MangaParams(id=manga_ref.id, query=title))
+            full_manga = ctx.manga_provider.get_manga(manga_ref["url"])
             if not full_manga:
                 return []
                 
@@ -174,11 +170,18 @@ async def get_media_episodes(media_id: int):
             local_chapters = {e.episode_number: e for e in record.media_episodes} if record else {}
             
             result = []
-            for ch in full_manga.chapters:
-                local = local_chapters.get(ch.number)
+            for ch in full_manga["availableChapters"]:
+                ch_number = ch["title"].split(" ")[-1] # Simple heuristic for chapter number if not provided
+                try:
+                    ch_num_float = float(ch_number)
+                except:
+                    ch_num_float = 0.0
+
+                local = local_chapters.get(str(ch_num_float))
                 result.append({
-                    "number": ch.number,
-                    "title": ch.title or f"Chapter {ch.number}",
+                    "number": str(ch_num_float),
+                    "title": ch["title"],
+                    "url": ch["url"],
                     "download_status": local.download_status.value if local else "not_downloaded",
                     "is_downloaded": local.download_status.name == "COMPLETED" if local else False
                 })

@@ -89,6 +89,8 @@ query (
       averageScore
       duration
       episodes
+      chapters
+      volumes
       genres
       synonyms
       studios {

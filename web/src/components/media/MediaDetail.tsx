@@ -256,21 +256,21 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 border-y border-white/[0.06]">
             {fullItem.studios?.[0] && (
               <div className="space-y-1">
-                <div className="flex items-center text-gray-500 space-x-1.5"><Building2 size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Studio</span></div>
+                <div className="flex items-center text-gray-500 space-x-1.5"><Building2 size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">{isManga ? "Source" : "Studio"}</span></div>
                 <div className="text-xs text-gray-300 font-medium truncate">{fullItem.studios.find(s => s.isAnimationStudio)?.name || fullItem.studios[0].name}</div>
               </div>
             )}
             <div className="space-y-1">
-              <div className="flex items-center text-gray-500 space-x-1.5"><Calendar size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Season</span></div>
-              <div className="text-xs text-gray-300 font-medium">{fullItem.season} {fullItem.seasonYear}</div>
+              <div className="flex items-center text-gray-500 space-x-1.5"><Calendar size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">{isManga ? "Status" : "Season"}</span></div>
+              <div className="text-xs text-gray-300 font-medium">{isManga ? fullItem.status : `${fullItem.season || ''} ${fullItem.seasonYear || ''}`}</div>
             </div>
             <div className="space-y-1">
               <div className="flex items-center text-gray-500 space-x-1.5"><Users size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Popularity</span></div>
               <div className="text-xs text-gray-300 font-medium">{fullItem.popularity?.toLocaleString()}</div>
             </div>
             <div className="space-y-1">
-              <div className="flex items-center text-gray-500 space-x-1.5"><Clock size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Duration</span></div>
-              <div className="text-xs text-gray-300 font-medium">{fullItem.duration}m</div>
+              <div className="flex items-center text-gray-500 space-x-1.5">{isManga ? <BookOpen size={12} /> : <Clock size={12} />}<span className="text-[10px] font-bold uppercase tracking-wider">{isManga ? "Volumes" : "Duration"}</span></div>
+              <div className="text-xs text-gray-300 font-medium">{isManga ? (fullItem.volumes || "??") : `${fullItem.duration}m`}</div>
             </div>
           </div>
 

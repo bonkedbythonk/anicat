@@ -78,33 +78,34 @@ async def get_health():
         # Check for updates (cached logic)
         update_available = False
         import subprocess
+        current_version = VERSION
         try:
             # Check if we are behind origin/main
             # We use --quiet to avoid spamming logs
-            subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=5)
-            status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
-            if "Your branch is behind" in status:
-                update_available = True
-        except Exception:
+            fetch_res = subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=10)
+            if fetch_res.returncode == 0:
+                status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
+                if "Your branch is behind" in status:
+                    update_available = True
+        except Exception as e:
+            # logger.debug(f"Update check failed: {e}")
             pass
 
         # Get unread notification count
         unread_notifications = 0
         try:
-            profile = ctx.media_api.get_viewer_profile()
-            if profile and hasattr(profile, 'unread_notifications'):
-                unread_notifications = getattr(profile, 'unread_notifications') or 0
+            notifications = ctx.media_api.get_notifications()
+            unread_notifications = len(notifications) if notifications else 0
         except Exception:
             pass
 
-        from ..core.constants import VERSION
         return HealthInfo(
             api_connected=ctx.media_api.is_authenticated(),
             worker_running=ctx._download is not None,
             is_offline=ctx.is_offline,
             update_available=update_available,
             unread_notifications=unread_notifications,
-            current_version=VERSION
+            current_version=current_version
         )
     except Exception:
         return HealthInfo(
@@ -136,10 +137,11 @@ async def trigger_update():
         )
         
         if result.returncode != 0:
-            return {"status": "error", "message": f"Git pull failed: {result.stderr or result.stdout}"}
+            err_msg = result.stderr or result.stdout
+            return {"status": "error", "message": f"Update failed: {err_msg}"}
             
         if "Already up to date." in result.stdout:
-            return {"status": "success", "message": "✨ Already on the latest version."}
+            return {"status": "success", "message": "✨ You are already on the latest version."}
         
         # 2. Try to run uv sync if uv is available
         try:
@@ -150,6 +152,6 @@ async def trigger_update():
         return {"status": "success", "message": "🚀 Updated successfully! Please restart the Anicat server to apply changes."}
         
     except subprocess.TimeoutExpired:
-        return {"status": "error", "message": "Update timed out. Please try running 'git pull' manually in the terminal."}
+        return {"status": "error", "message": "⏳ Update timed out. Please check your internet connection or run 'git pull' manually."}
     except Exception as e:
-        return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        return {"status": "error", "message": f"❌ Unexpected error during update: {str(e)}"}

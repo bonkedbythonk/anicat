@@ -1,6 +1,8 @@
 #!/bin/bash
 
-PROJECT_DIR="/Users/thomas/Documents/randomcode/anicat"
+# Find the project root dynamically (scripts/ parent directory)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_NAME="Anicat.app"
 INSTALL_DIR="$HOME/Applications"
 

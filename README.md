@@ -27,10 +27,15 @@ uv tool install git+https://github.com/bonkedbythonk/anicat.git
 
 ## One-Click Desktop Setup (macOS)
 
-For the easiest experience, run this command in your terminal once to install the Anicat app to your Launchpad:
+For the easiest experience, run this command in your terminal from the project root:
 
 ```bash
-./scripts/install.sh
+bash ./scripts/install.sh
+```
+
+Or from any directory:
+```bash
+bash ~/path/to/anicat/scripts/install.sh
 ```
 
 1. **Open Launchpad**: Press `F4` or search for **Anicat** in Spotlight (`Cmd+Space`).

@@ -154,7 +154,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
 
       <div className="relative ml-auto w-full max-w-2xl bg-surface border-l border-white/[0.06] overflow-y-auto animate-slide-in-right">
         {/* Banner */}
-        <div className="relative h-64 lg:h-72 overflow-hidden">
+        <div className="relative h-80 lg:h-96 overflow-hidden shrink-0">
           <img
             src={fullItem.banner_image || fullItem.cover_image.large}
             alt={title}
@@ -170,7 +170,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
             <X size={20} />
           </button>
 
-          <div className="absolute bottom-6 left-6 right-6 z-10 space-y-4">
+          <div className="absolute bottom-8 left-6 right-6 z-10 space-y-5">
             <div className="flex items-end space-x-5">
               <div className="w-28 h-40 rounded-lg overflow-hidden border border-white/10 shrink-0 shadow-2xl hidden sm:block">
                 <img src={fullItem.cover_image.large} alt={title} className="w-full h-full object-cover" />

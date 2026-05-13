@@ -8,9 +8,10 @@ interface EpisodeListProps {
   mediaId: number;
   episodes: Episode[];
   loading: boolean;
+  progress?: number;
 }
 
-export default function EpisodeList({ mediaId, episodes, loading }: EpisodeListProps) {
+export default function EpisodeList({ mediaId, episodes, loading, progress = 0 }: EpisodeListProps) {
   const [playingEp, setPlayingEp] = useState<string | null>(null);
   const [queueingEp, setQueueingEp] = useState<string | null>(null);
   const [batchStart, setBatchStart] = useState("");
@@ -83,7 +84,7 @@ export default function EpisodeList({ mediaId, episodes, loading }: EpisodeListP
 
   return (
     <div className="space-y-4">
-      {/* Episode list */
+      {/* Episode list */}
       {episodes.length === 0 ? (
         <div className="text-center py-12 text-gray-600 text-sm">
           No episodes found from this provider.
@@ -92,16 +93,20 @@ export default function EpisodeList({ mediaId, episodes, loading }: EpisodeListP
         <div className="space-y-1 max-h-[50vh] overflow-y-auto scrollbar-hide pr-1">
           {episodes.map((ep) => {
             const epNum = String(ep.number);
+            const isWatched = Number(ep.number) <= progress;
             return (
               <div
                 key={epNum}
                 className="flex items-center justify-between px-4 py-3 rounded-xl hover:bg-white/[0.03] transition-colors group"
               >
                 <div className="flex items-center space-x-4 min-w-0">
-                  <span className="text-accent font-bold text-sm w-8 text-right shrink-0">
-                    {epNum}
-                  </span>
-                  <span className="text-sm text-gray-300 truncate group-hover:text-white transition-colors">
+                  <div className="flex items-center space-x-1 w-10 justify-end shrink-0">
+                    {isWatched && <CheckCircle2 size={12} className="text-green-500" />}
+                    <span className={`font-bold text-sm ${isWatched ? "text-green-500" : "text-accent"}`}>
+                      {epNum}
+                    </span>
+                  </div>
+                  <span className={`text-sm truncate group-hover:text-white transition-colors ${isWatched ? "text-gray-500" : "text-gray-300"}`}>
                     {ep.title}
                   </span>
                   {statusIcon(ep.download_status)}

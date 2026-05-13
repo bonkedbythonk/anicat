@@ -73,8 +73,9 @@ cd anicat && git pull
   ```
 
 **App won't open after installation?**
-- Restart your Mac
-- Make sure you have at least 2GB free disk space
+- **Give it a minute**: The very first time you open Anicat, it might take 30-60 seconds to finish setting up the background engine.
+- **Check for 'uv'**: Anicat uses a tool called `uv` to run. If the installation failed, you can manually install it by running: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **Restart your Mac**: Sometimes macOS needs a quick refresh to see the new App.
 
 **Videos won't play?**
 - Check your internet connection

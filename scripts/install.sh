@@ -8,9 +8,26 @@ INSTALL_DIR="$HOME/Applications"
 
 echo "🚀 Installing Anicat Desktop App..."
 
-# 1. Save current project path
+# 1. Check for uv (Python manager)
+if ! command -v uv &> /dev/null; then
+    echo "📦 Installing 'uv' (Python manager)..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    # Try to add to current path for the rest of the script
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# 2. Sync dependencies
+echo "📦 Setting up the environment and dependencies..."
+echo "   (This may take a minute on the first install)"
+if ! uv sync --quiet; then
+    echo "❌ Error: Failed to install dependencies. Check your internet connection."
+    exit 1
+fi
+
+# 3. Save current project path
 echo "$PROJECT_DIR" > "$HOME/.anicat_path"
-echo "✅ Project path saved to $HOME/.anicat_path"
+echo "✅ Environment ready."
 
 # 2. Recreate the App bundle to ensure portability
 cd "$PROJECT_DIR"

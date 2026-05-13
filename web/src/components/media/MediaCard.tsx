@@ -37,7 +37,18 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
     currentReleased = totalEps;
   }
   
-  const hasNewEpisodes = item.user_status && progress < currentReleased;
+  const hasNewEpisodes = item.user_status?.status === 'watching' && progress < currentReleased;
+
+  if (title.includes("Replica")) {
+    console.log(`[DEBUG] ${title}:`, {
+      progress,
+      totalEps,
+      nextEp,
+      currentReleased,
+      hasNewEpisodes,
+      itemRaw: item
+    });
+  }
 
   return (
     <button 
@@ -68,12 +79,6 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           </button>
         </div>
 
-        {/* New badge */}
-        {hasNewEpisodes && (
-          <div className="absolute top-2 left-2 bg-accent text-white px-2 py-0.5 rounded-md text-[10px] font-black z-10 shadow-lg shadow-accent/40 animate-pulse-glow">
-            NEW
-          </div>
-        )}
 
         {/* Score badge */}
         {item.average_score && (
@@ -89,6 +94,16 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
               className="h-full bg-accent rounded-full" 
               style={{ width: `${Math.min((progress / (totalEps || currentReleased || 1)) * 100, 100)}%` }}
             />
+          </div>
+        )}
+
+        {/* New badge - Moved to bottom of container for better stacking */}
+        {hasNewEpisodes && (
+          <div 
+            className="absolute top-2 left-2 bg-accent text-white px-1.5 py-0.5 rounded text-[9px] font-black z-50 shadow-lg"
+            style={{ transform: 'translateZ(10px)', pointerEvents: 'none' }}
+          >
+            NEW
           </div>
         )}
       </div>

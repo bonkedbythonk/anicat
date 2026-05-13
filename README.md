@@ -61,9 +61,11 @@ cd anicat && git pull
 ## Troubleshooting
 
 **Installation says "destination path 'anicat' already exists"?**
-- You might be trying to clone into a folder that already has anicat
-- Open a new Terminal window and try again from your home directory
-- Or delete the existing anicat folder first: `rm -rf anicat`
+- This means you already have an old version of the folder.
+- **To overwrite and start fresh**, run this instead:
+  ```bash
+  rm -rf anicat && git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
+  ```
 
 **Installation says "command not found"?**
 - Make sure you copied the command exactly as shown

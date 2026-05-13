@@ -1,138 +1,148 @@
-# anicat
+# Anicat
 
-Anicat is a high-performance media management suite designed for macOS. It provides both a sophisticated web-based dashboard and a robust command-line interface (CLI) for searching, streaming, downloading, and tracking anime and manga.
-
-The project bridges the gap between terminal efficiency and modern streaming experiences, featuring deep AniList integration and a local-first architecture.
+Your anime streaming app for macOS. Search, stream, and track anime all in one place.
 
 ---
 
-## Installation
+## Quick Start (3 Steps)
 
-### Prerequisites
-Ensure you have the core media engines installed on your system:
-```bash
-brew install --cask kitty  # Required for terminal image support (covers/thumbnails)
-brew install mpv fzf       # Required for playback and terminal features
-```
+### Step 1: Get the App
 
-### Install Anicat
+Download Anicat from GitHub:
+1. Go to: https://github.com/bonkedbythonk/anicat/releases
+2. Look for the latest **Anicat.dmg** file
+3. Download it
 
-Install the package with [uv](https://astral.sh/uv/) package manager:
-```bash
-uv tool install git+https://github.com/bonkedbythonk/anicat.git
-```
+### Step 2: Install
 
-That's it! Now choose how you want to use it below.
+1. **Double-click** the downloaded `Anicat.dmg` file
+2. **Drag** the Anicat icon to your `Applications` folder
+3. Close the window
+
+### Step 3: Launch
+
+1. Open your `Applications` folder (or press `Cmd+Shift+A`)
+2. **Double-click Anicat**
+3. The app opens automatically—that's it!
+
+---
+
+## Features
+
+- **Search Anime:** Find anything in a huge anime library
+- **Stream Online:** Watch episodes directly (up to 1080p)
+- **Download:** Save episodes to watch offline
+- **Track Progress:** Keep your watch list in sync with AniList
+- **Simple Interface:** Designed to be easy to use
 
 ---
 
 ## Getting Started
 
-Choose the setup that works best for you:
+### First Time Setup
 
-### Option 1: Quick Start - macOS Desktop App (Recommended)
+1. **Open Anicat** from your Applications folder
+2. **Sign in with AniList** (optional) to sync your watch list
+3. **Search for anime** and start watching!
 
-**The absolute easiest way.** One click and everything starts.
+---
 
-First, navigate to where you have the Anicat project:
+## Troubleshooting
+
+**App won't open?**
+- Try restarting your Mac
+- Make sure you have at least 2GB free disk space
+
+**Videos won't play?**
+- Check your internet connection
+- Try a different video quality (Settings → Quality)
+
+---
+
+## For Developers & Advanced Users
+
+If you want to modify the code or understand how it works:
+
+### Prerequisites
+
+You'll need:
+- macOS 12 or later
+- Homebrew (https://brew.sh/)
+
+### Installation for Developers
+
 ```bash
-cd ~/path/to/anicat  # e.g., cd ~/Documents/anicat or cd ~/Downloads/anicat
-bash ./scripts/install.sh
+# 1. Install dependencies
+brew install mpv fzf
+
+# 2. Clone the project
+git clone https://github.com/bonkedbythonk/anicat.git
+cd anicat
+
+# 3. Install with uv (Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install -e .
+
+# 4. Run the dashboard
+anicat dashboard
 ```
 
-Or if you know the full path:
+### Web Dashboard (Development)
+
+If you want to work on the web interface:
+
 ```bash
-bash /full/path/to/anicat/scripts/install.sh
+# Start backend (keep this running)
+anicat dashboard --no-browser
+
+# In another terminal, start frontend
+cd web
+npm run dev
+
+# Open http://localhost:3000 in your browser
 ```
 
-Then:
-1. **Open Launchpad**: Press `F4` or search for **Anicat** in Spotlight (`Cmd+Space`)
-2. **Add to Dock**: Drag the **Anicat** icon into your Dock
-3. **Click Once**: Done! The app:
-   - Starts the backend API server in the background
-   - Opens your dashboard automatically (`http://localhost:8000`)
-   - Everything works with zero terminal commands
+---
 
-**Perfect for:** Users who just want to watch anime, no technical setup needed.
+## What You Can Do
+
+**Search & Discover**
+- Browse thousands of anime titles
+- Filter by genre, season, or popularity
+- Read reviews and recommendations
+
+**Stream**
+- Watch high-quality anime (up to 1080p)
+- Resume where you left off
+- Auto-tracking of your progress
+
+**Download**
+- Save episodes to watch offline
+- Queue multiple episodes at once
+- Manage your library
+
+**Track Your List**
+- Connect with AniList to sync your watch list
+- Rate shows and episodes
+- Keep track of completed, watching, and planned anime
 
 ---
 
-### Option 2: Developer Setup - Web Dashboard + Terminal
+## Settings & Customization
 
-For developers who want control over what's running and easier code updates.
-
-1. **Start the backend** (in a terminal, keep it running):
-   ```bash
-   anicat dashboard --no-browser
-   ```
-
-2. **Open your browser** and navigate to `http://localhost:3000`
-
-3. **Optional - Install as PWA**: 
-   - **macOS Safari**: Press `Cmd+Shift+B` to bookmark, or use "Add to Dock" from the Share menu
-   - **Any browser**: Look for the "Install" or "+" icon in the address bar to install as a standalone app
-
-**Advantages:** 
-- Works in any browser on any device on your network
-- Easy to modify code and see changes live
-- More control over when services start/stop
+Open Settings to customize:
+- **Playback Quality:** Choose your video quality preference
+- **Download Location:** Pick where to save episodes
+- **Streaming Providers:** Select your preferred anime sources
+- **Theme:** Light or dark mode
 
 ---
 
-## Core Interfaces
+## Need Help?
 
-Anicat provides a unified web-based dashboard backed by a powerful CLI layer for terminal workflows.
-
-### 1. Web Dashboard (Primary Interface)
-
-The main way to interact with Anicat is through the **Progressive Web App (PWA)** dashboard accessible at `http://localhost:3000`.
-
-**Features:**
-- **Intelligent Search:** Global media discovery with paginated results for deep browsing
-- **Enriched Metadata:** Episode lists, character profiles, user reviews, and recommendations
-- **AniList Sync:** Real-time 10-star rating system and list management (Watching, Planning, Completed, etc.)
-- **Playback Management:** Queue episodes directly from the interface with intelligent resume functionality
-- **Responsive Design:** Optimized for desktop browsers and installable as a standalone PWA
-- **Local Library:** Monitor downloads and manage your media collection visually
-
-### 2. Interactive CLI (Terminal-Focused Workflows)
-
-For power users who prefer the terminal, the CLI provides fast keyboard-driven access to the same media library.
-
-**Launch:** `anicat`
-
-**Features:**
-- **Rapid Navigation:** Browse lists and trigger playback using optimized terminal bindings
-- **Offline Registry:** Track your local media library and watch history without persistent internet
-- **Background Sync:** Watch history recorded offline automatically syncs to AniList upon reconnection
-
----
-
-## Technical Functionality
-
-### High-Performance Streaming
-- **Quality Control:** Support for streaming in up to 1080p with configurable provider preferences.
-- **Auto-Tracking:** Playback progress is automatically tracked and updated on your account as you watch.
-- **Media Engine:** Uses `mpv` for lightweight, hardware-accelerated playback.
-
-### Download Management
-- **Queue System:** Queue individual episodes or entire ranges directly from the dashboard or CLI.
-- **Task Resilience:** Automatic support for retrying failed tasks and managing the local download queue.
-- **Local Library:** Visual interface for monitoring storage and managing completed downloads.
-
-### Account Management
-- **Secure Authentication:** Integrated OAuth2 login flow for AniList.
-- **Profile Management:** Instantly update your watch status, episode progress, and personal ratings.
-
----
-
-## Configuration
-
-Anicat is highly customizable through its `config.toml` file. These settings can be managed visually through the dashboard settings panel.
-
-- **Provider Preferences:** Configure default scrapers, streaming quality, and translation types (Sub/Dub).
-- **Library Management:** Define custom directories for downloads and the local media registry.
-- **Interface Settings:** Toggle categories and customize the visual experience.
+**Issues or Questions?**
+- Check GitHub Issues: https://github.com/bonkedbythonk/anicat/issues
+- Report a bug: Click "Report Bug" in Settings
 
 ---
 

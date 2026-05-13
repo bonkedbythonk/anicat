@@ -10,6 +10,8 @@ Your anime streaming app for macOS. Search, stream, and track anime all in one p
 
 Open the **Terminal** app (press `Cmd+Space`, type `terminal`, and press Enter).
 
+Make sure you're in your home directory (just open Terminal, and you'll be there by default).
+
 Then copy and paste **all of this** into Terminal and press Enter:
 
 ```bash
@@ -57,6 +59,11 @@ cd anicat && git pull
 ---
 
 ## Troubleshooting
+
+**Installation says "destination path 'anicat' already exists"?**
+- You might be trying to clone into a folder that already has anicat
+- Open a new Terminal window and try again from your home directory
+- Or delete the existing anicat folder first: `rm -rf anicat`
 
 **Installation says "command not found"?**
 - Make sure you copied the command exactly as shown

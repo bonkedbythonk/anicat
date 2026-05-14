@@ -10,7 +10,18 @@ echo "🚀 Installing Anicat Desktop App..."
 
 # 1. Check for System Dependencies (mpv, ffmpeg, chafa)
 echo "🔍 Checking for system dependencies (mpv, ffmpeg, chafa)..."
-if ! command -v brew &> /dev/null; then
+
+# Try to find brew in common locations if command -v fails
+BREW_EXE=$(command -v brew || true)
+if [ -z "$BREW_EXE" ]; then
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+        BREW_EXE="/opt/homebrew/bin/brew"
+    elif [ -f "/usr/local/bin/brew" ]; then
+        BREW_EXE="/usr/local/bin/brew"
+    fi
+fi
+
+if [ -z "$BREW_EXE" ]; then
     echo "⚠️  Homebrew not found. It is required to install system dependencies (mpv, ffmpeg, chafa)."
     echo "📦 Would you like to install Homebrew now? (y/n)"
     read -r response
@@ -18,11 +29,15 @@ if ! command -v brew &> /dev/null; then
         echo "🚀 Installing Homebrew... (This may ask for your Mac password)"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         
-        # Add brew to path for the current session (handles both Intel and Apple Silicon)
-        if [ -f /opt/homebrew/bin/brew ]; then
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [ -f /usr/local/bin/brew ]; then
-            eval "$(/usr/local/bin/brew shellenv)"
+        # Set BREW_EXE after installation
+        if [ -f "/opt/homebrew/bin/brew" ]; then
+            BREW_EXE="/opt/homebrew/bin/brew"
+        elif [ -f "/usr/local/bin/brew" ]; then
+            BREW_EXE="/usr/local/bin/brew"
+        fi
+
+        if [ -n "$BREW_EXE" ]; then
+            eval "$($BREW_EXE shellenv)"
         fi
     else
         echo "❌ Homebrew is required for Anicat to function properly. Please install it manually from https://brew.sh"
@@ -31,12 +46,12 @@ if ! command -v brew &> /dev/null; then
 fi
 
 # Now that we (hopefully) have brew, install the tools
-if command -v brew &> /dev/null; then
+if [ -n "$BREW_EXE" ]; then
     echo "📦 Checking system tools (mpv, ffmpeg, chafa)..."
     for cmd in mpv ffmpeg chafa; do
         if ! command -v $cmd &> /dev/null; then
             echo "   - Installing $cmd via Homebrew..."
-            brew install $cmd --quiet
+            $BREW_EXE install $cmd --quiet
         fi
     done
     echo "✅ System tools verified."

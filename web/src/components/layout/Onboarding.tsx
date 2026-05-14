@@ -44,8 +44,11 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
         anilist: { ...config.anilist, token: token.trim() }
       });
       
+      // Force backend to reconnect with new token
+      await mediaApi.reconnect();
+      
       // Briefly wait to ensure backend registers the token
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Try to reconnect/validate
       const health = await mediaApi.getHealthStatus();

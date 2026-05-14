@@ -355,6 +355,7 @@ class AniListApi(BaseApiClient):
             ANILIST_ENDPOINT, self.http_client, gql.GET_NOTIFICATIONS, variables
         )
         return response.json() is not None and "errors" not in response.json()
+    def transform_raw_search_data(self, raw_data: dict) -> Optional[MediaSearchResult]:
         """
         Transform raw AniList API response data into a MediaSearchResult.
 

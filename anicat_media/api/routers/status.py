@@ -27,6 +27,10 @@ class HealthInfo(BaseModel):
 _last_playback: Optional[PlaybackInfo] = None
 _playback_expiry: Optional[datetime] = None
 
+# Update check cache
+_last_update_check: Optional[datetime] = None
+_cached_update_available: bool = False
+
 def set_playback(media_id: int, media_title: str, episode: str):
     """Called by the actions router when playback starts."""
     global _last_playback, _playback_expiry
@@ -76,17 +80,25 @@ async def get_health():
         ctx = get_ctx()
         
         # Check for updates (cached logic)
-        update_available = False
-        import subprocess
-        try:
-            # Check if we are behind origin/main
-            # We use --quiet to avoid spamming logs
-            subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=5)
-            status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
-            if "Your branch is behind" in status:
-                update_available = True
-        except Exception:
-            pass
+        global _last_update_check, _cached_update_available
+        from datetime import timedelta
+        
+        now = datetime.now()
+        if _last_update_check is None or now - _last_update_check > timedelta(minutes=15):
+            _last_update_check = now
+            _cached_update_available = False
+            import subprocess
+            try:
+                # Check if we are behind origin/main
+                # We use --quiet to avoid spamming logs
+                subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=5)
+                status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
+                if "Your branch is behind" in status:
+                    _cached_update_available = True
+            except Exception:
+                pass
+        
+        update_available = _cached_update_available
 
         # Get unread notification count
         unread_notifications = 0
@@ -114,6 +126,24 @@ async def get_health():
             update_available=False,
             current_version="unknown"
         )
+
+@router.post("/check-update")
+async def check_for_updates():
+    """Manually trigger an update check, ignoring cache."""
+    global _last_update_check, _cached_update_available
+    import subprocess
+    
+    _last_update_check = datetime.now()
+    _cached_update_available = False
+    try:
+        subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=10)
+        status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
+        if "Your branch is behind" in status:
+            _cached_update_available = True
+            return {"status": "success", "update_available": True, "message": "A new version of Anicat is available!"}
+        return {"status": "success", "update_available": False, "message": "✨ You are running the latest version."}
+    except Exception as e:
+        return {"status": "error", "update_available": False, "message": f"Failed to check for updates: {str(e)}"}
 
 @router.post("/update")
 async def trigger_update():

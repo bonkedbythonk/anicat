@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Play, Maximize, Loader2 } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
+import { dispatchRefresh } from "@/lib/events";
 
 interface HeroProps {
   item: MediaItem;
@@ -17,9 +18,13 @@ export default function Hero({ item, onSelect }: HeroProps) {
   const handlePlay = async () => {
     setLoading(true);
     try {
-      await mediaApi.play(item.id);
+      // Use explicit next episode if available for better accuracy
+      const nextEp = item.user_status?.progress !== undefined ? String(item.user_status.progress + 1) : undefined;
+      await mediaApi.play(item.id, nextEp);
+      dispatchRefresh();
     } catch (error) {
       console.error("Failed to trigger playback:", error);
+      alert("Failed to start playback. Please check if the server is running.");
     } finally {
       setLoading(false);
     }
@@ -74,7 +79,7 @@ export default function Hero({ item, onSelect }: HeroProps) {
             ) : (
               <Play fill="currentColor" size={18} />
             )}
-            <span>{loading ? "Starting..." : "Resume"}</span>
+            <span>{loading ? "Starting..." : (item.user_status?.progress ? "Resume" : "Play Now")}</span>
           </button>
           
           <button 

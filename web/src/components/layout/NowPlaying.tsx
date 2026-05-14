@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Play, X, CheckCircle2, Loader2, Music } from "lucide-react";
 import { mediaApi, type PlaybackStatus } from "@/lib/api";
+import { dispatchRefresh } from "@/lib/events";
 
 export default function NowPlaying() {
   const [playback, setPlayback] = useState<PlaybackStatus>(null);
@@ -36,6 +37,7 @@ export default function NowPlaying() {
       const epNum = parseInt(playback.episode);
       await mediaApi.updateStatus(playback.media_id, undefined, undefined, epNum);
       setMarked(true);
+      dispatchRefresh();
       setTimeout(() => {
         setDismissed(true);
       }, 2000);

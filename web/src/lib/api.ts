@@ -259,6 +259,9 @@ export const mediaApi = {
   triggerBackup: () =>
     fetchFromApi('/registry/backup', { method: 'POST' }),
 
+  checkUpdate: (): Promise<{ status: string; update_available: boolean; message: string }> =>
+    fetchFromApi('/status/check-update', { method: 'POST' }),
+
   triggerUpdate: (): Promise<{ status: string; message: string }> =>
     fetchFromApi('/status/update', { method: 'POST' }),
 

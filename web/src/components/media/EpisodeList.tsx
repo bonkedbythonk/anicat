@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen } from "lucide-react";
 import { mediaApi, type Episode } from "@/lib/api";
+import { dispatchRefresh } from "@/lib/events";
 
 interface EpisodeListProps {
   mediaId: number;
@@ -23,6 +24,7 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
     setPlayingEp(epNum);
     try {
       await mediaApi.play(mediaId, epNum);
+      dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
     } finally {

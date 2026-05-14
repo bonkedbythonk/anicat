@@ -9,6 +9,7 @@ import MediaDetail from "@/components/media/MediaDetail";
 import Hero from "@/components/media/Hero";
 import useKeyboardShortcuts from "@/lib/useKeyboardShortcuts";
 import { mediaApi, type MediaItem, type QueueItem, type Notification, type UserProfile, type SearchFilters, type HealthStatus } from "@/lib/api";
+import { useRefreshTrigger } from "@/lib/events";
 import {
   Search,
   Loader2,
@@ -44,6 +45,7 @@ import {
 
 // ─── Home View ────────────────────────────────────────
 function HomeView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
+  const refreshKey = useRefreshTrigger();
   const [watchingList, setWatchingList] = useState<MediaItem[]>([]);
   const [trendingList, setTrendingList] = useState<MediaItem[]>([]);
   const [seasonalList, setSeasonalList] = useState<MediaItem[]>([]);
@@ -67,7 +69,7 @@ function HomeView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       }
     }
     load();
-  }, []);
+  }, [refreshKey]);
 
   const [heroItem, setHeroItem] = useState<MediaItem | null>(null);
 
@@ -106,6 +108,7 @@ function HomeView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
 
 // ─── Manga View ──────────────────────────────────────
 function MangaView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
+  const refreshKey = useRefreshTrigger();
   const [trendingList, setTrendingList] = useState<MediaItem[]>([]);
   const [popularList, setPopularList] = useState<MediaItem[]>([]);
   const [readingList, setReadingList] = useState<MediaItem[]>([]);
@@ -136,7 +139,7 @@ function MangaView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       }
     };
     loadManga();
-  }, []);
+  }, [refreshKey]);
 
   if (loading) {
     return (
@@ -198,6 +201,7 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   const [results, setResults] = useState<MediaItem[]>([]);
   const [suggestions, setSuggestions] = useState<MediaItem[]>([]);
   const [discovery, setDiscovery] = useState<MediaItem[]>([]);
+  const [randomList, setRandomList] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -227,9 +231,17 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
         if (active) {
           setDiscovery(shuffled);
         }
+
+        // Fetch truly random items by picking a random page (1-100)
+        const randomPage = Math.floor(Math.random() * 100) + 1;
+        const randomData = await mediaApi.search("", type, randomPage);
+        if (active) {
+          setRandomList(randomData.media || []);
+        }
       } catch {
         if (active) {
           setDiscovery([]);
+          setRandomList([]);
         }
       }
     };
@@ -474,6 +486,32 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
             ))}
           </div>
         </div>
+
+        {randomList.length > 0 && (
+          <div className="space-y-4 pt-8 border-t border-white/[0.04]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-extrabold tracking-tight text-white">Random {type === "ANIME" ? "Anime" : "Manga"}</h2>
+                <p className="text-sm text-gray-500">Completely random picks from the database.</p>
+              </div>
+              <button
+                onClick={async () => {
+                  const randomPage = Math.floor(Math.random() * 100) + 1;
+                  const data = await mediaApi.search("", type, randomPage);
+                  setRandomList(data.media || []);
+                }}
+                className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
+              >
+                New Random
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {randomList.map((item) => (
+                <MediaCard key={item.id} item={item} onSelect={onSelect} />
+              ))}
+            </div>
+          </div>
+        )}
       ) : results.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
           {results.map((item) => (
@@ -502,6 +540,7 @@ const LIST_TABS = [
 ];
 
 function ListsView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
+  const refreshKey = useRefreshTrigger();
   const [activeTab, setActiveTab] = useState("watching");
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -523,7 +562,7 @@ function ListsView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
         setItems([]);
       })
       .finally(() => setLoading(false));
-  }, [activeTab, type]);
+  }, [activeTab, type, refreshKey]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
@@ -725,6 +764,7 @@ function DownloadsView() {
 
 // ─── Library View ─────────────────────────────────────
 function LibraryView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
+  const refreshKey = useRefreshTrigger();
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -742,7 +782,7 @@ function LibraryView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
-  }, [type]);
+  }, [type, refreshKey]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
@@ -811,7 +851,7 @@ function LibraryView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
 }
 
 // ─── Settings View ────────────────────────────────────
-function SettingsView() {
+function SettingsView({ health }: { health: HealthStatus | null }) {
   const [config, setConfig] = useState<Record<string, Record<string, unknown>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -821,6 +861,7 @@ function SettingsView() {
   const [backingUp, setBackingUp] = useState(false);
   const [backupUrl, setBackupUrl] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [hasUpdate, setHasUpdate] = useState(health?.update_available || false);
   const [updateMessage, setUpdateMessage] = useState<{ text: string; type: "success" | "error" | null }>({ text: "", type: null });
 
   useEffect(() => {
@@ -830,14 +871,30 @@ function SettingsView() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (health?.update_available) {
+      setHasUpdate(true);
+    }
+  }, [health]);
+
   const handleUpdate = async () => {
     setCheckingUpdate(true);
     setUpdateMessage({ text: "", type: null });
     try {
-      const res = await mediaApi.triggerUpdate();
-      setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
-      if (res.status === "success" && res.message.includes("Updated")) {
-        setTimeout(() => window.location.reload(), 2000);
+      if (hasUpdate) {
+        // Perform the actual update
+        const res = await mediaApi.triggerUpdate();
+        setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
+        if (res.status === "success" && res.message.includes("Updated")) {
+          setTimeout(() => window.location.reload(), 2000);
+        }
+      } else {
+        // Just check for updates
+        const res = await mediaApi.checkUpdate();
+        setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
+        if (res.status === "success" && res.update_available) {
+          setHasUpdate(true);
+        }
       }
     } catch (err) {
       setUpdateMessage({ text: "Failed to connect to update server.", type: "error" });
@@ -1057,7 +1114,7 @@ function SettingsView() {
                     <p className="text-sm text-gray-500 mt-1">Check for the latest features and bug fixes.</p>
                   </div>
                   <div className="px-3 py-1 bg-white/[0.04] rounded-lg border border-white/[0.1] text-[10px] font-mono text-gray-400">
-                    v1.2.4
+                    {health?.current_version || "v1.2.4"}
                   </div>
                 </div>
 
@@ -1065,10 +1122,12 @@ function SettingsView() {
                   <button
                     onClick={handleUpdate}
                     disabled={checkingUpdate}
-                    className="flex items-center justify-center space-x-2 py-3 bg-accent text-white rounded-xl font-bold hover:bg-accent-light transition-all shadow-lg shadow-accent/20 disabled:opacity-50"
+                    className={`flex items-center justify-center space-x-2 py-3 rounded-xl font-bold transition-all shadow-lg shadow-accent/20 disabled:opacity-50 ${
+                      hasUpdate ? "bg-green-600 hover:bg-green-500 text-white shadow-green-500/20" : "bg-accent text-white hover:bg-accent-light"
+                    }`}
                   >
-                    {checkingUpdate ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
-                    <span>{checkingUpdate ? "Checking..." : "Check for Updates"}</span>
+                    {checkingUpdate ? <Loader2 size={16} className="animate-spin" /> : hasUpdate ? <Download size={16} /> : <RotateCcw size={16} />}
+                    <span>{checkingUpdate ? (hasUpdate ? "Updating..." : "Checking...") : hasUpdate ? "Install Update" : "Check for Updates"}</span>
                   </button>
                   
                   {updateMessage.text && (
@@ -1080,7 +1139,7 @@ function SettingsView() {
                     </div>
                   )}
 
-                  <p className="text-[10px] text-center text-gray-600">Current build: 2026.05.13.production</p>
+                  <p className="text-[10px] text-center text-gray-600">Build: {new Date().toLocaleDateString()}</p>
                 </div>
               </div>
 
@@ -1359,12 +1418,14 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(false);
   const [dismissedOffline, setDismissedOffline] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
 
   // Poll health for offline banner and notifications
   useEffect(() => {
     async function checkSystem() {
       try {
         const status = await mediaApi.getHealthStatus();
+        setHealthStatus(status);
         setIsOffline(status.is_offline);
         if (!status.is_offline) setDismissedOffline(false);
         setNotificationCount(status.unread_notifications || 0);
@@ -1402,7 +1463,7 @@ export default function App() {
       case "library":
         return <LibraryView onSelect={handleSelect} />;
       case "settings":
-        return <SettingsView />;
+        return <SettingsView health={healthStatus} />;
       case "notifications":
         return <NotificationsView onSelect={handleSelect} />;
       case "profile":

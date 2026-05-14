@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
+import { dispatchRefresh, useRefreshTrigger } from "@/lib/events";
 import EpisodeList from "./EpisodeList";
 
 interface MediaDetailProps {
@@ -11,6 +12,7 @@ interface MediaDetailProps {
 }
 
 export default function MediaDetail({ item, onClose }: MediaDetailProps) {
+  const refreshKey = useRefreshTrigger();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -65,7 +67,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
         setEpisodes([]);
       })
       .finally(() => setLoadingEps(false));
-  }, [item.id]);
+  }, [item.id, refreshKey]);
 
   useEffect(() => {
     if (activeTab === "characters" && characters.length === 0) {
@@ -94,6 +96,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     try {
       await mediaApi.updateStatus(item.id, undefined, score);
       setRating(score);
+      dispatchRefresh();
     } catch (err) {
       console.error("Failed to update rating:", err);
     } finally {
@@ -106,6 +109,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     try {
       await mediaApi.updateStatus(item.id, newStatus);
       setStatus(newStatus);
+      dispatchRefresh();
     } catch (err) {
       console.error("Failed to update status:", err);
     } finally {
@@ -118,6 +122,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     try {
       const nextEp = (fullItem.user_status?.progress || 0) + 1;
       await mediaApi.play(item.id, String(nextEp));
+      dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
     } finally {

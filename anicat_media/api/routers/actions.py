@@ -32,10 +32,19 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         if not media_item:
             raise HTTPException(status_code=404, detail="Media not found")
 
-        # 1. Determine next episode
+        # 1. Determine next episode and start time
+        start_time = None
         if not episode:
-            episode, _ = ctx.watch_history.get_episode(media_item)
+            episode, start_time = ctx.watch_history.get_episode(media_item)
             episode = str(episode) if episode else "1"
+        else:
+            # If episode is provided, check if we have a resume position for it
+            _, resume_time = ctx.watch_history.get_episode(media_item)
+            # Only use resume time if the episode matches the one being requested
+            # get_episode returns the "smart" next episode, so we check if the requested one is the same
+            current_progress = str(media_item.user_status.progress) if media_item.user_status else "0"
+            if episode == str(int(current_progress) + 1) or episode == current_progress:
+                start_time = resume_time
 
         # 2. Search provider
         title = media_item.title.romaji or media_item.title.english
@@ -102,7 +111,8 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             query=title,
             episode=episode,
             title=title,
-            headers=server.headers
+            headers=server.headers,
+            start_time=start_time
         )
         background_tasks.add_task(_play_and_track, ctx, params, anime=anime_ref, media_item=media_item)
         

@@ -170,6 +170,9 @@ class MpvPlayer(BasePlayer):
         Returns:
             subprocess.Popen: The running MPV process.
         """
+        if not self.executable:
+            raise AnicatError("MPV executable not found in PATH. Please install MPV to use the dashboard.")
+
         mpv_args = [
             self.executable,
             f"--input-ipc-server={socket_path}",

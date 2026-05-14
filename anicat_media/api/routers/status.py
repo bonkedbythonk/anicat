@@ -17,6 +17,7 @@ class PlaybackInfo(BaseModel):
 
 class HealthInfo(BaseModel):
     api_connected: bool
+    api_authenticated: bool
     worker_running: bool
     is_offline: bool
     update_available: bool = False
@@ -110,6 +111,7 @@ async def get_health():
             pass
 
         from ..core.constants import VERSION
+        api_authenticated = ctx.media_api.token is not None
         api_connected = ctx.media_api.is_authenticated()
         
         # Auto-recover is_offline status if we are clearly connected
@@ -118,6 +120,7 @@ async def get_health():
 
         return HealthInfo(
             api_connected=api_connected,
+            api_authenticated=api_authenticated,
             worker_running=ctx._download is not None,
             is_offline=ctx.is_offline,
             update_available=update_available,
@@ -127,6 +130,7 @@ async def get_health():
     except Exception:
         return HealthInfo(
             api_connected=False,
+            api_authenticated=False,
             worker_running=False,
             is_offline=True,
             update_available=False,

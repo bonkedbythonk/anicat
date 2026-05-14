@@ -136,19 +136,31 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
               href="https://anilist.co/api/v2/oauth/authorize?client_id=14188&response_type=token" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] transition-all group"
+              className="flex items-center justify-between p-4 rounded-2xl bg-accent/10 border border-accent/20 hover:bg-accent/20 transition-all group"
             >
               <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-accent/10 text-accent">
+                <div className="p-2 rounded-lg bg-accent text-white shadow-lg shadow-accent/20">
                   <Globe size={18} />
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-bold text-white">1. Get your Secure Token</p>
-                  <p className="text-[11px] text-gray-500">Click here to log in and copy the code</p>
+                  <p className="text-[11px] text-accent font-medium">Click here to log in and copy the code</p>
                 </div>
               </div>
-              <ChevronRight size={18} className="text-gray-600 group-hover:text-white transition-colors" />
+              <ChevronRight size={18} className="text-accent group-hover:translate-x-1 transition-all" />
             </a>
+
+            <div className="flex items-center justify-center space-x-2 text-[11px] text-gray-500 pt-1">
+              <span>Don't have an AniList account?</span>
+              <a 
+                href="https://anilist.co/signup" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-accent hover:underline font-bold"
+              >
+                Sign up here
+              </a>
+            </div>
           </div>
 
           <div className="flex flex-col space-y-3 pt-2">

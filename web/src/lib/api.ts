@@ -131,6 +131,7 @@ export type PlaybackStatus = {
 
 export type HealthStatus = {
   api_connected: boolean;
+  api_authenticated: boolean;
   worker_running: boolean;
   is_offline: boolean;
   update_available?: boolean;

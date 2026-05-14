@@ -89,10 +89,15 @@ class AniListApi(BaseApiClient):
     def authenticate(self, token: str) -> Optional[UserProfile]:
         self.token = token
         self.http_client.headers["Authorization"] = f"Bearer {token}"
-        self.user_profile = self.get_viewer_profile()
-        if not self.user_profile:
-            self.token = None
-            self.http_client.headers.pop("Authorization", None)
+        
+        # We try to fetch the profile, but we DON'T clear the token if it fails.
+        # Failing to fetch profile usually means we are offline, not that the token is bad.
+        try:
+            self.user_profile = self.get_viewer_profile()
+        except Exception as e:
+            logger.warning(f"Failed to fetch viewer profile during auth (likely offline): {e}")
+            self.user_profile = None
+            
         return self.user_profile
 
     def is_authenticated(self) -> bool:

@@ -11,8 +11,21 @@ echo "🚀 Installing Anicat Desktop App..."
 # 1. Check for System Dependencies (mpv, ffmpeg, chafa)
 echo "🔍 Checking for system dependencies (mpv, ffmpeg, chafa)..."
 if ! command -v brew &> /dev/null; then
-    echo "⚠️  Homebrew not found. System dependencies might be missing."
-    echo "   (For the best experience, we recommend installing Homebrew from https://brew.sh)"
+    echo "⚠️  Homebrew not found. It is required to install system dependencies (mpv, ffmpeg, chafa)."
+    echo "📦 Would you like to install Homebrew now? (y/n)"
+    read -r response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        echo "🚀 Installing Homebrew... (This may ask for your Mac password)"
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        
+        # Add brew to path for the current session
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        fi
+    else
+        echo "❌ Homebrew is required for Anicat to function properly. Please install it manually from https://brew.sh"
+        exit 1
+    fi
 else
     # Ensure brew is updated if it's been a while (optional, but keep it fast)
     for cmd in mpv ffmpeg chafa; do

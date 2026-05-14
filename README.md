@@ -63,10 +63,13 @@ cd anicat && git pull && ./scripts/install.sh
   rm -rf anicat && git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
   ```
 
-**Terminal says "command not found: anicat"?**
-- This usually means your terminal needs to be "refreshed" after the first installation.
+**Terminal says \"command not found: anicat\"?**
+- This usually means your terminal needs to be \"refreshed\" after the first installation.
 - **Try this**: Close your Terminal window and open a new one.
 - **Still not working?** Copy and paste this line into your terminal: `source ~/.zshrc` (or `source ~/.bash_profile` if you are on an older Mac).
+
+**Does it install Homebrew and MPV?**
+- **Yes!** The installer will check if you have Homebrew and MPV. If you don't, it will ask for your permission to install them automatically so the app works perfectly.
 
 **Videos won't play?**
 - Check your internet connection.

@@ -45,7 +45,7 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
       const status = await mediaApi.getHealthStatus();
       setHealth(status);
     } catch {
-      setHealth({ api_connected: false, worker_running: false, is_offline: true });
+      setHealth({ api_connected: false, api_authenticated: false, worker_running: false, is_offline: true });
     }
   }, []);
 

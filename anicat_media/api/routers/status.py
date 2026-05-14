@@ -183,3 +183,23 @@ async def trigger_update():
         return {"status": "error", "message": "Update timed out. Please try running 'git pull' manually in the terminal."}
     except Exception as e:
         return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+@router.post("/reconnect")
+async def reconnect():
+    """Force a reconnection attempt to the media API."""
+    ctx = get_ctx()
+    try:
+        ctx.is_offline = False
+        # Accessing media_api property triggers authentication if _media_api is None
+        # We force a reset of _media_api to re-trigger auth
+        ctx._media_api = None
+        api = ctx.media_api
+        connected = api.is_authenticated()
+        if connected:
+            return {"status": "success", "message": "Successfully reconnected to AniList!"}
+        else:
+            ctx.is_offline = True
+            return {"status": "error", "message": "Reconnection failed: Still unable to authenticate."}
+    except Exception as e:
+        ctx.is_offline = True
+        return {"status": "error", "message": f"Reconnection error: {str(e)}"}

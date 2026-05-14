@@ -1,5 +1,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
 from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview, MediaSort, MediaSeason, MediaGenre, MediaStatus, MediaFormat
 from ...libs.media_api.params import MediaSearchParams, MediaCharactersParams, MediaReviewsParams, MediaRecommendationParams
 
@@ -34,6 +37,8 @@ async def get_recent(
     try:
         ctx = get_ctx()
         return ctx.media_registry.get_recently_watched(limit=limit, type=type)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -54,6 +59,8 @@ async def get_trending(
         )
         result = ctx.media_api.search_media(params)
         return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -77,6 +84,8 @@ async def get_seasonal(
         )
         result = ctx.media_api.search_media(params)
         return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -114,6 +123,8 @@ async def search_media(
             format_in=format_list,
         )
         return ctx.media_api.search_media(params)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -126,8 +137,53 @@ async def get_media_details(media_id: int):
         if not media:
             raise HTTPException(status_code=404, detail="Media not found")
         return media
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+async def get_manga_ref(ctx, media, media_id: int):
+    """Get the manga reference from registry or search."""
+    record = ctx.media_registry.get_media_record(media_id)
+    provider_name = ctx.config.general.manga_provider.value
+    
+    if record and record.provider_mapping and provider_name in record.provider_mapping:
+        provider_id = record.provider_mapping[provider_name]
+        return provider_id, record
+
+    # Search for the manga
+    title = media.title.romaji or media.title.english
+    from ...core.utils.normalizer import normalize_title
+    from ...libs.provider.manga.params import MangaSearchParams
+    
+    search_results = ctx.manga_provider.search(
+        MangaSearchParams(
+            query=normalize_title(title, provider_name, True)
+        )
+    )
+    
+    if not search_results or not search_results.results:
+        return None, record
+        
+    from ...cli.utils.search import find_best_match_title
+    results_map = {r.title: r for r in search_results.results}
+    try:
+        best_title = find_best_match_title(results_map, ctx.config.general.manga_provider, media)
+        manga_ref = results_map[best_title]
+    except Exception:
+        manga_ref = search_results.results[0]
+        
+    # Cache the result
+    if not record:
+        record = ctx.media_registry.get_or_create_record(media)
+    
+    if not record.provider_mapping:
+        record.provider_mapping = {}
+        
+    record.provider_mapping[provider_name] = manga_ref.id
+    ctx.media_registry.save_media_record(record)
+    
+    return manga_ref.id, record
 
 @router.get("/{media_id}/episodes")
 async def get_media_episodes(media_id: int):
@@ -140,37 +196,18 @@ async def get_media_episodes(media_id: int):
         
         from ...libs.media_api.types import MediaType
         is_manga = media.type == MediaType.MANGA
-        title = media.title.romaji or media.title.english
-        
-        from ...core.utils.normalizer import normalize_title
-        from ...cli.utils.search import find_best_match_title
         
         if is_manga:
-            # --- Manga Logic ---
-            from ...libs.provider.manga.base import MangaSearchParams as MangaProviderParams
-            from ...libs.provider.manga.base import MangaParams
+            from ...libs.provider.manga.params import MangaParams
             
-            search_results = ctx.manga_provider.search(
-                MangaProviderParams(
-                    query=normalize_title(title, ctx.config.general.manga_provider.value, True)
-                )
-            )
-            
-            if not search_results or not search_results.results:
+            manga_id, record = await get_manga_ref(ctx, media, media_id)
+            if not manga_id:
                 return []
-            
-            results_map = {r.title: r for r in search_results.results}
-            try:
-                best_title = find_best_match_title(results_map, ctx.config.general.manga_provider, media)
-                manga_ref = results_map[best_title]
-            except Exception:
-                manga_ref = search_results.results[0]
                 
-            full_manga = ctx.manga_provider.get(MangaParams(id=manga_ref.id, query=title))
+            full_manga = ctx.manga_provider.get(MangaParams(id=manga_id, query=media.title.romaji))
             if not full_manga:
                 return []
                 
-            record = ctx.media_registry.get_media_record(media_id)
             local_chapters = {e.episode_number: e for e in record.media_episodes} if record else {}
             
             result = []
@@ -185,11 +222,10 @@ async def get_media_episodes(media_id: int):
             return result
         else:
             # --- Anime Logic ---
-            from ...libs.provider.anime.params import SearchParams as ProviderSearchParams
-            from ...libs.provider.anime.params import AnimeParams
+            from ...libs.provider.anime.params import AnimeParams, SearchParams as AnimeSearchParams
             
             search_results = ctx.provider.search(
-                ProviderSearchParams(
+                AnimeSearchParams(
                     query=normalize_title(title, ctx.config.general.provider.value, True),
                     translation_type=ctx.config.stream.translation_type
                 )
@@ -231,6 +267,8 @@ async def get_media_episodes(media_id: int):
                     "is_downloaded": local.download_status.name == "COMPLETED" if local else False
                 })
             return result
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -243,6 +281,8 @@ async def get_media_characters(media_id: int):
         ctx = get_ctx()
         params = MediaCharactersParams(id=media_id)
         return ctx.media_api.get_characters_of(params)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -253,6 +293,8 @@ async def get_media_reviews(media_id: int, page: int = 1):
         ctx = get_ctx()
         params = MediaReviewsParams(id=media_id, page=page)
         return ctx.media_api.get_reviews_for(params)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -263,5 +305,43 @@ async def get_media_recommendations(media_id: int, page: int = 1):
         ctx = get_ctx()
         params = MediaRecommendationParams(id=media_id, page=page)
         return ctx.media_api.get_recommendation_for(params)
+    except HTTPException:
+        raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{media_id}/chapter/{chapter_number}/pages")
+async def get_chapter_pages(media_id: int, chapter_number: str):
+    """Get pages for a specific manga chapter."""
+    try:
+        ctx = get_ctx()
+        media = ctx.media_api.get_media_item(media_id)
+        if not media:
+            raise HTTPException(status_code=404, detail="Media not found")
+        
+        from ...libs.provider.manga.params import MangaParams
+        
+        manga_id, _ = await get_manga_ref(ctx, media, media_id)
+        if not manga_id:
+             raise HTTPException(status_code=404, detail="Manga not found")
+            
+        full_manga = ctx.manga_provider.get(MangaParams(id=manga_id, query=media.title.romaji))
+        if not full_manga or not full_manga.chapters:
+             raise HTTPException(status_code=404, detail="No chapters found")
+        
+        # Find the requested chapter
+        chapter = next((ch for ch in full_manga.chapters if ch.number == chapter_number), None)
+        if not chapter:
+            raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
+            
+        chapter_data = ctx.manga_provider.get_chapter_thumbnails(full_manga.id, chapter.url or chapter.number)
+        if not chapter_data or not chapter_data.get("thumbnails"):
+             raise HTTPException(status_code=404, detail="Failed to load chapter pages")
+        
+        return chapter_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

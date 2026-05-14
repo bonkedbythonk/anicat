@@ -214,6 +214,7 @@ class MediaItem(BaseMediaApiModel):
 
     description: Optional[str] = None
     episodes: Optional[int] = None
+    chapters: Optional[int] = None
     duration: Optional[int] = None  # In minutes
     genres: List[MediaGenre] = Field(default_factory=list)
     tags: List[MediaTagItem] = Field(default_factory=list)

@@ -25,26 +25,35 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
   };
 
   const title = item.title.english || item.title.romaji || "Media";
+  const isManga = item.type === 'MANGA';
   const progress = item.user_status?.progress || 0;
-  const totalEps = item.episodes || 0;
+  const totalCount = item.episodes || item.chapters || 0;
   const nextEp = item.next_airing?.episode;
   
   // Only treat this as "new" when there is an actual upcoming airing.
   let currentReleased = 0;
   if (nextEp) {
     currentReleased = nextEp - 1;
-  } else if (totalEps > 0) {
-    currentReleased = totalEps;
+  } else if (totalCount > 0) {
+    currentReleased = totalCount;
   }
   
+  const isFinished = item.status === 'FINISHED' || (item.end_date && new Date(item.end_date) < new Date());
+  
+  const isAiringNow = item.next_airing?.airing_at ? (
+    new Date(item.next_airing.airing_at + "Z") > new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+  ) : !!nextEp;
+
   const hasNewEpisodes = 
     item.user_status?.status === 'watching' && 
     item.status === 'RELEASING' && 
-    !!nextEp && 
-    progress < currentReleased;
+    !isFinished &&
+    isAiringNow &&
+    progress < currentReleased &&
+    (totalCount === 0 || progress < totalCount);
 
   return (
-    <button 
+    <div 
       onClick={() => onSelect?.(item)} 
       className="group cursor-pointer flex flex-col space-y-2.5 w-full text-left"
     >
@@ -85,7 +94,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/60 z-10">
             <div 
               className="h-full bg-accent rounded-full" 
-              style={{ width: `${Math.min((progress / (totalEps || currentReleased || 1)) * 100, 100)}%` }}
+              style={{ width: `${Math.min((progress / (totalCount || currentReleased || 1)) * 100, 100)}%` }}
             />
           </div>
         )}
@@ -108,7 +117,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
         {item.user_status && progress > 0 ? (
           <div className="flex items-center space-x-2">
             <p className={`text-[11px] font-medium ${hasNewEpisodes ? "text-accent" : "text-gray-500"}`}>
-              EP {progress} / {totalEps || currentReleased || "?"}
+              {isManga ? "CH" : "EP"} {progress} / {totalCount || currentReleased || "?"}
             </p>
             {hasNewEpisodes && (
               <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
@@ -120,6 +129,6 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
           </p>
         )}
       </div>
-    </button>
+    </div>
   );
 }

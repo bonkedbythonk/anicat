@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import { dispatchRefresh, useRefreshTrigger } from "@/lib/events";
+import { formatTime, formatRelativeTime } from "@/lib/date";
 import EpisodeList from "./EpisodeList";
+import MangaReader from "./MangaReader";
 
 interface MediaDetailProps {
   item: MediaItem;
@@ -28,9 +30,13 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
   const [status, setStatus] = useState(item.user_status?.status || "");
   const [isUpdatingRating, setIsUpdatingRating] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [hasFetchedChars, setHasFetchedChars] = useState(false);
+  const [hasFetchedReviews, setHasFetchedReviews] = useState(false);
+  const [hasFetchedRecs, setHasFetchedRecs] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
   const [isDownloadingRemaining, setIsDownloadingRemaining] = useState(false);
+  const [readingChapter, setReadingChapter] = useState<string | null>(null);
 
   const title = fullItem.title.english || fullItem.title.romaji || "Unknown";
 
@@ -48,6 +54,9 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     setLoadingChars(false);
     setLoadingReviews(false);
     setLoadingRecs(false);
+    setHasFetchedChars(false);
+    setHasFetchedReviews(false);
+    setHasFetchedRecs(false);
     setActiveTab("episodes");
     setRating(item.user_status?.score || 0);
     setStatus(item.user_status?.status || "");
@@ -70,20 +79,23 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
   }, [item.id, refreshKey]);
 
   useEffect(() => {
-    if (activeTab === "characters" && characters.length === 0) {
+    if (activeTab === "characters" && !hasFetchedChars) {
       setLoadingChars(true);
+      setHasFetchedChars(true);
       mediaApi.getCharacters(item.id)
         .then(data => setCharacters(data.characters || []))
         .catch(console.error)
         .finally(() => setLoadingChars(false));
-    } else if (activeTab === "reviews" && reviews.length === 0) {
+    } else if (activeTab === "reviews" && !hasFetchedReviews) {
       setLoadingReviews(true);
+      setHasFetchedReviews(true);
       mediaApi.getReviews(item.id)
         .then(setReviews)
         .catch(console.error)
         .finally(() => setLoadingReviews(false));
-    } else if (activeTab === "recommendations" && recommendations.length === 0) {
+    } else if (activeTab === "recommendations" && !hasFetchedRecs) {
       setLoadingRecs(true);
+      setHasFetchedRecs(true);
       mediaApi.getRecommendations(item.id)
         .then(setRecommendations)
         .catch(console.error)
@@ -118,15 +130,36 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
   };
 
   const handlePlayNext = async () => {
+    const nextEp = (fullItem.user_status?.progress || 0) + 1;
+    if (isManga) {
+      setReadingChapter(String(nextEp));
+      return;
+    }
     setIsPlayingNext(true);
     try {
-      const nextEp = (fullItem.user_status?.progress || 0) + 1;
       await mediaApi.play(item.id, String(nextEp));
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
     } finally {
       setIsPlayingNext(false);
+    }
+  };
+
+  const handleUnwatch = async (epNum: string) => {
+    const num = parseInt(epNum);
+    if (isNaN(num)) return;
+    
+    // Set progress to num - 1
+    const newProgress = Math.max(0, num - 1);
+    setIsUpdatingStatus(true);
+    try {
+      await mediaApi.updateStatus(item.id, undefined, undefined, newProgress);
+      dispatchRefresh();
+    } catch (error) {
+      console.error("Failed to unwatch:", error);
+    } finally {
+      setIsUpdatingStatus(false);
     }
   };
 
@@ -281,6 +314,35 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
                 <div className="text-xs text-gray-300 font-medium">{fullItem.duration}m</div>
               </div>
             )}
+            <div className="space-y-1">
+              <div className="flex items-center text-gray-500 space-x-1.5">
+                <CheckCircle2 size={12} />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Progress</span>
+                {fullItem.user_status?.progress ? (
+                  <div className="flex items-center space-x-1">
+                    <button 
+                      onClick={() => handleUnwatch(String(fullItem.user_status?.progress))}
+                      className="p-0.5 hover:bg-white/10 rounded text-gray-500 hover:text-red-500 transition-colors"
+                      title={isManga ? "Undo last chapter" : "Undo last episode"}
+                    >
+                      <RotateCcw size={10} />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (confirm(`Are you sure you want to reset all progress for ${title}?`)) {
+                          handleUnwatch("1"); // Sets to 0
+                        }
+                      }}
+                      className="p-0.5 hover:bg-white/10 rounded text-gray-500 hover:text-red-500 transition-colors"
+                      title={isManga ? "Reset all chapters" : "Reset all episodes"}
+                    >
+                      <XCircle size={10} />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="text-xs text-gray-300 font-medium">{fullItem.user_status?.progress || 0} / {fullItem.episodes || fullItem.chapters || "?"}</div>
+            </div>
           </div>
 
           {!isManga && fullItem.next_airing && (
@@ -288,7 +350,12 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
               <div className="p-2 bg-accent/10 rounded-lg text-accent"><Calendar size={18} /></div>
               <div>
                 <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
-                <div className="text-sm text-gray-200 font-semibold">Episode {fullItem.next_airing.episode} airing {new Date(fullItem.next_airing.airing_at + "Z").toLocaleString()}</div>
+                <div className="text-sm text-gray-200 font-semibold">
+                  Episode {fullItem.next_airing.episode} airing {formatRelativeTime(new Date(fullItem.next_airing.airing_at + "Z"))} 
+                  <span className="text-gray-500 text-xs ml-2">
+                    ({formatTime(new Date(fullItem.next_airing.airing_at + "Z"), config?.general?.time_format || '24h')})
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -313,7 +380,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
           </div>
 
           <div className="animate-fade-in">
-            {activeTab === "episodes" && <EpisodeList mediaId={item.id} episodes={episodes} loading={loadingEps} progress={fullItem.user_status?.progress} isManga={isManga} />}
+            {activeTab === "episodes" && <EpisodeList mediaId={item.id} episodes={episodes} loading={loadingEps} progress={fullItem.user_status?.progress} isManga={isManga} onRead={setReadingChapter} onUnwatch={handleUnwatch} />}
             {activeTab === "characters" && (
               <div className="grid grid-cols-2 gap-3">
                 {characters.map(char => (
@@ -353,6 +420,25 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
           </div>
         </div>
       </div>
+
+      {readingChapter && (
+        <MangaReader 
+          mediaId={item.id} 
+          chapterNumber={readingChapter} 
+          onClose={() => {
+            setReadingChapter(null);
+            dispatchRefresh();
+          }} 
+          onProgressUpdate={async (num) => {
+            try {
+              await mediaApi.updateStatus(item.id, undefined, undefined, parseInt(num));
+              dispatchRefresh();
+            } catch (error) {
+              console.error("Failed to update manga progress:", error);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

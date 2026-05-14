@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+import webbrowser
 from ...libs.player.params import PlayerParams
 
 router = APIRouter()
@@ -46,10 +47,68 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             if episode == str(int(current_progress) + 1) or episode == current_progress:
                 start_time = resume_time
 
-        # 2. Search provider
+        # 2. Check if Manga
+        from ...libs.media_api.types import MediaType, MediaFormat
+        is_manga = media_item.type == MediaType.MANGA or media_item.format in (
+            MediaFormat.MANGA,
+            MediaFormat.NOVEL,
+            MediaFormat.ONE_SHOT,
+        )
+        
         title = media_item.title.romaji or media_item.title.english
-        from ...libs.provider.anime.params import SearchParams as ProviderSearchParams
         from ...core.utils.normalizer import normalize_title
+        
+        if is_manga:
+            from ...libs.provider.manga.params import MangaSearchParams, MangaParams
+            search_results = ctx.manga_provider.search(
+                MangaSearchParams(
+                    query=normalize_title(title, ctx.config.general.manga_provider.value, True)
+                )
+            )
+            
+            if not search_results or not search_results.results:
+                 raise HTTPException(status_code=404, detail=f"No manga results found for {title}")
+            
+            from ...cli.utils.search import find_best_match_title
+            results_map = {r.title: r for r in search_results.results}
+            try:
+                best_title = find_best_match_title(results_map, ctx.config.general.manga_provider, media_item)
+                manga_ref = results_map[best_title]
+            except Exception:
+                manga_ref = search_results.results[0]
+                
+            full_manga = ctx.manga_provider.get(MangaParams(id=manga_ref.id, query=title))
+            if not full_manga or not full_manga.chapters:
+                 raise HTTPException(status_code=404, detail="No chapters found")
+            
+            # Find the requested chapter
+            # episode is the chapter number as a string
+            chapter = next((ch for ch in full_manga.chapters if ch.number == episode), None)
+            if not chapter:
+                # Fallback to the first chapter if not found
+                chapter = full_manga.chapters[0]
+                episode = chapter.number
+                
+            chapter_data = ctx.manga_provider.get_chapter_thumbnails(full_manga.id, chapter.url or chapter.number)
+            if not chapter_data or not chapter_data.get("thumbnails"):
+                 raise HTTPException(status_code=404, detail="Failed to load chapter pages")
+            
+            # For now, we just open the first page in the browser as a "playback" action
+            first_page = chapter_data["thumbnails"][0]
+            webbrowser.open(first_page)
+            
+            # Track progress
+            from ...libs.player.types import PlayerResult
+            ctx.watch_history.track(media_item, PlayerResult(episode=episode, stop_time=None, total_time=None))
+            
+            # Track for Now Playing
+            from .status import set_playback
+            set_playback(media_id=media_id, media_title=title, episode=episode)
+            
+            return {"status": "reading", "media": title, "episode": episode}
+
+        # 3. Search anime provider
+        from ...libs.provider.anime.params import SearchParams as ProviderSearchParams
         
         search_results = ctx.provider.search(
             ProviderSearchParams(
@@ -122,6 +181,8 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         
         return {"status": "playing", "media": title, "episode": episode}
         
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

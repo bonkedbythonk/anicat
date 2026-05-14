@@ -39,6 +39,7 @@ query (
         favourites
         averageScore
         episodes
+        chapters
         genres
         synonyms
         studios {

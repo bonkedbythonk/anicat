@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen } from "lucide-react";
+import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle } from "lucide-react";
 import { mediaApi, type Episode } from "@/lib/api";
 import { dispatchRefresh } from "@/lib/events";
 
@@ -11,9 +11,11 @@ interface EpisodeListProps {
   loading: boolean;
   progress?: number;
   isManga?: boolean;
+  onRead?: (chapterNum: string) => void;
+  onUnwatch?: (epNum: string) => void;
 }
 
-export default function EpisodeList({ mediaId, episodes, loading, progress = 0, isManga = false }: EpisodeListProps) {
+export default function EpisodeList({ mediaId, episodes, loading, progress = 0, isManga = false, onRead, onUnwatch }: EpisodeListProps) {
   const [playingEp, setPlayingEp] = useState<string | null>(null);
   const [queueingEp, setQueueingEp] = useState<string | null>(null);
   const [batchStart, setBatchStart] = useState("");
@@ -21,6 +23,10 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
   const [batchQueuing, setBatchQueuing] = useState(false);
 
   const handlePlay = async (epNum: string) => {
+    if (isManga && onRead) {
+      onRead(epNum);
+      return;
+    }
     setPlayingEp(epNum);
     try {
       await mediaApi.play(mediaId, epNum);
@@ -102,7 +108,19 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
               >
                 <div className="flex items-center space-x-4 min-w-0">
                   <div className="flex items-center space-x-1 w-10 justify-end shrink-0">
-                    {isWatched && <CheckCircle2 size={12} className="text-green-500" />}
+                    {isWatched && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onUnwatch) onUnwatch(epNum);
+                        }}
+                        title={isManga ? "Mark as unread" : "Mark as unwatched"}
+                        className="p-1 hover:bg-white/10 rounded-full transition-colors group/unwatch"
+                      >
+                        <CheckCircle2 size={16} className="text-green-500 fill-green-500/10 shrink-0 group-hover/unwatch:hidden" />
+                        <XCircle size={16} className="text-red-500 hidden group-hover/unwatch:block" />
+                      </button>
+                    )}
                     <span className={`font-bold text-sm ${isWatched ? "text-green-500" : "text-accent"}`}>
                       {epNum}
                     </span>

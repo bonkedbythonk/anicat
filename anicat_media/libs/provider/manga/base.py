@@ -1,18 +1,27 @@
-from httpx import Client
-from ....core.utils.networking import random_user_agent
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, ClassVar, Dict, Optional
+
+from .params import MangaParams, MangaSearchParams
+
+if TYPE_CHECKING:
+    from httpx import Client
+    from .types import Manga, MangaSearchResults
 
 
-class MangaProvider:
-    session: Client
+class BaseMangaProvider(ABC):
+    HEADERS: ClassVar[Dict[str, str]] = {}
 
-    USER_AGENT = random_user_agent()
-    HEADERS = {}
+    def __init__(self, client: "Client") -> None:
+        self.client = client
 
-    def __init__(self) -> None:
-        self.session = Client(
-            headers={
-                "User-Agent": self.USER_AGENT,
-                **self.HEADERS,
-            },
-            timeout=10,
-        )
+    @abstractmethod
+    def search(self, params: MangaSearchParams) -> "MangaSearchResults | None":
+        pass
+
+    @abstractmethod
+    def get(self, params: MangaParams) -> "Manga | None":
+        pass
+
+    @abstractmethod
+    def get_chapter_thumbnails(self, manga_id: str, chapter: str) -> Optional[dict]:
+        pass

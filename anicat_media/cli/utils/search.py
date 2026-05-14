@@ -3,12 +3,14 @@
 from anicat_media.core.utils.fuzzy import fuzz
 from anicat_media.core.utils.normalizer import normalize_title
 from anicat_media.libs.provider.anime.types import SearchResult, ProviderName
+from anicat_media.libs.provider.manga.types import MangaProviderName
+from typing import Any, Union
 from anicat_media.libs.media_api.types import MediaItem
 
 
 def find_best_match_title(
     provider_results_map: dict[str, SearchResult],
-    provider: ProviderName,
+    provider: Union[ProviderName, MangaProviderName],
     media_item: MediaItem,
 ) -> str:
     """Find the best match title using fuzzy matching for both the english AND romaji title.

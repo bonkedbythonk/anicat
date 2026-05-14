@@ -158,7 +158,6 @@ class AniListApi(BaseApiClient):
         """Fetch a single media item by ID, bypassing long-term cache."""
         variables = {
             "id_in": [media_id],
-            "type": "ANIME",
             "per_page": 1,
         }
         response = execute_graphql(
@@ -210,7 +209,7 @@ class AniListApi(BaseApiClient):
         variables = {
             "mediaId": params.media_id,
             "status": user_list_status_map[params.status] if params.status else None,
-            "progress": int(float(params.progress)) if params.progress else None,
+            "progress": int(float(params.progress)) if params.progress is not None else None,
             "scoreRaw": score_raw,
         }
         variables = {k: v for k, v in variables.items() if v is not None}

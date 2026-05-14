@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ...libs.media_api.types import MediaSort, UserMediaListSort
 from ...libs.provider.anime.types import ProviderName, ProviderServer
+from ...libs.provider.manga.types import MangaProviderName
 from ..constants import APP_ASCII_ART
 from . import defaults
 from . import descriptions as desc
@@ -171,6 +172,10 @@ class GeneralConfig(BaseConfig):
     provider: ProviderName = Field(
         default=ProviderName.ANIMEPAHE,
         description=desc.GENERAL_PROVIDER,
+    )
+    manga_provider: MangaProviderName = Field(
+        default=MangaProviderName.MANGAKATANA,
+        description="The provider to use for manga content.",
     )
     selector: Literal["default", "fzf", "rofi"] = Field(
         default_factory=defaults.GENERAL_SELECTOR,

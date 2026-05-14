@@ -210,20 +210,21 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
 
         manga_title = media_item.title.english or media_item.title.romaji
         
-        from .....libs.provider.manga.MangaProvider import MangaProvider as MangaProviderManager
-        provider_name = "mangakatana"
-        manga_provider = MangaProviderManager(provider=provider_name)
+        manga_provider = ctx.manga_provider
+        provider_name = ctx.config.general.manga_provider.value
         
         loading_message = f"Searching {provider_name} for '{manga_title}'"
         search_results = None
+        from .....libs.provider.manga.params import MangaSearchParams
         with feedback.progress(loading_message):
-            search_results = manga_provider.search_for_manga(manga_title)
+            search_results_obj = manga_provider.search(MangaSearchParams(query=manga_title))
+            search_results = search_results_obj.results if search_results_obj else None
             
         if not search_results:
             feedback.error(f"No results found on {provider_name} for {manga_title}")
             return InternalDirective.RELOAD
             
-        result_map = {result["title"]: result for result in search_results}
+        result_map = {result.title: result for result in search_results}
         
         provider_choices = list(result_map.keys())
         back_text = f"{' ' if ctx.config.general.icons else ''}Back"
@@ -234,18 +235,19 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
             return InternalDirective.RELOAD
             
         selected_manga = result_map[selected_title]
-        manga_url = selected_manga["url"]
+        manga_id = selected_manga.id
         
         manga_info = None
+        from .....libs.provider.manga.params import MangaParams
         with feedback.progress("Fetching chapters"):
-            manga_info = manga_provider.get_manga(manga_url)
+            manga_info = manga_provider.get(MangaParams(id=manga_id, query=manga_title))
             
-        if not manga_info or not manga_info.get("availableChapters"):
+        if not manga_info or not manga_info.chapters:
             feedback.error("No chapters found")
             return InternalDirective.RELOAD
             
-        chapters = manga_info["availableChapters"]
-        chapter_map = {ch["title"]: ch for ch in chapters}
+        chapters = manga_info.chapters
+        chapter_map = {ch.title or f"Chapter {ch.number}": ch for ch in chapters}
         
         while True:
             chapter_choices = list(chapter_map.keys())
@@ -264,7 +266,7 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
             chapter_data = None
             with feedback.progress(f"Loading '{selected_chapter_title}'"):
                 chapter_data = manga_provider.get_chapter_thumbnails(
-                    manga_info["id"], chapter_url
+                    manga_info.id, selected_chapter.url or selected_chapter.number
                 )
                 
             if not chapter_data or not chapter_data.get("thumbnails"):
@@ -304,9 +306,9 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
             
             next_options = []
             if next_chapter:
-                next_options.append(f"Next: {next_chapter['title']}")
+                next_options.append(f"Next: {next_chapter.title or f'Chapter {next_chapter.number}'}")
             if prev_chapter:
-                next_options.append(f"Prev: {prev_chapter['title']}")
+                next_options.append(f"Prev: {prev_chapter.title or f'Chapter {prev_chapter.number}'}")
                 
             next_options.extend(["Select another chapter", "Finish"])
             

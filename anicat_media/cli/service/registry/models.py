@@ -46,6 +46,7 @@ class MediaEpisode(BaseModel):
 class MediaRecord(BaseModel):
     media_item: MediaItem
     media_episodes: list[MediaEpisode] = Field(default_factory=list)
+    provider_mapping: Dict[str, str] = Field(default_factory=dict)
 
 
 class MediaRegistryIndexEntry(BaseModel):

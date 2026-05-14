@@ -244,6 +244,7 @@ def _to_generic_media_item(
         trailer=_to_generic_media_trailer(data["trailer"]),
         description=data.get("description"),
         episodes=data.get("episodes"),
+        chapters=data.get("chapters"),
         duration=data.get("duration"),
         genres=[MediaGenre(genre) for genre in data["genres"]],
         tags=_to_generic_tags(data.get("tags")),

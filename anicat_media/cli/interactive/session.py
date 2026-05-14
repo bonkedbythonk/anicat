@@ -104,7 +104,7 @@ class Context:
     @property
     def manga_provider(self) -> Any:
         if not self._manga_provider:
-            from ...libs.provider.manga.MangaProvider import create_manga_provider
+            from ...libs.provider.manga.provider import create_manga_provider
             self._manga_provider = create_manga_provider(self.config.general.manga_provider)
         return self._manga_provider
 

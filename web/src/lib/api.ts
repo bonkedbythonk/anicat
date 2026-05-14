@@ -41,6 +41,7 @@ export type MediaItem = {
   description?: string;
   episodes?: number;
   chapters?: number;
+  duration?: number;
   status?: string;
   format?: string;
   genres?: string[];
@@ -56,6 +57,7 @@ export type MediaItem = {
     episode: number;
     airing_at?: string;
   };
+  end_date?: string;
   user_status?: {
     status?: string;
     progress?: number;
@@ -209,6 +211,9 @@ export const mediaApi = {
   getRecommendations: (mediaId: number, page = 1): Promise<MediaItem[]> =>
     fetchFromApi(`/media/${mediaId}/recommendations?page=${page}`),
 
+  getChapterPages: (mediaId: number, chapterNumber: string): Promise<{ thumbnails: string[], title: string }> =>
+    fetchFromApi(`/media/${mediaId}/chapter/${chapterNumber}/pages`),
+
   // ─── Playback ───────────────────────────────────────
   play: (mediaId: number, episode?: string) =>
     fetchFromApi(`/actions/play/${mediaId}${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
@@ -267,4 +272,7 @@ export const mediaApi = {
 
   getHealthStatus: (): Promise<HealthStatus> =>
     fetchFromApi('/status/health'),
+    
+  reconnect: (): Promise<{ status: string; message: string }> =>
+    fetchFromApi('/status/reconnect', { method: 'POST' }),
 };

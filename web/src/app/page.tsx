@@ -152,14 +152,14 @@ function MangaView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   return (
     <div className="space-y-12 animate-fade-in pb-20">
       {heroManga && <Hero item={heroManga} onSelect={onSelect} />}
-      
-      <MediaRow title="Trending Manga" items={trendingList} onSelect={onSelect} />
-      
-      <MediaRow title="Highly Rated Manga" items={popularList} onSelect={onSelect} />
 
       {readingList.length > 0 && (
         <MediaRow title="Continue Reading" items={readingList} onSelect={onSelect} />
       )}
+      
+      <MediaRow title="Trending Manga" items={trendingList} onSelect={onSelect} />
+      
+      <MediaRow title="Highly Rated Manga" items={popularList} onSelect={onSelect} />
     </div>
   );
 }
@@ -204,6 +204,7 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   const [randomList, setRandomList] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [loadingDiscovery, setLoadingDiscovery] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
 
@@ -211,52 +212,60 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  const seedDiscovery = useCallback(async (active = true) => {
+    setLoadingDiscovery(true);
+    try {
+      const [trending, seasonal, recent] = await Promise.all([
+        mediaApi.getTrending(type),
+        mediaApi.getSeasonal(type),
+        mediaApi.getRecent(type, 12),
+      ]);
+
+      const pool = [...(trending.media || []), ...(seasonal.media || []), ...(recent.media || [])];
+      const shuffled = pool
+        .sort(() => Math.random() - 0.5)
+        .filter((item, index, array) => array.findIndex(other => other.id === item.id) === index)
+        .slice(0, 18);
+
+      if (active) {
+        setDiscovery(shuffled);
+      }
+
+      // Fetch truly random items by picking a random page (1-100)
+      const randomPage = Math.floor(Math.random() * 100) + 1;
+      const randomData = await mediaApi.search("", type, randomPage);
+      if (active) {
+        setRandomList(randomData.media || []);
+      }
+    } catch (err) {
+      console.error("Discovery seeding failed:", err);
+      if (active) {
+        setDiscovery([]);
+        setRandomList([]);
+      }
+    } finally {
+      if (active) setLoadingDiscovery(false);
+    }
+  }, [type]);
+
   useEffect(() => {
     let active = true;
-
-    const seedDiscovery = async () => {
-      try {
-        const [trending, seasonal, recent] = await Promise.all([
-          mediaApi.getTrending(type),
-          mediaApi.getSeasonal(type),
-          mediaApi.getRecent(type, 12),
-        ]);
-
-        const pool = [...(trending.media || []), ...(seasonal.media || []), ...(recent.media || [])];
-        const shuffled = pool
-          .sort(() => Math.random() - 0.5)
-          .filter((item, index, array) => array.findIndex(other => other.id === item.id) === index)
-          .slice(0, 18);
-
-        if (active) {
-          setDiscovery(shuffled);
-        }
-
-        // Fetch truly random items by picking a random page (1-100)
-        const randomPage = Math.floor(Math.random() * 100) + 1;
-        const randomData = await mediaApi.search("", type, randomPage);
-        if (active) {
-          setRandomList(randomData.media || []);
-        }
-      } catch {
-        if (active) {
-          setDiscovery([]);
-          setRandomList([]);
-        }
-      }
-    };
-
-    seedDiscovery();
-
+    seedDiscovery(active);
     return () => {
       active = false;
     };
-  }, [type]);
+  }, [seedDiscovery]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
 
     if (!trimmedQuery) {
+      setResults([]);
+      setHasMore(false);
+      // Auto-reseed if empty
+      if (discovery.length === 0) {
+        seedDiscovery();
+      }
       return;
     }
 
@@ -466,52 +475,83 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       </div>
 
       {/* Results */}
-      {query.trim().length === 0 && discovery.length > 0 ? (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-2xl font-extrabold tracking-tight text-white">Discover Anime</h2>
-              <p className="text-sm text-gray-500">A rotating mix of trending, seasonal, and recent picks.</p>
-            </div>
-            <button
-              onClick={() => setDiscovery([...discovery].sort(() => Math.random() - 0.5))}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
-            >
-              Shuffle
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {discovery.map((item) => (
-              <MediaCard key={item.id} item={item} onSelect={onSelect} />
-            ))}
-          </div>
-        </div>
+      {query.trim().length === 0 ? (
+        <div className="space-y-12">
+          {loadingDiscovery ? (
+             <div className="flex flex-col items-center justify-center py-24 space-y-4">
+               <Loader2 className="animate-spin text-accent" size={40} />
+               <p className="text-gray-500 font-medium">Curating your discovery feed...</p>
+             </div>
+          ) : (
+            <>
+              {discovery.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl font-extrabold tracking-tight text-white">Discover {type === "ANIME" ? "Anime" : "Manga"}</h2>
+                      <p className="text-sm text-gray-500">A rotating mix of trending, seasonal, and recent picks.</p>
+                    </div>
+                    <button
+                      onClick={() => setDiscovery([...discovery].sort(() => Math.random() - 0.5))}
+                      className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
+                    >
+                      Shuffle
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {discovery.map((item) => (
+                      <MediaCard key={item.id} item={item} onSelect={onSelect} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
-        {randomList.length > 0 && (
-          <div className="space-y-4 pt-8 border-t border-white/[0.04]">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-extrabold tracking-tight text-white">Random {type === "ANIME" ? "Anime" : "Manga"}</h2>
-                <p className="text-sm text-gray-500">Completely random picks from the database.</p>
-              </div>
-              <button
-                onClick={async () => {
-                  const randomPage = Math.floor(Math.random() * 100) + 1;
-                  const data = await mediaApi.search("", type, randomPage);
-                  setRandomList(data.media || []);
-                }}
-                className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
-              >
-                New Random
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {randomList.map((item) => (
-                <MediaCard key={item.id} item={item} onSelect={onSelect} />
-              ))}
-            </div>
-          </div>
-        )}
+              {randomList.length > 0 && (
+                <div className="space-y-4 pt-12 border-t border-white/[0.04]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl font-extrabold tracking-tight text-white">Random Picks</h2>
+                      <p className="text-sm text-gray-500">Completely random picks from across the database.</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        setLoadingDiscovery(true);
+                        const randomPage = Math.floor(Math.random() * 100) + 1;
+                        try {
+                          const data = await mediaApi.search("", type, randomPage);
+                          setRandomList(data.media || []);
+                        } finally {
+                          setLoadingDiscovery(false);
+                        }
+                      }}
+                      className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
+                    >
+                      New Random
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {randomList.map((item) => (
+                      <MediaCard key={item.id} item={item} onSelect={onSelect} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!loadingDiscovery && discovery.length === 0 && randomList.length === 0 && (
+                <div className="text-center py-24 bg-white/[0.02] rounded-3xl border border-dashed border-white/[0.06]">
+                  <Activity size={40} className="mx-auto text-gray-800 mb-4" />
+                  <p className="text-gray-500 font-semibold">Unable to load discovery feed.</p>
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="mt-4 text-accent text-sm font-bold hover:underline"
+                  >
+                    Try Refreshing
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       ) : results.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
           {results.map((item) => (
@@ -1483,11 +1523,29 @@ export default function App() {
             <div className="mx-6 mt-6 lg:mx-10 bg-red-500/10 border border-red-500/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between shadow-xl">
               <div className="flex items-center space-x-3 text-red-400">
                 <WifiOff size={18} />
-                <span className="text-sm font-bold">You are currently offline. Browsing local library mode.</span>
+                <span className="text-sm font-bold">
+                  {process.env.NODE_ENV === 'development' && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded mr-2 align-middle">DEV</span>}
+                  AniList API unreachable. Browsing local library mode.
+                </span>
               </div>
-              <button onClick={() => setDismissedOffline(true)} className="text-red-400 hover:text-red-300 p-1">
-                <X size={16} />
-              </button>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={async () => {
+                    try {
+                      await mediaApi.reconnect();
+                      window.location.reload();
+                    } catch (err) {
+                      console.error("Reconnection failed:", err);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-bold transition-all border border-red-500/20"
+                >
+                  Retry Connection
+                </button>
+                <button onClick={() => setDismissedOffline(true)} className="text-red-400 hover:text-red-300 p-1">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
           </div>
         )}

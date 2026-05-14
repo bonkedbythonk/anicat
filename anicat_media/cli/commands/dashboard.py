@@ -24,7 +24,7 @@ def dashboard(config: AppConfig, port: int, no_browser: bool):
             time.sleep(1.5)
             # We now serve the frontend directly from the backend on port 8000
             click.echo("Opening Anicat Dashboard...")
-            webbrowser.open("http://localhost:8000")
+            webbrowser.open(f"http://localhost:{port}")
             
         Timer(1, open_browser).start()
 

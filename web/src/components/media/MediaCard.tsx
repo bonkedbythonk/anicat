@@ -37,18 +37,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
     currentReleased = totalEps;
   }
   
-  const hasNewEpisodes = item.user_status?.status === 'watching' && !!nextEp && progress < currentReleased;
-
-  if (title.includes("Replica")) {
-    console.log(`[DEBUG] ${title}:`, {
-      progress,
-      totalEps,
-      nextEp,
-      currentReleased,
-      hasNewEpisodes,
-      itemRaw: item
-    });
-  }
+  const hasNewEpisodes = item.user_status?.status === 'watching' && item.status === 'RELEASING' && !!nextEp && progress < currentReleased;
 
   return (
     <button 

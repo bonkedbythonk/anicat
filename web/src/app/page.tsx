@@ -979,8 +979,6 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
       await mediaApi.triggerBackup();
       const origin = window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin;
       setBackupUrl(`${origin}/api/registry/backup/download`);
-    } catch (err) {
-      console.error("Backup failed:", err);
     } finally {
       setBackingUp(false);
     }
@@ -1146,7 +1144,7 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
             </div>
           )}
 
-          {(activeTab === "system" || activeTab === "maintenance") && (
+          {activeTab === "maintenance" && (
             <div className="space-y-8 animate-fade-in">
               {/* Onboarding Reset */}
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
@@ -1175,7 +1173,8 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                   <span>Start Setup From Scratch</span>
                 </button>
               </div>
-              {/* Application Update Section (Previously System) */}
+
+              {/* Application Update */}
               <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1186,7 +1185,6 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                     {health?.current_version || "v1.2.4"}
                   </div>
                 </div>
-
                 <div className="flex flex-col space-y-3 pt-2">
                   <button
                     onClick={handleUpdate}
@@ -1198,7 +1196,6 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                     {checkingUpdate ? <Loader2 size={16} className="animate-spin" /> : hasUpdate ? <Download size={16} /> : <RotateCcw size={16} />}
                     <span>{checkingUpdate ? (hasUpdate ? "Updating..." : "Checking...") : hasUpdate ? "Install Update" : "Check for Updates"}</span>
                   </button>
-                  
                   {updateMessage.text && (
                     <div className={`p-3 rounded-xl text-xs font-semibold flex items-center space-x-2 animate-fade-in ${
                       updateMessage.type === "success" ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
@@ -1207,17 +1204,19 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                       <span>{updateMessage.text}</span>
                     </div>
                   )}
-
                   <p className="text-[10px] text-center text-gray-600">Build: {new Date().toLocaleDateString()}</p>
                 </div>
               </div>
-            </div>
-          )}
 
+              {/* Danger Zone */}
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
                 <h3 className="text-lg font-bold text-red-400/80">Danger Zone</h3>
                 <button
-                  onClick={() => confirm("Are you sure you want to clear your local cache?")}
+                  onClick={() => {
+                    if (confirm("Are you sure you want to clear your local cache? This cannot be undone.")) {
+                      // Registry clear logic
+                    }
+                  }}
                   className="w-full py-3 border border-red-500/20 text-red-400/60 rounded-xl text-sm font-bold hover:bg-red-500/10 transition-all"
                 >
                   Clear Local Registry
@@ -1233,7 +1232,6 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                 <p className="text-sm text-gray-400">
                   Your registry stores offline metadata, playback progress, and download tracking.
                 </p>
-
                 <div className="pt-4 border-t border-white/[0.04]">
                   <button
                     onClick={handleBackup}

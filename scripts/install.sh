@@ -18,23 +18,30 @@ if ! command -v brew &> /dev/null; then
         echo "🚀 Installing Homebrew... (This may ask for your Mac password)"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         
-        # Add brew to path for the current session
-        if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Add brew to path for the current session (handles both Intel and Apple Silicon)
+        if [ -f /opt/homebrew/bin/brew ]; then
             eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -f /usr/local/bin/brew ]; then
+            eval "$(/usr/local/bin/brew shellenv)"
         fi
     else
         echo "❌ Homebrew is required for Anicat to function properly. Please install it manually from https://brew.sh"
         exit 1
     fi
-else
-    # Ensure brew is updated if it's been a while (optional, but keep it fast)
+fi
+
+# Now that we (hopefully) have brew, install the tools
+if command -v brew &> /dev/null; then
+    echo "📦 Checking system tools (mpv, ffmpeg, chafa)..."
     for cmd in mpv ffmpeg chafa; do
         if ! command -v $cmd &> /dev/null; then
-            echo "📦 Installing $cmd via Homebrew..."
-            brew install $cmd
+            echo "   - Installing $cmd via Homebrew..."
+            brew install $cmd --quiet
         fi
     done
-    echo "✅ System dependencies verified."
+    echo "✅ System tools verified."
+else
+    echo "⚠️  Warning: Homebrew is still not found. Skipping tool installation."
 fi
 
 # 2. Check for uv (Python manager)

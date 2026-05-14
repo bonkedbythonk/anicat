@@ -102,13 +102,13 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
     },
     {
       id: 2,
-      title: "Connect AniList",
-      subtitle: "Sync your library and discover more",
+      title: "Connect Your Account",
+      subtitle: "Sync your library and track your progress",
       content: (
         <div className="space-y-6 animate-fade-in">
           <p className="text-gray-400 text-sm leading-relaxed">
             Anicat works best when connected to <span className="text-white font-semibold">AniList</span>. 
-            This allows us to fetch your lists, tracking progress, and provide recommendations.
+            It's like a digital diary for your anime and manga. By connecting, your watch history stays synced across all your devices.
           </p>
 
           <div className="space-y-4">
@@ -120,7 +120,7 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="Paste your AniList Token..."
+                placeholder="Paste your Secure Token here..."
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-2xl py-4 pl-12 pr-6 text-sm font-medium focus:outline-none focus:border-accent/40 focus:bg-white/[0.05] transition-all"
               />
             </div>
@@ -136,12 +136,12 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
               className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] transition-all group"
             >
               <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+                <div className="p-2 rounded-lg bg-accent/10 text-accent">
                   <Globe size={18} />
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-bold text-white">Get your token</p>
-                  <p className="text-[11px] text-gray-500">Authorize Anicat on AniList.co</p>
+                  <p className="text-sm font-bold text-white">1. Get your Secure Token</p>
+                  <p className="text-[11px] text-gray-500">Click here to log in and copy the code</p>
                 </div>
               </div>
               <ChevronRight size={18} className="text-gray-600 group-hover:text-white transition-colors" />

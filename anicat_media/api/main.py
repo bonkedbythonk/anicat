@@ -73,26 +73,35 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(registry_router.router, prefix="/api/registry", tags=["registry"])
 
     api_dir = os.path.dirname(os.path.abspath(__file__))
-    web_out_dir = os.path.join(api_dir, "static")
+    project_root = os.path.dirname(os.path.dirname(api_dir))
+    web_static_dir = os.path.join(api_dir, "static")
+    web_out_dir = os.path.join(project_root, "web", "out")
 
-    if os.path.exists(web_out_dir):
-        app.mount("/", StaticFiles(directory=web_out_dir, html=True), name="static")
+    # Priority 1: Built static files in the api/static directory (Production/Installed)
+    if os.path.exists(web_static_dir) and os.listdir(web_static_dir):
+        app.mount("/", StaticFiles(directory=web_static_dir, html=True), name="static")
 
         @app.exception_handler(404)
         async def not_found_handler(request, exc):
-            return FileResponse(os.path.join(web_out_dir, "index.html"))
-    else:
-        dev_web_out = os.path.join(os.path.dirname(os.path.dirname(api_dir)), "web", "out")
-        if os.path.exists(dev_web_out):
-            app.mount("/", StaticFiles(directory=dev_web_out, html=True), name="static")
+            return FileResponse(os.path.join(web_static_dir, "index.html"))
+            
+    # Priority 2: Built files in the web/out directory (Development build)
+    elif os.path.exists(web_out_dir) and os.listdir(web_out_dir):
+        app.mount("/", StaticFiles(directory=web_out_dir, html=True), name="static")
 
-            @app.exception_handler(404)
-            async def dev_not_found_handler(request, exc):
-                return FileResponse(os.path.join(dev_web_out, "index.html"))
-        else:
-            @app.get("/")
-            async def root():
-                return {"status": "ok", "message": "API is running, but frontend is not built. Run 'npm run build' in 'web' folder."}
+        @app.exception_handler(404)
+        async def dev_not_found_handler(request, exc):
+            return FileResponse(os.path.join(web_out_dir, "index.html"))
+            
+    # Priority 3: No built files found
+    else:
+        @app.get("/")
+        async def root():
+            return {
+                "status": "error", 
+                "message": "Frontend not found. Please run './scripts/install.sh' or 'npm run build' in the 'web' folder.",
+                "paths_checked": [web_static_dir, web_out_dir]
+            }
 
     return app
 

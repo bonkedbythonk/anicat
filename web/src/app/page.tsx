@@ -10,6 +10,7 @@ import Hero from "@/components/media/Hero";
 import useKeyboardShortcuts from "@/lib/useKeyboardShortcuts";
 import { mediaApi, type MediaItem, type QueueItem, type Notification, type UserProfile, type SearchFilters, type HealthStatus } from "@/lib/api";
 import { useRefreshTrigger } from "@/lib/events";
+import Onboarding from "@/components/layout/Onboarding";
 import {
   Search,
   Loader2,
@@ -1459,6 +1460,7 @@ export default function App() {
   const [dismissedOffline, setDismissedOffline] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Poll health for offline banner and notifications
   useEffect(() => {
@@ -1483,6 +1485,29 @@ export default function App() {
     const interval = setInterval(checkSystem, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Check if onboarding should be shown
+  useEffect(() => {
+    if (healthStatus && !healthStatus.api_connected) {
+      const hasSeenOnboarding = localStorage.getItem("anicat_onboarding_seen");
+      if (!hasSeenOnboarding) {
+        setShowOnboarding(true);
+      }
+    } else if (healthStatus?.api_connected) {
+      setShowOnboarding(false);
+    }
+  }, [healthStatus]);
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    localStorage.setItem("anicat_onboarding_seen", "true");
+    window.location.reload();
+  };
+
+  const handleOnboardingSkip = () => {
+    setShowOnboarding(false);
+    localStorage.setItem("anicat_onboarding_seen", "true");
+  };
 
   useKeyboardShortcuts({
     onNavigate: setActiveView,
@@ -1569,6 +1594,13 @@ export default function App() {
       )}
 
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+
+      {showOnboarding && (
+        <Onboarding 
+          onComplete={handleOnboardingComplete} 
+          onSkip={handleOnboardingSkip} 
+        />
+      )}
     </div>
   );
 }

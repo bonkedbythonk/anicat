@@ -54,7 +54,6 @@ export type MediaItem = {
   favourites?: number;
   season?: string;
   seasonYear?: number;
-  duration?: number;
   studios?: { name: string; isAnimationStudio: boolean }[];
   tags?: { name: string; rank: number }[];
   next_airing?: {

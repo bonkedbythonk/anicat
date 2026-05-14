@@ -38,7 +38,32 @@ RESOLVED_PROJECT_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(sys.arg
 echo "$RESOLVED_PROJECT_DIR" > "$HOME/.anicat_path"
 echo "✅ Environment ready."
 
-# 5. Create global wrapper script for 'anicat' command
+# 5. Build Frontend (for dashboard)
+echo "📦 Building Anicat Dashboard frontend..."
+if ! command -v npm &> /dev/null; then
+    echo "⚠️  Warning: 'npm' not found. Dashboard frontend will not be updated."
+    echo "   Please install Node.js (https://nodejs.org) to build the dashboard."
+else
+    cd "$PROJECT_DIR/web"
+    echo "   - Installing frontend dependencies..."
+    npm install --quiet
+    echo "   - Building static export..."
+    if npm run build; then
+        echo "   - Syncing static files to backend..."
+        STATIC_DIR="$PROJECT_DIR/anicat_media/api/static"
+        rm -rf "$STATIC_DIR"/*
+        mkdir -p "$STATIC_DIR"
+        cp -R out/* "$STATIC_DIR/"
+        echo "✅ Dashboard built and synced."
+    else
+        echo "❌ Error: Frontend build failed."
+        exit 1
+    fi
+fi
+
+cd "$PROJECT_DIR"
+
+# 6. Create global wrapper script for 'anicat' command
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/anicat" << 'EOF'
 #!/bin/bash

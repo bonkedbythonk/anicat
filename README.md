@@ -10,31 +10,29 @@ Your anime streaming app for macOS. Search, stream, and track anime all in one p
 
 Open the **Terminal** app (press `Cmd+Space`, type `terminal`, and press Enter).
 
-Make sure you're in your home directory (just open Terminal, and you'll be there by default).
-
-Then copy and paste **all of this** into Terminal and press Enter:
+Then copy and paste **this entire line** into Terminal and press Enter:
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
 ```
 
-**That's it!** The app is now installed.
+### Step 2: Enjoy!
 
-### Step 2: Launch
+**That's it!** The app will install everything and then **automatically open the dashboard** in your browser.
 
-1. Press `Cmd+Space` and type **Anicat**
-2. Press Enter
-3. The app opens—enjoy!
+- To open it again later, just type `anicat dashboard` in your terminal.
+- To use the terminal version, just type `anicat`.
 
 ---
 
 ## Features
 
-- **Search Anime:** Find anything in a huge anime library
-- **Stream Online:** Watch episodes directly (up to 1080p)
-- **Download:** Save episodes to watch offline
-- **Track Progress:** Keep your watch list in sync with AniList
-- **Simple Interface:** Designed to be easy to use
+- **Premium Dashboard:** A beautiful web interface to browse and watch.
+- **Search Anime:** Find anything in a huge anime library.
+- **Stream Online:** Watch episodes directly (up to 1080p).
+- **Download:** Save episodes to watch offline.
+- **Track Progress:** Keep your watch list in sync with AniList.
+- **Simple Setup:** One command and you're ready to go.
 
 ---
 
@@ -42,19 +40,17 @@ git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/
 
 ### First Time You Use Anicat
 
-1. **Open Anicat** (press `Cmd+Space`, type `Anicat`, press Enter)
-2. **Sign in with AniList** (optional, to sync your watch list)
-3. **Search for anime** and start watching
+1. **Wait for the installer** to finish (it will open the dashboard for you).
+2. **Follow the Onboarding**: A friendly guide will help you connect your AniList account (optional).
+3. **Search for anime** and start watching!
 
 ### Want to Update Later?
 
-Just run this in Terminal to get the latest:
+Just run this in Terminal to get the latest features:
 
 ```bash
-cd anicat && git pull
+cd anicat && git pull && ./scripts/install.sh
 ```
-
-(If you don't remember where anicat is, that's fine—you don't need to update manually. Just use the app and it'll keep working.)
 
 ---
 
@@ -67,84 +63,28 @@ cd anicat && git pull
   rm -rf anicat && git clone https://github.com/bonkedbythonk/anicat.git && cd anicat && ./scripts/install.sh
   ```
 
-**Installation says "command not found"?**
-- Make sure you copied the command exactly as shown
-- You might need to install Xcode Command Line Tools:
-  ```bash
-  xcode-select --install
-  ```
-
-**App won't open after installation?**
-- **Give it a minute**: The very first time you open Anicat, it might take 30-60 seconds to finish setting up the background engine.
-- **Check for 'uv'**: Anicat uses a tool called `uv` to run. If the installation failed, you can manually install it by running: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **Restart your Mac**: Sometimes macOS needs a quick refresh to see the new App.
+**Terminal says "command not found: anicat"?**
+- This usually means your terminal needs to be "refreshed" after the first installation.
+- **Try this**: Close your Terminal window and open a new one.
+- **Still not working?** Copy and paste this line into your terminal: `source ~/.zshrc` (or `source ~/.bash_profile` if you are on an older Mac).
 
 **Videos won't play?**
-- Check your internet connection
-- Try a different video quality in Settings
+- Check your internet connection.
+- Make sure you have `mpv` installed (the installer usually handles this, but you can run `brew install mpv` if needed).
 
 ---
 
 ## Two Ways to Use Anicat
 
-### **Web Dashboard** (Most People Use This)
+### **1. Web Dashboard** (Recommended)
+The web dashboard is the easy, visual way to use Anicat.
+- Type `anicat dashboard` in Terminal to open it.
+- Search, browse, and watch visually.
 
-The web dashboard is the easy, visual way to use Anicat. It's what opens when you click the Anicat icon.
-
-- Search and browse anime visually
-- Click to play, download, or track shows
-- See your watch list and recommendations
-- Sync with AniList
-
-**You don't need to know anything else—just use it like a normal app.**
-
-### **Command Line (Optional)**
-
-If you want to use Anicat from Terminal, just type `anicat` and the rest speaks for itself.
-
-**You don't need this to use Anicat. The web dashboard is easier for most people.**
-
----
-
-## What You Can Do
-
-**Search & Discover**
-- Browse thousands of anime titles
-- Filter by genre, season, or popularity
-- Read reviews and recommendations
-
-**Stream**
-- Watch high-quality anime (up to 1080p)
-- Resume where you left off
-- Auto-tracking of your progress
-
-**Download**
-- Save episodes to watch offline
-- Queue multiple episodes at once
-- Manage your library
-
-**Track Your List**
-- Connect with AniList to sync your watch list
-- Rate shows and episodes
-- Keep track of completed, watching, and planned anime
-
----
-
-## Settings & Customization
-
-Open Settings to customize:
-- **Playback Quality:** Choose your video quality preference
-- **Download Location:** Pick where to save episodes
-- **Streaming Providers:** Select your preferred anime sources
-- **Theme:** Light or dark mode
-
----
-
-## Need Help?
-
-**Issues or Questions?**
-- Check GitHub Issues: https://github.com/bonkedbythonk/anicat/issues
-- Report a bug: Click "Report Bug" in Settings
+### **2. Command Line**
+If you like the terminal, you can use Anicat directly there too!
+- Type `anicat` to see all commands.
+- It's powerful, fast, and stays out of your way.
 
 ---
 

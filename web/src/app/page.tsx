@@ -1000,8 +1000,7 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
     { id: "downloads", label: "Downloads", icon: HardDrive },
     { id: "anilist", label: "AniList", icon: Globe },
     { id: "registry", label: "Registry", icon: Activity },
-    { id: "system", label: "System", icon: RotateCcw },
-    { id: "maintenance", label: "Maintenance", icon: AlertCircle },
+    { id: "maintenance", label: "Maintenance", icon: RotateCcw },
   ];
 
   return (
@@ -1147,8 +1146,9 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
             </div>
           )}
 
-          {activeTab === "maintenance" && (
-            <div className="space-y-6 animate-fade-in">
+          {(activeTab === "system" || activeTab === "maintenance") && (
+            <div className="space-y-8 animate-fade-in">
+              {/* Onboarding Reset */}
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
                 <div className="flex items-start space-x-4">
                   <div className="p-2 rounded-lg bg-red-500/10 text-red-400">
@@ -1175,9 +1175,7 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                   <span>Start Setup From Scratch</span>
                 </button>
               </div>
-            </div>
-          )}
-            <div className="space-y-8 animate-fade-in">
+              {/* Application Update Section (Previously System) */}
               <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1213,6 +1211,8 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
                   <p className="text-[10px] text-center text-gray-600">Build: {new Date().toLocaleDateString()}</p>
                 </div>
               </div>
+            </div>
+          )}
 
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
                 <h3 className="text-lg font-bold text-red-400/80">Danger Zone</h3>
@@ -1487,7 +1487,17 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [dismissedOffline, setDismissedOffline] = useState(false);
+  const [dismissedOffline, setDismissedOffline] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem("anicat_offline_dismissed") === "true";
+    }
+    return false;
+  });
+
+  const handleDismissOffline = () => {
+    setDismissedOffline(true);
+    sessionStorage.setItem("anicat_offline_dismissed", "true");
+  };
   const [notificationCount, setNotificationCount] = useState(0);
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -1603,8 +1613,11 @@ export default function App() {
                 >
                   Retry Connection
                 </button>
-                <button onClick={() => setDismissedOffline(true)} className="text-red-400 hover:text-red-300 p-1">
-                  <X size={16} />
+                <button 
+                  onClick={handleDismissOffline}
+                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <X size={16} className="text-gray-400" />
                 </button>
               </div>
             </div>

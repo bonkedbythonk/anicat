@@ -101,7 +101,12 @@ class AniListApi(BaseApiClient):
         return self.user_profile
 
     def is_authenticated(self) -> bool:
-        return True if self.user_profile else False
+        """Returns True if we have a token, regardless of connection status."""
+        return self.token is not None
+
+    def is_connected(self) -> bool:
+        """Returns True if we have successfully fetched the user profile."""
+        return self.user_profile is not None
 
     def get_viewer_profile(self) -> Optional[UserProfile]:
         if not self.token:

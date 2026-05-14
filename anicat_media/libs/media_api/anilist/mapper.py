@@ -252,9 +252,11 @@ def _to_generic_media_item(
         average_score=data.get("averageScore"),
         popularity=data.get("popularity"),
         favourites=data.get("favourites"),
-        next_airing=_to_generic_airing_schedule(data.get("nextAiringEpisode")),
         start_date=_to_generic_date(data["startDate"]),
         end_date=_to_generic_date(data["endDate"]),
+        season=data.get("season"),
+        season_year=data.get("seasonYear"),
+        next_airing=_to_generic_airing_schedule(data.get("nextAiringEpisode")),
         streaming_episodes=_to_generic_streaming_episodes(
             data.get("streamingEpisodes", [])
         ),

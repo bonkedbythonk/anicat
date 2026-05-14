@@ -80,7 +80,7 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
         <img
           src="/anicat_logo.webp"
           alt="Anicat Logo"
-          className="w-24 h-auto lg:w-32 opacity-90 hover:opacity-100 transition-opacity mix-blend-screen"
+          className="w-24 h-auto lg:w-32 opacity-95 hover:opacity-100 transition-opacity object-contain"
         />
       </div>
 

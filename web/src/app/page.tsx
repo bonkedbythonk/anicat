@@ -117,7 +117,7 @@ function MangaView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       try {
         const [trending, popular, reading] = await Promise.all([
           mediaApi.getTrending("MANGA"),
-          mediaApi.getSeasonal("MANGA"),
+          mediaApi.search("", "MANGA", 1, { min_score: 70 }),
           mediaApi.getUserList("watching", "MANGA")
         ]);
         setTrendingList(trending.media || []);
@@ -152,7 +152,7 @@ function MangaView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       
       <MediaRow title="Trending Manga" items={trendingList} onSelect={onSelect} />
       
-      <MediaRow title="Popular Manga" items={popularList} onSelect={onSelect} />
+      <MediaRow title="Highly Rated Manga" items={popularList} onSelect={onSelect} />
 
       {readingList.length > 0 && (
         <MediaRow title="Continue Reading" items={readingList} onSelect={onSelect} />
@@ -196,7 +196,10 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [results, setResults] = useState<MediaItem[]>([]);
+  const [suggestions, setSuggestions] = useState<MediaItem[]>([]);
+  const [discovery, setDiscovery] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
 
@@ -205,14 +208,50 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
   const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
+    let active = true;
+
+    const seedDiscovery = async () => {
+      try {
+        const [trending, seasonal, recent] = await Promise.all([
+          mediaApi.getTrending(type),
+          mediaApi.getSeasonal(type),
+          mediaApi.getRecent(type, 12),
+        ]);
+
+        const pool = [...(trending.media || []), ...(seasonal.media || []), ...(recent.media || [])];
+        const shuffled = pool
+          .sort(() => Math.random() - 0.5)
+          .filter((item, index, array) => array.findIndex(other => other.id === item.id) === index)
+          .slice(0, 18);
+
+        if (active) {
+          setDiscovery(shuffled);
+        }
+      } catch {
+        if (active) {
+          setDiscovery([]);
+        }
+      }
+    };
+
+    seedDiscovery();
+
+    return () => {
+      active = false;
+    };
+  }, [type]);
+
+  useEffect(() => {
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
       return;
     }
+
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const data = await mediaApi.search(query, type, 1, filters);
+        const data = await mediaApi.search(trimmedQuery, type, 1, filters);
         setResults(data.media || []);
         setHasMore(data.page_info?.has_next_page || false);
         setPage(1);
@@ -222,6 +261,28 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
         setLoading(false);
       }
     }, 400);
+    return () => clearTimeout(timer);
+  }, [query, type, filters]);
+
+  useEffect(() => {
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery.length < 2) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const data = await mediaApi.search(trimmedQuery, type, 1, filters);
+        setSuggestions((data.media || []).slice(0, 6));
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 200);
+
     return () => clearTimeout(timer);
   }, [query, type, filters]);
 
@@ -283,6 +344,42 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
             <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 text-accent animate-spin" size={22} />
           )}
         </div>
+
+        {query.trim().length >= 2 && suggestions.length > 0 && (
+          <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 shadow-2xl shadow-black/20">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-gray-500">Suggestions</p>
+              {loadingSuggestions && <Loader2 className="animate-spin text-accent" size={14} />}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {suggestions.map((item) => {
+                const title = item.title.english || item.title.romaji || "Media";
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setQuery(title);
+                    }}
+                    className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-2 text-left transition-colors hover:border-accent/30 hover:bg-white/[0.05]"
+                  >
+                    <img
+                      src={item.cover_image.large}
+                      alt={title}
+                      className="h-14 w-10 rounded-lg object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-white">{title}</p>
+                      <p className="truncate text-[11px] text-gray-500">
+                        {item.season && item.seasonYear ? `${item.season.charAt(0) + item.season.slice(1).toLowerCase()} ${item.seasonYear}` : item.status || "Anime"}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Filter toggle */}
         <button
@@ -357,7 +454,27 @@ function SearchView({ onSelect }: { onSelect: (item: MediaItem) => void }) {
       </div>
 
       {/* Results */}
-      {results.length > 0 ? (
+      {query.trim().length === 0 && discovery.length > 0 ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-extrabold tracking-tight text-white">Discover Anime</h2>
+              <p className="text-sm text-gray-500">A rotating mix of trending, seasonal, and recent picks.</p>
+            </div>
+            <button
+              onClick={() => setDiscovery([...discovery].sort(() => Math.random() - 0.5))}
+              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
+            >
+              Shuffle
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {discovery.map((item) => (
+              <MediaCard key={item.id} item={item} onSelect={onSelect} />
+            ))}
+          </div>
+        </div>
+      ) : results.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
           {results.map((item) => (
             <MediaCard key={item.id} item={item} onSelect={onSelect} />

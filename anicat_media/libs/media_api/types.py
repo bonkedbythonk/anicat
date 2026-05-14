@@ -76,7 +76,7 @@ class NotificationType(Enum):
 
 # MODELS
 class BaseMediaApiModel(BaseModel):
-    model_config = ConfigDict(frozen=False)
+    model_config = ConfigDict(frozen=False, populate_by_name=True)
 
 
 class MediaImage(BaseMediaApiModel):
@@ -226,6 +226,9 @@ class MediaItem(BaseMediaApiModel):
 
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+
+    season: Optional[str] = None
+    season_year: Optional[int] = Field(None, alias="seasonYear")
 
     next_airing: Optional[AiringSchedule] = None
 

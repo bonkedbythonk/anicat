@@ -29,7 +29,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
   const totalEps = item.episodes || 0;
   const nextEp = item.next_airing?.episode;
   
-  // Calculate if there are new episodes available
+  // Only treat this as "new" when there is an actual upcoming airing.
   let currentReleased = 0;
   if (nextEp) {
     currentReleased = nextEp - 1;
@@ -37,7 +37,7 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
     currentReleased = totalEps;
   }
   
-  const hasNewEpisodes = item.user_status?.status === 'watching' && progress < currentReleased;
+  const hasNewEpisodes = item.user_status?.status === 'watching' && !!nextEp && progress < currentReleased;
 
   if (title.includes("Replica")) {
     console.log(`[DEBUG] ${title}:`, {

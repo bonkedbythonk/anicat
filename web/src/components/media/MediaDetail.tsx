@@ -254,27 +254,31 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
 
         <div className="p-6 space-y-6">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 border-y border-white/[0.06]">
-            {fullItem.studios?.[0] && (
+            {!isManga && fullItem.studios?.[0] && (
               <div className="space-y-1">
                 <div className="flex items-center text-gray-500 space-x-1.5"><Building2 size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Studio</span></div>
                 <div className="text-xs text-gray-300 font-medium truncate">{fullItem.studios.find(s => s.isAnimationStudio)?.name || fullItem.studios[0].name}</div>
               </div>
             )}
-            <div className="space-y-1">
-              <div className="flex items-center text-gray-500 space-x-1.5"><Calendar size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Season</span></div>
-              <div className="text-xs text-gray-300 font-medium">{fullItem.season} {fullItem.seasonYear}</div>
-            </div>
+            {!isManga && (
+              <div className="space-y-1">
+                <div className="flex items-center text-gray-500 space-x-1.5"><Calendar size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Season</span></div>
+                <div className="text-xs text-gray-300 font-medium">{fullItem.season} {fullItem.seasonYear}</div>
+              </div>
+            )}
             <div className="space-y-1">
               <div className="flex items-center text-gray-500 space-x-1.5"><Users size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Popularity</span></div>
               <div className="text-xs text-gray-300 font-medium">{fullItem.popularity?.toLocaleString()}</div>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center text-gray-500 space-x-1.5"><Clock size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Duration</span></div>
-              <div className="text-xs text-gray-300 font-medium">{fullItem.duration}m</div>
-            </div>
+            {!isManga && (
+              <div className="space-y-1">
+                <div className="flex items-center text-gray-500 space-x-1.5"><Clock size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Duration</span></div>
+                <div className="text-xs text-gray-300 font-medium">{fullItem.duration}m</div>
+              </div>
+            )}
           </div>
 
-          {fullItem.next_airing && (
+          {!isManga && fullItem.next_airing && (
             <div className="bg-accent/5 border border-accent/10 rounded-xl p-4 flex items-center space-x-3">
               <div className="p-2 bg-accent/10 rounded-lg text-accent"><Calendar size={18} /></div>
               <div>

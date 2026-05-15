@@ -166,8 +166,8 @@ echo "Global 'anicat' command installed at $HOME/.local/bin/anicat"
 
 # 9. Create macOS App Bundle
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "Creating Anicat.app for macOS..."
-    APP_PATH="$HOME/Applications/Anicat.app"
+    echo "Creating Anicat Dashboard.app for macOS..."
+    APP_PATH="$HOME/Applications/Anicat Dashboard.app"
     mkdir -p "$APP_PATH/Contents/MacOS"
     mkdir -p "$APP_PATH/Contents/Resources"
 
@@ -182,9 +182,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     <key>CFBundleIconFile</key>
     <string>logo.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>com.bonkedbythonk.anicat</string>
+    <string>com.bonkedbythonk.anicat-dashboard</string>
     <key>CFBundleName</key>
-    <string>Anicat</string>
+    <string>Anicat Dashboard</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -214,7 +214,42 @@ EOF
         cp "$PROJECT_DIR/anicat_media/assets/icons/logo.icns" "$APP_PATH/Contents/Resources/logo.icns"
     fi
 
-    echo "Anicat.app created in $HOME/Applications"
+    echo "Anicat Dashboard.app created in $HOME/Applications"
+
+    # 10. Create macOS LaunchAgent for background persistence
+    echo "Setting up background service (LaunchAgent)..."
+    LAUNCH_AGENT_PATH="$HOME/Library/LaunchAgents/com.bonkedbythonk.anicat.plist"
+    mkdir -p "$(dirname "$LAUNCH_AGENT_PATH")"
+
+    cat > "$LAUNCH_AGENT_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bonkedbythonk.anicat</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$HOME/.local/bin/anicat</string>
+        <string>dashboard</string>
+        <string>--no-browser</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/anicat.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/anicat.err</string>
+</dict>
+</plist>
+EOF
+
+    # Load the agent
+    launchctl unload "$LAUNCH_AGENT_PATH" 2>/dev/null
+    launchctl load "$LAUNCH_AGENT_PATH"
+    echo "Background service installed and started."
 fi
 
 # 9. Success message

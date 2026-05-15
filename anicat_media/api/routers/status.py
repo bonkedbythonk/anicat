@@ -204,6 +204,10 @@ async def trigger_update():
             # but we use a timeout to wait for it to at least start successfully
             # Pass --no-launch so it doesn't open a new browser window
             subprocess.Popen(["bash", install_script, "--no-launch"], cwd=repo_root)
+            
+            # We return the message, and then the install script will eventually 
+            # rebuild and the user will refresh. To be safe, we don't kill ourselves 
+            # immediately, but we've already removed the rocket from THIS message below.
             return {"status": "success", "message": "Update in progress. The application will rebuild in the background. Please refresh this page in 1-2 minutes to apply the changes."}
         
         return {"status": "success", "message": "Updated successfully (code only)."}

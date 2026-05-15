@@ -6,10 +6,10 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_NAME="Anicat.app"
 INSTALL_DIR="$HOME/Applications"
 
-echo "🚀 Installing Anicat Desktop App..."
+echo "Installing Anicat Desktop App..."
 
 # 1. Check for System Dependencies (mpv, ffmpeg, chafa)
-echo "🔍 Checking for system dependencies (mpv, ffmpeg, chafa)..."
+echo "Checking for system dependencies (mpv, ffmpeg, chafa)..."
 
 # Try to find brew in common locations if command -v fails
 BREW_EXE=$(command -v brew || true)
@@ -22,11 +22,11 @@ if [ -z "$BREW_EXE" ]; then
 fi
 
 if [ -z "$BREW_EXE" ]; then
-    echo "⚠️  Homebrew not found. It is required to install system dependencies (mpv, ffmpeg, chafa)."
-    echo "📦 Would you like to install Homebrew now? (y/n)"
+    echo "Homebrew not found. It is required to install system dependencies (mpv, ffmpeg, chafa)."
+    echo "Would you like to install Homebrew now? (y/n)"
     read -r response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        echo "🚀 Installing Homebrew... (This may ask for your Mac password)"
+        echo "Installing Homebrew... (This may ask for your Mac password)"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         
         # Set BREW_EXE after installation
@@ -40,28 +40,28 @@ if [ -z "$BREW_EXE" ]; then
             eval "$($BREW_EXE shellenv)"
         fi
     else
-        echo "❌ Homebrew is required for Anicat to function properly. Please install it manually from https://brew.sh"
+        echo "Homebrew is required for Anicat to function properly. Please install it manually from https://brew.sh"
         exit 1
     fi
 fi
 
 # Now that we (hopefully) have brew, install the tools
 if [ -n "$BREW_EXE" ]; then
-    echo "📦 Checking system tools (mpv, ffmpeg, chafa)..."
+    echo "Checking system tools (mpv, ffmpeg, chafa)..."
     for cmd in mpv ffmpeg chafa; do
         if ! command -v $cmd &> /dev/null; then
             echo "   - Installing $cmd via Homebrew..."
             $BREW_EXE install $cmd --quiet
         fi
     done
-    echo "✅ System tools verified."
+    echo "System tools verified."
 else
-    echo "⚠️  Warning: Homebrew is still not found. Skipping tool installation."
+    echo "Warning: Homebrew is still not found. Skipping tool installation."
 fi
 
 # 2. Check for uv (Python manager)
 if ! command -v uv &> /dev/null; then
-    echo "📦 Installing 'uv' (Python manager)..."
+    echo "Installing 'uv' (Python manager)..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
     
     # Try to add to current path for the rest of the script
@@ -69,17 +69,17 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # 3. Sync dependencies
-echo "📦 Setting up the environment and dependencies..."
+echo "Setting up the environment and dependencies..."
 echo "   (This may take a minute on the first install)"
 if ! uv sync --quiet; then
-    echo "❌ Error: Failed to install dependencies. Check your internet connection."
+    echo "Error: Failed to install dependencies. Check your internet connection."
     exit 1
 fi
 
 # 4. Install the anicat CLI command
-echo "📦 Installing anicat CLI command..."
+    echo "Installing anicat CLI command..."
 if ! uv pip install -e . --quiet; then
-    echo "❌ Error: Failed to install anicat package. Check your setup."
+    echo "Error: Failed to install anicat package. Check your setup."
     exit 1
 fi
 
@@ -87,12 +87,12 @@ fi
 # Resolve to an absolute canonical path to avoid stale/cached locations
 RESOLVED_PROJECT_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PROJECT_DIR")
 echo "$RESOLVED_PROJECT_DIR" > "$HOME/.anicat_path"
-echo "✅ Environment ready."
+echo "Environment ready."
 
 # 6. Build Frontend (for dashboard)
-echo "📦 Building Anicat Dashboard frontend..."
+echo "Building Anicat Dashboard frontend..."
 if ! command -v npm &> /dev/null; then
-    echo "⚠️  Warning: 'npm' not found. Dashboard frontend will not be updated."
+    echo "Warning: 'npm' not found. Dashboard frontend will not be updated."
     echo "   Please install Node.js (https://nodejs.org) to build the dashboard."
 else
     cd "$PROJECT_DIR/web"
@@ -105,9 +105,9 @@ else
         rm -rf "$STATIC_DIR"/*
         mkdir -p "$STATIC_DIR"
         cp -R out/* "$STATIC_DIR/"
-        echo "✅ Dashboard built and synced."
+        echo "Dashboard built and synced."
     else
-        echo "❌ Error: Frontend build failed."
+        echo "Error: Frontend build failed."
         exit 1
     fi
 fi
@@ -123,13 +123,13 @@ cat > "$HOME/.local/bin/anicat" << 'EOF'
 # Read project directory from saved path and resolve it to an absolute path
 RAW_PROJECT_DIR="$(cat "$HOME/.anicat_path" 2>/dev/null)"
 if [ -z "$RAW_PROJECT_DIR" ]; then
-    echo "❌ Error: Anicat project directory not found. Please reinstall anicat."
+    echo "Error: Anicat project directory not found. Please reinstall anicat."
     exit 1
 fi
 PROJECT_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$RAW_PROJECT_DIR")
 
 if [ ! -d "$PROJECT_DIR" ]; then
-    echo "❌ Error: Anicat project directory not found at $PROJECT_DIR. Please reinstall anicat."
+    echo "Error: Anicat project directory not found at $PROJECT_DIR. Please reinstall anicat."
     exit 1
 fi
 
@@ -156,20 +156,20 @@ fi
 
 if [ -n "$SHELL_CONFIG" ]; then
     if ! grep -q ".local/bin" "$SHELL_CONFIG" 2>/dev/null; then
-        echo "📝 Adding ~/.local/bin to PATH in $SHELL_CONFIG..."
+        echo "Adding ~/.local/bin to PATH in $SHELL_CONFIG..."
         echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_CONFIG"
-        echo "✅ PATH updated. Please run 'source $SHELL_CONFIG' or open a new terminal."
+        echo "PATH updated. Please run 'source $SHELL_CONFIG' or open a new terminal."
     fi
 fi
 
-echo "✅ Global 'anicat' command installed at $HOME/.local/bin/anicat"
+echo "Global 'anicat' command installed at $HOME/.local/bin/anicat"
 
 # 9. Success message
 echo ""
-echo "✨ Installation Complete! ✨"
+echo "Installation Complete!"
 echo "Anicat is now installed and ready to go."
 echo ""
-echo "🚀 Launching Anicat Dashboard for you..."
+echo "Launching Anicat Dashboard for you..."
 echo ""
 
 # Ensure the new PATH is available for this session

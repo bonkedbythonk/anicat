@@ -147,7 +147,7 @@ async def check_for_updates():
         if "Your branch is behind" in status:
             _cached_update_available = True
             return {"status": "success", "update_available": True, "message": "A new version of Anicat is available!"}
-        return {"status": "success", "update_available": False, "message": "✨ You are running the latest version."}
+        return {"status": "success", "update_available": False, "message": "You are running the latest version."}
     except Exception as e:
         return {"status": "error", "update_available": False, "message": f"Failed to check for updates: {str(e)}"}
 
@@ -181,7 +181,7 @@ async def trigger_update():
             return {"status": "error", "message": f"Git pull failed: {result.stderr or result.stdout}"}
             
         if "Already up to date." in result.stdout:
-            return {"status": "success", "message": "✨ Already on the latest version."}
+            return {"status": "success", "message": "Already on the latest version."}
         
         # 2. Run the installation script to sync everything and rebuild frontend
         install_script = os.path.join(repo_root, "scripts", "install.sh")
@@ -189,7 +189,7 @@ async def trigger_update():
             # Run install script in the background so we don't block the API too long
             # but we use a timeout to wait for it to at least start successfully
             subprocess.Popen(["bash", install_script], cwd=repo_root)
-            return {"status": "success", "message": "🚀 Update started! The app will rebuild and restart automatically in about 1-2 minutes."}
+            return {"status": "success", "message": "Update started! The app will rebuild and restart automatically in about 1-2 minutes."}
         
         return {"status": "success", "message": "Updated successfully (code only)."}
         

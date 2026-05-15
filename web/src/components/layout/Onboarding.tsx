@@ -170,10 +170,7 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
               className="w-full bg-accent hover:bg-accent-light text-white font-bold py-4 rounded-2xl flex items-center justify-center space-x-2 transition-all shadow-xl shadow-accent/20 active:scale-95 disabled:opacity-50"
             >
               {saving ? <Loader2 size={20} className="animate-spin" /> : (
-                <>
-                  <span>Connect Account</span>
-                  <Sparkles size={18} />
-                </>
+                <span>Connect Account</span>
               )}
             </button>
             <button 

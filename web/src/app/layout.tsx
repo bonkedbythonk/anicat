@@ -14,11 +14,11 @@ export default function RootLayout({
         <meta name="theme-color" content="#050505" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/logo.png" type="image/png" />
-        <link rel="apple-touch-icon" href="/pwa-logo.png?v=2" />
+        <link rel="apple-touch-icon" href="/pwa-logo.png?v=3" />
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
             const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            document.write('<link rel="manifest" href="/manifest.json?v=2">');
+            document.write('<link rel="manifest" href="/manifest.json?v=3">');
           })();
         ` }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />

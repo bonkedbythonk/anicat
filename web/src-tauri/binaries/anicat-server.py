@@ -17,7 +17,7 @@ def main():
     # When running as a bundled sidecar, we might need to adjust paths
     if getattr(sys, 'frozen', False):
         # Running in a bundle
-        base_dir = sys._MEIPASS
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     else:
         # Running in normal python
         base_dir = os.path.dirname(os.path.abspath(__file__))

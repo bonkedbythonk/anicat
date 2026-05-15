@@ -29,14 +29,47 @@ class AuthService:
         _lock_file = APP_DATA_DIR / "auth.lock"
         self._lock = FileLock(_lock_file)
 
-    def resolve_token(self, config: Optional["AppConfig"] = None) -> str | None:
+    def resolve_token(
+        self,
+        config: Optional["AppConfig"] = None,
+        explicit_token: Optional[str] = None,
+    ) -> str | None:
         """
-        Resolve an AniList token exclusively from the configuration object.
+        Resolve an AniList token from multiple sources in priority order:
+        1. explicit_token (passed via flag or argument)
+        2. ANILIST_TOKEN environment variable
+        3. Token file (~/.config/anicat/token.txt)
+        4. App config (config.toml)
         """
+        # 1. Explicit token
+        if explicit_token:
+            token = self._read_token_from_path_or_string(explicit_token)
+            if token:
+                logger.debug("Resolved token from explicit input.")
+                return token
+
+        # 2. Environment variable
+        env_token = os.environ.get("ANILIST_TOKEN")
+        if env_token:
+            logger.debug("Resolved token from environment variable.")
+            return env_token.strip()
+
+        # 3. Token file (XDG convention)
+        if _XDG_TOKEN_FILE.exists():
+            try:
+                token = _XDG_TOKEN_FILE.read_text(encoding="utf-8").strip()
+                if token:
+                    logger.debug(f"Resolved token from file: {_XDG_TOKEN_FILE}")
+                    return token
+            except Exception as e:
+                logger.warning(f"Failed to read token file {_XDG_TOKEN_FILE}: {e}")
+
+        # 4. App config
         if config and config.anilist.token:
+            logger.debug("Resolved token from app config.")
             return config.anilist.token
-        
-        logger.debug("No token found in config.")
+
+        logger.debug("No token found in any source.")
         return None
 
     @staticmethod

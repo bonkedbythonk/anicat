@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 import subprocess
 from anicat_media.core.constants import VERSION
-from anicat_media.core.config import ConfigLoader
+from anicat_media.cli.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 

@@ -1,3 +1,4 @@
+from enum import Enum
 from pathlib import Path
 from ...core.config import AppConfig
 
@@ -8,9 +9,9 @@ def generate_config_toml_from_app_model(config: AppConfig) -> str:
     This is a simple implementation to avoid external dependencies like tomli_w.
     """
     lines = [
-        "#/\_/\ ",
-        "#( o.o )",
-        "# > ^ <  [ a n i c a t ]",
+        r"#/\_/\ ",
+        r"#( o.o )",
+        r"# > ^ <  [ a n i c a t ]",
         ""
     ]
     
@@ -50,7 +51,7 @@ def generate_config_toml_from_app_model(config: AppConfig) -> str:
                 
                 str_val = str_val.replace("\\", "\\\\").replace('"', '\\"')
                 value = f'"{str_val}"'
-            elif hasattr(field_value, "value"): # Enum
+            elif isinstance(field_value, Enum): # Enum
                 value = f'"{field_value.value}"'
             else:
                 str_val = str(field_value).replace("\\", "\\\\")

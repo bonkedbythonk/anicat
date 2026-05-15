@@ -390,7 +390,7 @@ def _manage_categories_action(ctx: Context, state: State) -> MenuAction:
             for cat in all_categories
         ]
 
-        selected = inquirer.checkbox(
+        selected = inquirer.checkbox(  # type: ignore
             message="Select categories to SHOW (uncheck to hide):",
             choices=choices,
             instruction="(Space to toggle, Enter to confirm)",
@@ -460,7 +460,7 @@ def _check_for_updates_action(ctx: Context, state: State) -> MenuAction:
                 return state.model_copy(update={"update_available": True})
 
             from InquirerPy import inquirer
-            if inquirer.confirm(message="Would you like to update Anicat now?", default=True).execute():
+            if inquirer.confirm(message="Would you like to update Anicat now?", default=True).execute():  # type: ignore
                 console.print("\n[bold cyan]Updating Anicat... This will take a moment.[/]")
                 import subprocess
                 import sys

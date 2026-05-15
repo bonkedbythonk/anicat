@@ -43,7 +43,7 @@ def login_flow(config: AppConfig):
     
     rprint("\n[bold green]Instructions:[/]")
     rprint("1. Copy the 'access_token' from the URL after authorizing.")
-    rprint("2. Paste it in the file behind [bold white]token = [/] (located under the [bold white]\[anilist][/] section).")
+    rprint(r"2. Paste it in the file behind [bold white]token = [/] (located under the [bold white]\[anilist][/] section).")
     rprint("3. Save ([bold white]Cmd+S[/]) and close the editor.")
     
     input("\nPress Enter here once you have saved and closed the file...")

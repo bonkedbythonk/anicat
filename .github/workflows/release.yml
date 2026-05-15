@@ -32,9 +32,9 @@ jobs:
           version: "latest"
       - name: install dependencies
         run: |
-          cd web && npm install
+          cd web && npm ci
           cd ..
-          uv sync --dev
+          uv sync --dev --all-extras
       - name: build sidecar
         run: |
           uv run pyinstaller --version # Verify pyinstaller is there

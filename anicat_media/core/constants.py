@@ -27,11 +27,11 @@ except Exception:
             if match:
                 __version__ = match.group(1)
             else:
-                __version__ = "4.0.0" # Default for V4
+                __version__ = "3.4.4"
         else:
-            __version__ = "4.0.0"
+            __version__ = "3.4.4"
     except Exception:
-        __version__ = "4.0.0"
+        __version__ = "3.4.4"
 
 VERSION = __version__
 

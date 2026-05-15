@@ -9,7 +9,7 @@ import MediaDetail from "@/components/media/MediaDetail";
 import Hero from "@/components/media/Hero";
 import MangaReader from "@/components/media/MangaReader";
 import useKeyboardShortcuts from "@/lib/useKeyboardShortcuts";
-import { mediaApi, type MediaItem, type QueueItem, type Notification, type UserProfile, type SearchFilters, type HealthStatus } from "@/lib/api";
+import { API_BASE_ORIGIN, mediaApi, type MediaItem, type QueueItem, type Notification, type UserProfile, type SearchFilters, type HealthStatus } from "@/lib/api";
 import { useRefreshTrigger, dispatchRefresh } from "@/lib/events";
 import Onboarding from "@/components/layout/Onboarding";
 import {
@@ -1163,8 +1163,7 @@ function SettingsView({ health, onUpdateStarted }: { health: HealthStatus | null
     setBackupUrl(null);
     try {
       await mediaApi.triggerBackup();
-      const origin = window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin;
-      setBackupUrl(`${origin}/api/registry/backup/download`);
+      setBackupUrl(`${API_BASE_ORIGIN}/api/registry/backup/download`);
     } finally {
       setBackingUp(false);
     }

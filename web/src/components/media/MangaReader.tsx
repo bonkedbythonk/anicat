@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Book, FileText, ScrollText } from "lucide-react";
-import { mediaApi } from "@/lib/api";
+import { API_BASE_ORIGIN, mediaApi } from "@/lib/api";
 
 interface MangaReaderProps {
   mediaId: number;
@@ -222,7 +222,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   };
 
   const getProxyUrl = (url: string) => {
-    return `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/media/manga/proxy?url=${encodeURIComponent(url)}`;
+    return `${API_BASE_ORIGIN}/api/media/manga/proxy?url=${encodeURIComponent(url)}`;
   };
 
   if (loading) {

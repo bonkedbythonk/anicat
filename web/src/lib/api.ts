@@ -1,8 +1,8 @@
 const isBrowser = typeof window !== 'undefined';
-const API_BASE_ORIGIN = isBrowser 
-  ? (['3000', '3001', '3002'].includes(window.location.port) ? 'http://localhost:8000' : window.location.origin) 
-  : 'http://localhost:8000';
-const API_BASE_URL = `${API_BASE_ORIGIN}/api`;
+const DEFAULT_API_BASE_ORIGIN = 'http://127.0.0.1:8000';
+
+export const API_BASE_ORIGIN = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE_ORIGIN;
+export const API_BASE_URL = `${API_BASE_ORIGIN}/api`;
 
 if (isBrowser) {
   console.log('API_BASE_URL:', API_BASE_URL);

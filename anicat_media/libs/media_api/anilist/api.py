@@ -349,9 +349,10 @@ class AniListApi(BaseApiClient):
             "airingAt_greater": airingAt_greater,
             "airingAt_lesser": airingAt_lesser,
             "page": page,
-            "perPage": per_page,
-            "mediaId_in": media_ids
+            "perPage": per_page
         }
+        if media_ids:
+            variables["mediaId_in"] = media_ids
         response = execute_graphql(
             ANILIST_ENDPOINT, self.http_client, gql.AIRING_SCHEDULE, variables
         )

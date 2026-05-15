@@ -11,12 +11,18 @@ jobs:
       matrix:
         platform: [macos-latest]
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: install dependencies
@@ -24,8 +30,15 @@ jobs:
           npm install
           pip install uv
           uv sync
+      - name: build sidecar
+        run: |
+          pip install pyinstaller
+          bash scripts/build_sidecar.sh
       - name: build tauri
-        run: npm run tauri build
+        run: |
+          cd web
+          npm run build
+          npx tauri build
       - name: upload release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')

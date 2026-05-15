@@ -376,11 +376,41 @@ async def get_chapter_pages(media_id: int, chapter_number: str):
         raise HTTPException(status_code=500, detail=str(e))
 @router.get("/manga/proxy")
 async def proxy_manga_image(url: str):
-    """Proxy manga images to avoid CORS and hotlinking issues."""
+    """Proxy and cache manga images to provide instantaneous navigation."""
     import httpx
+    import hashlib
     from fastapi import Response
+    from ...core.constants import APP_CACHE_DIR
     
-    # Common headers to bypass hotlink protection
+    # Setup cache directory
+    manga_cache = APP_CACHE_DIR / "manga"
+    manga_cache.mkdir(parents=True, exist_ok=True)
+    
+    # Create a unique filename from the URL
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    # Try to guess extension from URL or use .jpg as fallback
+    ext = ".jpg"
+    if ".webp" in url.lower(): ext = ".webp"
+    elif ".png" in url.lower(): ext = ".png"
+    elif ".avif" in url.lower(): ext = ".avif"
+    
+    cache_path = manga_cache / f"{url_hash}{ext}"
+
+    # 1. Check if we already have it in the local cache
+    if cache_path.exists():
+        try:
+            return Response(
+                content=cache_path.read_bytes(),
+                media_type=f"image/{ext.replace('.', '')}",
+                headers={
+                    "Cache-Control": "public, max-age=31536000",
+                    "X-Cache-Status": "HIT"
+                }
+            )
+        except Exception:
+            pass # Fallback to fetching if read fails
+
+    # 2. Not in cache, fetch it
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://mangakatana.com/",
@@ -389,20 +419,22 @@ async def proxy_manga_image(url: str):
 
     try:
         async with httpx.AsyncClient() as client:
-            # Add a timeout to avoid hanging
-            response = await client.get(url, headers=headers, timeout=10.0, follow_redirects=True)
+            response = await client.get(url, headers=headers, timeout=15.0, follow_redirects=True)
             if response.status_code == 200:
+                # Save to cache for next time
+                cache_path.write_bytes(response.content)
+                
                 return Response(
                     content=response.content,
                     media_type=response.headers.get("Content-Type", "image/jpeg"),
                     headers={
                         "Cache-Control": "public, max-age=31536000",
-                        "Access-Control-Allow-Origin": "*",
+                        "X-Cache-Status": "MISS"
                     }
                 )
             else:
-                logger.error(f"[MANGA PROXY] Failed to fetch image: {url} (Status: {response.status_code})")
-                raise HTTPException(status_code=response.status_code, detail="Failed to fetch image from source")
+                logger.error(f"[MANGA PROXY] Source failed: {url} ({response.status_code})")
+                raise HTTPException(status_code=response.status_code, detail="Source refused request")
     except Exception as e:
-        logger.error(f"[MANGA PROXY] Proxy error for {url}: {str(e)}")
+        logger.error(f"[MANGA PROXY] Cache error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

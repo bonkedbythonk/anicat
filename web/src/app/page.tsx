@@ -1589,7 +1589,7 @@ export default function App() {
       <main className="flex-1 ml-[72px] lg:ml-60 overflow-y-auto scrollbar-hide relative">
         {/* Offline Banner */}
         {isOffline && !dismissedOffline && (
-          <div className="absolute top-0 left-0 right-0 z-50 animate-slide-down">
+          <div className="absolute top-0 left-0 right-0 z-[300] animate-slide-down">
             <div className="mx-6 mt-6 lg:mx-10 bg-red-500/10 border border-red-500/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between shadow-xl">
               <div className="flex items-center space-x-3 text-red-400">
                 <WifiOff size={18} />
@@ -1624,7 +1624,7 @@ export default function App() {
 
         {/* Refresh Banner */}
         {refreshNeeded && (
-          <div className={`absolute top-0 left-0 right-0 z-50 animate-slide-down ${isOffline && !dismissedOffline ? 'mt-24' : ''}`}>
+          <div className={`absolute top-0 left-0 right-0 z-[300] animate-slide-down ${isOffline && !dismissedOffline ? 'mt-24' : ''}`}>
             <div className="mx-6 mt-6 lg:mx-10 bg-green-500/10 border border-green-500/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between shadow-xl">
               <div className="flex items-center space-x-3 text-green-400">
                 <RotateCcw size={18} className="animate-spin-slow" />

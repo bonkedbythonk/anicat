@@ -1194,6 +1194,22 @@ function SettingsView({ health, onUpdateStarted }: { health: HealthStatus | null
                   Clear Local Registry
                 </button>
               </div>
+
+              {/* Reset Setup */}
+              <div className="pt-2">
+                <button 
+                  onClick={() => {
+                    if (confirm("Reset onboarding and restart setup?")) {
+                      localStorage.removeItem("anicat_onboarding_seen");
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] text-gray-600 text-[10px] font-bold transition-all border border-white/[0.04] flex items-center justify-center space-x-2"
+                >
+                  <RotateCcw size={12} />
+                  <span>Reset Onboarding Setup</span>
+                </button>
+              </div>
             </div>
           )}
 

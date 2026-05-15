@@ -261,7 +261,6 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
                 break
                 
             selected_chapter = chapter_map[selected_chapter_title]
-            chapter_url = selected_chapter["url"]
             
             chapter_data = None
             with feedback.progress(f"Loading '{selected_chapter_title}'"):

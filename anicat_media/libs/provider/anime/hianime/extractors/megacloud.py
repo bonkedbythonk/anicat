@@ -9,7 +9,6 @@ import httpx
 
 from ...types import EpisodeStream, Server, Subtitle
 from .. import constants
-from ..types import HiAnimeSource
 
 logger = logging.getLogger(__name__)
 

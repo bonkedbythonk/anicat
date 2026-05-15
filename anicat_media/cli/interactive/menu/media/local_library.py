@@ -97,7 +97,6 @@ def local_library(ctx: Context, state: State) -> State | InternalDirective:
 
 
 def _format_title(ctx: Context, media_item: MediaItem) -> str:
-    config = ctx.config
 
     title = media_item.title.english or media_item.title.romaji
     progress = "0"

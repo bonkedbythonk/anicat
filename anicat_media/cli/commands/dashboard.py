@@ -26,7 +26,7 @@ def dashboard(config: AppConfig, port: int, host: str, no_browser: bool, reload:
     except Exception:
         pass
 
-    click.echo(f"Anicat Dashboard is starting...")
+    click.echo("Anicat Dashboard is starting...")
     click.echo(f"   - Local:  http://localhost:{port}")
     if host == "0.0.0.0" and local_ip != "localhost":
         click.echo(f"   - Remote: http://{local_ip}:{port} (for your iPhone/Tablet)")

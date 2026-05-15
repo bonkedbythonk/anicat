@@ -1,12 +1,11 @@
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 import logging
 
-logger = logging.getLogger(__name__)
 from ...libs.media_api.types import MediaType, MediaSearchResult, MediaItem, CharacterSearchResult, MediaReview, MediaSort, MediaSeason, MediaGenre, MediaStatus, MediaFormat
 from ...libs.media_api.params import MediaSearchParams, MediaCharactersParams, MediaReviewsParams, MediaRecommendationParams
 
-from fastapi import APIRouter, HTTPException, Query
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -420,9 +419,12 @@ async def proxy_manga_image(url: str):
     url_hash = hashlib.md5(url.encode()).hexdigest()
     # Try to guess extension from URL or use .jpg as fallback
     ext = ".jpg"
-    if ".webp" in url.lower(): ext = ".webp"
-    elif ".png" in url.lower(): ext = ".png"
-    elif ".avif" in url.lower(): ext = ".avif"
+    if ".webp" in url.lower():
+        ext = ".webp"
+    elif ".png" in url.lower():
+        ext = ".png"
+    elif ".avif" in url.lower():
+        ext = ".avif"
     
     cache_path = manga_cache / f"{url_hash}{ext}"
 

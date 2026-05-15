@@ -19,7 +19,7 @@ def status(ctx):
             click.secho("\n✅ Anicat is ONLINE", fg="green", bold=True)
             click.echo(f"  Version: {data.get('current_version', 'unknown')}")
             click.echo(f"  AniList: {'Connected' if data.get('api_authenticated') else 'Not Logged In'}")
-            click.echo(f"  Network: {'Local Only (Safe)' if data.get('is_offline') == False else 'Offline'}")
+            click.echo(f"  Network: {'Local Only (Safe)' if not data.get('is_offline') else 'Offline'}")
             
             if data.get('update_available'):
                 click.secho("\n✨ An update is available! Install it via the Dashboard.", fg="amber")

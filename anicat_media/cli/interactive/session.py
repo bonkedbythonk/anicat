@@ -135,7 +135,6 @@ class Context:
 
             media_api = create_api_client(self.config.general.media_api, self.config)
 
-            auth = self.auth
             token = self.config.anilist.token
             if token:
                 try:

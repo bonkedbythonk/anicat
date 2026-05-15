@@ -4,7 +4,7 @@ from anicat_media.core.utils.fuzzy import fuzz
 from anicat_media.core.utils.normalizer import normalize_title
 from anicat_media.libs.provider.anime.types import SearchResult, ProviderName
 from anicat_media.libs.provider.manga.types import MangaProviderName
-from typing import Any, Union
+from typing import Union
 from anicat_media.libs.media_api.types import MediaItem
 
 

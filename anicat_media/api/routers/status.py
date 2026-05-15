@@ -9,6 +9,9 @@ def get_ctx():
     from ..main import ctx
     return ctx
 
+import logging
+logger = logging.getLogger(__name__)
+
 class PlaybackInfo(BaseModel):
     media_id: int
     media_title: str
@@ -127,6 +130,7 @@ async def get_health():
         from ..core.constants import VERSION
         
         # Refresh token status from config to ensure we aren't using stale memory
+        from ..core.config import ConfigLoader
         loader = ConfigLoader()
         current_config = loader.load(allow_setup=False)
         api_authenticated = bool(current_config.anilist.token and len(current_config.anilist.token) > 10)

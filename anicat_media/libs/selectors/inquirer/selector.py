@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 
 from InquirerPy import inquirer
-from InquirerPy.prompts.fuzzy import FuzzyPrompt
 from InquirerPy.validator import EmptyInputValidator
 from rich.console import Console
 from rich.text import Text

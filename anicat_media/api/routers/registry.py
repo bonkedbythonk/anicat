@@ -26,13 +26,10 @@ async def create_backup():
     """Create a registry backup archive."""
     try:
         import shutil
-        import tempfile
-        from pathlib import Path
         from datetime import datetime
 
         ctx = get_ctx()
         registry_dir = ctx.media_registry.media_registry_dir
-        index_dir = ctx.media_registry.config.index_dir
 
         # Create timestamped backup
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -60,7 +57,6 @@ async def create_backup():
 async def download_latest_backup():
     """Download the most recent backup archive."""
     try:
-        from pathlib import Path
 
         ctx = get_ctx()
         backup_dir = ctx.media_registry.media_registry_dir.parent / "backups"

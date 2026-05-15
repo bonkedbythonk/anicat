@@ -233,6 +233,9 @@ export const mediaApi = {
   play: (mediaId: number, episode?: string) =>
     fetchFromApi(`/actions/play/${mediaId}${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
 
+  playNext: (mediaId: number) =>
+    fetchFromApi(`/actions/play/${mediaId}`, { method: 'POST' }),
+
   getPlaybackStatus: (): Promise<PlaybackStatus> =>
     fetchFromApi('/status/playback'),
 

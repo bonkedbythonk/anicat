@@ -137,6 +137,7 @@ export type HealthStatus = {
   update_available?: boolean;
   unread_notifications?: number;
   current_version?: string;
+  data_version?: number;
 };
 
 export type SearchFilters = {

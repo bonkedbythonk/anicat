@@ -1,60 +1,66 @@
 # Anicat
 
-Anicat is a production-ready media companion for macOS. It provides a centralized dashboard to stream anime, read manga, and track progress via AniList, all within a minimalist environment that operates silently in the background.
+Anicat is a media companion for macOS designed for anime and manga management. It provides a centralized dashboard to stream content, track progress via AniList, and manage local reading with a focus on performance and minimalist design.
 
 ![Anicat Dashboard](dashboard_preview.png)
 
-## How it Works
+## Features
 
-Anicat is designed as a **Silent Engine**. Unlike typical apps, it is split into two parts:
+- **macOS Native Service**: Runs as a persistent LaunchAgent background service with a native App bundle for Dock integration.
+- **Privacy Focused**: Network isolation via 127.0.0.1 (Localhost) binding ensures the service is invisible to external devices.
+- **High-Speed Manga**: Backend image proxy with persistent disk caching for instantaneous page navigation.
+- **Real-time Synchronization**: Bi-directional AniList sync for automated progress tracking across devices.
+- **Advanced Playback**: Native MPV integration supporting custom shaders, subtitle selection, and multi-track audio.
+- **Automated Maintenance**: Integrated update system with background fetch and one-click installation.
 
-1.  **The Server (The Brain)**: When you install Anicat, it sets up a macOS "LaunchAgent." This means the core logic starts automatically when you log in to your Mac. It stays hidden, uses almost zero resources, and handles all your AniList syncing and manga caching behind the scenes.
-2.  **The Dashboard (The Remote)**: The "Anicat Dashboard" app in your Applications folder is your way to talk to the brain. It opens the web interface where you actually watch and read.
+## Keyboard Shortcuts
 
-By separating these, Anicat can keep tracking your progress and checking for updates even when the dashboard window is closed.
+### Video Player (MPV)
+- `Space`: Play / Pause
+- `F`: Toggle Fullscreen
+- `Shift + N`: Skip to Next Episode
+- `Shift + P`: Return to Previous Episode
+- `Left / Right`: Seek backwards/forwards (5 seconds)
+- `Up / Down`: Volume control
+- `[` / `]`: Adjust playback speed
+- `J`: Cycle through subtitles
+- `#`: Cycle through audio tracks
+- `Q`: Quit player and save progress
+
+### Manga Reader
+- `Left / Right`: Previous / Next page
+- `F`: Toggle Fullscreen
+- `S`: Single Page mode
+- `D`: Double Page mode
+- `V`: Vertical (Long-strip) mode
+- `Esc`: Close reader
 
 ## Installation
 
-Anicat is installed via a single command that manages system dependencies (mpv, ffmpeg, chafa), configures the background service, and creates the native App bundle.
+Anicat can be installed via a single command. The installer automatically manages system dependencies (mpv, ffmpeg, chafa) and initializes the background service.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install.sh | bash
 ```
 
-## Features
+## Usage
 
-- **macOS Native Persistence**: Operates as a background service that survives restarts and terminal closures.
-- **Stealth Privacy**: Bound to 127.0.0.1 (Localhost), making it invisible to other devices on your Wi-Fi.
-- **Manga Turbo-Mode**: High-speed image proxying with local disk caching for instantaneous navigation.
-- **AniList Real-time Sync**: Progress is updated on AniList the microsecond it changes in Anicat.
-- **Automated Updates**: A sidebar indicator notifies you of new versions; updates are installed with a single click.
+### Dashboard
+The primary interface is the **Anicat Dashboard** application, located in the `/Applications` folder. Launching the app opens the web-based interface in your default browser.
 
-## Command Line Interface (Advanced)
+### Command Line Interface
+Anicat includes a global command-line utility for advanced management:
+- `anicat status`: View system health and connectivity reports.
+- `anicat stop`: Terminate all background processes.
+- `anicat dashboard`: Start the server manually.
 
-While most users will only ever use the Dashboard app, the `anicat` command provides deep control over the system:
+## Tech Stack
 
-- `anicat status`: Displays the current health, version, and connectivity of the background server.
-- `anicat stop`: Safely terminates the background server. Use this if you want to completely shut down Anicat.
-- `anicat dashboard`: Manually starts the server. (Note: The App bundle does this for you automatically).
-- `anicat login`: Manually trigger the AniList authentication flow.
+- **Backend**: Python (FastAPI), Uvicorn
+- **Frontend**: Next.js (React), Tailwind CSS
+- **Playback**: MPV (Native)
+- **Persistence**: SQLite-based local registry
 
-## Maintenance and Updates
+## License
 
-Anicat is designed to be self-sustaining. When an update is pushed, an amber notification dot will appear in the dashboard sidebar. 
-
-Clicking **Install Update** in the Maintenance settings will:
-1.  Stash your local configuration safely.
-2.  Pull the latest code from GitHub.
-3.  Rebuild the dashboard.
-4.  Restart the background service automatically.
-
-## Technical Details
-
-- **Language**: Python (Backend), Next.js (Frontend)
-- **Database**: SQLite-based local registry (found in `~/Library/Application Support/anicat`)
-- **Persistence**: macOS LaunchAgent (`~/Library/LaunchAgents/com.bonkedbythonk.anicat.plist`)
-- **Network**: Only listens on Port 8000 (Localhost only).
-
----
-
-Released under the [UNLICENSE](LICENSE). Built for the macOS community.
+Anicat is released under the UNLICENSE.

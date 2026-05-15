@@ -1,8 +1,35 @@
 #!/bin/bash
 
-# Find the project root dynamically (scripts/ parent directory)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# Find the project root dynamically
+if [[ "$0" == "bash" ]] || [[ "$0" == "/bin/bash" ]] || [[ "$0" == "sh" ]] || [[ "$0" == "/bin/sh" ]] || [[ -z "$0" ]] || [[ "$0" == "-" ]]; then
+    # Running via pipe, check if we are in a repo already
+    if [ -f "pyproject.toml" ] && [ -d "anicat_media" ]; then
+        PROJECT_DIR="$(pwd)"
+    elif [ -d "anicat" ] && [ -f "anicat/pyproject.toml" ]; then
+        cd anicat
+        PROJECT_DIR="$(pwd)"
+    else
+        echo "Piped execution detected and no repository found. Cloning Anicat..."
+        if ! command -v git &> /dev/null; then
+            echo "Error: git is not installed. Please install git first."
+            exit 1
+        fi
+        git clone https://github.com/bonkedbythonk/anicat.git
+        cd anicat || exit 1
+        PROJECT_DIR="$(pwd)"
+    fi
+else
+    # Running from a file
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    # Ensure we are in the project root
+    if [ ! -f "$PROJECT_DIR/pyproject.toml" ]; then
+        echo "Error: Could not find pyproject.toml in $PROJECT_DIR"
+        exit 1
+    fi
+    cd "$PROJECT_DIR" || { echo "Error: Could not enter project directory $PROJECT_DIR"; exit 1; }
+fi
+
 APP_NAME="Anicat.app"
 INSTALL_DIR="$HOME/Applications"
 

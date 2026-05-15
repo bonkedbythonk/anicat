@@ -203,7 +203,14 @@ async def trigger_update():
             # Run install script in the background so we don't block the API too long
             # but we use a timeout to wait for it to at least start successfully
             # Pass --no-launch so it doesn't open a new browser window
-            subprocess.Popen(["bash", install_script, "--no-launch"], cwd=repo_root)
+            # Redirect stdout/stderr to DEVNULL to prevent "suspended (tty output)"
+            subprocess.Popen(
+                ["bash", install_script, "--no-launch"], 
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
             
             # We return the message, and then the install script will eventually 
             # rebuild and the user will refresh. To be safe, we don't kill ourselves 

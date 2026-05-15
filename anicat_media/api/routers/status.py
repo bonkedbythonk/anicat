@@ -100,11 +100,10 @@ async def get_health():
                 pass
         
         # Auto-check for updates every hour in the background
-        from datetime import timedelta
-        global _last_update_check, _cached_update_available
         if not _last_update_check or (datetime.now() - _last_update_check) > timedelta(hours=1):
             # Run a quiet fetch in the background
             try:
+                import os
                 repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                 subprocess.Popen(["git", "fetch", "--quiet"], cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 # We don't wait for it here to keep the health check fast, 

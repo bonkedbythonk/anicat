@@ -41,6 +41,7 @@ commands = {
     "completions": "completions.completions",
     "dashboard": "dashboard.dashboard",
     "stop": "stop.stop",
+    "status": "status.status",
 }
 
 

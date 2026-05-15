@@ -152,17 +152,24 @@ async def check_for_updates():
     """Manually trigger an update check, ignoring cache."""
     global _last_update_check, _cached_update_available
     import subprocess
+    import os
     
     _last_update_check = datetime.now()
     _cached_update_available = False
     try:
-        subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=10)
-        status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8")
+        # Get the root of the repository
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        
+        # Run fetch and status with explicit CWD
+        subprocess.run(["git", "fetch", "--quiet"], capture_output=True, timeout=10, cwd=repo_root)
+        status = subprocess.check_output(["git", "status", "-uno"], encoding="utf-8", cwd=repo_root)
+        
         if "Your branch is behind" in status:
             _cached_update_available = True
             return {"status": "success", "update_available": True, "message": "A new version of Anicat is available!"}
         return {"status": "success", "update_available": False, "message": "You are running the latest version."}
     except Exception as e:
+        logger.error(f"[UPDATE CHECK] Error: {str(e)}")
         return {"status": "error", "update_available": False, "message": f"Failed to check for updates: {str(e)}"}
 
 @router.post("/update")

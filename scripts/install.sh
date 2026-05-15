@@ -233,6 +233,8 @@ EOF
         <string>$HOME/.local/bin/anicat</string>
         <string>dashboard</string>
         <string>--no-browser</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

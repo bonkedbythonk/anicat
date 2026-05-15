@@ -1,43 +1,58 @@
-# Anicat 🐈‍⬛
+# Anicat
 
-Anicat is a simple, beautiful way to watch anime and read manga on your Mac. It keeps track of everything you watch and read automatically using your AniList account.
+Anicat is a media companion designed specifically for macOS that simplifies how you manage and enjoy anime and manga. It combines a beautiful, minimalist dashboard with powerful background technology to ensure your progress is always synced and your content is always ready to play.
 
 ![Anicat Dashboard](dashboard_preview.png)
 
-## 🌟 Why use Anicat?
+## Overview
 
-- **Everything in one place**: A single, clean dashboard for all your favorite shows and comics.
-- **Set it and forget it**: Once installed, it stays in the background and works silently.
-- **Mac-Friendly**: It looks and feels like a real Mac app. You can even keep it in your Dock!
-- **Fast and Private**: Built to be fast, private, and easy on your computer's battery.
+Unlike traditional websites or complex media servers, Anicat is built to be a "quiet citizen" on your Mac. It runs as a lightweight background service that starts automatically when you log in. This means you never have to worry about opening a terminal or starting a server manually—the dashboard is simply there whenever you need it.
+
+## Key Features
+
+### Centralized Media Dashboard
+Anicat provides a single, unified interface for your entire library. The dashboard is designed with a dark, minimalist aesthetic that fits perfectly with modern macOS. You can browse your "Continue Watching" list, search for new titles, and manage your collection without ever leaving the app.
+
+### Automatic AniList Synchronization
+Your progress is precious. Anicat features bi-directional synchronization with AniList. When you finish an episode or a chapter, the app updates your AniList profile instantly. If you update your progress on your phone, Anicat sees it and reflects the change on your dashboard within seconds.
+
+### High-Performance Manga Reader
+Reading manga should be as fast as flipping pages in a book. Anicat uses a specialized backend proxy and local disk caching to ensure that manga chapters load instantly. By pre-fetching pages in the background, the reader allows you to skip forwards and backwards through a chapter with zero lag.
+
+### Background Persistence
+Anicat includes a native macOS App bundle that you can keep in your Applications folder and your Dock. Once installed, the core service runs silently in the background. It uses a negligible amount of system resources, ensuring that your Mac remains fast and responsive while Anicat waits for your next session.
+
+### Privacy and Isolation
+Privacy is a core design principle. Anicat is configured to run on your "Localhost" (127.0.0.1) only. This ensures that the service is completely invisible to other devices on your network, providing an isolated and secure environment for your media management.
+
+## Installation Guide
+
+The installation process is fully automated and designed to be accessible to everyone, regardless of technical experience.
+
+### Step 1: Open the Terminal
+The Terminal is a built-in macOS tool. To open it, press the Command key and the Spacebar at the same time, type "Terminal," and press Enter.
+
+### Step 2: Run the Installer
+Copy the command below, paste it into the Terminal window, and press Enter:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install.sh | bash
+```
+
+### Step 3: Complete the Setup
+The installer will automatically download all necessary components and configure the background service. Once you see the "Installation Complete" message, you can close the Terminal. You will now find the "Anicat Dashboard" app in your Applications folder.
+
+## Using Anicat
+
+### Getting Started
+When you first launch the app, you will be guided through a simple onboarding process to connect your AniList account. This only needs to be done once.
+
+### Staying Updated
+Anicat features a built-in update system. When a new version is available, a subtle amber dot will appear next to the Settings icon in the sidebar. You can install the latest features and fixes directly from the Maintenance tab with a single click.
+
+### Management
+If you ever need to stop the background service or check the system health, you can use the built-in Maintenance tools in the dashboard or use the "anicat" command in your terminal.
 
 ---
 
-## 🚀 How to Install (The Easy Way)
-
-You don't need to be a computer expert to set this up. Just follow these three simple steps:
-
-1.  **Open Terminal**: Press `Command + Space` on your keyboard, type **Terminal**, and hit `Enter`.
-2.  **Paste this command**: Copy the line below and paste it into the Terminal window:
-    ```bash
-    curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install.sh | bash
-    ```
-3.  **Wait for the "Complete!" message**: The computer will do all the heavy lifting for you. Once it's done, you're all set!
-
----
-
-## 💡 How to use Anicat
-
-- **Open the App**: You will find **Anicat Dashboard** in your **Applications** folder. Just double-click it to start!
-- **AniList Sync**: When you first open the app, it will help you connect your AniList account so it can save your progress.
-- **Updates**: If there's a new version, a little orange dot will appear in the sidebar. Just go to Settings and click "Update"—it handles everything for you.
-- **Closing the App**: You can close the dashboard window whenever you want. Anicat will keep running quietly in the background so you can come back to it anytime.
-
----
-
-### 🙋‍♂️ Need Help?
-If something doesn't look right, just try running the installation command again. It will fix any common issues automatically!
-
----
-
-*Enjoy your anime!* 🍿🐈‍⬛✨
+Anicat is released under the UNLICENSE.

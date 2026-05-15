@@ -96,21 +96,25 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
         {/* Secondary Nav */}
         {secondaryItems.map((item) => {
           const isActive = activeView === item.view;
+          const hasUpdate = item.view === "settings" && health?.update_available;
+          
           return (
             <button
               key={item.view}
               onClick={() => onNavigate(item.view)}
-              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${isActive
+              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${isActive
                   ? "bg-accent/10 text-white"
                   : "text-gray-500 hover:text-white hover:bg-white/[0.04]"
                 }`}
             >
-              <div className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors relative ${isActive ? "bg-accent text-white shadow-lg shadow-accent/25" : "group-hover:text-accent"
+              <div className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? "bg-accent text-white shadow-lg shadow-accent/25" : "group-hover:text-accent"
                 }`}>
                 <item.icon size={18} />
-                {/* Notification badge */}
+                {hasUpdate && (
+                  <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-black animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                )}
                 {item.view === "notifications" && notificationCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] font-bold text-white flex items-center justify-center animate-bounce-once">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-black">
                     {notificationCount > 9 ? "9+" : notificationCount}
                   </span>
                 )}

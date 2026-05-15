@@ -164,6 +164,59 @@ fi
 
 echo "Global 'anicat' command installed at $HOME/.local/bin/anicat"
 
+# 9. Create macOS App Bundle
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "Creating Anicat.app for macOS..."
+    APP_PATH="$HOME/Applications/Anicat.app"
+    mkdir -p "$APP_PATH/Contents/MacOS"
+    mkdir -p "$APP_PATH/Contents/Resources"
+
+    # Create Info.plist
+    cat > "$APP_PATH/Contents/Info.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>Anicat</string>
+    <key>CFBundleIconFile</key>
+    <string>logo.icns</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.bonkedbythonk.anicat</string>
+    <key>CFBundleName</key>
+    <string>Anicat</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+EOF
+
+    # Create Launcher Script
+    cat > "$APP_PATH/Contents/MacOS/Anicat" << 'EOF'
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+# Close any existing dashboard first
+pkill -f "anicat dashboard" || true
+# Launch in background and detach
+nohup anicat dashboard --no-browser > /dev/null 2>&1 &
+# Open the browser/PWA
+sleep 2
+open "http://localhost:8000"
+EOF
+    chmod +x "$APP_PATH/Contents/MacOS/Anicat"
+
+    # Copy Icon
+    if [ -f "$PROJECT_DIR/anicat_media/assets/icons/logo.icns" ]; then
+        cp "$PROJECT_DIR/anicat_media/assets/icons/logo.icns" "$APP_PATH/Contents/Resources/logo.icns"
+    fi
+
+    echo "Anicat.app created in $HOME/Applications"
+fi
+
 # 9. Success message
 echo ""
 echo "Installation Complete!"

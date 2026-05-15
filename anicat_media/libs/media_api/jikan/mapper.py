@@ -89,6 +89,8 @@ def _to_generic_media_item(data: dict) -> MediaItem:
         streaming_episodes={},
         # Jikan doesn't provide user list status in its search results.
         user_status=None,
+        seasonYear=None,
+        next_airing=None,
     )
 
 

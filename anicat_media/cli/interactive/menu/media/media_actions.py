@@ -161,7 +161,7 @@ def _remove_downloads(ctx: Context, state: State) -> MenuAction:
         if not media_item:
             return InternalDirective.RELOAD
 
-        if not ctx.selector.confirm(f"Are you sure you want to remove ALL downloaded episodes for '{media_item.title.english or media_item.title.romaji}'?"):
+        if not ctx.selector.confirm(f"Are you sure you want to remove ALL downloaded episodes for '{str(media_item.title.english or media_item.title.romaji)}'?"):
             return InternalDirective.RELOAD
 
         record = ctx.media_registry.get_media_record(media_item.id)
@@ -208,7 +208,7 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
         if not media_item:
             return InternalDirective.RELOAD
 
-        manga_title = media_item.title.english or media_item.title.romaji
+        manga_title = str(media_item.title.english or media_item.title.romaji)
         
         manga_provider = ctx.manga_provider
         provider_name = ctx.config.general.manga_provider.value
@@ -217,7 +217,7 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
         search_results = None
         from .....libs.provider.manga.params import MangaSearchParams
         with feedback.progress(loading_message):
-            search_results_obj = manga_provider.search(MangaSearchParams(query=manga_title))
+            search_results_obj = manga_provider.search(MangaSearchParams(query=str(manga_title or "Unknown")))
             search_results = search_results_obj.results if search_results_obj else None
             
         if not search_results:
@@ -240,7 +240,7 @@ def _read_chapters(ctx: Context, state: State) -> MenuAction:
         manga_info = None
         from .....libs.provider.manga.params import MangaParams
         with feedback.progress("Fetching chapters"):
-            manga_info = manga_provider.get(MangaParams(id=manga_id, query=manga_title))
+            manga_info = manga_provider.get(MangaParams(id=manga_id, query=str(manga_title or "Unknown")))
             
         if not manga_info or not manga_info.chapters:
             feedback.error("No chapters found")

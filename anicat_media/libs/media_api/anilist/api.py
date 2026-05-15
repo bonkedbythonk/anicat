@@ -345,7 +345,7 @@ class AniListApi(BaseApiClient):
         self, airingAt_greater: int, airingAt_lesser: int, page: int = 1, per_page: int = 50,
         media_ids: Optional[List[int]] = None
     ) -> Optional[Any]:
-        variables = {
+        variables: dict[str, Any] = {
             "airingAt_greater": airingAt_greater,
             "airingAt_lesser": airingAt_lesser,
             "page": page,
@@ -423,7 +423,7 @@ class AniListApi(BaseApiClient):
             MediaSearchResult object or None if transformation fails
         """
         try:
-            return mapper.to_generic_search_result(raw_data)
+            return mapper.to_generic_search_result(raw_data)  # type: ignore
         except Exception as e:
             logger.error(f"Failed to transform raw search data: {e}")
             return None

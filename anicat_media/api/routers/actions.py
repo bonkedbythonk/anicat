@@ -178,7 +178,6 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         background_tasks.add_task(_play_and_track, ctx, params, anime=anime_ref, media_item=media_item)
         
         # Track playback for Now Playing bar
-        from .status import set_playback
         set_playback(media_id=media_id, media_title=title, episode=episode)
         
         return {"status": "playing", "media": title, "episode": episode}

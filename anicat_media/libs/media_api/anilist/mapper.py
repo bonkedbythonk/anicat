@@ -256,7 +256,7 @@ def _to_generic_media_item(
         start_date=_to_generic_date(data["startDate"]),
         end_date=_to_generic_date(data["endDate"]),
         season=data.get("season"),
-        season_year=data.get("seasonYear"),
+        seasonYear=data.get("seasonYear"),
         next_airing=_to_generic_airing_schedule(data.get("nextAiringEpisode")),
         streaming_episodes=_to_generic_streaming_episodes(
             data.get("streamingEpisodes", [])
@@ -569,6 +569,7 @@ def _to_generic_media_item_from_notification_partial(
         favourites=None,
         streaming_episodes={},
         user_status=None,
+        seasonYear=None,
     )
 
 
@@ -627,10 +628,10 @@ def to_generic_global_schedule(data: dict) -> dict:
             media = _to_generic_media_item(schedule.get("media", {}))
             if media:
                 # Attach airing info to the media item for convenience in this view
-                media.next_airing = {
-                    "episode": schedule.get("episode"),
-                    "airing_at": datetime.fromtimestamp(schedule.get("airingAt")).isoformat()
-                }
+                media.next_airing = AiringSchedule(
+                    episode=schedule.get("episode") or 0,
+                    airing_at=datetime.fromtimestamp(schedule.get("airingAt")) if schedule.get("airingAt") else None
+                )
                 media_list.append(media)
         except Exception as e:
             logger.error(f"Failed to map schedule item: {e}")

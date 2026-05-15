@@ -181,6 +181,7 @@ class JikanApi(BaseApiClient):
                             studios=[],
                             streaming_episodes={},
                             user_status=None,
+                            seasonYear=None,
                         )
                         related_anime.append(media_item)
 

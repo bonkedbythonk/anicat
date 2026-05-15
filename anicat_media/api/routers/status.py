@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import logging
+import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 import subprocess
@@ -49,7 +50,6 @@ def set_playback(media_id: int, media_title: str, episode: str):
         started_at=datetime.now().isoformat(),
     )
     # Auto-expire after 2 hours
-    from datetime import timedelta
     _playback_expiry = datetime.now() + timedelta(hours=2)
 
 @router.get("/playback", response_model=Optional[PlaybackInfo])
@@ -58,7 +58,6 @@ async def get_playback_status():
     global _last_playback, _playback_expiry
     
     # Auto-dismiss if MPV is no longer running
-    import subprocess
     try:
         # Check if any mpv process is running
         subprocess.check_output(["pgrep", "mpv"])
@@ -89,13 +88,11 @@ async def get_health():
         
         # Check for updates (cached logic)
         global _last_update_check, _cached_update_available
-        from datetime import timedelta
         
         now = datetime.now()
         if _last_update_check is None or now - _last_update_check > timedelta(minutes=15):
             _last_update_check = now
             _cached_update_available = False
-            import subprocess
             try:
                 # Check if we are behind origin/main
                 # We use --quiet to avoid spamming logs
@@ -110,7 +107,6 @@ async def get_health():
         if not _last_update_check or (datetime.now() - _last_update_check) > timedelta(hours=1):
             # Run a quiet fetch in the background
             try:
-                import os
                 repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                 subprocess.Popen(["git", "fetch", "--quiet"], cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 # We don't wait for it here to keep the health check fast, 
@@ -174,8 +170,6 @@ async def get_health():
 async def check_for_updates():
     """Manually trigger an update check, ignoring cache."""
     global _last_update_check, _cached_update_available
-    import subprocess
-    import os
     
     _last_update_check = datetime.now()
     _cached_update_available = False
@@ -198,8 +192,6 @@ async def check_for_updates():
 @router.post("/update")
 async def trigger_update():
     """Trigger a git pull to update the application."""
-    import subprocess
-    import os
     try:
         # Get the root of the repository
         # This file is at: anicat_media/api/routers/status.py

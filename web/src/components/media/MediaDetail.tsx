@@ -166,6 +166,7 @@ export default function MediaDetail({ item, onClose }: MediaDetailProps) {
     
     // Set progress to num - 1
     const newProgress = Math.max(0, num - 1);
+    console.log(`[Undo] Current: ${num}, New: ${newProgress}`);
     
     // Optimistic Update: Update the local state immediately
     setFullItem(prev => ({

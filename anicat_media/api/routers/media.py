@@ -140,6 +140,7 @@ async def get_media_details(media_id: int):
         # Merge with local registry for "Live" feel and offline support
         local_entry = ctx.media_registry.get_media_index_entry(media_id)
         if local_entry:
+            logger.debug(f"Merging local registry for media {media_id}. Local progress: {local_entry.progress}")
             if not media.user_status:
                 from ...libs.media_api.types import UserListItem
                 media.user_status = UserListItem(
@@ -148,12 +149,10 @@ async def get_media_details(media_id: int):
                     score=local_entry.score
                 )
             else:
-                # If local registry was updated recently (or just has different data),
-                # we might want to prioritize it to avoid "stale" AniList data issues.
-                # For now, let's always trust the local progress if it exists and is different.
                 if local_entry.progress.isdigit():
                     local_progress = int(local_entry.progress)
                     if local_progress != media.user_status.progress:
+                        logger.info(f"Overriding AniList progress ({media.user_status.progress}) with local progress ({local_progress}) for media {media_id}")
                         media.user_status.progress = local_progress
                 
                 if local_entry.status != media.user_status.status:

@@ -897,7 +897,8 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState<"general" | "streaming" | "downloads" | "anilist" | "registry" | "system">("general");
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
   const [registryStats, setRegistryStats] = useState<any>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [backupUrl, setBackupUrl] = useState<string | null>(null);
@@ -926,8 +927,8 @@ function SettingsView({ health }: { health: HealthStatus | null }) {
         // Perform the actual update
         const res = await mediaApi.triggerUpdate();
         setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
-        if (res.status === "success" && res.message.includes("Updated")) {
-          setTimeout(() => window.location.reload(), 2000);
+        if (res.status === "success" && (res.message.includes("Update") || res.message.includes("Updated"))) {
+          setRefreshNeeded(true);
         }
       } else {
         // Just check for updates
@@ -1593,7 +1594,6 @@ export default function App() {
               <div className="flex items-center space-x-3 text-red-400">
                 <WifiOff size={18} />
                 <span className="text-sm font-bold">
-                  {process.env.NODE_ENV === 'development' && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded mr-2 align-middle">DEV</span>}
                   AniList API unreachable. Browsing local library mode.
                 </span>
               </div>
@@ -1613,6 +1613,34 @@ export default function App() {
                 </button>
                 <button 
                   onClick={handleDismissOffline}
+                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <X size={16} className="text-gray-400" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Refresh Banner */}
+        {refreshNeeded && (
+          <div className={`absolute top-0 left-0 right-0 z-50 animate-slide-down ${isOffline && !dismissedOffline ? 'mt-24' : ''}`}>
+            <div className="mx-6 mt-6 lg:mx-10 bg-green-500/10 border border-green-500/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between shadow-xl">
+              <div className="flex items-center space-x-3 text-green-400">
+                <RotateCcw size={18} className="animate-spin-slow" />
+                <span className="text-sm font-bold">
+                  Update in progress. Please refresh in ~2 minutes to apply changes.
+                </span>
+              </div>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-xs font-bold transition-all shadow-lg shadow-green-500/20"
+                >
+                  Refresh Now
+                </button>
+                <button 
+                  onClick={() => setRefreshNeeded(false)}
                   className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
                 >
                   <X size={16} className="text-gray-400" />

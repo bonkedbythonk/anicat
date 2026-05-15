@@ -204,7 +204,7 @@ async def trigger_update():
             # but we use a timeout to wait for it to at least start successfully
             # Pass --no-launch so it doesn't open a new browser window
             subprocess.Popen(["bash", install_script, "--no-launch"], cwd=repo_root)
-            return {"status": "success", "message": "Update started! The app will rebuild and restart automatically in about 1-2 minutes."}
+            return {"status": "success", "message": "Update in progress. The application will rebuild in the background. Please refresh this page in 1-2 minutes to apply the changes."}
         
         return {"status": "success", "message": "Updated successfully (code only)."}
         

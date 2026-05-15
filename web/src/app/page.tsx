@@ -1146,34 +1146,6 @@ function SettingsView({ health, onUpdateStarted }: { health: HealthStatus | null
 
           {activeTab === "maintenance" && (
             <div className="space-y-8 animate-fade-in">
-              {/* Onboarding Reset */}
-              <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
-                <div className="flex items-start space-x-4">
-                  <div className="p-2 rounded-lg bg-red-500/10 text-red-400">
-                    <RotateCcw size={20} />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-bold text-white">Reset Onboarding</h3>
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                      This will reset your "getting started" progress and re-run the welcome setup. 
-                      Your account token and downloads will not be deleted.
-                    </p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => {
-                    if (confirm("Reset onboarding and restart setup?")) {
-                      localStorage.removeItem("anicat_onboarding_seen");
-                      window.location.reload();
-                    }
-                  }}
-                  className="w-full py-3 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold transition-all border border-red-500/10 flex items-center justify-center space-x-2"
-                >
-                  <AlertCircle size={16} />
-                  <span>Start Setup From Scratch</span>
-                </button>
-              </div>
-
               {/* Application Update */}
               <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
                 <div className="flex items-center justify-between">

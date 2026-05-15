@@ -23,6 +23,9 @@ curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/in
 
 ### Usage
 - **Open Dashboard**: Launch the **Anicat Dashboard** from your `/Applications` folder.
+- **Native Experience (PWA)**: For a cleaner interface without browser tabs, you can install Anicat as a standalone app:
+  - **Safari**: Go to File > Add to Dock.
+  - **Chrome**: Go to the three-dot menu > Save and Share > Install page as app.
 - **Login**: When prompted, connect your AniList account to enable real-time progress syncing.
 - **Updates**: A visual indicator appears in the sidebar when an update is ready. Install it with one click from **Settings > Maintenance**.
 

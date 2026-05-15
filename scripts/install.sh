@@ -169,6 +169,12 @@ echo ""
 echo "Installation Complete!"
 echo "Anicat is now installed and ready to go."
 echo ""
+
+if [[ "$*" == *"--no-launch"* ]]; then
+    echo "Skipping dashboard launch as requested."
+    exit 0
+fi
+
 echo "Launching Anicat Dashboard for you..."
 echo ""
 

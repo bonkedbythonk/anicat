@@ -202,7 +202,8 @@ async def trigger_update():
         if os.path.exists(install_script):
             # Run install script in the background so we don't block the API too long
             # but we use a timeout to wait for it to at least start successfully
-            subprocess.Popen(["bash", install_script], cwd=repo_root)
+            # Pass --no-launch so it doesn't open a new browser window
+            subprocess.Popen(["bash", install_script, "--no-launch"], cwd=repo_root)
             return {"status": "success", "message": "Update started! The app will rebuild and restart automatically in about 1-2 minutes."}
         
         return {"status": "success", "message": "Updated successfully (code only)."}

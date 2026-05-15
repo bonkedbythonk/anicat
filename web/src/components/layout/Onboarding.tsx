@@ -195,7 +195,7 @@ export default function Onboarding({ onComplete, onSkip }: OnboardingProps) {
         
         <div className="p-10 lg:p-12 text-center">
           <div className="w-20 h-20 bg-accent/10 rounded-3xl flex items-center justify-center mx-auto mb-8 animate-pulse-glow">
-            <img src="/anicat_logo.webp" alt="Logo" className="w-12 h-12 object-contain" />
+            <img src="/pwa-logo.png?v=2" alt="Logo" className="w-12 h-12 object-contain" />
           </div>
 
           <h1 className="text-3xl lg:text-4xl font-black text-white tracking-tight mb-2">

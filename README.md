@@ -12,14 +12,19 @@ Anicat is designed as a **Silent Background Service**. Once installed, the core 
 
 This architecture allows Anicat to keep your AniList progress synced and your updates checked even when the dashboard window is closed.
 
-## Quick Start
+## Installation
 
-### Installation
-Anicat can be installed via a single command. The installer manages all system dependencies (mpv, ffmpeg, chafa), sets up the background service, and creates the native App bundle.
+Anicat is installed using a single command that handles everything for you automatically. If you have never used the Terminal before, just follow these simple steps:
 
-```bash
-curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install.sh | bash
-```
+1. **Open the Terminal**: Press the **Command** key and the **Spacebar** on your keyboard at the same time. Type "Terminal" into the search box that appears and press **Enter**.
+2. **Paste the Command**: Copy the entire line of text below and paste it into the Terminal window:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install.sh | bash
+   ```
+3. **Press Enter**: Hit the **Enter** key on your keyboard.
+4. **Wait for Completion**: The installer will set up everything for you. This may take a minute. Once it is finished, you can close the Terminal.
+
+You will now find the **Anicat Dashboard** app waiting for you in your **Applications** folder.
 
 ### Usage
 - **Open Dashboard**: Launch the **Anicat Dashboard** from your `/Applications` folder.

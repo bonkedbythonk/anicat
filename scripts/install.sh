@@ -1,23 +1,30 @@
 #!/bin/bash
 
 # Find the project root dynamically
+IS_PIPED=false
 if [[ "$0" == "bash" ]] || [[ "$0" == "/bin/bash" ]] || [[ "$0" == "sh" ]] || [[ "$0" == "/bin/sh" ]] || [[ -z "$0" ]] || [[ "$0" == "-" ]]; then
-    # Running via pipe, check if we are in a repo already
-    if [ -f "pyproject.toml" ] && [ -d "anicat_media" ]; then
-        PROJECT_DIR="$(pwd)"
-    elif [ -d "anicat" ] && [ -f "anicat/pyproject.toml" ]; then
-        cd anicat
-        PROJECT_DIR="$(pwd)"
-    else
-        echo "Piped execution detected and no repository found. Cloning Anicat..."
-        if ! command -v git &> /dev/null; then
-            echo "Error: git is not installed. Please install git first."
-            exit 1
-        fi
-        git clone https://github.com/bonkedbythonk/anicat.git
-        cd anicat || exit 1
-        PROJECT_DIR="$(pwd)"
+    IS_PIPED=true
+fi
+
+if [ -f "pyproject.toml" ] && [ -d "anicat_media" ]; then
+    PROJECT_DIR="$(pwd)"
+elif [ -d "anicat" ] && [ -f "anicat/pyproject.toml" ]; then
+    cd anicat || exit 1
+    PROJECT_DIR="$(pwd)"
+elif [ "$IS_PIPED" = true ]; then
+    echo "Piped execution detected and no repository found. Cloning Anicat..."
+    if ! command -v git &> /dev/null; then
+        echo "Error: git is not installed. Please install git first."
+        exit 1
     fi
+    # If the directory exists but is empty or broken, remove it first
+    if [ -d "anicat" ]; then
+        echo "Existing 'anicat' directory found but seems incomplete. Removing and re-cloning..."
+        rm -rf anicat
+    fi
+    git clone https://github.com/bonkedbythonk/anicat.git
+    cd anicat || exit 1
+    PROJECT_DIR="$(pwd)"
 else
     # Running from a file
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

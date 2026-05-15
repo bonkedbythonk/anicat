@@ -1527,12 +1527,14 @@ export default function App() {
 
   // Check if onboarding should be shown
   useEffect(() => {
-    if (healthStatus && !healthStatus.api_connected) {
+    // Only show onboarding if we have health data AND user is NOT authenticated
+    if (healthStatus && !healthStatus.api_authenticated) {
       const hasSeenOnboarding = localStorage.getItem("anicat_onboarding_seen");
       if (!hasSeenOnboarding) {
         setShowOnboarding(true);
       }
-    } else if (healthStatus?.api_connected) {
+    } else if (healthStatus?.api_authenticated) {
+      // If we are authenticated, definitely don't show it
       setShowOnboarding(false);
     }
   }, [healthStatus]);

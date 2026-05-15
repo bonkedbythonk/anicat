@@ -97,3 +97,8 @@ htmlcov/
 
 # Static build artifacts
 anicat_media/api/static/
+# Tauri and build artifacts
+web/src-tauri/binaries/
+web/src-tauri/target/
+build_sidecar/
+web/src-tauri/target/release/bundle/dmg/

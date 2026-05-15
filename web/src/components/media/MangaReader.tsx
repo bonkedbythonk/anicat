@@ -52,7 +52,7 @@ export default function MangaReader({ mediaId, chapterNumber, onClose, onProgres
         const globalIdx = currentPage + idx;
         if (!loadedImages.has(globalIdx)) {
           const img = new Image();
-          img.src = src;
+          img.src = getProxyUrl(src);
           img.onload = () => {
             setLoadedImages(prev => new Set(prev).add(globalIdx));
           };
@@ -132,6 +132,10 @@ export default function MangaReader({ mediaId, chapterNumber, onClose, onProgres
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  const getProxyUrl = (url: string) => {
+    return `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/media/manga/proxy?url=${encodeURIComponent(url)}`;
+  };
+
   if (loading) {
     return (
       <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center">
@@ -192,7 +196,7 @@ export default function MangaReader({ mediaId, chapterNumber, onClose, onProgres
               <div key={idx} className="relative min-h-[400px] flex items-center justify-center bg-white/[0.02] rounded-lg overflow-hidden">
                 {!loadedImages.has(idx) && <Loader2 className="animate-spin text-white/10" size={32} />}
                 <img 
-                  src={page} 
+                  src={getProxyUrl(page)} 
                   alt={`Page ${idx + 1}`} 
                   className={`w-full h-auto transition-opacity duration-300 ${loadedImages.has(idx) ? "opacity-100" : "opacity-0"}`} 
                   onLoad={() => setLoadedImages(prev => new Set(prev).add(idx))}
@@ -214,14 +218,14 @@ export default function MangaReader({ mediaId, chapterNumber, onClose, onProgres
                   <div className="flex-1 h-full flex items-center justify-end">
                     <div className="relative max-h-full">
                       {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
-                      <img key={pages[currentPage]} src={pages[currentPage]} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
+                      <img key={pages[currentPage]} src={getProxyUrl(pages[currentPage])} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
                     </div>
                   </div>
                   {currentPage + 1 < pages.length && (
                     <div className="flex-1 h-full flex items-center justify-start border-l border-white/5">
                       <div className="relative max-h-full">
                         {!loadedImages.has(currentPage + 1) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
-                        <img key={pages[currentPage + 1]} src={pages[currentPage + 1]} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
+                        <img key={pages[currentPage + 1]} src={getProxyUrl(pages[currentPage + 1])} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
                       </div>
                     </div>
                   )}
@@ -229,7 +233,7 @@ export default function MangaReader({ mediaId, chapterNumber, onClose, onProgres
               ) : (
                 <div className="relative h-full flex items-center justify-center">
                   {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
-                  <img key={pages[currentPage]} src={pages[currentPage]} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
+                  <img key={pages[currentPage]} src={getProxyUrl(pages[currentPage])} className="max-h-[90vh] max-w-full object-contain bg-black shadow-2xl" />
                 </div>
               )}
             </div>

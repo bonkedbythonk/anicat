@@ -374,3 +374,35 @@ async def get_chapter_pages(media_id: int, chapter_number: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+@router.get("/manga/proxy")
+async def proxy_manga_image(url: str):
+    """Proxy manga images to avoid CORS and hotlinking issues."""
+    import httpx
+    from fastapi import Response
+    
+    # Common headers to bypass hotlink protection
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://mangakatana.com/",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # Add a timeout to avoid hanging
+            response = await client.get(url, headers=headers, timeout=10.0, follow_redirects=True)
+            if response.status_code == 200:
+                return Response(
+                    content=response.content,
+                    media_type=response.headers.get("Content-Type", "image/jpeg"),
+                    headers={
+                        "Cache-Control": "public, max-age=31536000",
+                        "Access-Control-Allow-Origin": "*",
+                    }
+                )
+            else:
+                logger.error(f"[MANGA PROXY] Failed to fetch image: {url} (Status: {response.status_code})")
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch image from source")
+    except Exception as e:
+        logger.error(f"[MANGA PROXY] Proxy error for {url}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

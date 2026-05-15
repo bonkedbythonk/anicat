@@ -307,7 +307,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                   const total = fullItem.episodes || fullItem.chapters || 0;
                   // If airing, we might not have all episodes yet. 
                   // Use the fetched episodes list as the source for 'available' episodes.
-                  const latestAvailable = episodes.length > 0 ? Math.max(...episodes.map(e => e.number)) : total;
+                  const latestAvailable = episodes.length > 0 ? Math.max(...episodes.map(e => Number(e.number))) : total;
                   const isFinished = total > 0 && currentProgress >= total;
                   const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
 

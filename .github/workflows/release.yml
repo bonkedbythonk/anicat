@@ -32,7 +32,8 @@ jobs:
           version: "latest"
       - name: install dependencies
         run: |
-          npm install
+          cd web && npm install
+          cd ..
           uv sync --dev
       - name: build sidecar
         run: |

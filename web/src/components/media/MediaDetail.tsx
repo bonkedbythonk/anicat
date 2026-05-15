@@ -28,7 +28,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
   const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "reviews" | "recommendations">("episodes");
   const [config, setConfig] = useState<any>(null);
 
-  const isManga = item.type === "MANGA" || (item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
+  const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
 
   useEffect(() => {
     async function loadDetails() {

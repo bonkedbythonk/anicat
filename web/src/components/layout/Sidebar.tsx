@@ -156,7 +156,7 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
         )}
 
         <div 
-          className="hidden lg:flex items-center space-x-3 cursor-pointer group/status"
+          className="flex items-center lg:space-x-3 cursor-pointer group/status justify-center lg:justify-start"
           onClick={() => {
             localStorage.removeItem("anicat_onboarding_seen");
             window.location.reload();
@@ -164,19 +164,8 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
           title="Click to re-run setup"
         >
           <div className={`w-2 h-2 rounded-full shrink-0 ${syncColor} group-hover/status:scale-125 transition-transform`} />
-          <p className="text-[10px] uppercase font-bold tracking-[0.12em] text-gray-600 group-hover/status:text-gray-400 transition-colors">{syncLabel}</p>
+          <p className="hidden lg:block text-[10px] uppercase font-bold tracking-[0.12em] text-gray-600 group-hover/status:text-gray-400 transition-colors">{syncLabel}</p>
         </div>
-      </div>
-
-      {/* Mobile sync dot */}
-      <div 
-        className="lg:hidden flex justify-center pb-2 mt-auto cursor-pointer"
-        onClick={() => {
-          localStorage.removeItem("anicat_onboarding_seen");
-          window.location.reload();
-        }}
-      >
-        <div className={`w-2.5 h-2.5 rounded-full ${syncColor}`} />
       </div>
     </aside>
   );

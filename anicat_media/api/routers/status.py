@@ -111,7 +111,21 @@ async def get_health():
             pass
 
         from ..core.constants import VERSION
+        
+        # Perform a quick, non-blocking check if we are truly offline
+        # If we have a token, we try to reach the API.
         api_authenticated = ctx.media_api.token is not None
+        
+        # If the context is marked as offline, let's try to verify if it's still true
+        if ctx.is_offline and api_authenticated:
+            try:
+                # Just a tiny HEAD request or similar to a reliable endpoint
+                import httpx
+                httpx.get("https://anilist.co", timeout=2.0)
+                ctx.is_offline = False # Connection is back!
+            except Exception:
+                pass
+                
         api_connected = not ctx.is_offline
 
         return HealthInfo(

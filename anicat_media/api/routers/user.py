@@ -43,7 +43,8 @@ async def get_user_list(
                 media=[]
             )
             
-        params = UserMediaListSearchParams(status=status, type=type, page=page)
+        from ...libs.media_api.types import UserMediaListStatus
+        params = UserMediaListSearchParams(status=status or UserMediaListStatus.CURRENT, type=type, page=page)
         result = ctx.media_api.search_media_list(params)
         if not result:
             from ...libs.media_api.types import PageInfo
@@ -66,7 +67,7 @@ async def update_list_entry(req: ListUpdateRequest):
         params = UpdateUserMediaListEntryParams(
             media_id=req.media_id,
             status=req.status,
-            progress=req.progress,
+            progress=str(req.progress) if req.progress is not None else None,
             score=req.score
         )
         # 1. Update local registry first (Live source of truth)

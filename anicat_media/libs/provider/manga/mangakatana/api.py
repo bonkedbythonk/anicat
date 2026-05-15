@@ -265,9 +265,9 @@ class MangaKatanaApi(BaseMangaProvider):
             "availableChapters": chapters,
         }
 
-    def get_chapter_thumbnails(self, manga_id: str, chapter_url: str):
+    def get_chapter_thumbnails(self, manga_id: str, chapter: str):
         try:
-            response = self.client.get(chapter_url, follow_redirects=True)
+            response = self.client.get(chapter, follow_redirects=True)
             if not response.is_success:
                 logger.error(
                     f"[MANGAKATANA] Chapter fetch failed: {response.status_code}"
@@ -275,7 +275,7 @@ class MangaKatanaApi(BaseMangaProvider):
                 return None
 
             html = response.text
-            return self._parse_chapter_pages(html, chapter_url)
+            return self._parse_chapter_pages(html, chapter)
 
         except Exception as e:
             logger.error(f"[MANGAKATANA] Get chapter thumbnails error: {e}")

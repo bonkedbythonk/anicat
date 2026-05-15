@@ -100,12 +100,12 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             
             # Track progress
             from ...libs.player.types import PlayerResult
-            ctx.watch_history.track(media_item, PlayerResult(episode=episode, stop_time=None, total_time=None))
+            ctx.watch_history.track(media_item, PlayerResult(episode=str(episode), stop_time=None, total_time=None))
             ctx.data_version += 1
             
             # Track for Now Playing
             from .status import set_playback
-            set_playback(media_id=media_id, media_title=title, episode=episode)
+            set_playback(media_id=media_id, media_title=title, episode=str(episode))
             
             return {"status": "reading", "media": title, "episode": episode}
 

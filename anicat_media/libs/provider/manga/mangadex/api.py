@@ -78,10 +78,10 @@ class MangaDexApi(BaseMangaProvider):
             logger.error(f"[MANGADEX-ERROR]: {e}")
             return None
 
-    def get_chapter_thumbnails(self, manga_id: str, chapter_id: str):
-        # Note: chapter_id here is the MangaDex chapter ID (UUID)
+    def get_chapter_thumbnails(self, manga_id: str, chapter: str):
+        # Note: chapter here is the MangaDex chapter ID (UUID)
         try:
-            chapters_thumbnails_url = f"https://api.mangadex.org/at-home/server/{chapter_id}"
+            chapters_thumbnails_url = f"https://api.mangadex.org/at-home/server/{chapter}"
             chapter_thumbnails_response = self.client.get(chapters_thumbnails_url)
             if not chapter_thumbnails_response.is_success:
                 return None

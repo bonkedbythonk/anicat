@@ -85,8 +85,9 @@ async def get_trending(
             per_page=per_page,
             sort=MediaSort.TRENDING_DESC,
         )
+        from ...libs.media_api.types import PageInfo
         result = ctx.media_api.search_media(params)
-        return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+        return result or MediaSearchResult(page_info=PageInfo(total=0, current_page=1, has_next_page=False, per_page=per_page), media=[])
     except HTTPException:
         raise
     except Exception as e:
@@ -110,8 +111,9 @@ async def get_seasonal(
             season=season,
             seasonYear=year,
         )
+        from ...libs.media_api.types import PageInfo
         result = ctx.media_api.search_media(params)
-        return result or MediaSearchResult(page_info={"total": 0, "current_page": 1, "has_next_page": False, "per_page": per_page}, media=[])
+        return result or MediaSearchResult(page_info=PageInfo(total=0, current_page=1, has_next_page=False, per_page=per_page), media=[])
     except HTTPException:
         raise
     except Exception as e:

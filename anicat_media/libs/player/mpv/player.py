@@ -5,9 +5,11 @@ This module provides the MpvPlayer class, which implements the BasePlayer interf
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
+import sys
 
 from ....core.config import MpvConfig
 from ....core.exceptions import AnicatError

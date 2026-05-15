@@ -64,6 +64,14 @@ You will now find the **Anicat Dashboard** app waiting for you in your **Applica
 - `V`: Vertical (Long-strip) mode
 - `Esc`: Close reader
 
+## Privacy & Security
+
+Anicat is built with a local-first philosophy to ensure total user privacy:
+- **Zero Telemetry**: The application does not collect or transmit analytics, usage data, or tracking information.
+- **Local-Only Access**: The backend service is bound to `127.0.0.1` (Localhost), making it inaccessible to other devices on your network.
+- **On-Device Storage**: All configuration, login tokens, and history are stored locally in `~/Library/Application Support/anicat`.
+- **Open Source**: The code is fully transparent and available for audit under the [UNLICENSE](LICENSE).
+
 ## Advanced Management
 
 For power users, the `anicat` command provides direct control over the service:

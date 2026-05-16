@@ -216,6 +216,9 @@ export const mediaApi = {
       body: JSON.stringify({ media_id, status, score, progress })
     }),
 
+  deleteFromList: (mediaId: number) =>
+    fetchFromApi(`/user/${mediaId}`, { method: 'DELETE' }),
+
   // ─── Media Extras ───────────────────────────────────
   getCharacters: (mediaId: number): Promise<{ characters: Character[] }> =>
     fetchFromApi(`/media/${mediaId}/characters`),

@@ -6,7 +6,7 @@ from ...libs.player.types import PlayerResult
 from .status import set_playback
 
 router = APIRouter()
-_active_requests = set()
+_active_requests = {} # media_id -> timestamp
 
 def get_ctx():
     from ..main import ctx
@@ -26,17 +26,21 @@ def _play_and_track(ctx, params, anime, media_item):
         import traceback
         traceback.print_exc()
     finally:
-        _active_requests.discard(media_item.id)
+        import time
+        _active_requests.pop(media_item.id, None)
 
 @router.post("/play/{media_id}")
 async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: Optional[str] = None):
     """
     Smart Play: Finds the next episode and triggers playback in MPV.
     """
+    now = time.time()
     if media_id in _active_requests:
-        raise HTTPException(status_code=429, detail="Playback request already in progress for this media")
+        last_request_time = _active_requests[media_id]
+        if now - last_request_time < 2.0: # Only block if within 2 seconds
+            raise HTTPException(status_code=429, detail="Playback request already in progress")
     
-    _active_requests.add(media_id)
+    _active_requests[media_id] = now
     try:
         ctx = get_ctx()
         media_item = ctx.media_api.get_media_item(media_id)
@@ -110,7 +114,7 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             # Track for Now Playing
             set_playback(media_id=media_id, media_title=title, episode=str(episode))
             
-            _active_requests.discard(media_id)
+            _active_requests.pop(media_id, None)
             return {"status": "reading", "media": title, "episode": episode, "chapter_data": chapter_data}
 
         # 3. Search anime provider
@@ -187,10 +191,10 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         return {"status": "playing", "media": title, "episode": episode}
         
     except HTTPException:
-        _active_requests.discard(media_id)
+        _active_requests.pop(media_id, None)
         raise
     except Exception as e:
-        _active_requests.discard(media_id)
+        _active_requests.pop(media_id, None)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

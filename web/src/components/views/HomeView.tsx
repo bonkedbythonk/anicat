@@ -23,12 +23,37 @@ export default function HomeView({ onSelect }: HomeViewProps) {
       ]);
 
       const watchingMedia = watching.media || [];
-      let recentReleases: MediaItem[] = [];
+      
+      // Calculate what's actually new based on user progress
+      const missedEpisodes = watchingMedia.filter(item => {
+        const progress = item.user_status?.progress || 0;
+        const nextEp = item.next_airing?.episode;
+        let currentReleased = 0;
+        if (nextEp) {
+          currentReleased = nextEp - 1;
+        } else if (item.episodes) {
+          currentReleased = item.episodes;
+        }
+        
+        const isFinished = item.status === 'FINISHED';
+        return item.status === 'RELEASING' && !isFinished && progress < currentReleased;
+      });
+
+      let recentReleases: MediaItem[] = missedEpisodes;
 
       if (watchingMedia.length > 0) {
         const watchingIds = watchingMedia.map((m) => m.id);
-        const schedule = await mediaApi.getSchedule(2, 0, 1, 10, watchingIds);
-        recentReleases = schedule.media || [];
+        const schedule = await mediaApi.getSchedule(3, 0, 1, 10, watchingIds);
+        const scheduledMedia = schedule.media || [];
+        
+        // Merge and de-duplicate
+        const seenIds = new Set(recentReleases.map(m => m.id));
+        for (const m of scheduledMedia) {
+          if (!seenIds.has(m.id)) {
+            recentReleases.push(m);
+            seenIds.add(m.id);
+          }
+        }
       }
 
       // Re-order watching list based on local playback status if available

@@ -125,7 +125,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
   const handleRemoveFromList = async () => {
     if (confirm(`Are you sure you want to remove ${item.title.english || item.title.romaji} from your list?`)) {
       try {
-        await mediaApi.updateStatus(item.id, "REPEATING", undefined, 0); // Hack to clear
+        await mediaApi.deleteFromList(item.id);
         dispatchRefresh();
         onClose();
       } catch (error) {

@@ -85,5 +85,21 @@ async def update_list_entry(req: ListUpdateRequest):
         await clear_playback()
         ctx.data_version += 1
         return {"status": "success", "synced": success}
+@router.delete("/{media_id}")
+async def delete_list_entry(media_id: int):
+    """Delete a user's list entry for a media item."""
+    try:
+        ctx = get_ctx()
+        # 1. Update local registry
+        ctx.media_registry.delete_media_record(media_id)
+        
+        # 2. Sync with AniList
+        success = ctx.media_api.delete_list_entry(media_id)
+        
+        # 3. Handle playback clear
+        from .status import clear_playback
+        await clear_playback()
+        ctx.data_version += 1
+        return {"status": "success", "deleted": success}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

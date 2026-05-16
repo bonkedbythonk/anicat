@@ -122,11 +122,13 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
                           e.stopPropagation();
                           if (onUnwatch) onUnwatch(epNum);
                         }}
-                        title={isManga ? "Mark as unread" : "Mark as unwatched"}
-                        className="p-1 hover:bg-white/10 rounded-full transition-colors group/unwatch"
+                        title={isManga ? "Backtrack to before this chapter" : "Mark as unwatched"}
+                        className="p-1.5 hover:bg-red-500/10 rounded-full transition-all group/unwatch relative"
                       >
-                        <CheckCircle2 size={16} className="text-green-500 fill-green-500/10 shrink-0 group-hover/unwatch:hidden" />
-                        <XCircle size={16} className="text-red-500 hidden group-hover/unwatch:block" />
+                        <CheckCircle2 size={18} className="text-green-500 fill-green-500/10 shrink-0 group-hover/unwatch:opacity-0 transition-opacity" />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/unwatch:opacity-100 transition-opacity">
+                          <XCircle size={18} className="text-red-500 fill-red-500/10" />
+                        </div>
                       </button>
                     )}
                     <span className={`font-bold text-sm ${isWatched ? "text-green-500" : "text-accent"}`}>

@@ -153,48 +153,24 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleNext, handlePrev, onClose]);
 
-  const toggleFullscreen = () => {
-    const element = containerRef.current as any;
-    if (!element) return;
-
-    const isFull = !!(
-      document.fullscreenElement || 
-      (document as any).webkitFullscreenElement || 
-      (document as any).webkitIsFullScreen ||
-      (document as any).mozFullScreenElement || 
-      (document as any).msFullscreenElement
-    );
-
+  const toggleFullscreen = async () => {
     try {
-      if (!isFull) {
-        if (element.requestFullscreen) {
-          element.requestFullscreen().catch((e: any) => alert("Fullscreen error: " + e.message));
-        } else if (element.webkitRequestFullscreen) {
-          element.webkitRequestFullscreen();
-        } else if (element.webkitRequestFullScreen) {
-          element.webkitRequestFullScreen();
-        } else if (element.mozRequestFullScreen) {
-          element.mozRequestFullScreen();
-        } else if (element.msRequestFullscreen) {
-          element.msRequestFullscreen();
-        } else {
-          alert("Your browser does not support fullscreen requests on this element.");
-        }
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const appWindow = getCurrentWindow();
+      const current = await appWindow.isFullscreen();
+      await appWindow.setFullscreen(!current);
+      setIsFullscreen(!current);
+    } catch (err) {
+      console.error("Native fullscreen toggle failed, falling back to browser API:", err);
+      // Fallback for web/development
+      const element = containerRef.current as any;
+      if (!element) return;
+      
+      if (!document.fullscreenElement) {
+        element.requestFullscreen?.() || element.webkitRequestFullscreen?.();
       } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen().catch((e: any) => alert("Exit fullscreen error: " + e.message));
-        } else if ((document as any).webkitExitFullscreen) {
-          (document as any).webkitExitFullscreen();
-        } else if ((document as any).webkitCancelFullScreen) {
-          (document as any).webkitCancelFullScreen();
-        } else if ((document as any).mozCancelFullScreen) {
-          (document as any).mozCancelFullScreen();
-        } else if ((document as any).msExitFullscreen) {
-          (document as any).msExitFullscreen();
-        }
+        document.exitFullscreen?.() || (document as any).webkitExitFullscreen?.();
       }
-    } catch (err: any) {
-      alert("Critical fullscreen error: " + err.message);
     }
   };
 

@@ -41,9 +41,15 @@ class MpvPlayer(BasePlayer):
         self.config = config
         self.executable = shutil.which("mpv")
         
-        # macOS specific fallback for background services
+        # macOS specific fallback for background services/native apps
         if not self.executable and sys.platform == "darwin":
-            for path in ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"]:
+            common_paths = [
+                "/opt/homebrew/bin/mpv",
+                "/usr/local/bin/mpv",
+                "/Applications/mpv.app/Contents/MacOS/mpv",
+                os.path.expanduser("~/Applications/mpv.app/Contents/MacOS/mpv")
+            ]
+            for path in common_paths:
                 if os.path.exists(path):
                     self.executable = path
                     break

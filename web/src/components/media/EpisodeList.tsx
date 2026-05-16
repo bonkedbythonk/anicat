@@ -21,26 +21,11 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
   const [batchStart, setBatchStart] = useState("");
   const [batchEnd, setBatchEnd] = useState("");
   const [batchQueuing, setBatchQueuing] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const activeEpRef = useRef<HTMLDivElement>(null);
-  const [hasScrolled, setHasScrolled] = useState(false);
 
+  // Removed automatic scrolling entirely to ensure UI stability.
+  // The list will always start at the top (Episode 1).
   useEffect(() => {
-    if (!loading && episodes.length > 0 && !hasScrolled) {
-      // Wait for the panel animation to finish, then snap the list position
-      const timer = setTimeout(() => {
-        if (containerRef.current && activeEpRef.current) {
-          containerRef.current.scrollTop = activeEpRef.current.offsetTop - 10;
-          setHasScrolled(true);
-        }
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [loading, episodes, hasScrolled]);
-
-  useEffect(() => {
-    // Reset scroll flag when media changes
-    setHasScrolled(false);
+    // Manual scroll only
   }, [mediaId]);
 
   const handlePlay = async (epNum: string) => {

@@ -217,7 +217,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                         <>
                           {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
                           <span>
-                            {isFinished ? "Completed" : isCaughtUp ? "Caught Up" : `${isManga ? 'Read' : 'Continue'} Episode ${nextEpisode}`}
+                            {isFinished ? "Completed" : isCaughtUp ? "Caught Up" : `${isManga ? 'Read' : 'Continue'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
                           </span>
                         </>
                       )}

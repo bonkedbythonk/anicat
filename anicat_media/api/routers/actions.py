@@ -103,11 +103,7 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             if not chapter_data or not chapter_data.get("thumbnails"):
                  raise HTTPException(status_code=404, detail="Failed to load chapter pages")
             
-            # For now, we just open the first page in the browser as a "playback" action
-            first_page = chapter_data["thumbnails"][0]
-            webbrowser.open(first_page)
-            
-            # Track progress
+            # Backwards compatibility: track progress but let the frontend handle the reader
             ctx.watch_history.track(media_item, PlayerResult(episode=str(episode), stop_time=None, total_time=None))
             ctx.data_version += 1
             
@@ -115,7 +111,7 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             set_playback(media_id=media_id, media_title=title, episode=str(episode))
             
             _active_requests.discard(media_id)
-            return {"status": "reading", "media": title, "episode": episode}
+            return {"status": "reading", "media": title, "episode": episode, "chapter_data": chapter_data}
 
         # 3. Search anime provider
         from ...libs.provider.anime.params import SearchParams as ProviderSearchParams

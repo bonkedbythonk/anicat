@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import Sidebar, { type ViewName } from "@/components/layout/Sidebar";
 import NowPlaying from "@/components/layout/NowPlaying";
 import MediaDetail from "@/components/media/MediaDetail";
@@ -208,9 +209,18 @@ export default function App() {
           </div>
         )}
 
-        <div className={`p-6 lg:p-10 max-w-[1600px] transition-all ${isOffline && !dismissedOffline ? 'pt-24 lg:pt-28' : ''}`}>
-          {renderView()}
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeView}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className={`p-6 lg:p-10 max-w-[1600px] transition-all ${isOffline && !dismissedOffline ? 'pt-24 lg:pt-28' : ''}`}
+          >
+            {renderView()}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       <NowPlaying />

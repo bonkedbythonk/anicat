@@ -256,9 +256,19 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                   </div>
                   <div className="h-8 w-px bg-white/10" />
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Score</span>
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                      {fullItem.user_status?.score && fullItem.user_status.score > 0 ? "Your Score" : "Avg Score"}
+                    </span>
                     <span className="text-base font-bold text-white">
-                      {(fullItem.user_status?.score && fullItem.user_status.score > 0) ? fullItem.user_status.score : '-'} <span className={`text-gray-600 font-medium ${!(fullItem.user_status?.score && fullItem.user_status.score > 0) ? 'hidden' : ''}`}>/ 10</span>
+                      {fullItem.user_status?.score && fullItem.user_status.score > 0 ? (
+                        <>
+                          {fullItem.user_status.score} <span className="text-gray-600 font-medium">/ 10</span>
+                        </>
+                      ) : (
+                        <>
+                          {fullItem.average_score ? `${fullItem.average_score}%` : '-'}
+                        </>
+                      )}
                     </span>
                   </div>
                 </div>

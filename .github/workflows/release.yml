@@ -80,9 +80,9 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         with:
           projectPath: web
-          tagName: v__VERSION__
-          releaseName: 'Anicat v__VERSION__'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Anicat ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download the latest version of Anicat.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

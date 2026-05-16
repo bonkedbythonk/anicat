@@ -302,4 +302,7 @@ export const mediaApi = {
 
   openUrl: (url: string) =>
     fetchFromApi(`/actions/open?url=${encodeURIComponent(url)}`),
+
+  getLogs: (lines = 100): Promise<{ logs: string }> =>
+    fetchFromApi(`/status/logs?lines=${lines}`),
 };

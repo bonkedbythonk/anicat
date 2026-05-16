@@ -1,5 +1,6 @@
 import logging
 import os
+from ..core.constants import LOG_FILE
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -54,7 +55,27 @@ class _ContextProxy:
 ctx = _ContextProxy()
 
 
+def setup_logging():
+    """Setup file logging for the sidecar."""
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # File handler
+    fh = logging.FileHandler(LOG_FILE)
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('[%(asctime)s][sidecar][%(levelname)s] %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    
+    # Stream handler (console)
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+    
+    logger.info(f"Logging initialized at {LOG_FILE}")
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
+    setup_logging()
     if config is None:
         loader = ConfigLoader()
         config = loader.load()

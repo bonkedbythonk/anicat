@@ -5,12 +5,27 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 import subprocess
-from anicat_media.core.constants import VERSION
+from anicat_media.core.constants import VERSION, LOG_FILE
 from anicat_media.cli.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+@router.get("/logs")
+async def get_logs(lines: int = 100):
+    """Retrieve the last N lines from the log file."""
+    if not os.path.exists(LOG_FILE):
+        return {"logs": "Log file not found."}
+    
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            # Efficiently get last lines for large files
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            return {"logs": "".join(last_lines)}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {str(e)}"}
 
 def get_ctx():
     from ..main import ctx

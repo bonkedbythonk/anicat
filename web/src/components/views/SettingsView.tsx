@@ -344,18 +344,61 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                 </div>
               </div>
 
+              {/* Debugging & Logs */}
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white">Technical Diagnostics</h3>
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const logs = await mediaApi.getLogs(50);
+                        const report = [
+                          `Anicat Version: ${health?.current_version || "unknown"}`,
+                          `Platform: ${window.navigator.platform}`,
+                          `User Agent: ${window.navigator.userAgent}`,
+                          `API Connected: ${health?.api_connected}`,
+                          `API Authenticated: ${health?.api_authenticated}`,
+                          `Is Offline: ${health?.is_offline}`,
+                          `Data Version: ${health?.data_version}`,
+                          `Timestamp: ${new Date().toISOString()}`,
+                          `\n--- LATEST LOGS ---\n`,
+                          logs.logs
+                        ].join('\n');
+                        await navigator.clipboard.writeText(report);
+                        alert("Debug report copied to clipboard!");
+                      } catch (err) {
+                        alert("Failed to generate report.");
+                      }
+                    }}
+                    className="text-[10px] font-bold text-accent hover:text-accent-light flex items-center space-x-1"
+                  >
+                    <Save size={12} />
+                    <span>Copy Debug Report</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <button 
+                    onClick={handleOpenLogs}
+                    className="w-full py-2.5 bg-white/[0.04] hover:bg-white/[0.07] text-white/70 rounded-xl text-xs font-bold transition-all border border-white/5 flex items-center justify-center space-x-2"
+                  >
+                    <HardDrive size={14} />
+                    <span>Open Log Directory</span>
+                  </button>
+
+                  <div className="relative">
+                    <pre className="w-full h-40 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-500 overflow-y-auto scrollbar-hide border border-white/5">
+                      {health ? "Fetching latest logs..." : "Engine offline."}
+                      <LogViewer />
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
               {/* Danger Zone */}
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
                 <h3 className="text-lg font-bold text-red-400/80">Danger Zone</h3>
-                {/* View Logs */}
-                <button 
-                  onClick={handleOpenLogs}
-                  className="w-full py-3 mb-4 bg-white/[0.05] hover:bg-white/[0.08] text-white/80 rounded-xl text-sm font-bold transition-all border border-white/5 flex items-center justify-center space-x-2"
-                >
-                  <Activity size={16} />
-                  <span>View Application Logs</span>
-                </button>
-
+                
                 <button
                   id="clear-registry-btn"
                   data-confirmed="false"
@@ -461,6 +504,27 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
       </div>
     </div>
   );
+}
+
+function LogViewer() {
+  const [logs, setLogs] = useState<string>("");
+
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        const res = await mediaApi.getLogs(50);
+        setLogs(res.logs);
+      } catch (err) {
+        setLogs("Could not fetch logs.");
+      }
+    };
+
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return <div className="mt-2 text-gray-400 whitespace-pre-wrap">{logs}</div>;
 }
 
 function SettingField({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {

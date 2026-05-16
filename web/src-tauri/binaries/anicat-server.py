@@ -32,7 +32,7 @@ def main():
     
     # Run the server on localhost
     # We use 127.0.0.1 for maximum privacy and to avoid firewall prompts
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run(app, host="127.0.0.1", port=13370, log_level="info")
 
 if __name__ == "__main__":
     main()

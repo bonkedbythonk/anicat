@@ -6,11 +6,42 @@ use tauri::{
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
+#[tauri::command]
+async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let log_path = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    
+    // Create directory if it doesn't exist
+    if !log_path.exists() {
+        std::fs::create_dir_all(&log_path).map_err(|e| e.to_string())?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&log_path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+        
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(&log_path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&log_path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_log::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![open_logs_folder])
         .setup(|app| {
             // Setup Tray Menu
             let quit_i = MenuItem::with_id(app, "quit", "Quit Anicat", true, None::<&str>)?;

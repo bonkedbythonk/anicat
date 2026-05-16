@@ -35,6 +35,16 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
     }
   }, [health]);
 
+  const handleOpenLogs = async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_logs_folder");
+    } catch (err) {
+      console.error("Failed to open logs:", err);
+      alert("Could not open logs folder automatically.");
+    }
+  };
+
   const handleUpdate = async () => {
     setCheckingUpdate(true);
     setUpdateMessage({ text: "", type: null });
@@ -337,6 +347,15 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
               {/* Danger Zone */}
               <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/10 space-y-4">
                 <h3 className="text-lg font-bold text-red-400/80">Danger Zone</h3>
+                {/* View Logs */}
+                <button 
+                  onClick={handleOpenLogs}
+                  className="w-full py-3 mb-4 bg-white/[0.05] hover:bg-white/[0.08] text-white/80 rounded-xl text-sm font-bold transition-all border border-white/5 flex items-center justify-center space-x-2"
+                >
+                  <Activity size={16} />
+                  <span>View Application Logs</span>
+                </button>
+
                 <button
                   id="clear-registry-btn"
                   data-confirmed="false"

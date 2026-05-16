@@ -71,7 +71,7 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0 
       </div>
 
       {/* Primary Nav */}
-      <nav className="flex-1 space-y-1 px-3">
+      <nav className="flex-1 space-y-1 px-3 overflow-y-auto scrollbar-hide">
         {navItems.map((item) => {
           const isActive = activeView === item.view;
           return (

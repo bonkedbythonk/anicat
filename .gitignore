@@ -101,4 +101,6 @@ anicat_media/api/static/
 web/src-tauri/binaries/
 web/src-tauri/target/
 build_sidecar/
+!build_sidecar/sidecar.spec
+!build_sidecar/anicat-server.py
 web/src-tauri/target/release/bundle/dmg/

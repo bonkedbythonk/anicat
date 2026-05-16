@@ -25,8 +25,9 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
 
   useEffect(() => {
     if (!loading && episodes.length > 0) {
-      // Use 'instant' instead of 'smooth' to prevent the "automatically scrolling" feeling
-      activeEpRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
+      // Use 'nearest' so it only scrolls if the episode isn't already visible,
+      // and it won't "jump" to the top if it can just show it at the bottom.
+      activeEpRef.current?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
     }
   }, [loading, episodes]);
 

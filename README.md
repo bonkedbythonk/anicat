@@ -1,29 +1,94 @@
-# Anicat
+# 🐱 Anicat
 
-Anicat is a specialized media companion for macOS, designed to streamline anime and manga management. It provides a centralized dashboard to stream content, track progress via AniList, and manage local reading with a minimalist, performance-first architecture.
+**Premium Anime & Manga Experience for macOS.**
 
-Anicat is built on the foundations of the [Viu](https://github.com/viu-media/viu) project, refined for a native macOS experience with a focus on background persistence and ease of use.
+Anicat is a high-performance, native media hub designed for those who want a seamless, unified interface for searching, streaming, and tracking their favorite content. It is a powerful fork of the `viu` engine, evolved into a full-featured macOS application.
 
-![Anicat Dashboard](assets/branding/dashboard_preview.png)
+---
 
-## Installation (macOS)
+## 🚀 Getting Started
 
-To install Anicat, run the following command in your terminal:
+Anicat offers three ways to experience your library, depending on your workflow:
 
+### 1. The Native App (Recommended)
+The premium way to use Anicat. It sits in your Dock and Menu Bar, manages a background server automatically, and looks stunning.
+
+**Install via Terminal:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash
 ```
+*   **Updates:** Simply click **"Install Update"** in the Settings > Maintenance tab within the app. No more terminal commands needed after the first install.
 
-This script downloads the latest release, installs it to your Applications folder, and configures the necessary security permissions.
+### 2. The TUI / CLI
+For those who live in the terminal. Fast, keyboard-driven, and lightweight.
 
-## Features
+**Run instantly:**
+```bash
+uv run anicat
+```
+*   Requires [uv](https://github.com/astral-sh/uv) to be installed.
 
-- **Premium macOS Experience**: Native-style squircle icon and glassmorphism UI.
-- **Sync Everything**: Automatic AniList synchronization for both anime and manga.
-- **Seamless Playback**: Integrated player support (AnimePahe) and high-quality reader (MangaKatana).
-- **Background Service**: Runs as a silent service on port 13370.
-- **Cross-Platform Ready**: Built with Tauri v2 for maximum performance and security.
+### 3. Web Dashboard
+Access the Anicat interface from any browser on your local network.
 
-## Architecture
+*   Launch the app/server and visit `http://localhost:13370` in your browser.
 
-Anicat consists of a FastAPI backend service and a Next.js frontend, bundled together as a native application using Tauri. The backend handles media scraping, progress tracking, and local state, while the frontend provides a responsive dashboard for media discovery and interaction.
+---
+
+## 🎬 Professional MPV Setup
+
+Anicat uses **mpv** for high-quality playback. Here is how to unlock its full potential:
+
+### Keyboard Shortcuts
+| Command | Action |
+| :--- | :--- |
+| `Shift + N` | **Play Next Episode** (Automated sync with Anicat) |
+| `Space` | Play / Pause |
+| `f` | Toggle Fullscreen |
+| `s` | Take Screenshot |
+| `j` | Cycle Subtitles |
+| `[` / `]` | Change Playback Speed |
+| `9` / `0` | Volume Control |
+
+### ✨ Improving the Visuals (Anime4K)
+Anime4K is a set of state-of-the-art open-source real-time anime upscaling algorithms.
+
+1.  Download the shaders from [Anime4K GitHub](https://github.com/bloc97/Anime4K).
+2.  Place them in `~/.config/mpv/shaders/`.
+3.  Configure your `mpv.conf` based on your hardware:
+
+#### Tier 1: Low-End / Base Apple Silicon (M1/M2/M3 Base, Intel iGPU)
+*Focus on speed and stability.*
+```conf
+# Add to mpv.conf
+glsl-shaders="~/.config/mpv/shaders/Anime4K_Upscale_CNN_M_x2_Fast.glsl"
+```
+
+#### Tier 2: Mid-Range (M1/M2/M3 Pro, RTX 3060/4060)
+*The "Sweet Spot" for quality.*
+```conf
+glsl-shaders="~/.config/mpv/shaders/Anime4K_Upscale_CNN_L_x2_HQ.glsl;~/.config/mpv/shaders/Anime4K_Auto_Restore_VL.glsl"
+```
+
+#### Tier 3: High-End (M1/M2/M3 Max/Ultra, RTX 3080/4090)
+*Ultimate quality with no compromises.*
+```conf
+glsl-shaders="~/.config/mpv/shaders/Anime4K_Upscale_CNN_UL_x2_Thin.glsl;~/.config/mpv/shaders/Anime4K_Restore_CNN_UL.glsl"
+```
+
+### 🎨 Modern UI Skin
+We recommend installing **[uosc](https://github.com/tomasklaen/uosc)** or **[modern-uifk](https://github.com/maoiscat/mpv-modern-uifk)** for a sleek, macOS-native look that replaces the default mpv bar.
+
+---
+
+## 🛠️ Features
+- **AniList Sync**: Automated progress tracking and library management.
+- **High-Speed Scrapers**: Native integration with AnimePahe and MangaKatana.
+- **Smart Caching**: Powered by TanStack Query for instant navigation.
+- **System Tray**: Keep Anicat alive in the background for automated downloads.
+- **Fluid UI**: Framer Motion transitions for a premium software feel.
+
+---
+
+## 📜 License & Credits
+Anicat is a fork of [viu](https://github.com/bonkedbythonk/viu). Distributed under the MIT License.

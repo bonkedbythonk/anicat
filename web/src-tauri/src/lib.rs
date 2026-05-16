@@ -43,6 +43,13 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::default().build())
         .invoke_handler(tauri::generate_handler![open_logs_folder])
         .setup(|app| {
+            // Clean up any existing sidecar processes to avoid "Address already in use"
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg("anicat-server")
+                .output();
+
             // Setup Tray Menu
             let quit_i = MenuItem::with_id(app, "quit", "Quit Anicat", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "Show Dashboard", true, None::<&str>)?;

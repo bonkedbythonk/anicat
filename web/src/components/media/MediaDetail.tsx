@@ -139,11 +139,9 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
     if (isUpdatingStatus) return;
     setIsUpdatingStatus(true);
     
-    const isPlanning = fullItem.user_status?.status === 'PLANNING';
-    const newStatus = isPlanning ? 'REPEATING' : 'PLANNING'; 
-    
+    const newStatus = fullItem.user_status?.status === "WATCHING" ? "PLANNING" : "WATCHING";
     try {
-      await mediaApi.updateStatus(item.id, newStatus);
+      await mediaApi.updateStatus(item.id, newStatus.toLowerCase() as any);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to toggle watchlist:", error);

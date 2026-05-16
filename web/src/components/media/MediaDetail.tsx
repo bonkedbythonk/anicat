@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import { dispatchRefresh, useRefreshTrigger } from "@/lib/events";
 import { formatTime, formatRelativeTime } from "@/lib/date";
@@ -109,14 +109,27 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
     }
   };
 
-  const handleUnwatch = async () => {
+  const [isEditingProgress, setIsEditingProgress] = useState(false);
+  const [editProgressValue, setEditProgressValue] = useState("");
+
+  const handleUpdateProgress = async (newProgress: number) => {
+    try {
+      await mediaApi.updateStatus(item.id, undefined, undefined, newProgress);
+      dispatchRefresh();
+      setIsEditingProgress(false);
+    } catch (error) {
+      console.error("Failed to update progress:", error);
+    }
+  };
+
+  const handleRemoveFromList = async () => {
     if (confirm(`Are you sure you want to remove ${item.title.english || item.title.romaji} from your list?`)) {
       try {
         await mediaApi.updateStatus(item.id, "REPEATING", undefined, 0); // Hack to clear
         dispatchRefresh();
         onClose();
       } catch (error) {
-        console.error("Failed to unwatch:", error);
+        console.error("Failed to remove from list:", error);
       }
     }
   };
@@ -127,7 +140,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
     setIsUpdatingStatus(true);
     
     const isPlanning = fullItem.user_status?.status === 'PLANNING';
-    const newStatus = isPlanning ? 'REPEATING' : 'PLANNING'; // REPEATING + 0 progress = hacky way to remove/reset
+    const newStatus = isPlanning ? 'REPEATING' : 'PLANNING'; 
     
     try {
       await mediaApi.updateStatus(item.id, newStatus);
@@ -239,20 +252,62 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                 </button>
 
                 <button 
-                  title="More actions"
-                  className="p-3.5 bg-white/[0.05] hover:bg-white/[0.1] text-white/70 hover:text-white rounded-2xl transition-all border border-white/5 active:scale-95"
+                  onClick={handleRemoveFromList}
+                  title="Remove from List"
+                  className="p-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-500/70 hover:text-red-500 rounded-2xl transition-all border border-red-500/20 active:scale-95"
                 >
-                  <MoreHorizontal size={22} />
+                  <Trash2 size={22} />
                 </button>
               </div>
 
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center space-x-6">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Progress</span>
-                    <span className="text-base font-bold text-white">
-                      {fullItem.user_status?.progress || 0} <span className="text-gray-600 font-medium">/</span> {fullItem.episodes || fullItem.chapters || '?'}
-                    </span>
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] mb-1">Progress</div>
+                    {isEditingProgress ? (
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          autoFocus
+                          type="number" 
+                          value={editProgressValue}
+                          onChange={(e) => setEditProgressValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleUpdateProgress(parseInt(editProgressValue) || 0);
+                            if (e.key === 'Escape') setIsEditingProgress(false);
+                          }}
+                          className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-sm font-bold text-white focus:outline-none focus:border-accent"
+                        />
+                        <button 
+                          onClick={() => handleUpdateProgress(parseInt(editProgressValue) || 0)}
+                          className="p-1.5 bg-accent text-white rounded-lg hover:bg-accent-light transition-colors"
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button 
+                          onClick={() => setIsEditingProgress(false)}
+                          className="p-1.5 bg-white/5 text-gray-400 rounded-lg hover:bg-white/10 transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-3 group/progress">
+                        <p className="text-xl font-black text-white tabular-nums">
+                          {fullItem.user_status?.progress || 0}
+                          <span className="text-gray-600 mx-1.5 font-medium">/</span>
+                          <span className="text-gray-400">{fullItem.episodes || fullItem.chapters || "?"}</span>
+                        </p>
+                        <button 
+                          onClick={() => {
+                            setEditProgressValue(String(fullItem.user_status?.progress || 0));
+                            setIsEditingProgress(true);
+                          }}
+                          className="p-1.5 bg-white/5 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-all opacity-0 group-hover/progress:opacity-100"
+                        >
+                          <Edit2 size={12} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="h-8 w-px bg-white/10" />
                   <div className="flex flex-col">
@@ -342,7 +397,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
               </div>
 
               <div className="animate-fade-in min-h-[300px]">
-                {activeTab === "episodes" && <EpisodeList mediaId={item.id} episodes={episodes} loading={loadingEps} progress={fullItem.user_status?.progress} isManga={isManga} onRead={onRead} onUnwatch={handleUnwatch} />}
+                {activeTab === "episodes" && <EpisodeList mediaId={item.id} episodes={episodes} loading={loadingEps} progress={fullItem.user_status?.progress} isManga={isManga} onRead={onRead} onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)} />}
                 {activeTab === "characters" && (
                   <div className="grid grid-cols-2 gap-4">
                     {loadingChars ? (

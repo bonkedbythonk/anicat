@@ -20,8 +20,15 @@ The premium way to use Anicat. It sits in your Dock and Menu Bar, manages a back
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash
 ```
 *   **Updates:** Simply click "Install Update" in the Settings > Maintenance tab within the app. No more terminal commands needed after the first install.
-*   **macOS Gatekeeper & MPV Troubleshooting:**
-    If you are running a public release DMG and find that MPV does not open, this is due to macOS Gatekeeper quarantine policies. To resolve:
+*   **Installing MPV (Unlock Premium Playback):**
+    Anicat includes a beautiful built-in player that works out-of-the-box. However, to unlock real-time **Anime4K upscaling** and custom skins, you'll want the native **MPV** player. You can install it in two ways:
+    *   **Option A: No Terminal (Easiest for Non-Technical Users)**: Download the precompiled macOS app bundle from the official [mpv.io/installation](https://mpv.io/installation/) page (or direct community builds like [stolendata's macOS builds](https://stolendata.no/export/mpv/)) and drag the `mpv.app` file directly into your `/Applications` folder. Anicat will automatically detect it!
+    *   **Option B: Via Terminal (Homebrew)**: If you have Homebrew installed, simply open your Terminal and run:
+        ```bash
+        brew install mpv
+        ```
+*   **macOS Gatekeeper Troubleshooting:**
+    If you are running a public release DMG and find that MPV does not open, this is due to macOS Gatekeeper quarantine policies blocking child subprocesses. To resolve:
     1. Ensure you have dragged `Anicat.app` to your `/Applications` folder (never run it directly from the mounted DMG volume).
     2. Run the following command in Terminal to allow the background server sidecar to launch external programs like MPV:
        ```bash

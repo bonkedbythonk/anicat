@@ -37,28 +37,39 @@ pub fn run() {
                 .build(app)?;
 
             let shell = app.shell();
-            let sidecar = shell.sidecar("anicat-server").unwrap();
-
-            let (mut rx, child) = sidecar.spawn().expect("Failed to spawn sidecar");
-
-            app.manage(child);
-
-            tauri::async_runtime::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(line) => {
-                            log::info!("sidecar-out: {}", String::from_utf8_lossy(&line).trim());
+            let sidecar_name = "anicat-server";
+            
+            match shell.sidecar(sidecar_name) {
+                Ok(sidecar) => {
+                    match sidecar.spawn() {
+                        Ok((mut rx, child)) => {
+                            app.manage(child);
+                            tauri::async_runtime::spawn(async move {
+                                while let Some(event) = rx.recv().await {
+                                    match event {
+                                        CommandEvent::Stdout(line) => {
+                                            log::info!("sidecar-out: {}", String::from_utf8_lossy(&line).trim());
+                                        }
+                                        CommandEvent::Stderr(line) => {
+                                            log::error!("sidecar-err: {}", String::from_utf8_lossy(&line).trim());
+                                        }
+                                        CommandEvent::Terminated(payload) => {
+                                            log::warn!("sidecar-terminated: {:?}", payload);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            });
                         }
-                        CommandEvent::Stderr(line) => {
-                            log::error!("sidecar-err: {}", String::from_utf8_lossy(&line).trim());
+                        Err(e) => {
+                            log::error!("Failed to spawn sidecar {}: {}", sidecar_name, e);
                         }
-                        CommandEvent::Terminated(payload) => {
-                            log::warn!("sidecar-terminated: {:?}", payload);
-                        }
-                        _ => {}
                     }
                 }
-            });
+                Err(e) => {
+                    log::error!("Failed to find sidecar {}: {}", sidecar_name, e);
+                }
+            }
 
             Ok(())
         })

@@ -4,6 +4,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import sys
+
+# Ensure common paths are present for macOS GUI launches
+if sys.platform == "darwin":
+    path = os.environ.get("PATH", "")
+    extra_paths = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        os.path.expanduser("~/.local/bin")
+    ]
+    current_paths = path.split(os.pathsep)
+    for p in extra_paths:
+        if p not in current_paths:
+            current_paths.append(p)
+    os.environ["PATH"] = os.pathsep.join(current_paths)
 from ..core.config import AppConfig
 from ..cli.config import ConfigLoader
 from ..cli.interactive.session import Context

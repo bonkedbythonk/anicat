@@ -12,28 +12,37 @@ Anicat is a high-performance, native media hub designed for those who want a sea
 
 Anicat offers a premium experience tailored for your workflow, whether you want a seamless macOS app or a blazing-fast terminal UI.
 
-### 🚀 1. The Native macOS App (Recommended)
+### 1. The Native macOS App (Recommended)
 The premium way to use Anicat. It sits in your Dock and Menu Bar, manages the background server automatically, and looks stunning.
 
-#### **Easy Installation (One-Click Setup)**
-Run this simple command in your Terminal to download, install, and configure security permissions for Anicat automatically:
+#### Easy Installation (One-Click Setup)
+Run this simple command in your Terminal to download, install, and configure all security permissions for Anicat automatically:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash
 ```
 *   **Updates:** Simply click "Install Update" in the `Settings > Maintenance` tab within the app. No more terminal commands needed after the first install!
 
+#### Manual Installation (Alternative)
+If you prefer to download the `.dmg` manually from the GitHub Releases page:
+1. Download the latest `.dmg` and double-click to mount it.
+2. Drag `Anicat.app` to your `/Applications` folder (never run it directly from the mounted volume).
+3. If macOS blocks the background server from launching external programs (like MPV), open Terminal and run this one-time command to remove the quarantine flag:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Anicat.app
+   ```
+
 ---
 
-### 🎥 2. Setting Up Playback (Built-in vs. Native MPV)
+### 2. Setting Up Playback (Built-in vs. Native MPV)
 Anicat features two ways to watch anime, fitting both casual viewers and quality purists:
 
-#### **A. The Built-in Player (Zero Setup)**
+#### A. The Built-in Player (Zero Setup)
 * Works 100% out-of-the-box on your first launch!
 * Plays streams directly inside the Anicat window without installing any extra software.
 
-#### **B. The Native MPV Player (Unlock Premium 4K Upscaling & Skins)**
+#### B. The Native MPV Player (Unlock Premium 4K Upscaling & Skins)
 To play high-performance upscaled anime via **Anime4K** shaders or use advanced skins (ModernX), you need the native **MPV** player. You can install it easily:
-*   **No Terminal (Easiest for Non-Technical Users)**: Download the precompiled macOS app bundle from the official [mpv.io/installation](https://mpv.io/installation/) page (or direct community builds like [stolendata's macOS builds](https://stolendata.no/export/mpv/)) and drag the `mpv.app` file directly into your `/Applications` folder. Anicat will automatically detect it!
+*   **No Terminal (Easiest)**: Download the precompiled macOS app bundle from the official [mpv.io/installation](https://mpv.io/installation/) page (or direct community builds like [stolendata's macOS builds](https://stolendata.no/export/mpv/)) and drag the `mpv.app` file directly into your `/Applications` folder. Anicat will automatically detect it!
 *   **Via Terminal (Homebrew)**: If you have Homebrew installed, simply open your Terminal and run:
     ```bash
     brew install mpv
@@ -41,26 +50,16 @@ To play high-performance upscaled anime via **Anime4K** shaders or use advanced 
 
 ---
 
-### 🛡️ 3. Troubleshooting macOS Gatekeeper (For the DMG version)
-If you manually downloaded the `.dmg` from GitHub Releases and find that the native player (MPV) won't open:
-1. Make sure you have dragged `Anicat.app` to your `/Applications` folder (never run it directly from the mounted DMG volume).
-2. Open Terminal and run this quick one-time command to remove macOS's quarantine restriction:
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/Anicat.app
-   ```
-
----
-
-### 💻 4. The Terminal TUI & Developer CLI
+### 3. The Terminal TUI & Developer CLI
 For developers and those who live in the terminal. Fast, keyboard-driven, and lightweight.
 
-#### **Run instantly (CLI/TUI):**
+#### Run instantly (CLI/TUI)
 ```bash
 uv run anicat
 ```
 *Requires [uv](https://github.com/astral-sh/uv) to be installed.*
 
-#### **Developer / Advanced Local Installation:**
+#### Developer / Advanced Local Installation
 If you want to build the entire suite (CLI, TUI, and App) locally from the source:
 ```bash
 ./scripts/install.sh
@@ -69,7 +68,7 @@ If you want to build the entire suite (CLI, TUI, and App) locally from the sourc
 
 ---
 
-### 🌐 5. Web Dashboard
+### 4. Web Dashboard
 Access the Anicat interface from any browser on your local network.
 * Launch the app/server and visit http://localhost:13370 in your browser.
 

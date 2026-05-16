@@ -39,23 +39,48 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
     setCheckingUpdate(true);
     setUpdateMessage({ text: "", type: null });
     try {
-      if (hasUpdate) {
-        // Perform the actual update
-        const res = await mediaApi.triggerUpdate();
-        setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
-        if (res.status === "success" && (res.message.includes("Update") || res.message.includes("Updated"))) {
-          if (onUpdateStarted) onUpdateStarted();
-        }
+      // Check if we are running in Tauri
+      let isTauri = false;
+      try {
+        isTauri = !!(window as any).__TAURI_INTERNALS__;
+      } catch {
+        isTauri = false;
+      }
+
+      if (isTauri) {
+        // Use Tauri Shell to run the update script
+        const { Command } = await import("@tauri-apps/plugin-shell");
+        const cmd = Command.create("bash", [
+          "-c",
+          "curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash"
+        ]);
+        
+        setUpdateMessage({ text: "Update started! The app will restart shortly.", type: "success" });
+        
+        const child = await cmd.spawn();
+        console.log("Update process spawned:", child.pid);
+        
+        // Give it a second to start before potentially closing (though the script handles replacement)
+        if (onUpdateStarted) onUpdateStarted();
       } else {
-        // Just check for updates
-        const res = await mediaApi.checkUpdate();
-        setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
-        if (res.status === "success" && res.update_available) {
-          setHasUpdate(true);
+        // Fallback for web/dev mode
+        if (hasUpdate) {
+          const res = await mediaApi.triggerUpdate();
+          setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
+          if (res.status === "success") {
+            if (onUpdateStarted) onUpdateStarted();
+          }
+        } else {
+          const res = await mediaApi.checkUpdate();
+          setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
+          if (res.status === "success" && res.update_available) {
+            setHasUpdate(true);
+          }
         }
       }
     } catch (err) {
-      setUpdateMessage({ text: "Failed to connect to update server.", type: "error" });
+      console.error("Update failed:", err);
+      setUpdateMessage({ text: "Failed to trigger update. Please try manual install.", type: "error" });
     } finally {
       setCheckingUpdate(false);
     }

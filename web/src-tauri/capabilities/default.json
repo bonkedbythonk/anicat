@@ -26,6 +26,14 @@
         {
           "name": "binaries/anicat-server",
           "sidecar": true
+        },
+        {
+          "name": "bash",
+          "cmd": "bash",
+          "args": [
+            "-c",
+            "curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash"
+          ]
         }
       ]
     }

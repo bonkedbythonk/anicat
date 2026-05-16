@@ -213,7 +213,10 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                   <Bookmark size={22} />
                 </button>
 
-                <button className="p-3.5 bg-white/[0.05] hover:bg-white/[0.1] text-white/70 hover:text-white rounded-2xl transition-all border border-white/5 active:scale-95">
+                <button 
+                  title="More actions"
+                  className="p-3.5 bg-white/[0.05] hover:bg-white/[0.1] text-white/70 hover:text-white rounded-2xl transition-all border border-white/5 active:scale-95"
+                >
                   <MoreHorizontal size={22} />
                 </button>
               </div>
@@ -230,7 +233,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead }: Me
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Score</span>
                     <span className="text-base font-bold text-white">
-                      {fullItem.user_status?.score || '-'} <span className={`text-gray-600 font-medium ${!fullItem.user_status?.score ? 'hidden' : ''}`}>/ 10</span>
+                      {(fullItem.user_status?.score && fullItem.user_status.score > 0) ? fullItem.user_status.score : '-'} <span className={`text-gray-600 font-medium ${!(fullItem.user_status?.score && fullItem.user_status.score > 0) ? 'hidden' : ''}`}>/ 10</span>
                     </span>
                   </div>
                 </div>

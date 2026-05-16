@@ -56,7 +56,6 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
     item.user_status?.status === 'watching' && 
     item.status === 'RELEASING' && 
     !isFinished &&
-    isAiringNow &&
     progress < currentReleased &&
     (totalCount === 0 || progress < totalCount);
 

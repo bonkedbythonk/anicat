@@ -25,9 +25,20 @@ export default function ListsView({ onSelect }: ListsViewProps) {
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [delayedLoading, setDelayedLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (loading) {
+      timer = setTimeout(() => setDelayedLoading(true), 400);
+    } else {
+      setDelayedLoading(false);
+    }
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   useEffect(() => {
     setLoading(true);
@@ -106,8 +117,8 @@ export default function ListsView({ onSelect }: ListsViewProps) {
 
       {/* Grid */}
       <div className={`relative transition-all duration-300 ${loading ? "opacity-50 pointer-events-none grayscale-[0.2]" : "opacity-100"}`}>
-        {loading && items.length > 0 && (
-          <div className="absolute top-0 left-0 right-0 z-10 flex justify-center mt-12">
+        {delayedLoading && items.length > 0 && (
+          <div className="absolute top-0 left-0 right-0 z-10 flex justify-center mt-12 animate-fade-in">
             <div className="bg-black/60 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
               <Loader2 className="animate-spin text-accent" size={20} />
               <span className="text-xs font-bold text-white uppercase tracking-widest">Updating List...</span>

@@ -79,7 +79,9 @@ glsl-shaders="~/.config/mpv/shaders/Anime4K_Upscale_CNN_UL_x2_Thin.glsl;~/.confi
 ```
 
 ### Modern UI Skin
-We recommend installing **[uosc](https://github.com/tomasklaen/uosc)** or **[modern-uifk](https://github.com/maoiscat/mpv-modern-uifk)** for a sleek, macOS-native look that replaces the default mpv bar.
+We highly recommend installing **[ModernX](https://github.com/cyl0/ModernX)** for a sleek, macOS-native look that replaces the default mpv bar. It provides a premium interface that perfectly complements the Anicat dashboard.
+
+Alternatively, you can try **[uosc](https://github.com/tomasklaen/uosc)** for a more minimalist approach.
 
 ---
 

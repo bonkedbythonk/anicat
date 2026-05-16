@@ -209,14 +209,14 @@ export default function App() {
           </div>
         )}
 
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="popLayout">
           <motion.div
             key={activeView}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className={`p-6 lg:p-10 max-w-[1600px] transition-all ${isOffline && !dismissedOffline ? 'pt-24 lg:pt-28' : ''}`}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className={`p-6 lg:p-10 max-w-[1600px] ${isOffline && !dismissedOffline ? 'pt-24 lg:pt-28' : ''}`}
           >
             {renderView()}
           </motion.div>

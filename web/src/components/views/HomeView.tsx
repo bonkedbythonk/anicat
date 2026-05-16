@@ -19,6 +19,7 @@ export default function HomeView({ onSelect }: HomeViewProps) {
         mediaApi.getUserList("watching", "ANIME"),
         mediaApi.getTrending("ANIME"),
         mediaApi.getSeasonal("ANIME"),
+        mediaApi.getPlaybackStatus().catch(() => null),
       ]);
 
       const watchingMedia = watching.media || [];
@@ -30,11 +31,22 @@ export default function HomeView({ onSelect }: HomeViewProps) {
         recentReleases = schedule.media || [];
       }
 
+      // Re-order watching list based on local playback status if available
+      if (playbackStatus && watchingMedia.length > 0) {
+        const lastPlayedId = playbackStatus.media_id;
+        const lastPlayedIndex = watchingMedia.findIndex(m => m.id === lastPlayedId);
+        if (lastPlayedIndex > 0) {
+          const [lastPlayedItem] = watchingMedia.splice(lastPlayedIndex, 1);
+          watchingMedia.unshift(lastPlayedItem);
+        }
+      }
+
       return {
         watchingList: watchingMedia,
         trendingList: trending.media || [],
         seasonalList: seasonal.media || [],
         recentReleases,
+        playbackStatus,
       };
     },
   });
@@ -54,8 +66,8 @@ export default function HomeView({ onSelect }: HomeViewProps) {
       });
 
       const pool = availableToWatch.length > 0 ? availableToWatch : watchingList;
-      const randomIndex = Math.floor(Math.random() * Math.min(pool.length, 10));
-      return pool[randomIndex];
+      // Instead of random, use the first one (which we've ensured is the last played)
+      return pool[0];
     } else if (trendingList.length > 0) {
       return trendingList[0];
     }

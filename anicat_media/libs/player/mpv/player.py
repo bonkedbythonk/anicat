@@ -39,7 +39,27 @@ class MpvPlayer(BasePlayer):
             config: MpvConfig object containing MPV-specific settings.
         """
         self.config = config
-        self.executable = shutil.which("mpv")
+        self.executable = None
+
+        # macOS specific: Prioritize bundled MPV inside the app resources first
+        if sys.platform == "darwin":
+            # For packaged Tauri apps, sys.executable is Anicat.app/Contents/MacOS/anicat-server
+            app_dir = os.path.dirname(sys.executable)
+            bundled_paths = [
+                # Inside Tauri v2 resources folder
+                os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources", "mpv")),
+                # Directly in Resources folder
+                os.path.abspath(os.path.join(app_dir, "..", "Resources", "mpv")),
+            ]
+            for path in bundled_paths:
+                if os.path.exists(path):
+                    self.executable = path
+                    logger.info(f"Bundled MPV discovered inside app resources at: {self.executable}")
+                    break
+
+        # Fallback to system-wide PATH lookup if not bundled
+        if not self.executable:
+            self.executable = shutil.which("mpv")
         
         # macOS specific fallback for background services/native apps
         if not self.executable and sys.platform == "darwin":

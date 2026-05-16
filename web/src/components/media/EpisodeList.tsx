@@ -25,9 +25,8 @@ export default function EpisodeList({ mediaId, episodes, loading, progress = 0, 
 
   useEffect(() => {
     if (!loading && episodes.length > 0) {
-      setTimeout(() => {
-        activeEpRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 300);
+      // Use 'instant' instead of 'smooth' to prevent the "automatically scrolling" feeling
+      activeEpRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
     }
   }, [loading, episodes]);
 

@@ -21,12 +21,15 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [hasUpdate, setHasUpdate] = useState(health?.update_available || false);
   const [updateMessage, setUpdateMessage] = useState<{ text: string; type: "success" | "error" | null }>({ text: "", type: null });
+  const [options, setOptions] = useState<Record<string, any> | null>(null);
 
   useEffect(() => {
     mediaApi.getConfig()
       .then(setConfig)
       .catch(console.error)
       .finally(() => setLoading(false));
+    // Fetch server-supported option lists for UI selects
+    mediaApi.getConfigOptions().then(setOptions).catch(() => {/* ignore */});
   }, []);
 
   useEffect(() => {
@@ -234,10 +237,9 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                   onChange={(e) => updateField("stream", "quality", e.target.value)}
                   className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
                 >
-                  <option value="1080">1080p</option>
-                  <option value="720">720p</option>
-                  <option value="480">480p</option>
-                  <option value="360">360p</option>
+                  {(options?.stream?.quality ?? ["1080", "720", "480", "360"]).map((q: string) => (
+                    <option key={q} value={q}>{q.endsWith('p') ? q : `${q}p`}</option>
+                  ))}
                 </select>
               </SettingField>
 
@@ -258,8 +260,9 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                   onChange={(e) => updateField("stream", "player_type", e.target.value)}
                   className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
                 >
-                  <option value="embedded">Embedded Cinematic Overlay (In-App HLS)</option>
-                  <option value="external">External Media Player (MPV client with Anime4K upscaling)</option>
+                  {(options?.stream?.player_type ?? ["embedded", "external"]).map((p: string) => (
+                    <option key={p} value={p}>{p === 'embedded' ? 'Embedded Cinematic Overlay (In-App HLS)' : 'External Media Player (MPV client with Anime4K upscaling)'}</option>
+                  ))}
                 </select>
               </SettingField>
             </div>

@@ -60,3 +60,23 @@ async def update_config(updates: dict):
         logger.error("Failed to update config: %s\n%s", e, tb)
         # Return structured error to help frontend show messages
         raise HTTPException(status_code=400, detail={"error": str(e), "trace": tb})
+
+
+    @router.get("/options")
+    async def get_config_options():
+        """Return allowed option values for UI dropdowns.
+
+        This keeps frontend option lists in sync with server-supported values.
+        """
+        return {
+            "stream": {
+                "quality": ["1080", "720", "480", "360"],
+                "player_type": ["embedded", "external"]
+            },
+            "general": {
+                "provider": ["animepahe"],
+                "manga_provider": ["mangakatana"],
+                "media_api": ["anilist", "jikan"],
+                "time_format": ["12h", "24h"]
+            }
+        }

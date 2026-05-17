@@ -294,6 +294,9 @@ export const mediaApi = {
       body: JSON.stringify(config)
     }),
 
+  getConfigOptions: (): Promise<Record<string, any>> =>
+    fetchFromApi('/config/options'),
+
   // ─── Notifications ──────────────────────────────────
   getNotifications: (): Promise<Notification[]> =>
     fetchFromApi('/notifications/'),

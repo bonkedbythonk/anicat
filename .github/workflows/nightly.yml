@@ -98,7 +98,7 @@ jobs:
             ### 🚀 Easy Installation (One-Click Setup)
             Run this simple command in your Terminal to download, install, and configure all security permissions for Anicat automatically:
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/testbranch/scripts/install_macos.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash
             ```
             
             *Caution: This is a pre-release/nightly build and may contain experimental features or bugs.*

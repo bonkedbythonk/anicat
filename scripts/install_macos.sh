@@ -49,12 +49,14 @@ xattr -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
 
 # 7. Automatically Restart the Application
 echo "Relaunching Anicat..."
-open -a "$INSTALL_PATH"
 
-# Wait a brief moment for the new app window to request launch resources, then kill the old one
-sleep 1
+# Kill the old running instances first to unblock a clean relaunch
 killall "Anicat" || true
 killall "Anicat Dev" || true
+
+# Wait a brief moment for processes to release resources, then boot it fresh
+sleep 1
+open -a "$INSTALL_PATH"
 
 echo ""
 echo "Installation Complete and Anicat has restarted!"

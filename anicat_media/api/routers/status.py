@@ -156,19 +156,35 @@ async def get_health():
             _last_update_check = now
             _cached_update_available = False
             try:
-                # Check if we are behind origin/main using a safer wrapper
-                from anicat_media.utils.subprocess import run_cmd
-                rc, _, _ = run_cmd(["git", "fetch", "--quiet"], timeout=8, cwd=repo_root)
-                rc, stdout, _ = run_cmd(["git", "status", "-uno"], timeout=5, cwd=repo_root)
-                if stdout and "behind" in stdout:
-                    _cached_update_available = True
+                if os.path.exists(os.path.join(repo_root, ".git")):
+                    # Check if we are behind origin/main using a safer wrapper
+                    from anicat_media.utils.subprocess import run_cmd
+                    rc, _, _ = run_cmd(["git", "fetch", "--quiet"], timeout=8, cwd=repo_root)
+                    rc, stdout, _ = run_cmd(["git", "status", "-uno"], timeout=5, cwd=repo_root)
+                    if stdout and "behind" in stdout:
+                        _cached_update_available = True
+                else:
+                    # Query GitHub Releases API for production installs
+                    import urllib.request
+                    import json
+                    req = urllib.request.Request(
+                        "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest",
+                        headers={"User-Agent": "Anicat-App"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode())
+                        latest_tag = data.get("tag_name", "")
+                    current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION
+                    if latest_tag and latest_tag != current_version:
+                        _cached_update_available = True
             except Exception:
                 pass
 
         # Auto-check for updates every hour in the background (fire-and-forget)
         if not _last_update_check or (datetime.now() - _last_update_check) > timedelta(hours=1):
             try:
-                subprocess.Popen(["git", "fetch", "--quiet"], cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(os.path.join(repo_root, ".git")):
+                    subprocess.Popen(["git", "fetch", "--quiet"], cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 _last_update_check = datetime.now()
             except Exception:
                 pass
@@ -244,17 +260,34 @@ async def check_for_updates():
 
     try:
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        from anicat_media.utils.subprocess import run_cmd
-
-        run_cmd(["git", "fetch", "--quiet"], timeout=10, cwd=repo_root)
-        rc, stdout, _ = run_cmd(["git", "status", "-uno"], timeout=8, cwd=repo_root)
-        _last_update_check = datetime.now()
-        if stdout and "behind" in stdout:
-            _cached_update_available = True
-            return {"status": "success", "update_available": True, "message": "A new version of Anicat is available!"}
-
-        _cached_update_available = False
-        return {"status": "success", "update_available": False, "message": "You are running the latest version."}
+        if os.path.exists(os.path.join(repo_root, ".git")):
+            from anicat_media.utils.subprocess import run_cmd
+            run_cmd(["git", "fetch", "--quiet"], timeout=10, cwd=repo_root)
+            rc, stdout, _ = run_cmd(["git", "status", "-uno"], timeout=8, cwd=repo_root)
+            _last_update_check = datetime.now()
+            if stdout and "behind" in stdout:
+                _cached_update_available = True
+                return {"status": "success", "update_available": True, "message": "A new version of Anicat is available!"}
+            _cached_update_available = False
+            return {"status": "success", "update_available": False, "message": "You are running the latest version."}
+        else:
+            # Query GitHub Releases API for production installs
+            import urllib.request
+            import json
+            req = urllib.request.Request(
+                "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest",
+                headers={"User-Agent": "Anicat-App"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                latest_tag = data.get("tag_name", "")
+            current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION
+            _last_update_check = datetime.now()
+            if latest_tag and latest_tag != current_version:
+                _cached_update_available = True
+                return {"status": "success", "update_available": True, "message": f"A new version ({latest_tag}) is available!"}
+            _cached_update_available = False
+            return {"status": "success", "update_available": False, "message": "You are running the latest version."}
     except Exception as e:
         logger.error(f"[UPDATE CHECK] Error: {str(e)}")
         return {"status": "error", "update_available": False, "message": f"Failed to check for updates: {str(e)}"}

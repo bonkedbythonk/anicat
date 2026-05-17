@@ -55,26 +55,33 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
     setCheckingUpdate(true);
     setUpdateMessage({ text: "", type: null });
     try {
-      // Check if we are running in Tauri
-      let isTauri = false;
-      try {
-        isTauri = !!(window as any).__TAURI_INTERNALS__;
-      } catch {
-        isTauri = false;
-      }
-
-      // Trigger update via the backend (more reliable permissions)
-      const res = await mediaApi.triggerUpdate();
-      if (res.status === "success") {
-        if (onUpdateStarted) {
-          onUpdateStarted(res.message);
+      if (!hasUpdate) {
+        // If we don't know of an update yet, check for one first!
+        const res = await mediaApi.checkUpdate();
+        if (res.status === "success") {
+          if (res.update_available) {
+            setHasUpdate(true);
+            setUpdateMessage({ text: res.message, type: "success" });
+          } else {
+            setUpdateMessage({ text: res.message, type: "success" });
+          }
+        } else {
+          setUpdateMessage({ text: res.message, type: "error" });
         }
       } else {
-        setUpdateMessage({ text: res.message, type: "error" });
+        // If we already know there is an update, trigger the installation!
+        const res = await mediaApi.triggerUpdate();
+        if (res.status === "success") {
+          if (onUpdateStarted) {
+            onUpdateStarted(res.message);
+          }
+        } else {
+          setUpdateMessage({ text: res.message, type: "error" });
+        }
       }
     } catch (err) {
       console.error("Update failed:", err);
-      setUpdateMessage({ text: "Failed to trigger update. Please try manual install.", type: "error" });
+      setUpdateMessage({ text: "Failed to process update action.", type: "error" });
     } finally {
       setCheckingUpdate(false);
     }

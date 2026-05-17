@@ -65,9 +65,12 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
 
       // Trigger update via the backend (more reliable permissions)
       const res = await mediaApi.triggerUpdate();
-      setUpdateMessage({ text: res.message, type: res.status === "success" ? "success" : "error" });
-      if (res.status === "success" && onUpdateStarted) {
-        onUpdateStarted(res.message);
+      if (res.status === "success") {
+        if (onUpdateStarted) {
+          onUpdateStarted(res.message);
+        }
+      } else {
+        setUpdateMessage({ text: res.message, type: "error" });
       }
     } catch (err) {
       console.error("Update failed:", err);

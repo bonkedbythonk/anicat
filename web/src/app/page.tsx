@@ -50,8 +50,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [refreshNeeded, setRefreshNeeded] = useState(false);
-  const [updateMessageText, setUpdateMessageText] = useState<string | null>(null);
+  const [activeUpdateOverlay, setActiveUpdateOverlay] = useState<{ active: boolean; message: string; isNative: boolean } | null>(null);
 
   const lastDataVersion = useRef<number | null>(null);
   
@@ -164,8 +163,16 @@ export default function App() {
           <SettingsView
             health={healthStatus}
             onUpdateStarted={(msg) => {
-              setUpdateMessageText(msg || "Update in progress...");
-              setRefreshNeeded(true);
+              const message = msg || "Update in progress...";
+              const isNative = message.toLowerCase().includes("restart") || message.toLowerCase().includes("native");
+              setActiveUpdateOverlay({ active: true, message, isNative });
+              
+              if (!isNative) {
+                // For git development builds, reload automatically after 7 seconds so the user does NOT have to do anything themselves!
+                setTimeout(() => {
+                  window.location.reload();
+                }, 7000);
+              }
             }}
           />
         );
@@ -322,36 +329,50 @@ export default function App() {
           </div>
         )}
 
-        {/* Refresh Banner */}
-        {refreshNeeded && (
-          <div className={`absolute top-0 left-0 right-0 z-[300] animate-slide-down ${isOffline && !dismissedOffline ? 'mt-24' : ''}`}>
-            <div className="mx-6 mt-6 lg:mx-10 bg-green-500/10 border border-green-500/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between shadow-xl">
-              <div className="flex items-center space-x-3 text-green-400">
-                <RotateCcw size={18} className="animate-spin-slow" />
-                <span className="text-sm font-bold leading-normal">
-                  {updateMessageText || "Update in progress. Please wait a moment..."}
-                </span>
+        {/* Full-Screen Update Overlay */}
+        {activeUpdateOverlay && activeUpdateOverlay.active && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[9999] flex flex-col items-center justify-center p-6">
+            <style>{`
+              @keyframes progress-fill {
+                0% { width: 0%; }
+                100% { width: 100%; }
+              }
+              .animate-spin-slow {
+                animation: spin 3s linear infinite;
+              }
+            `}</style>
+            <div className="max-w-md w-full text-center space-y-6">
+              {/* Spinning Logo / Icon */}
+              <div className="relative flex justify-center">
+                <div className="absolute -inset-4 bg-accent/20 rounded-full blur-xl animate-pulse" />
+                <div className="relative p-6 bg-white/[0.02] border border-white/[0.08] rounded-full shadow-2xl">
+                  <RotateCcw size={48} className="text-accent animate-spin-slow" />
+                </div>
               </div>
-              <div className="flex items-center space-x-4">
-                {/* Only show manual reload button if it is NOT a native app restart update */}
-                {!(updateMessageText?.toLowerCase().includes("restart") || updateMessageText?.toLowerCase().includes("native")) && (
-                  <button 
-                    onClick={() => window.location.reload()}
-                    className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-xs font-bold transition-all shadow-lg shadow-green-500/20"
-                  >
-                    Refresh Now
-                  </button>
-                )}
-                <button 
-                  onClick={() => {
-                    setRefreshNeeded(false);
-                    setUpdateMessageText(null);
-                  }}
-                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                >
-                  <X size={16} className="text-gray-400" />
-                </button>
+
+              {/* Title & Description */}
+              <div className="space-y-3">
+                <h2 className="text-2xl font-black tracking-tight text-white animate-pulse">
+                  {activeUpdateOverlay.isNative ? "Installing Native Update" : "Updating Local Environment"}
+                </h2>
+                <p className="text-sm text-gray-400 leading-relaxed px-4">
+                  {activeUpdateOverlay.message}
+                </p>
               </div>
+
+              {/* Loader Bar */}
+              <div className="w-48 mx-auto h-1.5 bg-white/[0.04] border border-white/[0.08] rounded-full overflow-hidden">
+                <div className="h-full bg-accent rounded-full" style={{
+                  animation: 'progress-fill 10s linear forwards'
+                }} />
+              </div>
+
+              {/* Auto Action Text */}
+              <p className="text-xs text-gray-500 font-medium">
+                {activeUpdateOverlay.isNative 
+                  ? "The application will close and restart automatically. Please do not close the app."
+                  : "Refreshing view automatically in a few seconds..."}
+              </p>
             </div>
           </div>
         )}

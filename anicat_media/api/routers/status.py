@@ -167,11 +167,13 @@ async def get_health():
                     # Query GitHub Releases API for production installs
                     import urllib.request
                     import json
+                    import ssl
                     req = urllib.request.Request(
                         "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest",
                         headers={"User-Agent": "Anicat-App"}
                     )
-                    with urllib.request.urlopen(req, timeout=5) as response:
+                    ctx = ssl._create_unverified_context()
+                    with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
                         data = json.loads(response.read().decode())
                         latest_tag = data.get("tag_name", "")
                     current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION
@@ -274,11 +276,13 @@ async def check_for_updates():
             # Query GitHub Releases API for production installs
             import urllib.request
             import json
+            import ssl
             req = urllib.request.Request(
                 "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest",
                 headers={"User-Agent": "Anicat-App"}
             )
-            with urllib.request.urlopen(req, timeout=5) as response:
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
                 data = json.loads(response.read().decode())
                 latest_tag = data.get("tag_name", "")
             current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION

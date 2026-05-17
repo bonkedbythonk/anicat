@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Play, Maximize, Loader2 } from "lucide-react";
-import { mediaApi, type MediaItem } from "@/lib/api";
-import { dispatchRefresh } from "@/lib/events";
+import { Play, Maximize } from "lucide-react";
+import { type MediaItem } from "@/lib/api";
 
 interface HeroProps {
   item: MediaItem;
@@ -21,29 +19,9 @@ export default function Hero({ item, onSelect }: HeroProps) {
   const isFinished = total > 0 && currentProgress >= total;
   const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
 
-  const [loading, setLoading] = useState(false);
-  const handlePlay = async () => {
-    if (isManga && onSelect) {
+  const handlePlay = () => {
+    if (onSelect) {
       onSelect(item, "play");
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      // If finished, start over from 1
-      let nextEpNum = currentProgress + 1;
-      if (isFinished) {
-        nextEpNum = 1;
-      }
-      
-      const nextEp = String(nextEpNum);
-      await mediaApi.play(item.id, nextEp);
-      dispatchRefresh();
-    } catch (error) {
-      console.error("Failed to trigger playback:", error);
-      alert("Failed to start playback. Please check if the server is running.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -88,22 +66,16 @@ export default function Hero({ item, onSelect }: HeroProps) {
         <div className="flex items-center space-x-3 pt-2">
           <button 
             onClick={handlePlay}
-            disabled={loading || isCaughtUp}
+            disabled={isCaughtUp}
             className="flex items-center space-x-3 bg-white text-black px-8 py-3.5 rounded-xl hover:bg-accent hover:text-white transition-all duration-300 font-bold text-sm active:scale-95 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-black"
           >
-            {loading ? (
-              <Loader2 className="animate-spin" size={18} />
-            ) : (
-              <Play fill="currentColor" size={18} />
-            )}
+            <Play fill="currentColor" size={18} />
             <span>
-              {loading 
-                ? "Starting..." 
-                : isFinished
-                  ? (isManga ? "Read Again" : "Re-watch")
-                  : isCaughtUp
-                    ? "Caught Up"
-                    : (item.user_status?.progress ? "Resume" : (isManga ? "Read Now" : "Play Now"))
+              {isFinished
+                ? (isManga ? "Read Again" : "Re-watch")
+                : isCaughtUp
+                  ? "Caught Up"
+                  : (item.user_status?.progress ? "Resume" : (isManga ? "Read Now" : "Play Now"))
               }
             </span>
           </button>

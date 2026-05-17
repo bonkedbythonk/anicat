@@ -1,34 +1,19 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Play, Loader2 } from "lucide-react";
-import { mediaApi, type MediaItem } from "@/lib/api";
+import { Play } from "lucide-react";
+import { type MediaItem } from "@/lib/api";
 
 interface MediaCardProps {
   item: MediaItem;
-  onSelect?: (item: MediaItem) => void;
+  onSelect?: (item: MediaItem, action?: "play") => void;
 }
 
 export default function MediaCard({ item, onSelect }: MediaCardProps) {
-  const [loading, setLoading] = useState(false);
-  const isProcessing = useRef(false);
-  const handlePlay = async (e: React.MouseEvent) => {
-    if (loading || isProcessing.current) return;
-    
+  const handlePlay = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    isProcessing.current = true;
-    setLoading(true);
-    try {
-      await mediaApi.play(item.id);
-    } catch (error) {
-      console.error("Failed to trigger playback:", error);
-    } finally {
-      setLoading(false);
-      setTimeout(() => {
-        isProcessing.current = false;
-      }, 500);
+    if (onSelect) {
+      onSelect(item, "play");
     }
   };
 
@@ -77,14 +62,9 @@ export default function MediaCard({ item, onSelect }: MediaCardProps) {
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10" style={{ transform: 'translateZ(1px)' }}>
           <button 
             onClick={handlePlay}
-            disabled={loading}
-            className="bg-accent p-3.5 rounded-full hover:scale-110 active:scale-95 transition-transform duration-200 shadow-xl shadow-accent/30 text-white disabled:opacity-70 disabled:scale-100"
+            className="bg-accent p-3.5 rounded-full hover:scale-110 active:scale-95 transition-transform duration-200 shadow-xl shadow-accent/30 text-white"
           >
-            {loading ? (
-              <Loader2 className="animate-spin" size={22} />
-            ) : (
-              <Play fill="currentColor" size={22} className="ml-0.5" />
-            )}
+            <Play fill="currentColor" size={22} className="ml-0.5" />
           </button>
         </div>
 

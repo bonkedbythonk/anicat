@@ -77,10 +77,10 @@ export default function MediaDetail({ item, onClose, initialAction, onRead, onPl
 
   // Handle initial action (e.g. from Hero "Play Now" button)
   useEffect(() => {
-    if (initialAction === "play") {
+    if (initialAction === "play" && !loading && config) {
       handlePlayNext();
     }
-  }, [initialAction, loading]);
+  }, [initialAction, loading, config]);
 
   const isProcessingAction = useRef(false);
 

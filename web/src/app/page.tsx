@@ -30,7 +30,9 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewName>("home");
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
   const [initialAction, setInitialAction] = useState<"play" | null>(null);
+  const [readingItem, setReadingItem] = useState<MediaItem | null>(null);
   const [readingChapter, setReadingChapter] = useState<string | null>(null);
+  const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
   const [playingEpisode, setPlayingEpisode] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -462,8 +464,14 @@ export default function App() {
           <MediaDetail 
             item={selectedItem} 
             initialAction={initialAction || undefined}
-            onRead={(chapter) => setReadingChapter(chapter)}
-            onPlayEpisode={(episode) => setPlayingEpisode(episode)}
+            onRead={(chapter) => {
+              setReadingItem(selectedItem);
+              setReadingChapter(chapter);
+            }}
+            onPlayEpisode={(episode) => {
+              setPlayingItem(selectedItem);
+              setPlayingEpisode(episode);
+            }}
             onClose={() => {
               setSelectedItem(null);
               setInitialAction(null);
@@ -472,17 +480,18 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {selectedItem && readingChapter && (
+      {readingItem && readingChapter && (
         <MangaReader
-          mediaId={selectedItem.id}
+          mediaId={readingItem.id}
           chapterNumber={readingChapter}
           onClose={() => {
             setReadingChapter(null);
+            setReadingItem(null);
             dispatchRefresh();
           }}
           onProgressUpdate={async (num) => {
             try {
-              await mediaApi.updateStatus(selectedItem.id, undefined, undefined, parseInt(num));
+              await mediaApi.updateStatus(readingItem.id, undefined, undefined, parseInt(num));
               dispatchRefresh();
             } catch (error) {
               console.error("Failed to update manga progress:", error);
@@ -491,17 +500,18 @@ export default function App() {
         />
       )}
 
-      {selectedItem && playingEpisode && (
+      {playingItem && playingEpisode && (
         <AnimePlayer
-          mediaId={selectedItem.id}
+          mediaId={playingItem.id}
           episodeNumber={playingEpisode}
           onClose={() => {
             setPlayingEpisode(null);
+            setPlayingItem(null);
             dispatchRefresh();
           }}
           onEpisodeCompleted={async (num) => {
             try {
-              await mediaApi.updateStatus(selectedItem.id, undefined, undefined, parseInt(num));
+              await mediaApi.updateStatus(playingItem.id, undefined, undefined, parseInt(num));
               dispatchRefresh();
             } catch (error) {
               console.error("Failed to update watch progress:", error);
@@ -511,7 +521,7 @@ export default function App() {
             const nextEp = String(parseInt(playingEpisode) + 1);
             setPlayingEpisode(nextEp);
           }}
-          hasNextEpisode={selectedItem.episodes ? parseInt(playingEpisode) < selectedItem.episodes : true}
+          hasNextEpisode={playingItem.episodes ? parseInt(playingEpisode) < playingItem.episodes : true}
         />
       )}
 

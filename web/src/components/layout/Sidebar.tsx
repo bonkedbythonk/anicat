@@ -45,13 +45,18 @@ export default function Sidebar({ activeView, onNavigate, notificationCount = 0,
     <aside className="fixed left-0 top-0 bottom-0 w-[72px] lg:w-60 bg-black/60 backdrop-blur-xl border-r border-white/[0.04] z-50 flex flex-col py-6 transition-all duration-300">
 
       {/* Logo */}
-      <div className="flex justify-center px-4 mb-10 pt-2">
+      <div className="flex flex-col items-center justify-center px-4 mb-10 pt-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/anicat_logo.webp?v=2"
           alt="Anicat Logo"
           className="w-24 h-auto lg:w-32 opacity-95 hover:opacity-100 transition-opacity object-contain"
         />
+        {process.env.NODE_ENV === "development" && (
+          <span className="mt-1.5 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/25 rounded-md select-none font-mono">
+            Local Dev
+          </span>
+        )}
       </div>
 
       {/* Primary Nav */}

@@ -83,7 +83,7 @@ export default function App() {
       } catch (err: any) {
         failedAttempts++;
         console.error("Health check failed:", err);
-        if (failedAttempts >= 3) {
+        if (failedAttempts >= 6) {
           setConnectionStatus("failed");
           setConnectionError(err?.message || "Connection refused (backend sidecar unreachable on port 13370).");
         }
@@ -92,13 +92,13 @@ export default function App() {
     
     checkSystem();
     const quickInterval = setInterval(() => {
-      if (failedAttempts < 3) {
+      if (failedAttempts < 6) {
         checkSystem();
       }
     }, 1500);
 
     const normalInterval = setInterval(() => {
-      if (failedAttempts >= 3) {
+      if (failedAttempts >= 6) {
         checkSystem();
       }
     }, 5000);

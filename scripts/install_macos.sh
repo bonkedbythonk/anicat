@@ -25,6 +25,15 @@ TMP_DMG="/tmp/anicat_latest.dmg"
 echo "Downloading Anicat from $DOWNLOAD_URL..."
 curl -L -o "$TMP_DMG" "$DOWNLOAD_URL"
 
+# Pre-cleanup: Detach any previously stuck Anicat mounts to keep the desktop pristine
+echo "Cleaning up any existing mounted volumes..."
+for volume in /Volumes/Anicat*; do
+    if [ -d "$volume" ]; then
+        echo "Detaching stuck volume: $volume"
+        hdiutil detach -force "$volume" 2>/dev/null || true
+    fi
+done
+
 # 3. Mount the DMG
 echo "Mounting DMG..."
 MOUNT_POINT=$(hdiutil mount "$TMP_DMG" | tail -n 1 | awk -F '\t' '{print $3}')
@@ -39,8 +48,8 @@ cp -R "$MOUNT_POINT/$APP_NAME" "/Applications/"
 
 # 5. Unmount and Cleanup
 echo "Cleaning up..."
-hdiutil unmount "$MOUNT_POINT"
-rm "$TMP_DMG"
+hdiutil detach -force "$MOUNT_POINT" 2>/dev/null || hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
+rm -f "$TMP_DMG"
 
 # 6. Bypass Gatekeeper (Quarantine)
 # Since the app is unsigned, we remove the quarantine flag so it opens without warnings.

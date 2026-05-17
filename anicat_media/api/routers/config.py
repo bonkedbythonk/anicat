@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException
 from ...core.config.model import AppConfig
 from ...core.constants import USER_CONFIG
 from ...cli.config.generate import generate_config_toml_from_app_model
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -19,6 +22,7 @@ async def get_config():
 async def update_config(updates: dict):
     """Update specific configuration fields."""
     try:
+        logger.info("Received config update: %s", updates)
         ctx = get_ctx()
         # Load current config dict
         config_dict = ctx.config.model_dump()
@@ -47,8 +51,12 @@ async def update_config(updates: dict):
             ctx._media_api = None
             ctx.is_offline = False
         
-        return {"status": "updated"}
+        logger.info("Config updated successfully")
+        # Return the new config so frontend can refresh state immediately
+        return {"status": "updated", "config": new_config.model_dump(mode="json")}
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail=str(e))
+        tb = traceback.format_exc()
+        logger.error("Failed to update config: %s\n%s", e, tb)
+        # Return structured error to help frontend show messages
+        raise HTTPException(status_code=400, detail={"error": str(e), "trace": tb})

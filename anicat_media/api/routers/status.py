@@ -7,6 +7,8 @@ from pydantic import BaseModel
 import subprocess
 from anicat_media.core.constants import VERSION, LOG_FILE
 from anicat_media.cli.config import ConfigLoader
+import shutil
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +21,32 @@ async def get_logs(lines: int = 100):
         return {"logs": "Log file not found."}
     
     try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            # Efficiently get last lines for large files
-            all_lines = f.readlines()
-            last_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-            return {"logs": "".join(last_lines)}
+        # Efficient tail implementation that avoids loading entire file into memory
+        def tail(path, n=100, buf_size=1024):
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                if file_size == 0:
+                    return ""
+                blocks = []
+                bytes_scanned = 0
+                # Read backwards in chunks until we have enough lines or reach file start
+                while bytes_scanned < file_size:
+                    read_size = min(buf_size, file_size - bytes_scanned)
+                    f.seek(max(0, file_size - bytes_scanned - read_size))
+                    chunk = f.read(read_size)
+                    blocks.insert(0, chunk)
+                    bytes_scanned += read_size
+                    data = b"".join(blocks)
+                    lines_list = data.splitlines()
+                    if len(lines_list) >= n:
+                        return b"\n".join(lines_list[-n:]).decode("utf-8", errors="replace")
+                # If we get here, return what we have
+                data = b"".join(blocks)
+                lines_list = data.splitlines()
+                return b"\n".join(lines_list[-n:]).decode("utf-8", errors="replace")
+
+        return {"logs": tail(LOG_FILE, lines)}
     except Exception as e:
         return {"logs": f"Error reading logs: {str(e)}"}
 
@@ -74,13 +97,33 @@ async def get_playback_status():
     
     # Auto-dismiss if MPV is no longer running
     try:
-        # Check if any mpv process is running
-        subprocess.check_output(["pgrep", "mpv"])
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # MPV not running, check if we should clear
-        if _last_playback:
-             _last_playback = None
-             _playback_expiry = None
+        # Determine if MPV is currently running in a platform-safe manner
+        mpv_running = True
+        if sys.platform.startswith("win"):
+            try:
+                out = subprocess.check_output(["tasklist"], encoding="utf-8")
+                if "mpv.exe" not in out:
+                    mpv_running = False
+            except Exception:
+                # Be conservative if we can't determine
+                mpv_running = True
+        else:
+            # Prefer pgrep when available to avoid heavy process listings
+            if shutil.which("pgrep"):
+                try:
+                    subprocess.check_output(["pgrep", "mpv"])  # raises CalledProcessError if none
+                except subprocess.CalledProcessError:
+                    mpv_running = False
+                except Exception:
+                    mpv_running = True
+            else:
+                # pgrep not available (e.g., minimal containers) — don't auto-clear
+                mpv_running = True
+
+        if not mpv_running:
+            if _last_playback:
+                _last_playback = None
+                _playback_expiry = None
     
     if _last_playback and _playback_expiry and datetime.now() > _playback_expiry:
         _last_playback = None
@@ -185,7 +228,10 @@ async def get_health():
 async def check_for_updates():
     """Manually trigger an update check, ignoring cache."""
     global _last_update_check, _cached_update_available
-    
+    # Respect opt-out environment variable for automated update checks
+    if os.environ.get("ANICAT_DISABLE_AUTO_UPDATE", "0") == "1":
+        return {"status": "error", "update_available": False, "message": "Auto-updates disabled by environment"}
+
     _last_update_check = datetime.now()
     _cached_update_available = False
     try:
@@ -208,6 +254,9 @@ async def check_for_updates():
 async def trigger_update():
     """Trigger the official installation script to update the application."""
     try:
+        # Respect opt-out environment variable for automated updates
+        if os.environ.get("ANICAT_DISABLE_AUTO_UPDATE", "0") == "1":
+            return {"status": "error", "message": "Auto-updates disabled by environment"}
         # For macOS, the most reliable way to update the native app is via the installer script
         # which downloads the latest release and replaces the binary.
         import platform

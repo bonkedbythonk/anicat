@@ -25,6 +25,7 @@ if sys.platform == "darwin":
             current_paths.append(p)
     os.environ["PATH"] = os.pathsep.join(current_paths)
 from ..core.config import AppConfig
+from ..core.constants import VERSION
 from ..cli.config import ConfigLoader
 from ..cli.interactive.session import Context
 
@@ -82,7 +83,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     ctx.set(Context(config))
 
-    app = FastAPI(title="Anicat API", version="1.0.0")
+    app = FastAPI(title="Anicat API", version=VERSION)
 
     app.add_middleware(
         CORSMiddleware,

@@ -95,6 +95,70 @@ def _version_tag_matches(candidate: str, expected: str) -> bool:
 def _current_version_tag() -> str:
     return f"v{_normalize_version(VERSION)}"
 
+
+def _check_github_update(update_branch: str) -> bool:
+    """Helper to check if an update is available from GitHub Releases, respecting the branch."""
+    import urllib.request
+    import json
+    import ssl
+    from anicat_media.core.constants import LAST_COMMIT_FILE
+
+    try:
+        ctx_ssl = ssl._create_unverified_context()
+        if update_branch == "nightly":
+            url = "https://api.github.com/repos/bonkedbythonk/anicat/releases"
+        else:
+            url = "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest"
+
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Anicat-App"}
+        )
+        with urllib.request.urlopen(req, timeout=5, context=ctx_ssl) as response:
+            res_data = json.loads(response.read().decode())
+            if isinstance(res_data, list):
+                latest_tag = res_data[0].get("tag_name", "") if res_data else ""
+            else:
+                latest_tag = res_data.get("tag_name", "")
+
+        if not latest_tag:
+            return False
+
+        if update_branch == "nightly" and latest_tag.lower() == "nightly":
+            # For nightly, query commit hash to be precise
+            remote_sha = ""
+            try:
+                commit_url = "https://api.github.com/repos/bonkedbythonk/anicat/commits/nightly"
+                commit_req = urllib.request.Request(commit_url, headers={"User-Agent": "Anicat-App"})
+                with urllib.request.urlopen(commit_req, timeout=5, context=ctx_ssl) as commit_resp:
+                    commit_data = json.loads(commit_resp.read().decode())
+                    remote_sha = commit_data.get("sha", "")
+            except Exception:
+                pass
+
+            if remote_sha:
+                local_sha = ""
+                if LAST_COMMIT_FILE.exists():
+                    try:
+                        local_sha = LAST_COMMIT_FILE.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        pass
+
+                if not local_sha:
+                    try:
+                        LAST_COMMIT_FILE.write_text(remote_sha, encoding="utf-8")
+                    except Exception:
+                        pass
+                    return False
+                return local_sha != remote_sha
+
+        # Stable or standard branch comparison
+        current_version = _current_version_tag()
+        return not _version_tag_matches(latest_tag, current_version)
+    except Exception as e:
+        logger.error(f"[UPDATE CHECK] GitHub Releases check failed: {str(e)}")
+        return False
+
 # Notifications/profile fetch cache to avoid rate limits
 _last_notifications_check: Optional[datetime] = None
 _cached_unread_notifications: int = 0
@@ -204,31 +268,7 @@ async def get_health():
                     except Exception:
                         pass
                 else:
-                    # Query GitHub Releases API for production installs
-                    import urllib.request
-                    import json
-                    import ssl
-                    
-                    if update_branch == "nightly":
-                        url = "https://api.github.com/repos/bonkedbythonk/anicat/releases"
-                    else:
-                        url = "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest"
-
-                    req = urllib.request.Request(
-                        url,
-                        headers={"User-Agent": "Anicat-App"}
-                    )
-                    ctx_ssl = ssl._create_unverified_context()
-                    with urllib.request.urlopen(req, timeout=5, context=ctx_ssl) as response:
-                        res_data = json.loads(response.read().decode())
-                        if isinstance(res_data, list):
-                            latest_tag = res_data[0].get("tag_name", "") if res_data else ""
-                        else:
-                            latest_tag = res_data.get("tag_name", "")
-                            
-                    current_version = _current_version_tag()
-                    if latest_tag and not _version_tag_matches(latest_tag, current_version):
-                        _cached_update_available = True
+                    _cached_update_available = _check_github_update(update_branch)
             except Exception:
                 pass
 
@@ -331,34 +371,12 @@ async def check_for_updates():
             _cached_update_available = False
             return {"status": "success", "update_available": False, "message": f"You are running the latest version of the {target_branch} branch."}
         else:
-            # Query GitHub Releases API for production installs
-            import urllib.request
-            import json
-            import ssl
-            
-            if update_branch == "nightly":
-                url = "https://api.github.com/repos/bonkedbythonk/anicat/releases"
-            else:
-                url = "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest"
-
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Anicat-App"}
-            )
-            ctx_ssl = ssl._create_unverified_context()
-            with urllib.request.urlopen(req, timeout=5, context=ctx_ssl) as response:
-                res_data = json.loads(response.read().decode())
-                if isinstance(res_data, list):
-                    latest_tag = res_data[0].get("tag_name", "") if res_data else ""
-                else:
-                    latest_tag = res_data.get("tag_name", "")
-            current_version = _current_version_tag()
             _last_update_check = datetime.now()
-            if latest_tag and not _version_tag_matches(latest_tag, current_version):
-                _cached_update_available = True
-                return {"status": "success", "update_available": True, "message": f"A new version ({latest_tag}) is available!"}
-            _cached_update_available = False
-            return {"status": "success", "update_available": False, "message": "You are running the latest version."}
+            has_update = _check_github_update(update_branch)
+            _cached_update_available = has_update
+            if has_update:
+                return {"status": "success", "update_available": True, "message": f"A new version is available on the {update_branch} branch!"}
+            return {"status": "success", "update_available": False, "message": f"You are running the latest version of the {update_branch} branch."}
     except Exception as e:
         logger.error(f"[UPDATE CHECK] Error: {str(e)}")
         return {"status": "error", "update_available": False, "message": f"Failed to check for updates: {str(e)}"}

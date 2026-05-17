@@ -82,6 +82,11 @@ async def _resolve_episode_stream(media_id: int, episode: Optional[str] = None):
     anime_id, record = await get_anime_ref(ctx, media_item, media_id)
     if not anime_id:
          raise HTTPException(status_code=404, detail=f"No results found for {title}")
+         
+    from ...libs.provider.anime.params import AnimeParams
+    full_anime = ctx.provider.get(AnimeParams(id=anime_id, query=title))
+    if not full_anime:
+         raise HTTPException(status_code=404, detail="Anime details not found")
     
     # 3. Get streams
     from ...libs.provider.anime.params import EpisodeStreamsParams
@@ -123,7 +128,7 @@ async def _resolve_episode_stream(media_id: int, episode: Optional[str] = None):
         "episode": episode,
         "headers": server.headers or {},
         "start_time": start_time,
-        "anime_ref": anime_ref,
+        "anime_ref": full_anime,
         "media_item": media_item
     }
 

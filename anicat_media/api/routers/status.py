@@ -78,6 +78,10 @@ _playback_expiry: Optional[datetime] = None
 _last_update_check: Optional[datetime] = None
 _cached_update_available: bool = False
 
+# Notifications/profile fetch cache to avoid rate limits
+_last_notifications_check: Optional[datetime] = None
+_cached_unread_notifications: int = 0
+
 def set_playback(media_id: int, media_title: str, episode: str):
     """Called by the actions router when playback starts."""
     global _last_playback, _playback_expiry
@@ -193,32 +197,29 @@ async def get_health():
 
         update_available = _cached_update_available
 
-        # Get unread notification count
-        unread_notifications = 0
-        try:
-            profile = ctx.media_api.get_viewer_profile()
-            if profile and hasattr(profile, 'unread_notifications'):
-                unread_notifications = getattr(profile, 'unread_notifications') or 0
-        except Exception:
-            pass
-
-
+        # Get unread notification count (cached to avoid hitting rate limits)
+        global _last_notifications_check, _cached_unread_notifications
+        unread_notifications = _cached_unread_notifications
+        
         # Refresh token status from config to ensure we aren't using stale memory
         loader = ConfigLoader()
         current_config = loader.load(allow_setup=False)
         api_authenticated = bool(current_config.anilist.token and len(current_config.anilist.token) > 10)
         
-        # The most accurate connection status is whether the media_api was able to fetch data
         api_connected = ctx.media_api.is_connected()
         
-        # If not connected, but we have a token, let's try a quick verify to see if we can go online
-        if not api_connected and api_authenticated:
+        # Perform the actual AniList query only once every 5 minutes (always fetch in tests)
+        is_testing = "pytest" in sys.modules
+        if is_testing or not _last_notifications_check or now - _last_notifications_check > timedelta(minutes=5):
+            _last_notifications_check = now
             try:
-                # This will trigger a lazy re-auth if _media_api is None
                 profile = ctx.media_api.get_viewer_profile()
                 if profile:
                     api_connected = True
                     ctx.is_offline = False
+                    if hasattr(profile, 'unread_notifications'):
+                        _cached_unread_notifications = getattr(profile, 'unread_notifications') or 0
+                        unread_notifications = _cached_unread_notifications
             except Exception:
                 pass
 

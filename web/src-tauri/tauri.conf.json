@@ -5,8 +5,8 @@
   "identifier": "com.bonkedbythonk.anicat",
   "build": {
     "frontendDist": "../out",
-    "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm run dev",
+    "devUrl": null,
+    "beforeDevCommand": "",
     "beforeBuildCommand": "npm run build"
   },
   "app": {

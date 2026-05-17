@@ -24,12 +24,8 @@ async def update_config(updates: dict):
     try:
         logger.info("Received config update: %s", updates)
         # Prefer using the running context if initialized, otherwise load config from disk
-        ctx = None
-        try:
-            import anicat_media.api.main as _main
-            if getattr(_main.ctx, "_ctx", None) is not None:
-                ctx = _main.ctx
-        except Exception:
+        ctx = get_ctx()
+        if not ctx.is_initialized():
             ctx = None
 
         if ctx is not None:
@@ -66,7 +62,7 @@ async def update_config(updates: dict):
             logger.info("No active context to refresh; updated config written to disk only.")
 
         # If the token was updated, reset the media_api instance and force online status
-        if "anilist" in updates and "token" in updates["anilist"]:
+        if "anilist" in updates and "token" in updates["anilist"] and ctx is not None:
             ctx._media_api = None
             ctx.is_offline = False
         

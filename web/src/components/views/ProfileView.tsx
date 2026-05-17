@@ -5,6 +5,8 @@ import { Loader2, User, Clock, Tv, BookOpen, Bookmark, Heart, Sparkles } from "l
 import { mediaApi, type UserProfile, type MediaItem } from "@/lib/api";
 import MediaCard from "@/components/media/MediaCard";
 
+import { useRefreshTrigger } from "@/lib/events";
+
 interface ProfileViewProps {
   onSelect?: (item: MediaItem) => void;
 }
@@ -13,6 +15,7 @@ export default function ProfileView({ onSelect }: ProfileViewProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [favType, setFavType] = useState<"ANIME" | "MANGA">("ANIME");
+  const refreshKey = useRefreshTrigger();
 
   useEffect(() => {
     async function load() {
@@ -26,7 +29,7 @@ export default function ProfileView({ onSelect }: ProfileViewProps) {
       }
     }
     load();
-  }, []);
+  }, [refreshKey]);
 
   if (loading) {
     return (

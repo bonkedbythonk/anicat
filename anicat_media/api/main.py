@@ -33,8 +33,15 @@ logger = logging.getLogger(__name__)
 
 
 class _ContextProxy:
-    def __init__(self):
-        self._ctx: Context | None = None
+    @property
+    def _ctx(self) -> Context | None:
+        import sys
+        return getattr(sys, "_anicat_ctx", None)
+
+    @_ctx.setter
+    def _ctx(self, val: Context | None) -> None:
+        import sys
+        sys._anicat_ctx = val
 
     def set(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -45,10 +52,11 @@ class _ContextProxy:
     def get_config(self) -> AppConfig:
         # If the runtime context isn't available, load the on-disk config
         # so callers can still read configuration safely during early startup.
-        if self._ctx is None:
+        ctx_val = self._ctx
+        if ctx_val is None:
             loader = ConfigLoader()
             return loader.load(allow_setup=False)
-        return self._ctx.config
+        return ctx_val.config
 
     def __getattr__(self, name):
         # Allow safe access to `config` even before the interactive Context
@@ -56,17 +64,20 @@ class _ContextProxy:
         # need read access from raising during early initialization.
         if name == "config":
             return self.get_config()
-        if self._ctx is None:
+        ctx_val = self._ctx
+        if ctx_val is None:
             raise RuntimeError("Anicat API context has not been initialized.")
-        return getattr(self._ctx, name)
+        return getattr(ctx_val, name)
 
     def __setattr__(self, name, value):
         if name == "_ctx":
-            object.__setattr__(self, name, value)
+            import sys
+            sys._anicat_ctx = value
             return
-        if self._ctx is None:
+        ctx_val = self._ctx
+        if ctx_val is None:
             raise RuntimeError("Anicat API context has not been initialized.")
-        setattr(self._ctx, name, value)
+        setattr(ctx_val, name, value)
 
 
 ctx = _ContextProxy()

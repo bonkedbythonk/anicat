@@ -281,13 +281,25 @@ async def trigger_update():
         import platform
         if platform.system() == "Darwin":
             logger.info("[UPDATE] Triggering macOS native update via installer script")
-            subprocess.Popen(
-                "curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash",
-                shell=True,
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            # If we are running in local dev and the local installer script exists, run it directly!
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            local_script = os.path.join(repo_root, "scripts", "install_macos.sh")
+            if os.path.exists(local_script):
+                logger.info(f"[UPDATE] Running local installer script: {local_script}")
+                subprocess.Popen(
+                    ["bash", local_script],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                subprocess.Popen(
+                    "curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash",
+                    shell=True,
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
             return {"status": "success", "message": "Native update triggered! The application will download the latest version and restart shortly. Please wait a few moments."}
 
         # Fallback for dev/git-based installations

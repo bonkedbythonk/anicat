@@ -20,6 +20,9 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    transform: translateZ(0);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -28,6 +31,8 @@
   background: rgba(10, 10, 15, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  transform: translateZ(0);
+  will-change: backdrop-filter, transform;
 }
 
 /* Card hover glow */
@@ -36,10 +41,11 @@
   will-change: transform, box-shadow;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .card-glow:hover {
-  transform: translateY(-6px);
+  transform: translateY(-6px) translateZ(0);
   box-shadow: 
     0 15px 35px -5px rgba(0, 0, 0, 0.9),
     0 0 20px -5px rgba(99, 102, 241, 0.4);

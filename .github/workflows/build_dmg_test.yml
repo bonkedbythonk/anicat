@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_dmg:
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,12 @@ jobs:
 
       - name: Build sidecar (PyInstaller)
         run: |
-          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
+          uv run python scripts/build_sidecar.py
+
+      - name: Verify sidecar binary exists
+        run: |
+          ls -lah web/src-tauri/binaries
+          test -f web/src-tauri/binaries/anicat-server-aarch64-apple-darwin
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

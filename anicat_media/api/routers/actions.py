@@ -77,35 +77,18 @@ async def _resolve_episode_stream(media_id: int, episode: Optional[str] = None):
             start_time = resume_time
 
     title = media_item.title.romaji or media_item.title.english
-    from ...core.utils.normalizer import normalize_title
-
-    # 2. Search anime provider
-    from ...libs.provider.anime.params import SearchParams as ProviderSearchParams
-    search_results = ctx.provider.search(
-        ProviderSearchParams(
-            query=normalize_title(title, ctx.config.general.provider.value, True),
-            translation_type=ctx.config.stream.translation_type
-        )
-    )
+    from .media import get_anime_ref
     
-    if not search_results or not search_results.results:
+    anime_id, record = await get_anime_ref(ctx, media_item, media_id)
+    if not anime_id:
          raise HTTPException(status_code=404, detail=f"No results found for {title}")
-         
-    # Pick best match
-    from ...cli.utils.search import find_best_match_title
-    results_map = {r.title: r for r in search_results.results}
-    try:
-        best_title = find_best_match_title(results_map, ctx.config.general.provider, media_item)
-        anime_ref = results_map[best_title]
-    except Exception:
-        anime_ref = search_results.results[0]
     
     # 3. Get streams
     from ...libs.provider.anime.params import EpisodeStreamsParams
     streams_iter = ctx.provider.episode_streams(
         EpisodeStreamsParams(
             query=title,
-            anime_id=anime_ref.id,
+            anime_id=anime_id,
             episode=episode,
             translation_type=ctx.config.stream.translation_type
         )
@@ -174,25 +157,14 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         from ...core.utils.normalizer import normalize_title
         
         if is_manga:
-            from ...libs.provider.manga.params import MangaSearchParams, MangaParams
-            search_results = ctx.manga_provider.search(
-                MangaSearchParams(
-                    query=normalize_title(title, ctx.config.general.manga_provider.value, True)
-                )
-            )
+            from ...libs.provider.manga.params import MangaParams
+            from .media import get_manga_ref
             
-            if not search_results or not search_results.results:
+            manga_id, record = await get_manga_ref(ctx, media_item, media_id)
+            if not manga_id:
                  raise HTTPException(status_code=404, detail=f"No manga results found for {title}")
-            
-            from ...cli.utils.search import find_best_match_title
-            results_map = {r.title: r for r in search_results.results}
-            try:
-                best_title = find_best_match_title(results_map, ctx.config.general.manga_provider, media_item)
-                manga_ref = results_map[best_title]
-            except Exception:
-                manga_ref = search_results.results[0]
-                
-            full_manga = ctx.manga_provider.get(MangaParams(id=manga_ref.id, query=title))
+                 
+            full_manga = ctx.manga_provider.get(MangaParams(id=manga_id, query=title))
             if not full_manga or not full_manga.chapters:
                  raise HTTPException(status_code=404, detail="No chapters found")
             

@@ -201,6 +201,50 @@ async def get_media_details(media_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+async def get_anime_ref(ctx, media, media_id: int):
+    """Get the anime reference from registry or search."""
+    record = ctx.media_registry.get_media_record(media_id)
+    provider_name = ctx.config.general.provider.value
+    
+    if record and record.provider_mapping and provider_name in record.provider_mapping:
+        provider_id = record.provider_mapping[provider_name]
+        return provider_id, record
+
+    # Search for the anime
+    title = media.title.romaji or media.title.english
+    from ...core.utils.normalizer import normalize_title
+    from ...libs.provider.anime.params import SearchParams as AnimeSearchParams
+    
+    search_results = ctx.provider.search(
+        AnimeSearchParams(
+            query=normalize_title(title, provider_name, True),
+            translation_type=ctx.config.stream.translation_type
+        )
+    )
+    
+    if not search_results or not search_results.results:
+        return None, record
+        
+    from ...cli.utils.search import find_best_match_title
+    results_map = {r.title: r for r in search_results.results}
+    try:
+        best_title = find_best_match_title(results_map, ctx.config.general.provider, media)
+        anime_ref = results_map[best_title]
+    except Exception:
+        anime_ref = search_results.results[0]
+        
+    # Cache the result
+    if not record:
+        record = ctx.media_registry.get_or_create_record(media)
+        
+    if not record.provider_mapping:
+        record.provider_mapping = {}
+        
+    record.provider_mapping[provider_name] = anime_ref.id
+    ctx.media_registry.save_media_record(record)
+    
+    return anime_ref.id, record
+
 async def get_manga_ref(ctx, media, media_id: int):
     """Get the manga reference from registry or search."""
     record = ctx.media_registry.get_media_record(media_id)
@@ -281,34 +325,17 @@ async def get_media_episodes(media_id: int):
             return result
         else:
             # --- Anime Logic ---
-            from ...libs.provider.anime.params import AnimeParams, SearchParams as AnimeSearchParams
-            # Ensure we have a normalized title for searching
+            from ...libs.provider.anime.params import AnimeParams
+            
+            anime_id, record = await get_anime_ref(ctx, media, media_id)
+            if not anime_id:
+                return []
+                
             title = media.title.romaji or media.title.english
-            from ...core.utils.normalizer import normalize_title
-            from ...cli.utils.search import find_best_match_title
-
-            search_results = ctx.provider.search(
-                AnimeSearchParams(
-                    query=normalize_title(title, ctx.config.general.provider.value, True),
-                    translation_type=ctx.config.stream.translation_type
-                )
-            )
-            
-            if not search_results or not search_results.results:
-                 return []
-                 
-            results_map = {r.title: r for r in search_results.results}
-            try:
-                best_title = find_best_match_title(results_map, ctx.config.general.provider, media)
-                anime_ref = results_map[best_title]
-            except Exception:
-                anime_ref = search_results.results[0]
-            
-            full_anime = ctx.provider.get(AnimeParams(id=anime_ref.id, query=title))
+            full_anime = ctx.provider.get(AnimeParams(id=anime_id, query=title))
             if not full_anime:
                 return []
                 
-            record = ctx.media_registry.get_media_record(media_id)
             local_episodes = {e.episode_number: e for e in record.media_episodes} if record else {}
             
             trans_type = ctx.config.stream.translation_type

@@ -78,9 +78,52 @@ export default function AnimePlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    let nativeCleanup: (() => void) | null = null;
+
     import("hls.js").then((M) => {
       const Hls = M.default;
-      if (Hls.isSupported()) {
+      
+      const isWebKitApple = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent) && 
+                            /WebKit/i.test(navigator.userAgent) && 
+                            !/Chrome/i.test(navigator.userAgent);
+      const canPlayNative = !!video.canPlayType("application/vnd.apple.mpegurl") || isWebKitApple;
+
+      if (canPlayNative) {
+        // Enforce native HLS playback for Apple WebKit (Tauri macOS WebView / Safari)
+        const streamUrl = resolved.stream_url.startsWith("http") 
+          ? resolved.stream_url 
+          : `${API_BASE_ORIGIN}${resolved.stream_url}`;
+        
+        console.log("[Player] Loading native Apple WebKit HLS stream:", streamUrl);
+        video.src = streamUrl;
+        
+        const handleLoadedMetadata = () => {
+          console.log("[Player] Native WebKit metadata loaded. Starting playback...");
+          if (resolved.start_time) {
+            video.currentTime = resolved.start_time;
+          }
+          video.play()
+            .then(() => setIsPlaying(true))
+            .catch((e) => {
+              console.warn("[Player] Playback autoplay blocked or failed:", e);
+              setIsPlaying(false);
+            });
+        };
+
+        const handleNativeError = (e: any) => {
+          console.error("[Player] Native HLS playback error encountered:", video.error);
+          setError("Native streaming connection was unexpectedly closed.");
+        };
+
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
+        video.addEventListener("error", handleNativeError);
+
+        nativeCleanup = () => {
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+          video.removeEventListener("error", handleNativeError);
+        };
+      } else if (Hls.isSupported()) {
+        // Use Hls.js MSE fallback for non-Apple environments (Chrome, Firefox, Windows, Linux)
         if (hlsRef.current) {
           hlsRef.current.destroy();
         }
@@ -92,11 +135,16 @@ export default function AnimePlayer({
         });
         hlsRef.current = hls;
 
-        const streamUrl = `${API_BASE_ORIGIN}${resolved.stream_url}`;
+        const streamUrl = resolved.stream_url.startsWith("http") 
+          ? resolved.stream_url 
+          : `${API_BASE_ORIGIN}${resolved.stream_url}`;
+        
+        console.log("[Player] Loading HLS.js stream:", streamUrl);
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log("[Player] HLS.js manifest parsed successfully.");
           if (resolved.start_time) {
             video.currentTime = resolved.start_time;
           }
@@ -106,32 +154,44 @@ export default function AnimePlayer({
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
+          console.warn("[Player][HLS Error]", { type: data.type, details: data.details, fatal: data.fatal });
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error("[Player][HLS Error] Fatal network error. Attempting to reload HLS stream...");
                 hls.startLoad();
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error("[Player][HLS Error] Fatal media error. Attempting to recover media...");
                 hls.recoverMediaError();
                 break;
               default:
+                console.error("[Player][HLS Error] Fatal HLS error of type:", data.type, data.details);
                 setError("Streaming connection was unexpectedly closed.");
                 break;
             }
           }
         });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        // Safari fallback
-        const streamUrl = `${API_BASE_ORIGIN}${resolved.stream_url}`;
+      } else if (canPlayNative) {
+        // Generic HLS fallback (in case Hls.js is not supported but native HLS is, and not explicitly Safari/Mac)
+        const streamUrl = resolved.stream_url.startsWith("http") 
+          ? resolved.stream_url 
+          : `${API_BASE_ORIGIN}${resolved.stream_url}`;
+        
+        console.log("[Player] Loading native fallback HLS stream:", streamUrl);
         video.src = streamUrl;
-        video.addEventListener("loadedmetadata", () => {
+        const handleGenericLoadedMetadata = () => {
           if (resolved.start_time) {
             video.currentTime = resolved.start_time;
           }
           video.play()
             .then(() => setIsPlaying(true))
             .catch(() => setIsPlaying(false));
-        });
+        };
+        video.addEventListener("loadedmetadata", handleGenericLoadedMetadata);
+        nativeCleanup = () => {
+          video.removeEventListener("loadedmetadata", handleGenericLoadedMetadata);
+        };
       } else {
         setError("Playback format is not supported by your system.");
       }
@@ -141,6 +201,9 @@ export default function AnimePlayer({
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (nativeCleanup) {
+        nativeCleanup();
       }
     };
   }, [resolved]);

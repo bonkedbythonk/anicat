@@ -6,9 +6,12 @@ import time
 import json
 import urllib.parse
 import httpx
+import logging
 from ...libs.player.params import PlayerParams
 from ...libs.player.types import PlayerResult
 from .status import set_playback
+
+logger = logging.getLogger(__name__)
 
 class PlaybackTrackRequest(BaseModel):
     media_id: int
@@ -254,7 +257,7 @@ async def resolve_media_stream(media_id: int, episode: Optional[str] = None):
         proxy_prefix = "/api/actions/proxy"
         headers_str = json.dumps(stream_headers)
         
-        proxied_stream_url = f"{proxy_prefix}?url={urllib.parse.quote(raw_stream_url)}&headers={urllib.parse.quote(headers_str)}"
+        proxied_stream_url = f"http://127.0.0.1:13370{proxy_prefix}?url={urllib.parse.quote(raw_stream_url)}&headers={urllib.parse.quote(headers_str)}"
         
         start_time_seconds = 0
         if resolved["start_time"]:
@@ -286,7 +289,7 @@ async def resolve_media_stream(media_id: int, episode: Optional[str] = None):
 def _proxy_m3u8_content(m3u8_content: str, base_url: str, headers_json: str) -> str:
     """
     Rewrites the HLS manifest so that all segment files (.ts) and sub-playlists
-    point back to our local proxy, injecting the required referer/user-agent headers.
+    point back to our local proxy as absolute URLs, injecting the required referer/user-agent headers.
     """
     lines = m3u8_content.splitlines()
     rewritten_lines = []
@@ -305,16 +308,16 @@ def _proxy_m3u8_content(m3u8_content: str, base_url: str, headers_json: str) -> 
                     remaining = suffix_parts[1] if len(suffix_parts) > 1 else ""
                     
                     absolute_uri = urllib.parse.urljoin(base_url, uri)
-                    proxied_uri = f"/api/actions/proxy?url={urllib.parse.quote(absolute_uri)}&headers={urllib.parse.quote(headers_json)}"
+                    proxied_uri = f"http://127.0.0.1:13370/api/actions/proxy?url={urllib.parse.quote(absolute_uri)}&headers={urllib.parse.quote(headers_json)}"
                     rewritten_lines.append(f'{prefix}URI="{proxied_uri}"{remaining}')
                     continue
                 except Exception:
                     pass
             rewritten_lines.append(line)
         else:
-            # Segment or sub-playlist URL
+            # Segment or sub-playlist URL - converted to absolute proxy URLs
             absolute_url = urllib.parse.urljoin(base_url, line_stripped)
-            proxied_url = f"/api/actions/proxy?url={urllib.parse.quote(absolute_url)}&headers={urllib.parse.quote(headers_json)}"
+            proxied_url = f"http://127.0.0.1:13370/api/actions/proxy?url={urllib.parse.quote(absolute_url)}&headers={urllib.parse.quote(headers_json)}"
             rewritten_lines.append(proxied_url)
     return "\n".join(rewritten_lines)
 
@@ -337,6 +340,7 @@ async def hls_stream_proxy(url: str, headers: str):
     async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
         parsed = urllib.parse.urlparse(url)
         is_m3u8 = parsed.path.endswith(".m3u8") or "m3u8" in parsed.query
+        is_key = "key" in parsed.path.lower() or parsed.path.endswith(".key")
 
         response = await client.get(url, headers=req_headers)
 
@@ -352,13 +356,29 @@ async def hls_stream_proxy(url: str, headers: str):
                     "Cache-Control": "no-cache"
                 }
             )
-        else:
-            # For HLS video segments (.ts), return standard Response containing all binary bytes.
-            # Avoid using StreamingResponse after exiting the httpx client context block.
+        elif is_key:
+            # Return standard application/octet-stream for HLS decryption key files
+            logger.info(f"[Proxy Key Debug] Fetching key {url} | Status: {response.status_code} | Length: {len(response.content)} | First 16 bytes: {response.content.hex()[:32]}")
             return Response(
                 content=response.content,
                 status_code=response.status_code,
-                media_type=response.headers.get("content-type", "video/mp2t"),
+                media_type="application/octet-stream",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                    "Cache-Control": "public, max-age=86400"
+                }
+            )
+        else:
+            # Force video/mp2t MIME type for video segments, even if disguised as images (e.g. .jpg)
+            if len(response.content) < 5000:
+                logger.warning(f"[Proxy Segment Debug] Warning: abnormally small segment {url} | Length: {len(response.content)} | Content preview: {response.content[:100]}")
+            else:
+                logger.info(f"[Proxy Segment Debug] Fetched segment {url} | Status: {response.status_code} | Length: {len(response.content)}")
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                media_type="video/mp2t",
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Headers": "*",
@@ -369,6 +389,28 @@ async def hls_stream_proxy(url: str, headers: str):
 @router.get("/test")
 async def test_actions():
     return {"status": "ok", "message": "Actions router is active"}
+
+class FrontendLogRequest(BaseModel):
+    level: str
+    message: str
+    data: Optional[dict] = None
+
+@router.post("/log")
+async def log_frontend_message(req: FrontendLogRequest):
+    import logging
+    logger = logging.getLogger("frontend")
+    formatted_msg = f"[Frontend {req.level.upper()}] {req.message}"
+    if req.data:
+        formatted_msg += f" | Data: {json.dumps(req.data)}"
+    
+    if req.level == "error":
+        logger.error(formatted_msg)
+    elif req.level == "warn":
+        logger.warning(formatted_msg)
+    else:
+        logger.info(formatted_msg)
+    return {"status": "success"}
+
 
 @router.get("/open")
 async def open_link(url: str):

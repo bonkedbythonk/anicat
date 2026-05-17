@@ -27,6 +27,92 @@ import ProfileView from "@/components/views/ProfileView";
 import HelpModal from "@/components/modals/HelpModal";
 
 export default function App() {
+  // Remote WebView debugging logging bridge
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const safeStringify = (val: any): string => {
+      try {
+        if (val === null) return "null";
+        if (val === undefined) return "undefined";
+        if (typeof val === "object") {
+          if (val instanceof Error) {
+            return `${val.name}: ${val.message}\n${val.stack || ""}`;
+          }
+          // Safe circular checker
+          const seen = new WeakSet();
+          return JSON.stringify(val, (key, value) => {
+            if (typeof value === "object" && value !== null) {
+              if (seen.has(value)) return "[Circular]";
+              seen.add(value);
+            }
+            return value;
+          });
+        }
+        return String(val);
+      } catch (e) {
+        return `[Unstringifiable Object: ${val?.constructor?.name || typeof val}]`;
+      }
+    };
+
+    const logToBackend = async (level: string, message: string, data?: any) => {
+      try {
+        await fetch("http://127.0.0.1:13370/api/actions/log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            level,
+            message,
+            data: data ? { detail: safeStringify(data) } : undefined
+          })
+        });
+      } catch (e) {
+        // Silence fallback
+      }
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      logToBackend("error", `Uncaught Error: ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`, event.error);
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      logToBackend("error", `Unhandled Rejection: ${event.reason}`, event.reason);
+    };
+
+    const originalConsoleError = console.error;
+    const originalConsoleWarn = console.warn;
+    const originalConsoleLog = console.log;
+
+    console.error = (...args: any[]) => {
+      originalConsoleError.apply(console, args);
+      logToBackend("error", args.map(safeStringify).join(" "));
+    };
+
+    console.warn = (...args: any[]) => {
+      originalConsoleWarn.apply(console, args);
+      logToBackend("warn", args.map(safeStringify).join(" "));
+    };
+
+    console.log = (...args: any[]) => {
+      originalConsoleLog.apply(console, args);
+      logToBackend("info", args.map(safeStringify).join(" "));
+    };
+
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleRejection);
+
+    logToBackend("info", "--- REMOTE WEBVIEW LOGGING BRIDGE INITIALIZED ---");
+    logToBackend("info", `WebView User Agent: ${navigator.userAgent}`);
+
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+      console.error = originalConsoleError;
+      console.warn = originalConsoleWarn;
+      console.log = originalConsoleLog;
+    };
+  }, []);
+
   const [activeView, setActiveView] = useState<ViewName>("home");
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
   const [initialAction, setInitialAction] = useState<"play" | null>(null);

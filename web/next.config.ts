@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: 'export',
+  devIndicators: false,
   images: {
     unoptimized: true, // Required for static export
     remotePatterns: [

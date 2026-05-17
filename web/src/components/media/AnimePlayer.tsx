@@ -428,18 +428,16 @@ export default function AnimePlayer({
       )}
 
       {/* Main Video Element */}
-      {resolved && (
-        <video
-          ref={videoRef}
-          onClick={handleTogglePlay}
-          onTimeUpdate={handleTimeUpdate}
-          onDurationChange={handleTimeUpdate}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          className="w-full h-full object-contain cursor-pointer"
-          playsInline
-        />
-      )}
+      <video
+        ref={videoRef}
+        onClick={handleTogglePlay}
+        onTimeUpdate={handleTimeUpdate}
+        onDurationChange={handleTimeUpdate}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        className={`w-full h-full object-contain cursor-pointer ${resolved ? "block" : "hidden"}`}
+        playsInline
+      />
 
       {/* Glassmorphic Top Controls Bar */}
       <div

@@ -60,8 +60,8 @@ xattr -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
 echo "Relaunching Anicat..."
 
 # Kill the old running instances first to unblock a clean relaunch
-killall "Anicat" || true
-killall "Anicat Dev" || true
+killall "Anicat" 2>/dev/null || true
+killall "Anicat Dev" 2>/dev/null || true
 
 # Wait a brief moment for processes to release resources, then boot it fresh
 sleep 1

@@ -603,6 +603,7 @@ export default function App() {
         <AnimePlayer
           mediaId={playingItem.id}
           episodeNumber={playingEpisode}
+          totalEpisodes={playingItem.episodes || undefined}
           onClose={() => {
             setPlayingEpisode(null);
             setPlayingItem(null);

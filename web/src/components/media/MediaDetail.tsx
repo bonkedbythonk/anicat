@@ -18,7 +18,7 @@ interface MediaDetailProps {
 
 type DetailConfig = {
   stream?: {
-    player_type?: string;
+    player_type?: "embedded" | "external";
   };
 };
 

@@ -57,6 +57,8 @@ export default function App() {
   // Poll health for offline banner, notifications, and live sync
   useEffect(() => {
     let failedAttempts = 0;
+    let isInitial = true;
+    let checkInterval: NodeJS.Timeout;
     
     async function checkSystem() {
       try {
@@ -64,6 +66,7 @@ export default function App() {
         setHealthStatus(status);
         setConnectionStatus("connected");
         setConnectionError(null);
+        failedAttempts = 0;
         
         // 1. Live Sync Detection
         if (status.data_version !== undefined) {
@@ -80,23 +83,45 @@ export default function App() {
         
         if (!shouldBeOffline) setDismissedOffline(false);
         setNotificationCount(status.unread_notifications || 0);
+
+        // Connection succeeded, transition to normal 10s polling interval
+        if (isInitial) {
+          isInitial = false;
+          clearInterval(checkInterval);
+          checkInterval = setInterval(checkSystem, 10000);
+        }
       } catch (err: any) {
         failedAttempts++;
-        console.error("Health check failed:", err);
-        if (failedAttempts >= 6) {
-          setConnectionStatus("failed");
-          setConnectionError(err?.message || "Connection refused (backend sidecar unreachable on port 13370).");
+        console.error("Health check failed (attempt " + failedAttempts + "):", err);
+        
+        if (isInitial) {
+          // In the initial boot phase, we show "checking" status and retry quickly (every 1s)
+          setConnectionStatus("checking");
+          
+          if (failedAttempts >= 8) {
+            isInitial = false;
+            clearInterval(checkInterval);
+            setConnectionStatus("failed");
+            setConnectionError(err?.message || "Connection refused (backend sidecar unreachable on port 13370).");
+            // Transition to slow polling so we can try to recover if they click retry
+            checkInterval = setInterval(checkSystem, 10000);
+          }
+        } else {
+          // If we were already connected and it suddenly failed, we wait for 6 consecutive failed 10s polls before failing
+          if (failedAttempts >= 6) {
+            setConnectionStatus("failed");
+            setConnectionError(err?.message || "Connection refused (backend sidecar unreachable on port 13370).");
+          }
         }
       }
     }
     
+    // Start initial fast polling (every 1s)
     checkSystem();
-    const interval = setInterval(() => {
-      checkSystem();
-    }, 10000); // 10s interval keeps main thread clear for buttery-smooth 120Hz ProMotion animations
+    checkInterval = setInterval(checkSystem, 1000);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(checkInterval);
     };
   }, []);
 
@@ -208,6 +233,53 @@ export default function App() {
       alert("Could not open logs folder. Please look inside your user Library/Caches/anicat folder manually.");
     }
   };
+
+  if (connectionStatus === "checking") {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#050505] text-white p-6 font-sans">
+        <style>{`
+          @keyframes progress-fill-startup {
+            0% { width: 0%; }
+            100% { width: 100%; }
+          }
+          .animate-spin-slow {
+            animation: spin 3s linear infinite;
+          }
+        `}</style>
+        <div className="max-w-md w-full text-center space-y-6">
+          {/* Spinning Logo / Icon */}
+          <div className="relative flex justify-center">
+            <div className="absolute -inset-4 bg-accent/20 rounded-full blur-xl animate-pulse" />
+            <div className="relative p-6 bg-white/[0.02] border border-white/[0.08] rounded-full shadow-2xl">
+              <RotateCw size={48} className="text-accent animate-spin-slow" />
+            </div>
+          </div>
+
+          {/* Title & Description */}
+          <div className="space-y-3">
+            <h2 className="text-2xl font-black tracking-tight text-white animate-pulse">
+              Starting up the services...
+            </h2>
+            <p className="text-sm text-gray-400 leading-relaxed px-4">
+              Initializing the local Python media server sidecar. Please wait a moment.
+            </p>
+          </div>
+
+          {/* Loader Bar */}
+          <div className="w-48 mx-auto h-1.5 bg-white/[0.04] border border-white/[0.08] rounded-full overflow-hidden">
+            <div className="h-full bg-accent rounded-full" style={{
+              animation: 'progress-fill-startup 8s linear forwards'
+            }} />
+          </div>
+
+          {/* Tiny Status Indicator */}
+          <p className="text-[10px] text-gray-500 font-medium font-mono">
+            Connecting to {API_BASE_ORIGIN}...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (connectionStatus === "failed") {
     return (

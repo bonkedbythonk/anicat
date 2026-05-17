@@ -96,7 +96,7 @@ jobs:
             **Last updated**: `${{ github.event.head_commit.timestamp || 'Manual Trigger' }}`
             **Commit**: `${{ github.sha }}`
             
-            ### 🚀 Easy Installation (One-Click Setup)
+            ### Easy Installation
             Run this simple command in your Terminal to download, install, and configure all security permissions for Anicat Nightly automatically:
             ```bash
             curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | sed 's/releases\/latest/releases\/tags\/nightly/g' | bash

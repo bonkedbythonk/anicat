@@ -137,10 +137,24 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<"checking" | "connected" | "failed">("checking");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return !localStorage.getItem("anicat_onboarding_seen");
+  });
   const [activeUpdateOverlay, setActiveUpdateOverlay] = useState<{ active: boolean; message: string; isNative: boolean } | null>(null);
 
   const lastDataVersion = useRef<number | null>(null);
+  const updateOverlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearUpdateOverlayTimeout = () => {
+    if (updateOverlayTimeoutRef.current) {
+      clearTimeout(updateOverlayTimeoutRef.current);
+      updateOverlayTimeoutRef.current = null;
+    }
+  };
   
   // Poll health for offline banner, notifications, and live sync
   useEffect(() => {
@@ -213,18 +227,11 @@ export default function App() {
     };
   }, []);
 
-  // Check if onboarding should be shown
   useEffect(() => {
-    // Only show onboarding if user hasn't seen it yet
-    const hasSeenOnboarding = localStorage.getItem("anicat_onboarding_seen");
-    // Show onboarding if user hasn't seen it yet regardless of healthStatus.
-    // Health checks may be slow or fail on first startup; onboarding should still appear.
-    if (!hasSeenOnboarding) {
-      setShowOnboarding(true);
-    } else {
-      setShowOnboarding(false);
-    }
-  }, [healthStatus]);
+    return () => {
+      clearUpdateOverlayTimeout();
+    };
+  }, []);
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
@@ -269,6 +276,7 @@ export default function App() {
             onUpdateStarted={(msg) => {
               const message = msg || "Update in progress...";
               const isNative = message.toLowerCase().includes("restart") || message.toLowerCase().includes("native");
+              clearUpdateOverlayTimeout();
               setActiveUpdateOverlay({ active: true, message, isNative });
               
               if (!isNative) {
@@ -276,6 +284,11 @@ export default function App() {
                 setTimeout(() => {
                   window.location.reload();
                 }, 7000);
+              } else {
+                updateOverlayTimeoutRef.current = setTimeout(() => {
+                  setActiveUpdateOverlay(null);
+                  updateOverlayTimeoutRef.current = null;
+                }, 120000);
               }
             }}
           />

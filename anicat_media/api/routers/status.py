@@ -78,6 +78,18 @@ _playback_expiry: Optional[datetime] = None
 _last_update_check: Optional[datetime] = None
 _cached_update_available: bool = False
 
+
+def _normalize_version(value: str) -> str:
+    return value.strip().removeprefix("v").removeprefix("V")
+
+
+def _version_tag_matches(candidate: str, expected: str) -> bool:
+    return _normalize_version(candidate).lower() == _normalize_version(expected).lower()
+
+
+def _current_version_tag() -> str:
+    return f"v{_normalize_version(VERSION)}"
+
 # Notifications/profile fetch cache to avoid rate limits
 _last_notifications_check: Optional[datetime] = None
 _cached_unread_notifications: int = 0
@@ -180,8 +192,8 @@ async def get_health():
                     with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
                         data = json.loads(response.read().decode())
                         latest_tag = data.get("tag_name", "")
-                    current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION
-                    if latest_tag and latest_tag != current_version:
+                    current_version = _current_version_tag()
+                    if latest_tag and not _version_tag_matches(latest_tag, current_version):
                         _cached_update_available = True
             except Exception:
                 pass
@@ -286,9 +298,9 @@ async def check_for_updates():
             with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
                 data = json.loads(response.read().decode())
                 latest_tag = data.get("tag_name", "")
-            current_version = f"v{VERSION}" if not VERSION.startswith("v") else VERSION
+            current_version = _current_version_tag()
             _last_update_check = datetime.now()
-            if latest_tag and latest_tag != current_version:
+            if latest_tag and not _version_tag_matches(latest_tag, current_version):
                 _cached_update_available = True
                 return {"status": "success", "update_available": True, "message": f"A new version ({latest_tag}) is available!"}
             _cached_update_available = False
@@ -300,6 +312,7 @@ async def check_for_updates():
 @router.post("/update")
 async def trigger_update():
     """Trigger the official installation script to update the application."""
+    global _last_update_check, _cached_update_available
     try:
         # Respect opt-out environment variable for automated updates
         if os.environ.get("ANICAT_DISABLE_AUTO_UPDATE", "0") == "1":
@@ -338,6 +351,8 @@ async def trigger_update():
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
+            _last_update_check = datetime.now()
+            _cached_update_available = False
             return {"status": "success", "message": "Native update triggered! The application will download the latest version and restart shortly. Please wait a few moments."}
 
         # Fallback for dev/git-based installations
@@ -351,7 +366,11 @@ async def trigger_update():
                 install_script = os.path.join(repo_root, "scripts", "install.sh")
                 if os.path.exists(install_script):
                     subprocess.Popen(["bash", install_script, "--no-launch"], cwd=repo_root, start_new_session=True)
+                    _last_update_check = datetime.now()
+                    _cached_update_available = False
                     return {"status": "success", "message": "Update in progress (Git). Rebuilding frontend..."}
+                _last_update_check = datetime.now()
+                _cached_update_available = False
                 return {"status": "success", "message": "Updated successfully (Git code only)."}
         
         return {"status": "error", "message": "Could not determine update method for this platform."}

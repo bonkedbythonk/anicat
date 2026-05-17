@@ -20,10 +20,11 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
   const [backingUp, setBackingUp] = useState(false);
   const [backupUrl, setBackupUrl] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [hasUpdate, setHasUpdate] = useState(health?.update_available || false);
+  const [stagedHasUpdate, setStagedHasUpdate] = useState(health?.update_available || false);
   const [updateMessage, setUpdateMessage] = useState<{ text: string; type: "success" | "error" | null }>({ text: "", type: null });
   const [options, setOptions] = useState<Record<string, any> | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const hasUpdate = Boolean(health?.update_available || stagedHasUpdate);
 
   useEffect(() => {
     mediaApi.getConfig()
@@ -33,12 +34,6 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
     // Fetch server-supported option lists for UI selects
     mediaApi.getConfigOptions().then(setOptions).catch(() => {/* ignore */});
   }, []);
-
-  useEffect(() => {
-    if (health?.update_available) {
-      setHasUpdate(true);
-    }
-  }, [health]);
 
   const handleOpenLogs = async () => {
     try {
@@ -59,12 +54,8 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
         // If we don't know of an update yet, check for one first!
         const res = await mediaApi.checkUpdate();
         if (res.status === "success") {
-          if (res.update_available) {
-            setHasUpdate(true);
-            setUpdateMessage({ text: res.message, type: "success" });
-          } else {
-            setUpdateMessage({ text: res.message, type: "success" });
-          }
+          setStagedHasUpdate(res.update_available);
+          setUpdateMessage({ text: res.message, type: "success" });
         } else {
           setUpdateMessage({ text: res.message, type: "error" });
         }
@@ -72,6 +63,7 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
         // If we already know there is an update, trigger the installation!
         const res = await mediaApi.triggerUpdate();
         if (res.status === "success") {
+          setStagedHasUpdate(false);
           if (onUpdateStarted) {
             onUpdateStarted(res.message);
           }

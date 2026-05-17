@@ -16,6 +16,12 @@ interface MediaDetailProps {
   onPlayEpisode?: (episodeNum: string) => void;
 }
 
+type DetailConfig = {
+  stream?: {
+    player_type?: string;
+  };
+};
+
 export default function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisode }: MediaDetailProps) {
   const refreshKey = useRefreshTrigger();
   const [fullItem, setFullItem] = useState<MediaItem>(item);
@@ -29,7 +35,7 @@ export default function MediaDetail({ item, onClose, initialAction, onRead, onPl
   const [loadingChars, setLoadingChars] = useState(false);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
   const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "reviews" | "recommendations">("episodes");
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<DetailConfig | null>(null);
 
   const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
 
@@ -52,28 +58,58 @@ export default function MediaDetail({ item, onClose, initialAction, onRead, onPl
   }, [item.id, refreshKey]);
 
   useEffect(() => {
-    if (activeTab === "episodes") {
-      setLoadingEps(true);
-      mediaApi.getEpisodes(item.id)
-        .then(setEpisodes)
-        .catch(err => console.error("Failed to load episodes:", err))
-        .finally(() => setLoadingEps(false));
-    } else if (activeTab === "characters" && characters.length === 0) {
-      setLoadingChars(true);
-      mediaApi.getCharacters(item.id)
-        .then(res => setCharacters(res.characters))
-        .catch(err => console.error("Failed to load characters:", err))
-        .finally(() => setLoadingChars(false));
-    } else if (activeTab === "reviews" && reviews.length === 0) {
-      mediaApi.getReviews(item.id)
-        .then(setReviews)
-        .catch(err => console.error("Failed to load reviews:", err));
-    } else if (activeTab === "recommendations" && recommendations.length === 0) {
-      mediaApi.getRecommendations(item.id)
-        .then(setRecommendations)
-        .catch(err => console.error("Failed to load recommendations:", err));
-    }
-  }, [item.id, activeTab]);
+    let isCancelled = false;
+
+    const loadTabData = async () => {
+      if (activeTab === "episodes") {
+        await Promise.resolve();
+        if (isCancelled) return;
+
+        setLoadingEps(true);
+        try {
+          const episodeData = await mediaApi.getEpisodes(item.id);
+          if (!isCancelled) setEpisodes(episodeData);
+        } catch (err) {
+          console.error("Failed to load episodes:", err);
+        } finally {
+          if (!isCancelled) setLoadingEps(false);
+        }
+      } else if (activeTab === "characters" && characters.length === 0) {
+        await Promise.resolve();
+        if (isCancelled) return;
+
+        setLoadingChars(true);
+        try {
+          const res = await mediaApi.getCharacters(item.id);
+          if (!isCancelled) setCharacters(res.characters);
+        } catch (err) {
+          console.error("Failed to load characters:", err);
+        } finally {
+          if (!isCancelled) setLoadingChars(false);
+        }
+      } else if (activeTab === "reviews" && reviews.length === 0) {
+        try {
+          const reviewData = await mediaApi.getReviews(item.id);
+          if (!isCancelled) setReviews(reviewData);
+        } catch (err) {
+          console.error("Failed to load reviews:", err);
+        }
+      } else if (activeTab === "recommendations" && recommendations.length === 0) {
+        try {
+          const recommendationData = await mediaApi.getRecommendations(item.id);
+          if (!isCancelled) setRecommendations(recommendationData);
+        } catch (err) {
+          console.error("Failed to load recommendations:", err);
+        }
+      }
+    };
+
+    void loadTabData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [item.id, activeTab, characters.length, reviews.length, recommendations.length]);
 
   // Handle initial action (e.g. from Hero "Play Now" button)
   useEffect(() => {
@@ -146,10 +182,13 @@ export default function MediaDetail({ item, onClose, initialAction, onRead, onPl
   const handleToggleWatchlist = async () => {
     if (isUpdatingStatus) return;
     setIsUpdatingStatus(true);
-    
-    const newStatus = fullItem.user_status?.status === "WATCHING" ? "PLANNING" : "WATCHING";
+
+    const currentStatus = fullItem.user_status?.status?.toLowerCase();
+    const isPlanning = currentStatus === "planning";
+    const newStatus = isPlanning ? "watching" : "planning";
+
     try {
-      await mediaApi.updateStatus(item.id, newStatus.toLowerCase() as any);
+      await mediaApi.updateStatus(item.id, newStatus);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to toggle watchlist:", error);
@@ -250,14 +289,14 @@ export default function MediaDetail({ item, onClose, initialAction, onRead, onPl
                 <button 
                   onClick={handleToggleWatchlist}
                   disabled={isUpdatingStatus}
-                  title={fullItem.user_status?.status === 'PLANNING' ? "Remove from Watchlist" : "Add to Watchlist"}
+                  title={fullItem.user_status?.status?.toLowerCase() === 'planning' ? "Remove from Watchlist" : "Add to Watchlist"}
                   className={`p-3.5 rounded-2xl transition-all border active:scale-95 ${
-                    fullItem.user_status?.status === 'PLANNING' 
+                    fullItem.user_status?.status?.toLowerCase() === 'planning' 
                     ? "bg-accent/20 border-accent/30 text-accent" 
                     : "bg-white/[0.05] border-white/5 text-white/70 hover:text-white hover:bg-white/[0.1]"
                   }`}
                 >
-                  {isUpdatingStatus ? <Loader2 size={22} className="animate-spin" /> : <Bookmark size={22} fill={fullItem.user_status?.status === 'PLANNING' ? "currentColor" : "none"} />}
+                  {isUpdatingStatus ? <Loader2 size={22} className="animate-spin" /> : <Bookmark size={22} fill={fullItem.user_status?.status?.toLowerCase() === 'planning' ? "currentColor" : "none"} />}
                 </button>
 
                 <button 

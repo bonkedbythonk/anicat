@@ -23,11 +23,18 @@ async def update_config(updates: dict):
     """Update specific configuration fields."""
     try:
         logger.info("Received config update: %s", updates)
-        # Prefer using the running context, but fall back to loading config from disk
+        # Prefer using the running context if initialized, otherwise load config from disk
+        ctx = None
         try:
-            ctx = get_ctx()
-            config_dict = ctx.config.model_dump()
+            import anicat_media.api.main as _main
+            if getattr(_main.ctx, "_ctx", None) is not None:
+                ctx = _main.ctx
         except Exception:
+            ctx = None
+
+        if ctx is not None:
+            config_dict = ctx.config.model_dump()
+        else:
             from ...cli.config import ConfigLoader as _ConfigLoader
             loader = _ConfigLoader()
             current = loader.load(allow_setup=False)
@@ -49,10 +56,13 @@ async def update_config(updates: dict):
         USER_CONFIG.write_text(toml_content, encoding="utf-8")
         
         # Attempt to update the in-memory context if available
-        try:
-            ctx.config = new_config
-            ctx.data_version += 1
-        except Exception:
+        if ctx is not None:
+            try:
+                ctx.config = new_config
+                ctx.data_version += 1
+            except Exception:
+                logger.info("Active context exists but failed to refresh in-memory config.")
+        else:
             logger.info("No active context to refresh; updated config written to disk only.")
 
         # If the token was updated, reset the media_api instance and force online status

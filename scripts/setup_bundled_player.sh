@@ -65,10 +65,6 @@ sub-auto=fuzzy
 sub-font="Outfit"
 sub-font-size=44
 sub-bold=yes
-
-# Shaders (Anime4K Real-time Upscaling & Restoration)
-# '~~/' prefix resolves dynamically to this isolated config directory at runtime
-glsl-shaders="~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl;~~/shaders/Anime4K_Auto_Restore_VL.glsl"
 EOF
 
 echo "=== 7. Generating customized uosc.conf styled with AniCat accents ==="

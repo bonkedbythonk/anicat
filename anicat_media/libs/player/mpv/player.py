@@ -327,6 +327,44 @@ class MpvPlayer(BasePlayer):
                 mpv_args.append(f"--config-dir={bundled_config}")
                 logger.info(f"Using isolated premium bundled MPV configuration from: {bundled_config}")
 
+            # Dynamically map and inject real-time upscaling shaders based on user's performance preference
+            shader_profile = getattr(params, "shader_profile", "balanced") or "balanced"
+            if shader_profile != "off":
+                bundled_shaders_dir = os.path.abspath(os.path.join(os.path.dirname(self.executable), "mpv_config", "shaders"))
+                if os.path.exists(bundled_shaders_dir):
+                    if shader_profile == "balanced":
+                        # Energy-efficient upscaling for MacBook Air & maximum battery life
+                        shader_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_M.glsl")
+                        if os.path.exists(shader_path):
+                            mpv_args.append(f"--glsl-shaders={shader_path}")
+                            logger.info("Using balanced energy-efficient Anime4K upscaling shaders (Tier M).")
+                    elif shader_profile == "high":
+                        # Premium upscaling and clean line restoration for MacBook Pro
+                        upscale_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_H.glsl")
+                        restore_path = os.path.join(bundled_shaders_dir, "Anime4K_Auto_Restore_VL.glsl")
+                        shaders_to_load = []
+                        if os.path.exists(upscale_path):
+                            shaders_to_load.append(upscale_path)
+                        if os.path.exists(restore_path):
+                            shaders_to_load.append(restore_path)
+                        if shaders_to_load:
+                            mpv_args.append(f"--glsl-shaders={':'.join(shaders_to_load)}")
+                            logger.info("Using high-performance Anime4K upscaling and line restoration shaders (Tier H).")
+                    elif shader_profile == "ultra":
+                        # Ultra multi-pass upscaling and clean line recovery for High-End GPUs
+                        upscale_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_UL.glsl")
+                        restore_path = os.path.join(bundled_shaders_dir, "Anime4K_Restore_CNN_UL.glsl")
+                        shaders_to_load = []
+                        if os.path.exists(upscale_path):
+                            shaders_to_load.append(upscale_path)
+                        if os.path.exists(restore_path):
+                            shaders_to_load.append(restore_path)
+                        if shaders_to_load:
+                            mpv_args.append(f"--glsl-shaders={':'.join(shaders_to_load)}")
+                            logger.info("Using ultra-high fidelity multi-pass Anime4K shaders (Tier UL).")
+            else:
+                logger.info("GPU upscaling shaders are disabled (Battery Saver / Low-End profile).")
+
         if params.headers:
             # mpv prefers no spaces after commas and colons in http-header-fields
             headers_list = []

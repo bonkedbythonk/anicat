@@ -316,6 +316,19 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                   <option value="true">Automatic (Seamless Hands-Free Binging)</option>
                 </select>
               </SettingField>
+
+              <SettingField label="GPU Upscaling Quality (MPV)" description="Balance upscaling visual fidelity and battery life for your MacBook GPU.">
+                <select
+                  value={String(config.stream?.shader_profile || "balanced")}
+                  onChange={(e) => updateField("stream", "shader_profile", e.target.value)}
+                  className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                >
+                  <option value="off">🔋 Battery Saver (Upscaling Off / Normal Scale)</option>
+                  <option value="balanced">💻 Balanced (MacBook Air / Energy-Efficient)</option>
+                  <option value="high">✨ High Quality (MacBook Pro / Detailed Upscale)</option>
+                  <option value="ultra">🌌 Ultra Fidelity (Maximum GPU / Desktop Rig)</option>
+                </select>
+              </SettingField>
             </div>
           )}
 

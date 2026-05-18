@@ -82,7 +82,7 @@ class GeneralConfig(BaseConfig):
         "xcode",
         "zenburn",
     ] = Field(
-        default=defaults.GENERAL_PYGMENT_STYLE, description=desc.GENERAL_PYGMENT_STYLE
+        default=defaults.GENERAL_PYGMENT_STYLE, description=desc.GENERAL_PYGMENT_STYLE  # type: ignore
     )
     preferred_spinner: Literal[
         "dots",
@@ -159,7 +159,7 @@ class GeneralConfig(BaseConfig):
         "betaWave",
         "aesthetic",
     ] = Field(
-        default=defaults.GENERAL_PREFERRED_SPINNER,
+        default=defaults.GENERAL_PREFERRED_SPINNER,  # type: ignore
         description=desc.GENERAL_PREFERRED_SPINNER,
     )
     media_api: Literal["anilist", "jikan"] = Field(
@@ -198,7 +198,7 @@ class GeneralConfig(BaseConfig):
     image_renderer: Literal[
         "icat", "chafa", "imgcat", "system-sixels", "system-kitty", "system-default"
     ] = Field(
-        default_factory=defaults.GENERAL_IMAGE_RENDERER,
+        default_factory=defaults.GENERAL_IMAGE_RENDERER,  # type: ignore
         description=desc.GENERAL_IMAGE_RENDERER,
     )
     manga_viewer: Literal["feh", "icat"] = Field(

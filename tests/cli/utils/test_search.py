@@ -39,6 +39,7 @@ def test_find_best_match_title_prefers_matching_sequel_number():
     media_item = MediaItem(
         id=2,
         title=MediaTitle(english="The Angel Next Door Spoils Me Rotten 2"),
+        seasonYear=None,
     )
 
     results_map = {

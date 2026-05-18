@@ -20,12 +20,19 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
   const [backingUp, setBackingUp] = useState(false);
   const [backupUrl, setBackupUrl] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [downloadingNightly, setDownloadingNightly] = useState(false);
   const [stagedHasUpdate, setStagedHasUpdate] = useState(health?.update_available || false);
   const [updateMessage, setUpdateMessage] = useState<{ text: string; type: "success" | "error" | null }>({ text: "", type: null });
   const [options, setOptions] = useState<Record<string, any> | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [autoSkip, setAutoSkip] = useState(false);
   const hasUpdate = Boolean(health?.update_available || stagedHasUpdate);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedAutoSkip = localStorage.getItem("anicat_auto_skip");
+      setAutoSkip(savedAutoSkip === "true");
+    }
+  }, []);
 
   useEffect(() => {
     mediaApi.getConfig()
@@ -80,25 +87,22 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
     }
   };
 
-  const handleDownloadNightly = async () => {
-    if (downloadingNightly) return;
-    setDownloadingNightly(true);
+  const handleBranchChange = async (newBranch: string) => {
+    if (!config) return;
+    const updated = {
+      ...config,
+      general: {
+        ...config.general,
+        update_branch: newBranch
+      }
+    };
+    setConfig(updated);
+    setStagedHasUpdate(false);
     setUpdateMessage({ text: "", type: null });
     try {
-      if (onUpdateStarted) {
-        onUpdateStarted("Downloading and checking out the nightly development branch... The application will download files and reload shortly. Please wait a few moments.");
-      }
-      const res = await mediaApi.triggerUpdate("nightly");
-      if (res.status === "success") {
-        setStagedHasUpdate(false);
-      } else {
-        setUpdateMessage({ text: res.message, type: "error" });
-      }
+      await mediaApi.updateConfig(updated);
     } catch (err) {
-      console.error("Nightly update failed:", err);
-      setUpdateMessage({ text: "Failed to trigger nightly update.", type: "error" });
-    } finally {
-      setDownloadingNightly(false);
+      console.error("Failed to save branch change:", err);
     }
   };
 
@@ -257,19 +261,7 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                 </select>
               </SettingField>
 
-              <SettingField
-                label="Update Branch"
-                description="Choose whether to fetch updates from the stable or nightly development branch."
-              >
-                <select
-                  value={String(config.general?.update_branch || "stable")}
-                  onChange={(e) => updateField("general", "update_branch", e.target.value)}
-                  className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
-                >
-                  <option value="stable">Stable (main branch)</option>
-                  <option value="nightly">Nightly (nightly branch)</option>
-                </select>
-              </SettingField>
+
             </div>
           )}
 
@@ -307,6 +299,21 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                   {(options?.stream?.player_type ?? ["embedded", "external"]).map((p: string) => (
                     <option key={p} value={p}>{p === 'embedded' ? 'Embedded Cinematic Overlay (In-App HLS)' : 'External Media Player (MPV client with Anime4K upscaling)'}</option>
                   ))}
+                </select>
+              </SettingField>
+
+              <SettingField label="Auto-Skip Credits" description="Automatically skip opening and ending credits themes using crowdsourced AniSkip times.">
+                <select
+                  value={autoSkip ? "true" : "false"}
+                  onChange={(e) => {
+                    const val = e.target.value === "true";
+                    setAutoSkip(val);
+                    localStorage.setItem("anicat_auto_skip", String(val));
+                  }}
+                  className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                >
+                  <option value="false">Manual (Show 'Skip Intro' button)</option>
+                  <option value="true">Automatic (Seamless Hands-Free Binging)</option>
                 </select>
               </SettingField>
             </div>
@@ -371,56 +378,70 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
           {activeTab === "maintenance" && (
             <div className="space-y-8 animate-fade-in">
               {/* Application Update */}
-              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
-                <div className="flex items-center justify-between">
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-white/[0.04]">
                   <div>
                     <h3 className="text-lg font-bold text-white">Application Update</h3>
-                    <p className="text-sm text-gray-500 mt-1">Check for the latest features and bug fixes.</p>
+                    <p className="text-sm text-gray-500 mt-1">Keep your application up to date with the latest releases.</p>
                   </div>
                   <div className="px-3 py-1 bg-white/[0.04] rounded-lg border border-white/[0.1] text-[10px] font-mono text-gray-400">
-                    {health?.current_version || "v1.2.4"}
+                    Current: {health?.current_version || "v1.2.4"}
                   </div>
                 </div>
-                <div className="flex flex-col space-y-3 pt-2">
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-accent uppercase tracking-wider">Update Branch</label>
+                    <select
+                      value={String(config.general?.update_branch || "stable")}
+                      onChange={(e) => handleBranchChange(e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white animate-fade-in"
+                    >
+                      <option value="stable" className="bg-[#121212] text-white">Stable (Official releases)</option>
+                      <option value="nightly" className="bg-[#121212] text-white">Nightly (Bleeding-edge developer branch)</option>
+                    </select>
+                  </div>
+
                   <button
                     onClick={handleUpdate}
                     disabled={checkingUpdate}
-                    className={`flex items-center justify-center space-x-2 py-3 rounded-xl font-bold transition-all shadow-lg shadow-accent/20 disabled:opacity-50 ${
-                      hasUpdate ? "bg-green-600 hover:bg-green-500 text-white shadow-green-500/20" : "bg-accent text-white hover:bg-accent-light"
+                    className={`w-full flex items-center justify-center space-x-2 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 ${
+                      hasUpdate
+                        ? "bg-green-600 hover:bg-green-500 text-white shadow-green-500/20"
+                        : "bg-accent text-white hover:bg-accent-light shadow-accent/20"
                     }`}
                   >
-                    {checkingUpdate ? <Loader2 size={16} className="animate-spin" /> : hasUpdate ? <Download size={16} /> : <RotateCcw size={16} />}
-                    <span>{checkingUpdate ? (hasUpdate ? "Updating..." : "Checking...") : hasUpdate ? "Install Update" : "Check for Updates"}</span>
+                    {checkingUpdate ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : hasUpdate ? (
+                      <Download size={16} />
+                    ) : (
+                      <RotateCcw size={16} />
+                    )}
+                    <span>
+                      {checkingUpdate
+                        ? (hasUpdate ? "Updating..." : "Checking...")
+                        : hasUpdate
+                        ? "Install Update"
+                        : "Check for Updates"}
+                    </span>
                   </button>
 
-                  <div className="pt-2 border-t border-white/5 flex flex-col space-y-2">
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>Want to try upcoming developer features?</span>
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 font-bold text-[9px] uppercase tracking-wider">Bleeding Edge</span>
-                    </div>
-                    <button
-                      onClick={handleDownloadNightly}
-                      disabled={downloadingNightly}
-                      className="flex items-center justify-center space-x-2 py-2.5 bg-white/[0.03] hover:bg-amber-600 hover:text-white border border-white/5 hover:border-amber-500/20 rounded-xl text-xs font-bold text-gray-400 transition-all active:scale-95 disabled:opacity-50"
-                    >
-                      {downloadingNightly ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Download size={14} />
-                      )}
-                      <span>{downloadingNightly ? "Downloading Nightly Branch..." : "Download & Install Nightly Branch"}</span>
-                    </button>
-                  </div>
-
                   {updateMessage.text && (
-                    <div className={`p-3 rounded-xl text-xs font-semibold flex items-center space-x-2 animate-fade-in ${
-                      updateMessage.type === "success" ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
+                    <div className={`p-4 rounded-xl text-xs font-semibold flex items-start space-x-3 animate-fade-in ${
+                      updateMessage.type === "success"
+                        ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                        : "bg-red-500/10 text-red-400 border border-red-500/20"
                     }`}>
-                      {updateMessage.type === "success" ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                      {updateMessage.type === "success" ? (
+                        <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
+                      ) : (
+                        <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                      )}
                       <span>{updateMessage.text}</span>
                     </div>
                   )}
-                  <p className="text-[10px] text-center text-gray-600">Build: {new Date().toLocaleDateString()}</p>
+                  <p className="text-[10px] text-center text-gray-600 pt-2 border-t border-white/5">Build: {new Date().toLocaleDateString()}</p>
                 </div>
               </div>
 

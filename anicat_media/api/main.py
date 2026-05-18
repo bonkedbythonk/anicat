@@ -24,6 +24,7 @@ if sys.platform == "darwin":
         if p not in current_paths:
             current_paths.append(p)
     os.environ["PATH"] = os.pathsep.join(current_paths)
+from typing import Any
 from ..core.config import AppConfig
 from ..core.constants import VERSION
 from ..cli.config import ConfigLoader
@@ -39,9 +40,9 @@ class _ContextProxy:
         return getattr(sys, "_anicat_ctx", None)
 
     @_ctx.setter
-    def _ctx(self, val: Context | None) -> None:
+    def _ctx(self, val: Any) -> None:
         import sys
-        sys._anicat_ctx = val
+        setattr(sys, "_anicat_ctx", val)
 
     def set(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -58,7 +59,7 @@ class _ContextProxy:
             return loader.load(allow_setup=False)
         return ctx_val.config
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> Any:
         # Allow safe access to `config` even before the interactive Context
         # has been created. This prevents endpoints and utilities that only
         # need read access from raising during early initialization.
@@ -72,7 +73,7 @@ class _ContextProxy:
     def __setattr__(self, name, value):
         if name == "_ctx":
             import sys
-            sys._anicat_ctx = value
+            setattr(sys, "_anicat_ctx", value)
             return
         ctx_val = self._ctx
         if ctx_val is None:

@@ -207,13 +207,15 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
         ep_record = next((e for e in record.media_episodes if e.episode_number == resolved_episode), None) if record and record.media_episodes else None
         
         is_local = False
+        file_path = None
         if ep_record and ep_record.download_status == DownloadStatus.COMPLETED and ep_record.file_path:
             from pathlib import Path
-            file_path = Path(ep_record.file_path)
-            if file_path.exists():
+            path_obj = Path(ep_record.file_path)
+            if path_obj.exists():
                 is_local = True
+                file_path = path_obj
 
-        if is_local:
+        if is_local and file_path is not None:
             local_title = f"{media_item.title.english or media_item.title.romaji}; Episode {resolved_episode}"
             if media_item.streaming_episodes and media_item.streaming_episodes.get(resolved_episode):
                 local_title = media_item.streaming_episodes[resolved_episode].title

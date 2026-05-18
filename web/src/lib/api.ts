@@ -35,6 +35,7 @@ export async function fetchFromApi(endpoint: string, options: RequestInit = {}) 
 
 export type MediaItem = {
   id: number;
+  id_mal?: number;
   type?: "ANIME" | "MANGA";
   title: {
     english?: string;

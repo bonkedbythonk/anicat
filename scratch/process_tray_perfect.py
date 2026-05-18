@@ -6,6 +6,7 @@ def extract_only_cat_silhouette(input_path, output_path):
     img = Image.open(input_path).convert("RGBA")
     width, height = img.size
     pixels = img.load()
+    assert pixels is not None
     
     # 1. Find a starting point (seed) near the center that has a bright/neon color
     # The container is extremely dark (luminance ~ 14), so a threshold of > 55 is perfect
@@ -16,7 +17,7 @@ def extract_only_cat_silhouette(input_path, output_path):
             for dy in range(-r_offset, r_offset + 1):
                 tx, ty = start_x + dx, start_y + dy
                 if 0 <= tx < width and 0 <= ty < height:
-                    r, g, b, a = pixels[tx, ty]
+                    r, g, b, a = pixels[tx, ty]  # type: ignore
                     lum = 0.299 * r + 0.587 * g + 0.114 * b
                     # If it's a bright or colored pixel (above 55), it's part of the cat face
                     if lum > 55:
@@ -44,7 +45,7 @@ def extract_only_cat_silhouette(input_path, output_path):
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nx, ny = cx + dx, cy + dy
             if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in cat_pixels:
-                r, g, b, a = pixels[nx, ny]
+                r, g, b, a = pixels[nx, ny]  # type: ignore
                 lum = 0.299 * r + 0.587 * g + 0.114 * b
                 # The container boundary is very dark (lum ~ 14), so lum > 45 perfectly blocks leakage
                 if lum > 45:
@@ -56,19 +57,20 @@ def extract_only_cat_silhouette(input_path, output_path):
     # 3. Render the isolated cat shape fully solid (Alpha = 255) with smooth borders
     new_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     new_pixels = new_img.load()
+    assert new_pixels is not None
     
     for x, y in cat_pixels:
-        r, g, b, a = pixels[x, y]
+        r, g, b, a = pixels[x, y]  # type: ignore
         lum = 0.299 * r + 0.587 * g + 0.114 * b
         
         # Make the core shape fully solid (Alpha = 255) to prevent fading/half-visibility
         # Only anti-alias the absolute outer edges (lum between 45 and 65)
         if lum > 65:
-            new_pixels[x, y] = (0, 0, 0, 255)
+            new_pixels[x, y] = (0, 0, 0, 255)  # type: ignore
         else:
             alpha = int(255 * min(1.0, max(0.0, (lum - 45) / 20.0)))
             if alpha > 10:
-                new_pixels[x, y] = (0, 0, 0, alpha)
+                new_pixels[x, y] = (0, 0, 0, alpha)  # type: ignore
             
     # 4. Crop to perfect cat silhouette bounding box
     bbox = new_img.getbbox()

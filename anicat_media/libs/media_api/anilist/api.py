@@ -255,7 +255,7 @@ class AniListApi(BaseApiClient):
             # or just rely on the 5-minute TTL.
             # For now, let's invalidate the specific list item if possible.
             invalidate_graphql_cache(ANILIST_ENDPOINT, gql.GET_MEDIA_LIST_ITEM, {"mediaId": params.media_id})
-            invalidate_graphql_cache(ANILIST_ENDPOINT, gql.SEARCH_MEDIA, {"id": params.media_id})
+            invalidate_graphql_cache(ANILIST_ENDPOINT, gql.SEARCH_MEDIA, {"id_in": [params.media_id], "per_page": 1})
             
         return success
 
@@ -283,7 +283,7 @@ class AniListApi(BaseApiClient):
             gql.DELETE_MEDIA_LIST_ENTRY,
             {"id": list_id},
         )
-        return (
+        deleted = (
             response.json()
             .get("data", {})
             .get("DeleteMediaListEntry", {})
@@ -291,6 +291,9 @@ class AniListApi(BaseApiClient):
             if response
             else False
         )
+        if deleted:
+            invalidate_graphql_cache(ANILIST_ENDPOINT, gql.SEARCH_MEDIA, {"id_in": [media_id], "per_page": 1})
+        return deleted
 
     def get_recommendation_for(
         self, params: MediaRecommendationParams

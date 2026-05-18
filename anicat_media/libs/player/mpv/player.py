@@ -322,7 +322,7 @@ class MpvPlayer(BasePlayer):
             headers_list = []
             for k, v in params.headers.items():
                 # Clean value of newlines and extra spaces
-                clean_v = str(v).strip().replace("\n", "").replace("\r", "")
+                clean_v = v.strip().replace("\n", "").replace("\r", "")
                 headers_list.append(f"{k}:{clean_v}")
             
             header_str = ",".join(headers_list)

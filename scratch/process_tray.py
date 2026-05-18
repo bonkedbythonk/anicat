@@ -12,27 +12,29 @@ def process_logo_to_tray(input_path, output_path):
     # Get pixel data
     pixels = img.load()
     new_pixels = new_img.load()
+    assert pixels is not None
+    assert new_pixels is not None
     
     # We will identify the background color (around 252, 252, 250)
     bg_color = (252, 252, 250)
     
     for y in range(height):
         for x in range(width):
-            r, g, b, a = pixels[x, y]
+            r, g, b, a = pixels[x, y]  # type: ignore
             
             # Calculate distance to background color
             dist = ((r - bg_color[0])**2 + (g - bg_color[1])**2 + (b - bg_color[2])**2)**0.5
             
             # If the pixel is very close to white/off-white, make it transparent
             if dist < 25 or (r > 245 and g > 245 and b > 245):
-                new_pixels[x, y] = (0, 0, 0, 0)
+                new_pixels[x, y] = (0, 0, 0, 0)  # type: ignore
             else:
                 # Convert the logo shape to black/greyscale.
                 # A good way is to calculate the luminance of the pixel,
                 # and map darker original pixels to darker black (higher opacity or solid black).
                 # Since the logo is a colored shape on a white background,
                 # we can make the foreground pure black to serve as a perfect macOS template icon.
-                new_pixels[x, y] = (0, 0, 0, 255)
+                new_pixels[x, y] = (0, 0, 0, 255)  # type: ignore
     
     # Crop to bounding box of non-transparent pixels to keep it centered and tight
     bbox = new_img.getbbox()

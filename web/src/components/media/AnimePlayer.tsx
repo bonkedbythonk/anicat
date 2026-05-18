@@ -6,6 +6,7 @@ import { API_BASE_ORIGIN, mediaApi } from "@/lib/api";
 
 interface AnimePlayerProps {
   mediaId: number;
+  malId?: number;
   episodeNumber: string;
   totalEpisodes?: number;
   onClose: () => void;
@@ -16,6 +17,7 @@ interface AnimePlayerProps {
 
 export default function AnimePlayer({
   mediaId,
+  malId,
   episodeNumber,
   totalEpisodes,
   onClose,
@@ -43,13 +45,14 @@ export default function AnimePlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isHoveredControls, setIsHoveredControls] = useState(false);
+  const [autoSkipEnabled, setAutoSkipEnabled] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load volume preference
+  // Load volume and auto-skip preference
   useEffect(() => {
     const savedVol = localStorage.getItem("anicat_player_volume");
     if (savedVol !== null) {
@@ -58,6 +61,10 @@ export default function AnimePlayer({
     const savedMuted = localStorage.getItem("anicat_player_muted");
     if (savedMuted !== null) {
       setIsMuted(savedMuted === "true");
+    }
+    const savedAutoSkip = localStorage.getItem("anicat_auto_skip");
+    if (savedAutoSkip !== null) {
+      setAutoSkipEnabled(savedAutoSkip === "true");
     }
   }, []);
 
@@ -104,7 +111,11 @@ export default function AnimePlayer({
     const epNum = parseInt(episodeNumber, 10);
     if (isNaN(epNum)) return;
 
-    fetch(`https://api.aniskip.com/v2/skip-times/${mediaId}/${epNum}?types[]=op&types[]=ed&episodeLength=0`)
+    // AniSkip API requires MyAnimeList (MAL) ID. Fall back to AniList ID if MAL ID is unavailable.
+    const queryId = malId || mediaId;
+    console.log(`[AniSkip] Fetching skip times for ID ${queryId} (MAL ID: ${malId || "N/A"}, AniList ID: ${mediaId}), Ep: ${epNum}`);
+
+    fetch(`https://api.aniskip.com/v2/skip-times/${queryId}/${epNum}?types[]=op&types[]=ed&episodeLength=0`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data && data.found && data.results) {
@@ -113,8 +124,10 @@ export default function AnimePlayer({
             start: r.interval.startTime,
             end: r.interval.endTime
           }));
+          console.log(`[AniSkip] Found skip times for ID ${queryId}:`, times);
           setSkipTimes(times);
         } else {
+          console.log(`[AniSkip] No skip times found for ID ${queryId}. Using standard 90s fallback.`);
           // Standard 90s fallback intro starting at 0:00 to 1:30
           setSkipTimes([{ type: "op", start: 0, end: 90 }]);
         }
@@ -123,7 +136,7 @@ export default function AnimePlayer({
         console.error("[AniSkip] Error querying skip API:", err);
         setSkipTimes([{ type: "op", start: 0, end: 90 }]);
       });
-  }, [mediaId, episodeNumber]);
+  }, [mediaId, malId, episodeNumber]);
 
   // Synchronize dynamic HLS.js streaming
   useEffect(() => {
@@ -355,6 +368,11 @@ export default function AnimePlayer({
         const matchingSkip = skipTimes.find(s => time >= s.start && time < s.end);
         if (matchingSkip) {
           setActiveSkip(matchingSkip);
+          if (autoSkipEnabled) {
+            console.log(`[AniSkip] Auto-skipping ${matchingSkip.type} from ${time}s to ${matchingSkip.end}s`);
+            handleSeek(matchingSkip.end);
+            return;
+          }
         } else {
           setActiveSkip(null);
         }
@@ -737,6 +755,26 @@ export default function AnimePlayer({
                 <option value="1.5" className="bg-[#050505]">1.5x</option>
                 <option value="2" className="bg-[#050505]">2.0x</option>
               </select>
+            </div>
+
+            {/* Auto-Skip Toggle */}
+            <div className="flex items-center">
+              <button
+                onClick={() => {
+                  const newval = !autoSkipEnabled;
+                  setAutoSkipEnabled(newval);
+                  localStorage.setItem("anicat_auto_skip", newval.toString());
+                }}
+                className={`px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black transition-all border flex items-center space-x-1.5 active:scale-95 duration-200 ${
+                  autoSkipEnabled
+                    ? "bg-accent/10 border-accent/20 text-accent hover:bg-accent/20"
+                    : "bg-white/[0.04] border-white/5 text-white/50 hover:text-white/80 hover:bg-white/[0.08]"
+                }`}
+                title="Automatically skip openings and endings using crowdsourced AniSkip times"
+              >
+                <span className={`w-1 h-1 rounded-full ${autoSkipEnabled ? 'bg-accent animate-pulse' : 'bg-white/30'}`} />
+                <span>Auto-Skip</span>
+              </button>
             </div>
           </div>
 

@@ -24,13 +24,14 @@ def extract_cat_silhouette(input_path, output_path):
             visited.add((x, y))
             
     pixels = img.load()
+    assert pixels is not None
     
     while queue:
         cx, cy = queue.pop(0)
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nx, ny = cx + dx, cy + dy
             if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
-                r, g, b, a = pixels[nx, ny]
+                r, g, b, a = pixels[nx, ny]  # type: ignore
                 dist = ((r - bg_color[0])**2 + (g - bg_color[1])**2 + (b - bg_color[2])**2)**0.5
                 # If it's close to the background color (bright off-white), it's outer background
                 if dist < 40 or (r > 235 and g > 235 and b > 235):
@@ -42,27 +43,28 @@ def extract_cat_silhouette(input_path, output_path):
     # 2. Create the new image containing ONLY the cat silhouette
     new_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     new_pixels = new_img.load()
+    assert new_pixels is not None
     
     for y in range(height):
         for x in range(width):
             if (x, y) in visited:
                 # Outer background -> transparent
-                new_pixels[x, y] = (0, 0, 0, 0)
+                new_pixels[x, y] = (0, 0, 0, 0)  # type: ignore
             else:
-                r, g, b, a = pixels[x, y]
+                r, g, b, a = pixels[x, y]  # type: ignore
                 luminance = 0.299 * r + 0.587 * g + 0.114 * b
                 
                 # The squircle container is dark (luminance < 120)
                 # The cat silhouette inside is bright (luminance > 120)
                 if luminance < 130:
                     # Container -> transparent
-                    new_pixels[x, y] = (0, 0, 0, 0)
+                    new_pixels[x, y] = (0, 0, 0, 0)  # type: ignore
                 else:
                     # Cat shape! Make it solid black with a smooth anti-aliased alpha transition
                     # Calculate alpha based on how bright it is above the threshold
                     alpha = int(255 * min(1.0, max(0.0, (luminance - 130) / 40.0)))
                     if alpha > 10:
-                        new_pixels[x, y] = (0, 0, 0, alpha)
+                        new_pixels[x, y] = (0, 0, 0, alpha)  # type: ignore
                         
     # 3. Crop to the active bounding box of the cat silhouette
     bbox = new_img.getbbox()

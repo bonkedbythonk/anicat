@@ -42,8 +42,25 @@ class MpvPlayer(BasePlayer):
         self.config = config
         self.executable = None
 
-        # macOS specific: Prioritize bundled MPV inside the app resources first
-        if sys.platform == "darwin":
+        # 1. Prioritize native system-wide MPV for maximum operating system compatibility
+        self.executable = shutil.which("mpv")
+        
+        # macOS specific: check common native package installation directories
+        if not self.executable and sys.platform == "darwin":
+            common_paths = [
+                "/opt/homebrew/bin/mpv",
+                "/usr/local/bin/mpv",
+                "/Applications/mpv.app/Contents/MacOS/mpv",
+                os.path.expanduser("~/Applications/mpv.app/Contents/MacOS/mpv")
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    self.executable = path
+                    logger.info(f"Native system-wide MPV discovered at: {self.executable}")
+                    break
+
+        # 2. Fall back to bundled MPV inside the app resources if not installed on system
+        if not self.executable and sys.platform == "darwin":
             # For packaged Tauri apps, sys.executable is Anicat.app/Contents/MacOS/anicat-server
             app_dir = os.path.dirname(sys.executable)
             bundled_paths = [
@@ -57,24 +74,7 @@ class MpvPlayer(BasePlayer):
             for path in bundled_paths:
                 if os.path.exists(path):
                     self.executable = path
-                    logger.info(f"Bundled MPV discovered inside app resources at: {self.executable}")
-                    break
-
-        # Fallback to system-wide PATH lookup if not bundled
-        if not self.executable:
-            self.executable = shutil.which("mpv")
-        
-        # macOS specific fallback for background services/native apps
-        if not self.executable and sys.platform == "darwin":
-            common_paths = [
-                "/opt/homebrew/bin/mpv",
-                "/usr/local/bin/mpv",
-                "/Applications/mpv.app/Contents/MacOS/mpv",
-                os.path.expanduser("~/Applications/mpv.app/Contents/MacOS/mpv")
-            ]
-            for path in common_paths:
-                if os.path.exists(path):
-                    self.executable = path
+                    logger.info(f"Bundled MPV fallback discovered inside app resources at: {self.executable}")
                     break
         
         if self.executable:
@@ -318,26 +318,36 @@ class MpvPlayer(BasePlayer):
         Returns:
             list[str]: List of MPV CLI arguments.
         """
-        mpv_args = []
-
+        # Locate the bundled configuration directory inside the application bundle resources
+        bundled_config = None
         if sys.platform == "darwin":
-            mpv_args.extend([
-                "--vo=gpu",
-                "--gpu-api=opengl",
-                "--gpu-context=cocoa"
-            ])
+            # For packaged Tauri apps, the sidecar is at Anicat.app/Contents/MacOS/anicat-server
+            # The Resources folder is at Anicat.app/Contents/Resources
+            app_dir = os.path.dirname(sys.executable)
+            config_search_paths = [
+                os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources", "mpv_config")),
+                os.path.abspath(os.path.join(app_dir, "..", "Resources", "mpv_config")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "web", "src-tauri", "resources", "mpv_config")),
+            ]
+            for path in config_search_paths:
+                if os.path.exists(path):
+                    bundled_config = path
+                    break
+        else:
+            # Non-macOS fallback inside workspace
+            fallback_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "web", "src-tauri", "resources", "mpv_config"))
+            if os.path.exists(fallback_path):
+                bundled_config = fallback_path
 
-        # Inject isolated config directory if using the bundled companion player
-        if self.executable and ("Resources/resources/mpv" in self.executable or "Resources/mpv" in self.executable or "web/src-tauri/resources/mpv" in self.executable):
-            bundled_config = os.path.abspath(os.path.join(os.path.dirname(self.executable), "mpv_config"))
-            if os.path.exists(bundled_config):
-                mpv_args.append(f"--config-dir={bundled_config}")
-                logger.info(f"Using isolated premium bundled MPV configuration from: {bundled_config}")
+        # If a bundled config directory is found, dynamically load uosc skin and Anime4K shaders
+        if bundled_config:
+            mpv_args.append(f"--config-dir={bundled_config}")
+            logger.info(f"Using isolated premium bundled MPV configuration from: {bundled_config}")
 
             # Dynamically map and inject real-time upscaling shaders based on user's performance preference
             shader_profile = getattr(params, "shader_profile", "balanced") or "balanced"
             if shader_profile != "off":
-                bundled_shaders_dir = os.path.abspath(os.path.join(os.path.dirname(self.executable), "mpv_config", "shaders"))
+                bundled_shaders_dir = os.path.join(bundled_config, "shaders")
                 if os.path.exists(bundled_shaders_dir):
                     if shader_profile == "balanced":
                         # Energy-efficient upscaling for MacBook Air & maximum battery life

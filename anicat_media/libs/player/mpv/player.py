@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import Optional
 from ....utils.subprocess import run_cmd
 
 from ....core.config import MpvConfig
@@ -65,12 +66,23 @@ class MpvPlayer(BasePlayer):
             bundled_paths = [
                 os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources", "mpv")),
                 os.path.abspath(os.path.join(app_dir, "..", "Resources", "mpv")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "web", "src-tauri", "resources", "mpv")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources", "mpv")),
             ]
             for path in bundled_paths:
                 if os.path.exists(path):
                     self.executable = path
                     logger.info(f"Bundled MPV fallback discovered inside app resources at: {self.executable}")
+                    # Dynamically de-quarantine the bundled resources folder to avoid macOS untrusted executable blocker
+                    try:
+                        resources_dir = os.path.dirname(self.executable)
+                        subprocess.run(
+                            ["xattr", "-r", "-d", "com.apple.quarantine", resources_dir],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                        logger.info("Successfully cleared macOS quarantine on bundled resources.")
+                    except Exception as e:
+                        logger.warning(f"Could not clear macOS quarantine dynamically: {e}")
                     break
 
         # Non-macOS standard PATH lookup
@@ -244,14 +256,25 @@ class MpvPlayer(BasePlayer):
             mpv_log_file = subprocess.DEVNULL
 
         full_cmd = pre_args + mpv_args
+        
+        # Isolated standalone Vulkan ICD resolution for Mac out-of-the-box compatibility
+        process_env = detect.get_clean_env().copy()
+        resources_dir = self._find_resources_dir()
+        if resources_dir:
+            icd_path = os.path.abspath(os.path.join(resources_dir, "lib", "vk_icd.json"))
+            if os.path.exists(icd_path):
+                process_env["VK_ICD_FILENAMES"] = icd_path
+                process_env["VK_DRIVER_FILES"] = icd_path
+                logger.info(f"Vulkan ICD dynamic loader isolation active: {icd_path}")
+
         logger.info(f"Starting MPV with IPC socket: {socket_path}")
         logger.info(f"MPV Command: {' '.join(full_cmd)}")
-        logger.info(f"MPV Environment (clean): {detect.get_clean_env()}")
+        logger.info(f"MPV Environment: {process_env}")
 
         try:
             process = subprocess.Popen(
                 full_cmd,
-                env=detect.get_clean_env(),
+                env=process_env,
                 stdout=mpv_log_file,
                 stderr=mpv_log_file,
             )
@@ -336,36 +359,19 @@ class MpvPlayer(BasePlayer):
             if shader_profile != "off":
                 bundled_shaders_dir = os.path.join(bundled_config, "shaders")
                 if os.path.exists(bundled_shaders_dir):
-                    if shader_profile == "balanced":
-                        # Energy-efficient upscaling for MacBook Air & maximum battery life
-                        shader_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_M.glsl")
-                        if os.path.exists(shader_path):
-                            mpv_args.append(f"--glsl-shaders={shader_path}")
-                            logger.info("Using balanced energy-efficient Anime4K upscaling shaders (Tier M).")
-                    elif shader_profile == "high":
-                        # Premium upscaling and clean line restoration for MacBook Pro
-                        upscale_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_H.glsl")
-                        restore_path = os.path.join(bundled_shaders_dir, "Anime4K_Auto_Restore_VL.glsl")
-                        shaders_to_load = []
-                        if os.path.exists(upscale_path):
-                            shaders_to_load.append(upscale_path)
-                        if os.path.exists(restore_path):
-                            shaders_to_load.append(restore_path)
-                        if shaders_to_load:
-                            mpv_args.append(f"--glsl-shaders={':'.join(shaders_to_load)}")
-                            logger.info("Using high-performance Anime4K upscaling and line restoration shaders (Tier H).")
-                    elif shader_profile == "ultra":
-                        # Ultra multi-pass upscaling and clean line recovery for High-End GPUs
-                        upscale_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_UL.glsl")
-                        restore_path = os.path.join(bundled_shaders_dir, "Anime4K_Restore_CNN_UL.glsl")
-                        shaders_to_load = []
-                        if os.path.exists(upscale_path):
-                            shaders_to_load.append(upscale_path)
-                        if os.path.exists(restore_path):
-                            shaders_to_load.append(restore_path)
-                        if shaders_to_load:
-                            mpv_args.append(f"--glsl-shaders={':'.join(shaders_to_load)}")
-                            logger.info("Using ultra-high fidelity multi-pass Anime4K shaders (Tier UL).")
+                    # Maps standard/balanced (or any legacy presets) directly to our highly-optimized VL shader pipeline
+                    clamp_path = os.path.join(bundled_shaders_dir, "Anime4K_Clamp_Highlights.glsl")
+                    restore_path = os.path.join(bundled_shaders_dir, "Anime4K_Restore_CNN_VL.glsl")
+                    upscale_path = os.path.join(bundled_shaders_dir, "Anime4K_Upscale_CNN_x2_VL.glsl")
+                    downscale_x2 = os.path.join(bundled_shaders_dir, "Anime4K_AutoDownscalePre_x2.glsl")
+                    downscale_x4 = os.path.join(bundled_shaders_dir, "Anime4K_AutoDownscalePre_x4.glsl")
+                    shaders_to_load = []
+                    for p in [clamp_path, restore_path, upscale_path, downscale_x2, downscale_x4]:
+                        if os.path.exists(p):
+                            shaders_to_load.append(p)
+                    if shaders_to_load:
+                        mpv_args.append(f"--glsl-shaders={':'.join(shaders_to_load)}")
+                        logger.info("Using standard high-efficiency Anime4K upscaling shaders (Tier VL).")
             else:
                 logger.info("GPU upscaling shaders are disabled (Battery Saver / Low-End profile).")
 
@@ -403,7 +409,7 @@ class MpvPlayer(BasePlayer):
                 os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources")),
                 os.path.abspath(os.path.join(app_dir, "..", "Resources")),
                 # Development fallback
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "web", "src-tauri", "resources")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources")),
             ]
             for p in paths:
                 if os.path.exists(p):
@@ -413,7 +419,7 @@ class MpvPlayer(BasePlayer):
             app_dir = os.path.dirname(sys.executable)
             paths = [
                 os.path.abspath(os.path.join(app_dir, "resources")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "web", "src-tauri", "resources")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources")),
             ]
             for p in paths:
                 if os.path.exists(p):

@@ -138,7 +138,11 @@ export default function App() {
     const listener = () => {
       const theme = localStorage.getItem("anicat_theme") || "system";
       if (theme === "system") {
+        document.documentElement.classList.add("theme-transition");
         applyTheme();
+        setTimeout(() => {
+          document.documentElement.classList.remove("theme-transition");
+        }, 300);
       }
     };
 
@@ -146,7 +150,11 @@ export default function App() {
     
     const storageListener = (e: StorageEvent) => {
       if (e.key === "anicat_theme") {
+        document.documentElement.classList.add("theme-transition");
         applyTheme();
+        setTimeout(() => {
+          document.documentElement.classList.remove("theme-transition");
+        }, 300);
       }
     };
     window.addEventListener("storage", storageListener);

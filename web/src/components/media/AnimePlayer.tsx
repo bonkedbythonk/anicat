@@ -149,10 +149,11 @@ export default function AnimePlayer({
     import("hls.js").then((M) => {
       const Hls = M.default;
       
+      const isChrome = /Chrome/i.test(navigator.userAgent) || /Chromium/i.test(navigator.userAgent);
       const isWebKitApple = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent) && 
                             /WebKit/i.test(navigator.userAgent) && 
-                            !/Chrome/i.test(navigator.userAgent);
-      const canPlayNative = !!video.canPlayType("application/vnd.apple.mpegurl") || isWebKitApple;
+                            !isChrome;
+      const canPlayNative = !isChrome && (!!video.canPlayType("application/vnd.apple.mpegurl") || isWebKitApple);
 
       if (canPlayNative) {
         // Enforce native HLS playback for Apple WebKit (Tauri macOS WebView / Safari)
@@ -219,21 +220,43 @@ export default function AnimePlayer({
             .catch(() => setIsPlaying(false));
         });
 
+        let mediaRecoverAttempts = 0;
+        let networkRecoverAttempts = 0;
+
         hls.on(Hls.Events.ERROR, (event, data) => {
-          console.warn("[Player][HLS Error]", { type: data.type, details: data.details, fatal: data.fatal });
+          console.log("[Player][HLS Error]", { type: data.type, details: data.details, fatal: data.fatal });
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                console.error("[Player][HLS Error] Fatal network error. Attempting to reload HLS stream...");
-                hls.startLoad();
+                networkRecoverAttempts++;
+                if (networkRecoverAttempts <= 3) {
+                  console.log(`[Player][HLS Error] Fatal network error (attempt ${networkRecoverAttempts}/3). Attempting to reload HLS stream...`);
+                  hls.startLoad();
+                } else {
+                  console.log("[Player][HLS Error] Network recovery attempts exhausted.");
+                  setError("Streaming connection timed out. Check your internet connection.");
+                  hls.destroy();
+                }
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
-                console.error("[Player][HLS Error] Fatal media error. Attempting to recover media...");
-                hls.recoverMediaError();
+                mediaRecoverAttempts++;
+                if (mediaRecoverAttempts === 1) {
+                  console.log("[Player][HLS Error] Fatal media error (attempt 1/3). Attempting to recover media...");
+                  hls.recoverMediaError();
+                } else if (mediaRecoverAttempts === 2) {
+                  console.log("[Player][HLS Error] Fatal media error (attempt 2/3). Swapping audio codec and recovering...");
+                  hls.swapAudioCodec();
+                  hls.recoverMediaError();
+                } else {
+                  console.log("[Player][HLS Error] Media recovery attempts exhausted. Codec is likely unsupported.");
+                  setError("This video format is not natively supported by your browser. Try launching in MPV instead!");
+                  hls.destroy();
+                }
                 break;
               default:
-                console.error("[Player][HLS Error] Fatal HLS error of type:", data.type, data.details);
+                console.log("[Player][HLS Error] Fatal unrecoverable HLS error:", data.type, data.details);
                 setError("Streaming connection was unexpectedly closed.");
+                hls.destroy();
                 break;
             }
           }
@@ -618,7 +641,7 @@ export default function AnimePlayer({
 
       {/* Glassmorphic Top Controls Bar */}
       <div
-        className={`absolute top-0 inset-x-0 p-5 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-all duration-500 z-30 ${
+        className={`absolute top-0 inset-x-0 p-5 bg-black/35 backdrop-blur-md shadow-[inset_0_-28px_28px_-20px_rgba(0,0,0,0.9)] flex items-center justify-between transition-all duration-500 z-30 ${
           showControls ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"
         }`}
       >
@@ -669,7 +692,7 @@ export default function AnimePlayer({
           setIsHoveredControls(false);
           resetControlsTimeout();
         }}
-        className={`absolute bottom-0 inset-x-0 p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col space-y-4 transition-all duration-500 z-30 ${
+        className={`absolute bottom-0 inset-x-0 p-6 bg-black/40 backdrop-blur-md shadow-[inset_0_28px_28px_-20px_rgba(0,0,0,0.95)] flex flex-col space-y-4 transition-all duration-500 z-30 ${
           showControls ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
         }`}
       >

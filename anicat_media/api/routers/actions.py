@@ -448,15 +448,21 @@ async def hls_stream_proxy(url: str, headers: str):
                 }
             )
         else:
-            # Force video/mp2t MIME type for video segments, even if disguised as images (e.g. .jpg)
+            # Detect fragmented MP4 segments vs MPEG-TS segments, even if disguised as images (e.g. .jpg)
+            media_type = "video/mp2t"
+            if len(response.content) >= 12:
+                magic_slice = response.content[:12]
+                if b"ftyp" in magic_slice or b"moof" in magic_slice or b"styp" in magic_slice or b"mdat" in magic_slice:
+                    media_type = "video/mp4"
+
             if len(response.content) < 5000:
                 logger.warning(f"[Proxy Segment Debug] Warning: abnormally small segment {url} | Length: {len(response.content)} | Content preview: {response.content[:100]}")
             else:
-                logger.info(f"[Proxy Segment Debug] Fetched segment {url} | Status: {response.status_code} | Length: {len(response.content)}")
+                logger.info(f"[Proxy Segment Debug] Fetched segment {url} | Status: {response.status_code} | Length: {len(response.content)} | Media Type: {media_type}")
             return Response(
                 content=response.content,
                 status_code=response.status_code,
-                media_type="video/mp2t",
+                media_type=media_type,
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Headers": "*",

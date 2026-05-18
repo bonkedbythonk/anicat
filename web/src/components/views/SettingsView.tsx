@@ -41,6 +41,9 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
   }, []);
 
   const handleThemeChange = (newTheme: "system" | "dark" | "light") => {
+    // Inject the theme-transition class temporarily to animate variables
+    document.documentElement.classList.add("theme-transition");
+
     setTheme(newTheme);
     localStorage.setItem("anicat_theme", newTheme);
     
@@ -53,6 +56,11 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
       document.documentElement.classList.add('dark');
     }
     window.dispatchEvent(new StorageEvent('storage', { key: 'anicat_theme', newValue: newTheme }));
+
+    // Clean up transition class after animation completes
+    setTimeout(() => {
+      document.documentElement.classList.remove("theme-transition");
+    }, 300);
   };
 
   useEffect(() => {
@@ -352,16 +360,14 @@ export default function SettingsView({ health, onUpdateStarted }: SettingsViewPr
                 </select>
               </SettingField>
 
-              <SettingField label="GPU Upscaling Quality (MPV)" description="Balance upscaling visual fidelity and battery life for your MacBook GPU.">
+              <SettingField label="GPU Upscaling Quality (MPV)" description="Toggle real-time high-fidelity neural upscaling for your companion video player.">
                 <select
                   value={String(config.stream?.shader_profile || "balanced")}
                   onChange={(e) => updateField("stream", "shader_profile", e.target.value)}
                   className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
                 >
+                  <option value="balanced">✨ Standard Quality (Neural Upscaling Enabled)</option>
                   <option value="off">🔋 Battery Saver (Upscaling Off / Normal Scale)</option>
-                  <option value="balanced">💻 Balanced (MacBook Air / Energy-Efficient)</option>
-                  <option value="high">✨ High Quality (MacBook Pro / Detailed Upscale)</option>
-                  <option value="ultra">🌌 Ultra Fidelity (Maximum GPU / Desktop Rig)</option>
                 </select>
               </SettingField>
             </div>

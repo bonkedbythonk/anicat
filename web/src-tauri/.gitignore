@@ -6,5 +6,6 @@
 # Bundled Player Binaries and Libraries (built dynamically during packaging)
 /resources/mpv
 /resources/lib/
-/resources/mpv_config/scripts/
+/resources/mpv_config/scripts/*
+!/resources/mpv_config/scripts/anicat_ui/
 /resources/mpv_config/shaders/

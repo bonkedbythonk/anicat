@@ -68,9 +68,9 @@ sub-font-size=44
 sub-bold=yes
 EOF
 
-echo "=== 7. Installing AniCat overlay and keybindings ==="
-cp web/src-tauri/resources/mpv_config/scripts/anicat_ui/main.lua "$CONFIG_DIR/scripts/anicat_ui/main.lua"
-cp web/src-tauri/resources/mpv_config/input.conf "$CONFIG_DIR/input.conf"
+# Copy overlay and keybindings if they aren't already in place (preventing cp-onto-itself errors)
+[ -f "$CONFIG_DIR/scripts/anicat_ui/main.lua" ] || cp web/src-tauri/resources/mpv_config/scripts/anicat_ui/main.lua "$CONFIG_DIR/scripts/anicat_ui/main.lua" 2>/dev/null || true
+[ -f "$CONFIG_DIR/input.conf" ] || cp web/src-tauri/resources/mpv_config/input.conf "$CONFIG_DIR/input.conf" 2>/dev/null || true
 
 echo "=== 8. Generating customized uosc.conf styled with AniCat accents ==="
 cat << 'EOF' > "$CONFIG_DIR/script-opts/uosc.conf"

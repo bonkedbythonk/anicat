@@ -351,8 +351,16 @@ class MpvPlayer(BasePlayer):
         if resources_dir:
             bundled_config = os.path.abspath(os.path.join(resources_dir, "mpv_config"))
             if os.path.exists(bundled_config):
+                # Prevent user's global mpv config from overriding our bundled UI
+                mpv_args.append("--no-config")
                 mpv_args.append(f"--config-dir={bundled_config}")
                 logger.info(f"Using isolated premium MPV configuration from: {bundled_config}")
+                # If we ship a custom AniCat UI script, prefer loading it explicitly
+                ani_ui = os.path.abspath(os.path.join(bundled_config, "scripts", "anicat_ui", "main.lua"))
+                if os.path.exists(ani_ui):
+                    # Pass script explicitly in case MPV's auto-loading is affected by user settings
+                    mpv_args.append(f"--script={ani_ui}")
+                    logger.info(f"Injecting AniCat custom UI script: {ani_ui}")
 
             # Dynamically map and inject real-time upscaling shaders based on user's performance preference
             shader_profile = getattr(params, "shader_profile", "balanced") or "balanced"
@@ -374,6 +382,21 @@ class MpvPlayer(BasePlayer):
                         logger.info("Using standard high-efficiency Anime4K upscaling shaders (Tier VL).")
             else:
                 logger.info("GPU upscaling shaders are disabled (Battery Saver / Low-End profile).")
+
+        # Pass AniSkip skip times to the AniCat UI script if available
+        if getattr(params, 'skip_times', None):
+            try:
+                parts = []
+                for s in params.skip_times:
+                    t = s.get('type')
+                    start = int(s.get('start') or 0)
+                    end = int(s.get('end') or 0)
+                    parts.append(f"{t},{start},{end}")
+                encoded = ";".join(parts)
+                mpv_args.append(f"--script-opts=anicat_ui-skip_times={encoded}")
+                logger.debug(f"Injected AniCat skip_times script-opts: {encoded}")
+            except Exception:
+                logger.debug("Failed to append AniCat skip_times to MPV args")
 
         if params.headers:
             # mpv prefers no spaces after commas and colons in http-header-fields
@@ -402,28 +425,38 @@ class MpvPlayer(BasePlayer):
 
     def _find_resources_dir(self) -> Optional[str]:
         """Locates the application's resources directory dynamically."""
+        # Prefer common packaged locations, then fall back to development resources.
+        app_dir = os.path.dirname(sys.executable)
+        candidate_paths = []
         if sys.platform == "darwin":
-            app_dir = os.path.dirname(sys.executable)
-            paths = [
-                # Packaged Tauri app path
+            candidate_paths.extend([
                 os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources")),
                 os.path.abspath(os.path.join(app_dir, "..", "Resources")),
-                # Development fallback
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources")),
-            ]
-            for p in paths:
-                if os.path.exists(p):
-                    return p
+            ])
         else:
-            # Generic fallback for Windows/Linux
-            app_dir = os.path.dirname(sys.executable)
-            paths = [
+            candidate_paths.extend([
                 os.path.abspath(os.path.join(app_dir, "resources")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources")),
-            ]
-            for p in paths:
-                if os.path.exists(p):
-                    return p
+            ])
+
+        # Explicit development fallback relative to the package
+        dev_fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "web", "src-tauri", "resources"))
+        candidate_paths.append(dev_fallback)
+
+        # Try to detect a repository root (look for .git or pyproject.toml) and prefer its web/src-tauri/resources
+        cur = os.path.abspath(os.path.dirname(__file__))
+        for _ in range(6):
+            if os.path.exists(os.path.join(cur, ".git")) or os.path.exists(os.path.join(cur, "pyproject.toml")):
+                repo_resources = os.path.join(cur, "web", "src-tauri", "resources")
+                candidate_paths.append(os.path.abspath(repo_resources))
+                break
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+
+        for p in candidate_paths:
+            if p and os.path.exists(p):
+                return p
         return None
 
 

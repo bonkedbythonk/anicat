@@ -73,17 +73,11 @@ uv run anicat
 *Requires [uv](https://github.com/astral-sh/uv) to be installed.*
 
 #### Developer / Advanced Local Installation
-If you want to build the entire suite (CLI, TUI, and App) locally from the source:
+If you want to build the entire suite (CLI, TUI, and Desktop App) locally from the source:
 ```bash
 ./scripts/install.sh
 ```
-*This script automatically checks/installs Homebrew, `mpv`, `ffmpeg`, `chafa`, `uv`, Node.js, builds the static frontends, and registers persistent system LaunchAgents.*
-
----
-
-### 4. Web Dashboard
-Access the Anicat interface from any browser on your local network.
-* Launch the app/server and visit http://localhost:13370 in your browser.
+*This script automatically checks/installs Homebrew, `mpv`, `ffmpeg`, `chafa`, `uv`, Node.js, compiles the Python sidecar, builds the native Tauri desktop application, installs `Anicat.app` to your Applications folder (`~/Applications/Anicat.app`), and bypasses Gatekeeper quarantine permissions.*
 
 ---
 
@@ -103,7 +97,7 @@ Anicat uses **mpv** for high-quality playback. To unlock features like Anime4K u
 - **Real-Time Data Sync**: Instant UI updates across all views powered by TanStack Query.
 - **Airing Schedules**: Live relative countdowns for currently releasing series.
 - **Premium Design**: Fluid Framer Motion transitions, glassmorphism, and a sleek media drawer layout.
-- **Cross-Platform Access**: Switch between the Native macOS App, TUI/CLI, or Web Dashboard.
+- **Interface Flexibility**: Switch seamlessly between the premium native macOS App or the keyboard-driven terminal TUI/CLI.
 
 ---
 

@@ -641,7 +641,7 @@ export default function AnimePlayer({
 
       {/* Glassmorphic Top Controls Bar */}
       <div
-        className={`absolute top-0 inset-x-0 p-5 bg-black/35 backdrop-blur-md shadow-[inset_0_-28px_28px_-20px_rgba(0,0,0,0.9)] flex items-center justify-between transition-all duration-500 z-30 ${
+        className={`absolute top-0 inset-x-0 p-5 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-all duration-500 z-30 ${
           showControls ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"
         }`}
       >
@@ -692,7 +692,7 @@ export default function AnimePlayer({
           setIsHoveredControls(false);
           resetControlsTimeout();
         }}
-        className={`absolute bottom-0 inset-x-0 p-6 bg-black/40 backdrop-blur-md shadow-[inset_0_28px_28px_-20px_rgba(0,0,0,0.95)] flex flex-col space-y-4 transition-all duration-500 z-30 ${
+        className={`absolute bottom-0 inset-x-0 p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col space-y-4 transition-all duration-500 z-30 ${
           showControls ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
         }`}
       >

@@ -145,7 +145,7 @@ class Context:
                         logger.warning(
                             "Token was rejected by the API — it may be invalid or expired."
                         )
-                except httpx.ConnectError as e:
+                except (httpx.RequestError, httpx.HTTPStatusError) as e:
                     logger.warning(f"It seems you are offline: {e}")
                     self.is_offline = True
             else:

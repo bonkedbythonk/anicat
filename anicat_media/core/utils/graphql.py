@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+import httpx
 from httpx import Client, Response
 
 from ..constants import APP_CACHE_DIR
@@ -132,15 +133,37 @@ def execute_graphql(
             )
 
     json_body = {"query": query, "variables": variables}
-    response = httpx_client.post(url, json=json_body, headers=headers, timeout=TIMEOUT)
-
-    if use_cache and response.status_code == 200:
-        try:
-            _cache.set(url, query, variables, response.json())
-        except Exception as e:
-            logger.warning(f"Failed to cache response: {e}")
-
-    return response
+    
+    try:
+        response = httpx_client.post(url, json=json_body, headers=headers, timeout=TIMEOUT)
+        
+        if response.status_code == 200:
+            if use_cache:
+                try:
+                    _cache.set(url, query, variables, response.json())
+                except Exception as e:
+                    logger.warning(f"Failed to cache response: {e}")
+            return response
+            
+        logger.warning(f"GraphQL request failed with status code {response.status_code}: {response.text}")
+        response.raise_for_status()
+        return response
+        
+    except (httpx.RequestError, httpx.HTTPStatusError) as e:
+        logger.warning(f"GraphQL request failed for {graphql_file.name}: {e}")
+        
+        # Offline Fallback: try to fetch from cache ignoring TTL (ttl = float('inf'))
+        cached_data = _cache.get(url, query, variables, ttl=float("inf"))
+        if cached_data:
+            logger.info(f"Returning expired cached response for {graphql_file.name} as offline fallback.")
+            return Response(
+                status_code=200,
+                content=json.dumps(cached_data).encode("utf-8"),
+                headers={"Content-Type": "application/json", "X-Offline-Fallback": "true"},
+            )
+            
+        # If no cache is available, re-raise the exception so callers can handle the offline state
+        raise
 
 
 def invalidate_graphql_cache(url: str, graphql_file: Path, variables: dict):

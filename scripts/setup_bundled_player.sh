@@ -38,6 +38,7 @@ cp -R "$APP_DIR/Contents/MacOS/lib" "$RESOURCES_DIR/"
 
 echo "=== 3. Setting up isolated themed configuration directories ==="
 mkdir -p "$CONFIG_DIR/scripts"
+mkdir -p "$CONFIG_DIR/scripts/anicat_ui"
 mkdir -p "$CONFIG_DIR/script-opts"
 mkdir -p "$CONFIG_DIR/shaders"
 
@@ -67,7 +68,11 @@ sub-font-size=44
 sub-bold=yes
 EOF
 
-echo "=== 7. Generating customized uosc.conf styled with AniCat accents ==="
+echo "=== 7. Installing AniCat overlay and keybindings ==="
+cp web/src-tauri/resources/mpv_config/scripts/anicat_ui/main.lua "$CONFIG_DIR/scripts/anicat_ui/main.lua"
+cp web/src-tauri/resources/mpv_config/input.conf "$CONFIG_DIR/input.conf"
+
+echo "=== 8. Generating customized uosc.conf styled with AniCat accents ==="
 cat << 'EOF' > "$CONFIG_DIR/script-opts/uosc.conf"
 # AniCat Vector-based Glassmorphism Theme for uosc
 # Matching web UI cyan accents and deep charcoal backgrounds
@@ -88,7 +93,7 @@ timeline_cache=yes
 volume_size=32
 EOF
 
-echo "=== 8. Generating AniCat Right-Click Context Menu ==="
+echo "=== 9. Generating AniCat Right-Click Context Menu ==="
 cat << 'EOF' > "$CONFIG_DIR/contextmenu.json"
 [
   { "type": "menu", "title": "AniCat Actions", "items": [

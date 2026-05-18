@@ -228,6 +228,25 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
                 headers={},
                 start_time=start_time
             )
+            # Attempt to fetch AniSkip skip times for this media/episode
+            try:
+                query_id = media_item.id_mal or media_id
+                ep_num = int(resolved_episode)
+                aniskip_url = f"https://api.aniskip.com/v2/skip-times/{query_id}/{ep_num}?types[]=op&types[]=ed&episodeLength=0"
+                r = httpx.get(aniskip_url, timeout=5.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    if data and data.get('found') and data.get('results'):
+                        times = []
+                        for res in data['results']:
+                            times.append({
+                                'type': res.get('skipType'),
+                                'start': res.get('interval', {}).get('startTime', 0),
+                                'end': res.get('interval', {}).get('endTime', 0)
+                            })
+                        params = params.__class__(**{**params.__dict__, 'skip_times': times})
+            except Exception as e:
+                logger.debug(f"Failed to fetch AniSkip times: {e}")
             background_tasks.add_task(_play_and_track, ctx, params, anime=None, media_item=media_item, local=True)
             
             set_playback(media_id=media_id, media_title=media_item.title.english or media_item.title.romaji, episode=resolved_episode)
@@ -245,6 +264,25 @@ async def play_media(media_id: int, background_tasks: BackgroundTasks, episode: 
             headers=resolved["headers"],
             start_time=resolved["start_time"]
         )
+        # Try to fetch AniSkip skip times for better experience in external MPV
+        try:
+            query_id = media_item.id_mal or media_id
+            ep_num = int(resolved["episode"])
+            aniskip_url = f"https://api.aniskip.com/v2/skip-times/{query_id}/{ep_num}?types[]=op&types[]=ed&episodeLength=0"
+            r = httpx.get(aniskip_url, timeout=5.0)
+            if r.status_code == 200:
+                data = r.json()
+                if data and data.get('found') and data.get('results'):
+                    times = []
+                    for res in data['results']:
+                        times.append({
+                            'type': res.get('skipType'),
+                            'start': res.get('interval', {}).get('startTime', 0),
+                            'end': res.get('interval', {}).get('endTime', 0)
+                        })
+                    params = params.__class__(**{**params.__dict__, 'skip_times': times})
+        except Exception as e:
+            logger.debug(f"Failed to fetch AniSkip times: {e}")
         background_tasks.add_task(_play_and_track, ctx, params, anime=resolved["anime_ref"], media_item=resolved["media_item"])
         
         set_playback(media_id=media_id, media_title=resolved["title"], episode=resolved["episode"])

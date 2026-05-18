@@ -321,7 +321,11 @@ class MpvPlayer(BasePlayer):
         mpv_args = []
 
         if sys.platform == "darwin":
-            mpv_args.append("--vo=gpu")
+            mpv_args.extend([
+                "--vo=gpu",
+                "--gpu-api=opengl",
+                "--gpu-context=cocoa"
+            ])
 
         # Inject isolated config directory if using the bundled companion player
         if self.executable and ("Resources/resources/mpv" in self.executable or "Resources/mpv" in self.executable or "web/src-tauri/resources/mpv" in self.executable):

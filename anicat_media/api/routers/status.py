@@ -175,6 +175,20 @@ def set_playback(media_id: int, media_title: str, episode: str):
     # Auto-expire after 2 hours
     _playback_expiry = datetime.now() + timedelta(hours=2)
 
+    # Trigger Discord Rich Presence update in the background if enabled
+    try:
+        ctx = get_ctx()
+        if ctx.config.general.discord:
+            import asyncio
+            from ...core.utils.discord_rpc import discord_rpc
+            asyncio.create_task(discord_rpc.update_watching(
+                title=media_title,
+                episode=episode,
+                media_id=media_id
+            ))
+    except Exception as e:
+        logger.debug(f"Failed to schedule Discord RPC update: {e}")
+
 @router.get("/playback", response_model=Optional[PlaybackInfo])
 async def get_playback_status():
     """Get the current/last playback status."""
@@ -208,6 +222,13 @@ async def get_playback_status():
             if _last_playback:
                 _last_playback = None
                 _playback_expiry = None
+                
+                # Clear Discord RPC
+                try:
+                    from ...core.utils.discord_rpc import discord_rpc
+                    await discord_rpc.clear()
+                except Exception:
+                    pass
     except Exception:
         # If process detection fails, be conservative and keep playback info
         pass
@@ -215,6 +236,12 @@ async def get_playback_status():
     if _last_playback and _playback_expiry and datetime.now() > _playback_expiry:
         _last_playback = None
         _playback_expiry = None
+        try:
+            from ...core.utils.discord_rpc import discord_rpc
+            await discord_rpc.clear()
+        except Exception:
+            pass
+            
     return _last_playback
 
 @router.delete("/playback")
@@ -223,6 +250,14 @@ async def clear_playback():
     global _last_playback, _playback_expiry
     _last_playback = None
     _playback_expiry = None
+    
+    # Clear Discord RPC
+    try:
+        from ...core.utils.discord_rpc import discord_rpc
+        await discord_rpc.clear()
+    except Exception:
+        pass
+        
     return {"status": "cleared"}
 
 @router.get("/health", response_model=HealthInfo)

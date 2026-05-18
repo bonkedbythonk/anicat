@@ -41,6 +41,7 @@ GIT_PROTOCOL = "https://"
 REPO_HOME = f"https://{GIT_REPO}/{AUTHOR}/anicat"
 
 DISCORD_INVITE = "https://discord.gg/C4rhMA4mmK"
+DISCORD_CLIENT_ID = "1241198642738987158"
 
 ANILIST_AUTH = (
     "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token"

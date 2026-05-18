@@ -27,12 +27,15 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Load reading direction preference on mount
+  // Load reading direction preference on mount and clear presence on unmount
   useEffect(() => {
     const savedDirection = localStorage.getItem("anicat_manga_reading_direction");
     if (savedDirection === "ltr" || savedDirection === "rtl") {
       setReadingDirection(savedDirection);
     }
+    return () => {
+      mediaApi.clearPlaybackStatus().catch(() => {/* ignore */});
+    };
   }, []);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastActionRef = useRef<number>(0);

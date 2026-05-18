@@ -409,6 +409,19 @@ async def get_chapter_pages(media_id: int, chapter_number: str):
         if not media:
             raise HTTPException(status_code=404, detail="Media not found")
         
+        # Trigger Discord Rich Presence update in the background if enabled
+        try:
+            if ctx.config.general.discord:
+                import asyncio
+                from ...core.utils.discord_rpc import discord_rpc
+                asyncio.create_task(discord_rpc.update_reading(
+                    title=media.title.english or media.title.romaji,
+                    chapter=chapter_number,
+                    media_id=media_id
+                ))
+        except Exception as e:
+            logger.debug(f"Failed to schedule Discord RPC manga update: {e}")
+        
         from ...libs.provider.manga.params import MangaParams
         
         manga_id, _ = await get_manga_ref(ctx, media, media_id)

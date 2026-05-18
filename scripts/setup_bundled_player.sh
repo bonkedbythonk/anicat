@@ -52,7 +52,7 @@ unzip -q -o /tmp/anime4k.zip "*.glsl" -d "$CONFIG_DIR/shaders/"
 echo "=== 6. Generating customized mpv.conf styled for AniCat ==="
 cat << 'EOF' > "$CONFIG_DIR/mpv.conf"
 # Video Quality Settings
-vo=gpu-next
+vo=gpu
 profile=high-quality
 hwdec=auto-safe
 

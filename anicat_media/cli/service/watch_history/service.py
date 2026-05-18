@@ -35,7 +35,7 @@ class WatchHistoryService:
             status = UserMediaListStatus.REPEATING
 
         # Calculate completion percentage if times are present
-        is_completed = True
+        is_completed = False
         completion_percentage = 0.0
         if player_result.stop_time and player_result.total_time:
             from ....core.utils.converter import calculate_completion_percentage

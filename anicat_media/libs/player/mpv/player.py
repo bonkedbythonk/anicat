@@ -351,8 +351,9 @@ class MpvPlayer(BasePlayer):
         if resources_dir:
             bundled_config = os.path.abspath(os.path.join(resources_dir, "mpv_config"))
             if os.path.exists(bundled_config):
-                # Prevent user's global mpv config from overriding our bundled UI
-                mpv_args.append("--no-config")
+                # Enforce native OSC disable explicitly to override any global/fallback settings
+                mpv_args.append("--osc=no")
+                # Point config-dir to our isolated, custom-themed settings to load mpv.conf, input.conf, and modernz.lua
                 mpv_args.append(f"--config-dir={bundled_config}")
                 logger.info(f"Using isolated premium MPV configuration from: {bundled_config}")
                 # If we ship a custom AniCat UI script, prefer loading it explicitly

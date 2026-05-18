@@ -206,11 +206,39 @@ end)
 
 register_script_messages()
 
+local function toggle_shaders()
+  -- Detect the current active shaders list
+  local current_shaders = mp.get_property('glsl-shaders') or ''
+  local shaders_enabled = (current_shaders ~= '')
+
+  if not shaders_enabled then
+    -- Load standard, high-efficiency Anime4K upscaling shaders
+    local shader_paths = {
+      "~~/shaders/Anime4K_Clamp_Highlights.glsl",
+      "~~/shaders/Anime4K_Restore_CNN_VL.glsl",
+      "~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl",
+      "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
+      "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl"
+    }
+    local path_str = table.concat(shader_paths, ":")
+    mp.commandv("change-list", "glsl-shaders", "set", path_str)
+    mp.osd_message("AniCat Preset: Standard Quality (Neural Upscaling Enabled)", 3.0)
+  else
+    -- Clear all shaders to enter Battery Saver / Low-End profile
+    mp.commandv("set", "glsl-shaders", "")
+    mp.osd_message("AniCat Preset: Battery Saver Mode (Upscaling Off)", 3.0)
+  end
+end
+
 local ok, err = pcall(function()
   mp.add_forced_key_binding('MBTN_LEFT', 'anicat-skip-click', on_left_click)
+  
+  -- Logical cross-platform shader toggle binds: ctrl+g (consistent with ctrl+s) and g
+  mp.add_forced_key_binding('ctrl+g', 'anicat-toggle-shaders-ctrl', toggle_shaders)
+  mp.add_forced_key_binding('g', 'anicat-toggle-shaders-g', toggle_shaders)
 end)
 if not ok then
-  msg.warn('Could not bind MBTN_LEFT: ' .. tostring(err))
+  msg.warn('Could not register forced keybindings: ' .. tostring(err))
 end
 
 msg.info('AniCat skip helper overlay loaded')

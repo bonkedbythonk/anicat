@@ -38,7 +38,7 @@
         "binaries/anicat-server"
     ],
     "resources": [
-      "resources/*"
+      "resources/**/*"
     ],
     "macOS": {
       "entitlements": "entitlements.mac.plist"

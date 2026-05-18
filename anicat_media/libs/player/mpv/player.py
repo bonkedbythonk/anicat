@@ -320,6 +320,9 @@ class MpvPlayer(BasePlayer):
         """
         mpv_args = []
 
+        if sys.platform == "darwin":
+            mpv_args.append("--vo=gpu")
+
         # Inject isolated config directory if using the bundled companion player
         if self.executable and ("Resources/resources/mpv" in self.executable or "Resources/mpv" in self.executable or "web/src-tauri/resources/mpv" in self.executable):
             bundled_config = os.path.abspath(os.path.join(os.path.dirname(self.executable), "mpv_config"))

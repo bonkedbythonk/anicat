@@ -226,6 +226,7 @@ fn restart_backend(state: tauri::State<'_, SidecarState>) -> Result<String, Stri
     let mut restart_guard = state.restart_count.lock().map_err(|e| e.to_string())?;
 
     if let Some(ref mut child) = *child_guard {
+        #[cfg_attr(not(unix), allow(unused_variables))]
         let pid = child.id();
         #[cfg(unix)]
         {
@@ -651,7 +652,7 @@ pub fn run() {
                         state.exiting.store(true, std::sync::atomic::Ordering::Relaxed);
                         if let Ok(mut guard) = state.child.lock() {
                             if let Some(ref mut child) = *guard {
-        let _pid = child.id();
+                                let pid = child.id();
                                 log::info!("[sidecar] Sending SIGTERM to process group of backend pid={}", pid);
                                 // Send SIGTERM to the entire process group so
                                 // grandchildren (Python, uvicorn, MPV) can

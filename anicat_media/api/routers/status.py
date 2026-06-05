@@ -1,0 +1,1100 @@
+from datetime import datetime, timedelta
+from typing import Literal, Optional
+import logging
+import os
+from fastapi import APIRouter, BackgroundTasks
+from pydantic import BaseModel
+import subprocess
+from anicat_media.core.constants import (
+    VERSION,
+    COMMIT,
+    LOG_FILE,
+    UPDATE_LOG_FILE,
+    UPDATE_IN_PROGRESS_FILE,
+)
+from anicat_media.core.config import ConfigLoader
+import shutil
+import sys
+from ..deps import get_ctx
+
+logger = logging.getLogger(__name__)
+
+
+# Update log helper — appends timestamped lines so the frontend can tail them
+def _log_update(message: str) -> None:
+    """Append a timestamped line to the update log file."""
+    try:
+        UPDATE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception as e:
+        logger.warning(f"Failed to write update log: {e}")
+
+
+class UpdateTriggerRequest(BaseModel):
+    branch: Optional[str] = None
+
+
+class CheckUpdateResponse(BaseModel):
+    status: str
+    update_available: bool
+    message: str
+    version: str = ""
+    release_notes: str = ""
+    release_url: str = ""
+
+
+router = APIRouter()
+
+
+@router.get("/logs")
+def get_logs(lines: int = 100):
+    """Retrieve the last N lines from the log file."""
+    if not os.path.exists(LOG_FILE):
+        return {"logs": "Log file not found."}
+
+    try:
+        # Efficient tail implementation that avoids loading entire file into memory
+        def tail(path, n=100, buf_size=1024):
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                if file_size == 0:
+                    return ""
+                blocks = []
+                bytes_scanned = 0
+                # Read backwards in chunks until we have enough lines or reach file start
+                while bytes_scanned < file_size:
+                    read_size = min(buf_size, file_size - bytes_scanned)
+                    f.seek(max(0, file_size - bytes_scanned - read_size))
+                    chunk = f.read(read_size)
+                    blocks.insert(0, chunk)
+                    bytes_scanned += read_size
+                    data = b"".join(blocks)
+                    lines_list = data.splitlines()
+                    if len(lines_list) >= n:
+                        return b"\n".join(lines_list[-n:]).decode(
+                            "utf-8", errors="replace"
+                        )
+                # If we get here, return what we have
+                data = b"".join(blocks)
+                lines_list = data.splitlines()
+                return b"\n".join(lines_list[-n:]).decode("utf-8", errors="replace")
+
+        return {"logs": tail(LOG_FILE, lines)}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {str(e)}"}
+
+
+
+
+# UX-27: MPV availability detection for onboarding
+class MpvAvailableResponse(BaseModel):
+    available: bool
+    path: Optional[str] = None
+
+
+@router.get("/mpv-available", response_model=MpvAvailableResponse)
+def mpv_available():
+    """Check if MPV is installed and accessible on the system PATH."""
+    mpv_path = shutil.which("mpv")
+    if mpv_path:
+        return {"available": True, "path": mpv_path}
+    # Also check bundled MPV paths
+    bundled_paths = [
+        os.path.join(
+            os.path.dirname(sys.executable), "..", "Resources", "resources", "mpv"
+        ),
+        os.path.join(os.path.dirname(sys.executable), "..", "Resources", "mpv"),
+    ]
+    for p in bundled_paths:
+        if os.path.exists(p):
+            return {"available": True, "path": p}
+    return {"available": False, "path": None}
+
+
+class PlaybackInfo(BaseModel):
+    media_id: int
+    media_title: str
+    episode: str
+    started_at: str
+
+
+class HealthInfo(BaseModel):
+    api_connected: bool
+    api_authenticated: bool
+    worker_running: bool
+    is_offline: bool
+    update_available: bool = False
+    updating: bool = False
+    unread_notifications: int = 0
+    data_version: int = 0
+    current_version: str = "unknown"
+    provider_status: Optional[str] = None
+
+
+# Module-level storage for last playback event
+_last_playback: Optional[PlaybackInfo] = None
+_playback_expiry: Optional[datetime] = None
+
+# Update check cache
+_last_update_check: Optional[datetime] = None
+_cached_update_available: bool = False
+
+
+def _normalize_version(value: str) -> str:
+    # Strip leading "v"/"V" and any suffix after "-" (e.g. "v4.6.1-stable" -> "4.6.1")
+    return value.strip().removeprefix("v").removeprefix("V").split("-")[0]
+
+
+def _version_tag_matches(candidate: str, expected: str) -> bool:
+    return _normalize_version(candidate).lower() == _normalize_version(expected).lower()
+
+
+def _current_version_tag() -> str:
+    return f"v{_normalize_version(VERSION)}"
+
+
+def _check_github_update(update_branch: str) -> dict:
+    """Check if an update is available from GitHub Releases.
+
+    Returns a dict with keys: available (bool), version (str),
+    release_notes (str), release_url (str).
+
+    Uses COMMIT (baked into _version.py at CI build time) for nightly
+    comparison instead of a fragile cache file.
+
+    For nightly: searches all releases for the one tagged 'nightly',
+    then compares the baked-in COMMIT against the release's commit.
+    This works even when stable releases appear first in the list.
+    """
+    import urllib.request
+    import json
+    import ssl
+
+    result = {
+        "available": False,
+        "version": "",
+        "release_notes": "",
+        "release_url": "",
+    }
+
+    try:
+        ctx_ssl = ssl._create_unverified_context()
+        url = "https://api.github.com/repos/bonkedbythonk/anicat/releases"
+
+        req = urllib.request.Request(url, headers={"User-Agent": "Anicat-App"})
+        with urllib.request.urlopen(req, timeout=5, context=ctx_ssl) as response:
+            all_releases = json.loads(response.read().decode())
+
+        if not isinstance(all_releases, list) or not all_releases:
+            return result
+
+        if update_branch == "nightly":
+            # Find the release tagged "nightly" (may not be the first one)
+            nightly_release = None
+            for r in all_releases:
+                if r.get("tag_name", "").lower() == "nightly":
+                    nightly_release = r
+                    break
+
+            if not nightly_release:
+                # No nightly release exists yet
+                return result
+
+            remote_sha = nightly_release.get("target_commitish", "") or ""
+            release_notes = nightly_release.get("body", "") or ""
+            release_url = nightly_release.get("html_url", "") or ""
+
+            if remote_sha and COMMIT:
+                # CI build — compare baked-in commit vs release commit
+                result["available"] = COMMIT != remote_sha
+            elif remote_sha and not COMMIT:
+                # Dev install (git checkout, no baked COMMIT) — always
+                # consider nightly available so it downloads the pre-built DMG
+                result["available"] = True
+            else:
+                # Fallback: no commit information, assume available
+                result["available"] = True
+
+            result["version"] = (
+                f"nightly ({remote_sha[:12]}...)" if remote_sha else "nightly"
+            )
+            result["release_notes"] = release_notes
+            result["release_url"] = release_url
+            return result
+
+        # Stable: always use the latest release
+        latest = all_releases[0]
+        latest_tag = latest.get("tag_name", "")
+        latest_version = _normalize_version(latest_tag)
+        release_notes = latest.get("body", "") or ""
+        release_url = latest.get("html_url", "") or ""
+
+        if not latest_tag:
+            return result
+
+        current_version = _current_version_tag()
+        result["available"] = not _version_tag_matches(latest_tag, current_version)
+        if result["available"]:
+            result["version"] = latest_version
+            result["release_notes"] = release_notes
+            result["release_url"] = release_url
+        return result
+    except Exception as e:
+        logger.error(f"[UPDATE CHECK] GitHub Releases check failed: {str(e)}")
+        return result
+
+
+# Notifications/profile fetch cache to avoid rate limits
+_last_notifications_check: Optional[datetime] = None
+_cached_unread_notifications: int = 0
+
+# AniList activity timestamp for cross-device sync detection
+_last_anilist_activity: Optional[int] = None
+
+
+def set_playback(media_id: int, media_title: str, episode: str):
+    """Called by the actions router when playback starts."""
+    global _last_playback, _playback_expiry
+    _last_playback = PlaybackInfo(
+        media_id=media_id,
+        media_title=media_title,
+        episode=episode,
+        started_at=datetime.now().isoformat(),
+    )
+    # Auto-expire after 2 hours
+    _playback_expiry = datetime.now() + timedelta(hours=2)
+
+    # Trigger Discord Rich Presence update in the background if enabled
+    try:
+        ctx = get_ctx()
+        if ctx.config.general.discord:
+            import asyncio
+            from ...core.utils.discord_rpc import discord_rpc
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    discord_rpc.update_watching(
+                        title=media_title, episode=episode, media_id=media_id
+                    )
+                )
+            except RuntimeError:
+                pass  # No running event loop (e.g., background thread)
+    except Exception as e:
+        logger.debug(f"Failed to schedule Discord RPC update: {e}")
+
+
+def _clear_playback():
+    """Clear in-memory playback state. Called on startup to reset stale state."""
+    global _last_playback, _playback_expiry
+    _last_playback = None
+    _playback_expiry = None
+
+
+@router.get("/playback", response_model=Optional[PlaybackInfo])
+def get_playback_status(background_tasks: BackgroundTasks):
+    """Get the current/last playback status."""
+    global _last_playback, _playback_expiry
+    # Auto-dismiss if MPV is no longer running
+    try:
+        # Determine if MPV is currently running in a platform-safe manner
+        mpv_running = True
+        if sys.platform.startswith("win"):
+            try:
+                out = subprocess.check_output(["tasklist"], encoding="utf-8")
+                if "mpv.exe" not in out:
+                    mpv_running = False
+            except Exception:
+                # Be conservative if we can't determine
+                mpv_running = True
+        else:
+            # Prefer pgrep when available to avoid heavy process listings
+            if shutil.which("pgrep"):
+                try:
+                    subprocess.check_output(
+                        ["pgrep", "mpv"]
+                    )  # raises CalledProcessError if none
+                except subprocess.CalledProcessError:
+                    mpv_running = False
+                except Exception:
+                    mpv_running = True
+            else:
+                # pgrep not available (e.g., minimal containers) — don't auto-clear
+                mpv_running = True
+
+        if not mpv_running:
+            if _last_playback:
+                _last_playback = None
+                _playback_expiry = None
+
+                # Clear Discord RPC
+                try:
+                    from ...core.utils.discord_rpc import discord_rpc
+
+                    background_tasks.add_task(discord_rpc.clear)
+                except Exception:
+                    pass
+    except Exception:
+        # If process detection fails, be conservative and keep playback info
+        pass
+
+    if _last_playback and _playback_expiry and datetime.now() > _playback_expiry:
+        _last_playback = None
+        _playback_expiry = None
+        try:
+            from ...core.utils.discord_rpc import discord_rpc
+
+            background_tasks.add_task(discord_rpc.clear)
+        except Exception:
+            pass
+
+    return _last_playback
+
+
+@router.delete("/playback")
+def clear_playback(background_tasks: BackgroundTasks):
+    """Clear the current playback status (e.g., after marking watched)."""
+    global _last_playback, _playback_expiry
+    _last_playback = None
+    _playback_expiry = None
+
+    # Clear Discord RPC
+    try:
+        from ...core.utils.discord_rpc import discord_rpc
+
+        background_tasks.add_task(discord_rpc.clear)
+    except Exception:
+        pass
+
+    return {"status": "cleared"}
+
+
+@router.get("/health", response_model=HealthInfo)
+def get_health():
+    """Get system health status."""
+    try:
+        ctx = get_ctx()
+        # Check for updates (cached logic)
+        global _last_update_check, _cached_update_available
+
+        now = datetime.now()
+        # Determine repository root once
+        repo_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+
+        if _last_update_check is None or now - _last_update_check > timedelta(
+            minutes=15
+        ):
+            _last_update_check = now
+            _cached_update_available = False
+            try:
+                try:
+                    loader = ConfigLoader()
+                    current_config = loader.load(allow_setup=False)
+                    update_branch = getattr(
+                        current_config.general, "update_branch", "stable"
+                    )
+                except Exception:
+                    update_branch = "stable"
+
+                # Unified detection: always use GitHub Releases API.
+                # This works for both git dev installs and DMG/release installs
+                # and avoids the git-vs-API divergence.
+                result = _check_github_update(update_branch)
+                _cached_update_available = result["available"]
+            except Exception:
+                pass
+
+        # Auto-check for updates every hour in the background (fire-and-forget)
+        if not _last_update_check or (datetime.now() - _last_update_check) > timedelta(
+            hours=1
+        ):
+            try:
+                if os.path.exists(os.path.join(repo_root, ".git")):
+                    subprocess.Popen(
+                        ["git", "fetch", "--quiet"],
+                        cwd=repo_root,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                _last_update_check = datetime.now()
+            except Exception:
+                pass
+
+        update_available = _cached_update_available
+
+        # Get unread notification count (cached to avoid hitting rate limits)
+        global _last_notifications_check, _cached_unread_notifications
+        unread_notifications = _cached_unread_notifications
+
+        # Refresh token status from config to ensure we aren't using stale memory
+        loader = ConfigLoader()
+        current_config = loader.load(allow_setup=False)
+        api_authenticated = bool(
+            current_config.anilist.token and len(current_config.anilist.token) > 10
+        )
+
+        api_connected = ctx.media_api.is_connected()
+
+        # Perform the actual AniList query only once every 5 minutes (always fetch in tests)
+        is_testing = "pytest" in sys.modules
+        if (
+            is_testing
+            or not _last_notifications_check
+            or now - _last_notifications_check > timedelta(minutes=5)
+        ):
+            _last_notifications_check = now
+            try:
+                profile = ctx.media_api.get_viewer_profile()
+                if profile:
+                    api_connected = True
+                    ctx.is_offline = False
+                    if hasattr(profile, "unread_notifications"):
+                        _cached_unread_notifications = (
+                            getattr(profile, "unread_notifications") or 0
+                        )
+                        unread_notifications = _cached_unread_notifications
+                    # Detect external AniList changes by checking the last activity timestamp.
+                    # If AniList has newer activity than our last known state, bump data_version
+                    # so the frontend re-fetches all views.
+                    last_activity = getattr(profile, "updated_at", None)
+                    if last_activity is not None:
+                        anilist_unix = int(last_activity)
+                        global _last_anilist_activity
+                        if (
+                            _last_anilist_activity is not None
+                            and anilist_unix > _last_anilist_activity
+                        ):
+                            ctx.data_version += 1
+                        _last_anilist_activity = anilist_unix
+            except Exception:
+                pass
+
+        # Report provider status so the frontend can show a meaningful message
+        provider_status: Optional[str] = None
+        try:
+            provider = ctx.provider if ctx._provider is not None else None
+            if provider and hasattr(provider, "status_message"):
+                provider_status = provider.status_message
+        except Exception:
+            pass
+
+        # Detect if an update is in progress (flag file set before the old process exits).
+        # If the flag file is stale (>5 minutes old), the update likely failed — clean it up.
+        updating = UPDATE_IN_PROGRESS_FILE.exists()
+        if updating:
+            try:
+                mtime = os.path.getmtime(UPDATE_IN_PROGRESS_FILE)
+                age = datetime.now().timestamp() - mtime
+                if age > 300:  # 5 minutes
+                    logger.warning(
+                        "[UPDATE] Stale update flag detected (>5min). Clearing."
+                    )
+                    UPDATE_IN_PROGRESS_FILE.unlink()
+                    updating = False
+            except Exception:
+                pass
+
+        return HealthInfo(
+            api_connected=api_connected,
+            api_authenticated=api_authenticated,
+            worker_running=ctx._download is not None,
+            is_offline=ctx.is_offline,
+            update_available=update_available,
+            updating=updating,
+            unread_notifications=unread_notifications,
+            data_version=ctx.data_version,
+            current_version=VERSION,
+            provider_status=provider_status,
+        )
+    except Exception:
+        return HealthInfo(
+            api_connected=False,
+            api_authenticated=False,
+            worker_running=False,
+            is_offline=True,
+            update_available=False,
+            updating=UPDATE_IN_PROGRESS_FILE.exists(),
+            current_version="unknown",
+        )
+
+
+@router.post("/check-update")
+def check_for_updates():
+    """Manually trigger an update check, ignoring cache."""
+    global _last_update_check, _cached_update_available
+    # Respect opt-out environment variable for automated update checks
+    if os.environ.get("ANICAT_DISABLE_AUTO_UPDATE", "0") == "1":
+        return {
+            "status": "error",
+            "update_available": False,
+            "message": "Auto-updates disabled by environment",
+            "version": "",
+            "release_notes": "",
+            "release_url": "",
+        }
+
+    # Respect user's config setting (allow disabling update checks via AppConfig)
+    try:
+        loader = ConfigLoader()
+        current_config = loader.load(allow_setup=False)
+        if not getattr(current_config.general, "check_for_updates", True):
+            return {
+                "status": "error",
+                "update_available": False,
+                "message": "Auto-updates disabled in configuration",
+                "version": "",
+                "release_notes": "",
+                "release_url": "",
+            }
+        update_branch = getattr(current_config.general, "update_branch", "stable")
+    except Exception:
+        update_branch = "stable"
+
+    try:
+        _last_update_check = datetime.now()
+
+        # Unified detection: always use GitHub Releases API.
+        # Works for git dev installs and DMG/release installs alike.
+        result = _check_github_update(update_branch)
+        _cached_update_available = result["available"]
+
+        if result["available"]:
+            version_str = result["version"]
+            return {
+                "status": "success",
+                "update_available": True,
+                "message": f"A new version is available: v{version_str}",
+                "version": version_str,
+                "release_notes": result["release_notes"],
+                "release_url": result["release_url"],
+            }
+        return {
+            "status": "success",
+            "update_available": False,
+            "message": f"You are running the latest version on the {update_branch} branch.",
+            "version": VERSION,
+            "release_notes": "",
+            "release_url": "",
+        }
+    except Exception as e:
+        logger.error(f"[UPDATE CHECK] Error: {str(e)}")
+        return {
+            "status": "error",
+            "update_available": False,
+            "message": f"Failed to check for updates: {str(e)}",
+            "version": "",
+            "release_notes": "",
+            "release_url": "",
+        }
+
+
+def _restart_backend_process(after_process: Optional[subprocess.Popen] = None) -> None:
+    """Restart the backend process. If after_process is provided, wait for it to complete first."""
+    import time
+    import signal
+    import threading
+
+    pid = os.getpid()
+
+    def target():
+        try:
+            if after_process:
+                # Wait for the build process to finish
+                after_process.wait()
+
+            # Give a small buffer time
+            time.sleep(1)
+
+            _log_update("Restarting backend server process...")
+            # Kill this uvicorn process, which Tauri watchdog will restart
+            if os.name == "nt":
+                os.kill(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGKILL)
+        except Exception as e:
+            logger.warning(f"Error in backend restart thread: {e}")
+            # Fallback for unix: send SIGKILL via command
+            if os.name != "nt":
+                subprocess.run(
+                    ["kill", "-9", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+    threading.Thread(target=target, daemon=True).start()
+
+
+@router.post("/update")
+def trigger_update(req: Optional[UpdateTriggerRequest] = None):
+    """Trigger the official installation script to update the application."""
+    global _last_update_check, _cached_update_available
+    try:
+        # Clear previous update log
+        try:
+            UPDATE_LOG_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        _log_update("Update process started")
+
+        # Respect opt-out environment variable for automated updates
+        if os.environ.get("ANICAT_DISABLE_AUTO_UPDATE", "0") == "1":
+            _log_update("Auto-updates disabled by environment variable")
+            return {
+                "status": "error",
+                "message": "Auto-updates disabled by environment",
+            }
+
+        # Respect user's config setting
+        try:
+            loader = ConfigLoader()
+            current_config = loader.load(allow_setup=False)
+            if not getattr(current_config.general, "check_for_updates", True):
+                _log_update("Auto-updates disabled in configuration")
+                return {
+                    "status": "error",
+                    "message": "Auto-updates disabled in configuration",
+                }
+            update_branch = getattr(current_config.general, "update_branch", "stable")
+        except Exception:
+            update_branch = "stable"
+
+        if req and req.branch in ("stable", "nightly"):
+            update_branch = req.branch
+
+        _log_update(f"Update target branch: {update_branch}")
+
+        repo_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        is_git_install = os.path.exists(os.path.join(repo_root, ".git"))
+
+        # ── Fast path: download pre-built DMG from GitHub Releases ──
+        # The CI workflow (nightly.yml) already builds and uploads release
+        # DMGs. Downloading is much faster than rebuilding from source.
+        _log_update("Checking for pre-built release...")
+        release_info = _check_github_update(update_branch)
+        if release_info.get("available") and release_info.get("release_url"):
+            _log_update(
+                f"Pre-built release found: {release_info.get('version', 'unknown')}"
+            )
+            # Use install_macos.sh which downloads and installs the DMG
+            if os.name == "posix" and sys.platform == "darwin":
+                _log_update("Starting DMG download via install_macos.sh...")
+                UPDATE_IN_PROGRESS_FILE.write_text("1", encoding="utf-8")
+                local_script = os.path.join(repo_root, "scripts", "install_macos.sh")
+                if os.path.exists(local_script):
+                    _log_update(f"Running: {local_script}")
+                    # Use osascript to launch completely detached from the app process hierarchy, preventing SIGKILL on app exit
+                    shell_cmd = f'bash "{local_script}" >> "{UPDATE_LOG_FILE}" 2>&1 &'
+                    applescript = f'do shell script "{shell_cmd.replace(chr(34), chr(92) + chr(34))}"'
+                    proc = subprocess.Popen(["osascript", "-e", applescript])
+                    if proc:
+                        proc.wait()
+                        _log_update("DMG installer started in detached session")
+                else:
+                    _log_update("No local installer — downloading from GitHub")
+                    branch_name = "nightly" if update_branch == "nightly" else "master"
+                    shell_cmd = f'curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/{branch_name}/scripts/install_macos.sh | bash >> "{UPDATE_LOG_FILE}" 2>&1 &'
+                    applescript = f'do shell script "{shell_cmd.replace(chr(34), chr(92) + chr(34))}"'
+                    proc = subprocess.Popen(["osascript", "-e", applescript])
+                    if proc:
+                        proc.wait()
+                        _log_update("Remote installer started in detached session")
+                _last_update_check = datetime.now()
+                _cached_update_available = False
+                return {
+                    "status": "success",
+                    "message": "Downloading pre-built DMG from GitHub Releases. The app will install and restart automatically.",
+                }
+            else:
+                _log_update("Not on macOS — falling back to git update")
+
+        # ── Fallback: git-based update (dev checkouts, non-macOS) ──
+        if is_git_install:
+            _log_update("Falling back to git-based update")
+
+            # Mark update in progress so frontend shows overlay and tails logs
+            UPDATE_IN_PROGRESS_FILE.write_text("1", encoding="utf-8")
+
+            from anicat_media.utils.subprocess import run_cmd
+
+            rc, stdout, _ = run_cmd(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=5, cwd=repo_root
+            )
+            current_branch = stdout.strip() if (rc == 0 and stdout) else "master"
+            _log_update(f"Current branch: {current_branch}")
+
+            if update_branch == "nightly":
+                target_branch = "nightly"
+            else:
+                target_branch = "master"
+
+            subprocess.run(["git", "stash"], cwd=repo_root, capture_output=True)
+            _log_update("Stashed local changes")
+
+            if current_branch != target_branch:
+                subprocess.run(
+                    ["git", "checkout", target_branch],
+                    cwd=repo_root,
+                    capture_output=True,
+                )
+                _log_update(f"Switched to branch {target_branch}")
+
+            _log_update("Running git pull...")
+            result = subprocess.run(
+                ["git", "pull", "origin", target_branch],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            subprocess.run(["git", "stash", "pop"], cwd=repo_root, capture_output=True)
+            _log_update(f"Git pull completed (exit code {result.returncode})")
+
+            _last_update_check = datetime.now()
+            _cached_update_available = False
+
+            if result.returncode == 0:
+                frontend_changed = False
+                try:
+                    diff_result = subprocess.run(
+                        ["git", "diff", "--name-only", "@{1}.."],
+                        cwd=repo_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    changed = (
+                        diff_result.stdout.strip().split("\n")
+                        if diff_result.stdout.strip()
+                        else []
+                    )
+                    frontend_changed = any(
+                        f.startswith("web/")
+                        or f.startswith("src-tauri/")
+                        or f == "package.json"
+                        for f in changed
+                    )
+                except Exception:
+                    frontend_changed = True
+
+                if frontend_changed:
+                    _log_update("Frontend files changed — rebuilding...")
+                    install_script = os.path.join(repo_root, "scripts", "install.sh")
+                    if os.path.exists(install_script):
+                        with open(UPDATE_LOG_FILE, "a") as log:
+                            proc = subprocess.Popen(
+                                ["bash", install_script, "--no-launch"],
+                                cwd=repo_root,
+                                start_new_session=True,
+                                stdout=log,
+                                stderr=subprocess.STDOUT,
+                            )
+                        _restart_backend_process(proc)
+                        return {
+                            "status": "success",
+                            "message": "Frontend changed. Rebuilding from source (this may take a minute). The app will reload automatically when finished.",
+                        }
+                    else:
+                        if UPDATE_IN_PROGRESS_FILE.exists():
+                            UPDATE_IN_PROGRESS_FILE.unlink()
+                        return {
+                            "status": "success",
+                            "message": "Frontend changed but no install.sh found.",
+                        }
+                else:
+                    _log_update("No frontend changes. Restarting backend...")
+                    _restart_backend_process(None)
+                    return {
+                        "status": "success",
+                        "message": "Updated. Backend restarting...",
+                    }
+            else:
+                if UPDATE_IN_PROGRESS_FILE.exists():
+                    UPDATE_IN_PROGRESS_FILE.unlink()
+                return {
+                    "status": "error",
+                    "message": f"Git pull failed: {result.stderr.strip() or result.stdout.strip()}",
+                }
+
+        # ── Pure native/DMG fallback (no .git, not macOS from release) ──
+        import platform
+
+        if platform.system() == "Darwin":
+            _log_update("No git repo — downloading DMG from GitHub Releases")
+            UPDATE_IN_PROGRESS_FILE.write_text("1", encoding="utf-8")
+            local_script = os.path.join(repo_root, "scripts", "install_macos.sh")
+            branch_name = "nightly" if update_branch == "nightly" else "master"
+            if os.path.exists(local_script):
+                # Use osascript to launch completely detached from the app process hierarchy, preventing SIGKILL on app exit
+                shell_cmd = f'bash "{local_script}" >> "{UPDATE_LOG_FILE}" 2>&1 &'
+                applescript = (
+                    f'do shell script "{shell_cmd.replace(chr(34), chr(92) + chr(34))}"'
+                )
+                proc = subprocess.Popen(["osascript", "-e", applescript])
+                if proc:
+                    proc.wait()
+                    _log_update("DMG installer started in detached session")
+            else:
+                _log_update("No local installer — downloading from GitHub")
+                shell_cmd = f'curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/{branch_name}/scripts/install_macos.sh | bash >> "{UPDATE_LOG_FILE}" 2>&1 &'
+                applescript = (
+                    f'do shell script "{shell_cmd.replace(chr(34), chr(92) + chr(34))}"'
+                )
+                proc = subprocess.Popen(["osascript", "-e", applescript])
+                if proc:
+                    proc.wait()
+                    _log_update("Remote installer started in detached session")
+            _last_update_check = datetime.now()
+            _cached_update_available = False
+            return {
+                "status": "success",
+                "message": "Downloading pre-built DMG from GitHub Releases. The app will install and restart automatically.",
+            }
+
+        return {
+            "status": "error",
+            "message": "Could not determine update method for this platform.",
+        }
+
+    except subprocess.TimeoutExpired:
+        _log_update("Update timed out")
+        return {
+            "status": "error",
+            "message": "Update timed out. Please try running 'git pull' manually in the terminal.",
+        }
+    except Exception as e:
+        _log_update(f"Update failed: {e}")
+        return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+
+# ── Update Log Stream Endpoint ──
+
+
+class UpdateLogsResponse(BaseModel):
+    logs: str
+    updating: bool
+
+
+@router.get("/update/logs", response_model=UpdateLogsResponse)
+def get_update_logs(lines: int = 100):
+    """Return the last N lines from the update log file."""
+    updating = UPDATE_IN_PROGRESS_FILE.exists()
+    if not UPDATE_LOG_FILE.exists():
+        return {"logs": "Update has not started yet.\n", "updating": updating}
+    try:
+
+        def tail(path, n=100, buf_size=1024):
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                if file_size == 0:
+                    return ""
+                blocks = []
+                bytes_scanned = 0
+                data = b""
+                while bytes_scanned < file_size:
+                    read_size = min(buf_size, file_size - bytes_scanned)
+                    f.seek(max(0, file_size - bytes_scanned - read_size))
+                    chunk = f.read(read_size)
+                    blocks.insert(0, chunk)
+                    bytes_scanned += read_size
+                    data = b"".join(blocks)
+                    if len(data.splitlines()) >= n:
+                        return b"\n".join(data.splitlines()[-n:]).decode(
+                            "utf-8", errors="replace"
+                        )
+                return b"\n".join(data.splitlines()[-n:]).decode(
+                    "utf-8", errors="replace"
+                )
+
+        return {"logs": tail(UPDATE_LOG_FILE, lines), "updating": updating}
+    except Exception as e:
+        return {"logs": f"Error reading update logs: {e}", "updating": updating}
+
+
+@router.post("/reconnect")
+def reconnect():
+    """Force a reconnection attempt to the media API."""
+    ctx = get_ctx()
+    try:
+        ctx.is_offline = False
+        # Force a reset of _media_api to re-trigger auth with current config
+        ctx._media_api = None
+
+        # Accessing media_api property triggers initialization and authentication
+        api = ctx.media_api
+
+        # Attempt to fetch profile to verify real connectivity
+        profile = api.get_viewer_profile(force_refresh=True)
+
+        if profile:
+            ctx.is_offline = False
+            return {
+                "status": "success",
+                "message": f"Successfully reconnected! Welcome back, {profile.name}.",
+            }
+        else:
+            ctx.is_offline = True
+            return {
+                "status": "error",
+                "message": "Reconnection failed: Token invalid or AniList unreachable.",
+            }
+    except Exception as e:
+        ctx.is_offline = True
+        return {"status": "error", "message": f"Reconnection error: {str(e)}"}
+
+
+class TestProviderRequest(BaseModel):
+    provider_name: str
+    is_manga: bool = False
+    query: str = "Naruto"
+
+
+@router.post("/test-provider")
+def test_provider(req: TestProviderRequest):
+    """Test search functionality of a specific anime or manga provider."""
+    import time
+
+    provider_name = req.provider_name.lower().strip()
+    is_manga = req.is_manga
+    query = req.query
+
+    start_time = time.perf_counter()
+    try:
+        if not is_manga:
+            from anicat_media.libs.provider.anime.provider import create_provider
+            from anicat_media.libs.provider.anime.types import ProviderName
+            from anicat_media.libs.provider.anime.params import SearchParams
+
+            try:
+                p_enum = ProviderName(provider_name)
+            except ValueError:
+                return {
+                    "status": "failed",
+                    "duration_ms": 0,
+                    "result_count": 0,
+                    "error": f"Invalid anime provider name: '{provider_name}'. Supported: {[e.value for e in ProviderName]}",
+                }
+
+            provider = create_provider(p_enum)
+            params = SearchParams(query=query)
+            res = provider.search(params)
+        else:
+            from anicat_media.libs.provider.manga.provider import create_manga_provider
+            from anicat_media.libs.provider.manga.types import MangaProviderName
+            from anicat_media.libs.provider.manga.params import MangaSearchParams
+
+            try:
+                p_enum = MangaProviderName(provider_name)
+            except ValueError:
+                return {
+                    "status": "failed",
+                    "duration_ms": 0,
+                    "result_count": 0,
+                    "error": f"Invalid manga provider name: '{provider_name}'. Supported: {[e.value for e in MangaProviderName]}",
+                }
+
+            provider = create_manga_provider(p_enum)
+            params = MangaSearchParams(query=query)
+            res = provider.search(params)
+
+        duration = (time.perf_counter() - start_time) * 1000
+
+        results_list = []
+        if res and hasattr(res, "results") and res.results:
+            for r in res.results:
+                results_list.append({
+                    "id": getattr(r, "id", "") or "",
+                    "title": getattr(r, "title", "") or "",
+                })
+
+        streams_list = []
+        if not is_manga and res and hasattr(res, "results") and res.results:
+            first_res = res.results[0]
+            try:
+                from anicat_media.libs.provider.anime.params import AnimeParams, EpisodeStreamsParams
+                from anicat_media.libs.provider.anime.base import BaseAnimeProvider
+                # Cast to anime provider since we're in the `not is_manga` branch
+                assert isinstance(provider, BaseAnimeProvider)
+                anime_provider = provider
+                # Get detailed anime object (to extract episode list)
+                detail = anime_provider.get(AnimeParams(id=first_res.id, query=first_res.title))
+                if detail and detail.episodes:
+                    episode_num = None
+                    tt: Literal["sub", "dub"] = "sub"
+                    if detail.episodes.sub:
+                        episode_num = detail.episodes.sub[0]
+                        tt = "sub"
+                    elif detail.episodes.dub:
+                        episode_num = detail.episodes.dub[0]
+                        tt = "dub"
+                    elif detail.episodes.raw:
+                        episode_num = detail.episodes.raw[0]
+                        tt = "sub"  # EpisodeStreamsParams only accepts sub/dub; fall back
+
+                    if episode_num:
+                        streams = anime_provider.episode_streams(
+                            EpisodeStreamsParams(
+                                query=first_res.title,
+                                anime_id=first_res.id,
+                                episode=str(episode_num),
+                                translation_type=tt,
+                            )
+                        )
+                        if streams:
+                            for s in streams:
+                                links = []
+                                for link in s.links:
+                                    t_type = (
+                                        link.translation_type.value
+                                        if hasattr(link.translation_type, "value")
+                                        else str(link.translation_type)
+                                    )
+                                    links.append({
+                                        "link": link.link,
+                                        "hls": link.hls,
+                                        "translation_type": t_type,
+                                        "quality": link.quality,
+                                    })
+                                subs = []
+                                if s.subtitles:
+                                    for sub in s.subtitles:
+                                        subs.append({
+                                            "url": sub.url,
+                                            "language": sub.language,
+                                        })
+                                streams_list.append({
+                                    "server": s.name,
+                                    "links": links,
+                                    "subtitles": subs,
+                                    "episode": episode_num,
+                                })
+            except Exception as stream_err:
+                logger.warning(
+                    f"Failed to fetch streams during provider test: {stream_err}"
+                )
+
+        return {
+            "status": "success",
+            "duration_ms": round(duration, 2),
+            "result_count": len(results_list),
+            "results": results_list[:5],
+            "streams": streams_list,
+        }
+    except Exception as e:
+        duration = (time.perf_counter() - start_time) * 1000
+        logger.exception(f"Scraper test failed for '{provider_name}' (manga={is_manga})")
+        return {
+            "status": "failed",
+            "duration_ms": round(duration, 2),
+            "result_count": 0,
+            "error": str(e),
+        }
+

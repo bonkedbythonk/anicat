@@ -1,0 +1,271 @@
+name: Build Nightly
+
+on:
+  push:
+    branches:
+      - nightly
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release_params.outputs.tag }}
+      name: ${{ steps.release_params.outputs.name }}
+      body: ${{ steps.release_params.outputs.body }}
+      prerelease: ${{ steps.release_params.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set release parameters
+        id: release_params
+        run: |
+          VERSION=$(cat version.txt)
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "name=Anicat v${VERSION}" >> $GITHUB_OUTPUT
+            echo "body=Anicat v${VERSION} — stable release. Download the .dmg (macOS) or .exe/.msi (Windows) from the assets below." >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=nightly" >> $GITHUB_OUTPUT
+            echo "name=Anicat Nightly Build" >> $GITHUB_OUTPUT
+            echo "body=Rolling pre-release from the nightly branch. Updated: ${{ github.event.head_commit.timestamp || 'manual' }} (commit ${{ github.sha }}). Download the .dmg (macOS) or .exe/.msi (Windows) from the assets below." >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete existing release and re-create (non-draft)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release_params.outputs.tag }}"
+          NAME="${{ steps.release_params.outputs.name }}"
+          PRERELEASE="${{ steps.release_params.outputs.prerelease }}"
+
+          # Delete the old release + tag so we start fresh
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+          # Wait a moment for GitHub to process the deletion
+          sleep 2
+
+          # Create the release as NON-DRAFT immediately
+          PRERELEASE_FLAG=""
+          if [ "$PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "$TAG" \
+            --title "$NAME" \
+            --notes "${{ steps.release_params.outputs.body }}" \
+            --target "${{ github.sha }}" \
+            $PRERELEASE_FLAG
+
+          echo "Created release: $TAG (non-draft)"
+
+      - name: Clean up stale draft releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking for stale draft releases..."
+          DRAFTS=$(gh release list --limit 50 --json tagName,isDraft --jq '.[] | select(.isDraft==true) | .tagName')
+          if [ -n "$DRAFTS" ]; then
+            echo "$DRAFTS" | while read -r draft_tag; do
+              echo "  Deleting draft release: $draft_tag"
+              gh release delete "$draft_tag" --yes --cleanup-tag 2>/dev/null || true
+            done
+            echo "Cleaned up stale draft releases."
+          else
+            echo "No stale draft releases found."
+          fi
+
+  build:
+    needs: setup
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-14' # Apple Silicon (M1) Runner
+            args: '--target aarch64-apple-darwin'
+            triple: 'aarch64-apple-darwin'
+            sidecar_suffix: ''
+          - platform: 'windows-latest'
+            args: '--target x86_64-pc-windows-msvc'
+            triple: 'x86_64-pc-windows-msvc'
+            sidecar_suffix: '.exe'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.jsx', 'web/src/**/*.ts', 'web/src/**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
+
+      - name: install python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install uv
+        if: runner.os == 'macOS'
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: install uv (Windows)
+        if: runner.os == 'Windows'
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: powershell
+
+      - name: install python dependencies
+        run: uv sync --all-extras
+
+      - name: inject commit SHA into version
+        run: |
+          python -c "from pathlib import Path; p=Path('anicat_media/_version.py'); p.write_text(p.read_text().replace('__commit__ = \"\"', '__commit__ = \"${{ github.sha }}\"'))"
+          echo "Injected commit SHA: ${{ github.sha }}"
+
+      - name: build sidecar
+        run: |
+          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
+          mkdir -p web/src-tauri/binaries
+          mv dist/anicat-server${{ matrix.sidecar_suffix }} web/src-tauri/binaries/anicat-server-${{ matrix.triple }}${{ matrix.sidecar_suffix }}
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            web/src-tauri -> target
+
+      - name: install frontend dependencies
+        run: cd web && npm install
+
+      - name: Setup Bundled Player Companion (macOS)
+        if: runner.os == 'macOS'
+        run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
+
+      - name: Setup Bundled Player Companion (Windows)
+        if: runner.os == 'Windows'
+        run: ./scripts/setup_bundled_player_windows.ps1
+        shell: powershell
+
+      - name: build frontend
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+        run: npm run build
+
+      # tauri-action uploads assets to the EXISTING release created in setup.
+      # releaseDraft=false ensures it won't flip the release to draft.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_TELEMETRY_DISABLED: 1
+        with:
+          projectPath: web
+          tagName: ${{ needs.setup.outputs.tag }}
+          releaseName: ${{ needs.setup.outputs.name }}
+          releaseBody: ${{ needs.setup.outputs.body }}
+          releaseDraft: false
+          prerelease: ${{ needs.setup.outputs.prerelease }}
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: [setup, build]
+    if: always() && needs.setup.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Safety net: ensure the release is not a draft even if tauri-action
+      # touched it. Also handles partial build failures gracefully.
+      - name: Ensure release is published (not draft)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.setup.outputs.tag }}"
+          if gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null | grep -q true; then
+            echo "Release $TAG is still a draft — publishing now."
+            gh release edit "$TAG" --draft=false
+          else
+            echo "Release $TAG is already published."
+          fi
+
+      - name: Clean up older releases and tags
+        if: github.ref_name == 'master'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          CURRENT_TAG="${{ needs.setup.outputs.tag }}"
+          VERSION=$(cat version.txt)
+          VERSION_TAG="v${VERSION}"
+          KEEP_TAGS="nightly ${CURRENT_TAG} ${VERSION_TAG}"
+          echo "Keeping releases/tags: $KEEP_TAGS"
+
+          # --- Delete old GitHub releases (except the ones we want to keep) ---
+          echo ""
+          echo "=== Cleaning old releases ==="
+          gh release list --limit 100 --json tagName --jq '.[].tagName' 2>/dev/null | while read -r tag; do
+            # Skip if this tag is in our keep list
+            skip=false
+            for keep in $KEEP_TAGS; do
+              if [ "$tag" = "$keep" ]; then
+                skip=true
+                break
+              fi
+            done
+            if [ "$skip" = "false" ]; then
+              echo "  Deleting release: $tag"
+              gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+            fi
+          done
+
+          # --- Delete orphaned remote git tags ---
+          echo ""
+          echo "=== Cleaning orphaned git tags ==="
+          git ls-remote --tags origin 2>/dev/null | grep -oP 'refs/tags/\K[^^]+' | while read -r tag; do
+            skip=false
+            for keep in $KEEP_TAGS; do
+              if [ "$tag" = "$keep" ]; then
+                skip=true
+                break
+              fi
+            done
+            if [ "$skip" = "false" ]; then
+              echo "  Deleting remote tag: $tag"
+              git push origin --delete "refs/tags/$tag" 2>/dev/null || true
+            fi
+          done
+
+          echo ""
+          echo "Cleanup complete."

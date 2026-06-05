@@ -1,0 +1,41 @@
+{
+  "name": "web",
+  "version": "4.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "tauri": "tauri",
+    "build:sidecar": "cd ../build_sidecar && uv run pyinstaller sidecar.spec && mkdir -p ../web/src-tauri/binaries && cp dist/anicat-server ../web/src-tauri/binaries/anicat-server-aarch64-apple-darwin",
+    "dev:full": "npm run build:sidecar && npm run tauri:dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "test:e2e": "npx playwright test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.10",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-notification": "^2.2.0",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "framer-motion": "^12.38.0",
+    "hls.js": "^1.6.16",
+    "lucide-react": "^1.14.0",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.11.1",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "@playwright/test": "^1.40.0",
+    "http-server": "^14.1.1"
+  }
+}

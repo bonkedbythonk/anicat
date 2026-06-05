@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# pre-commit — Auto-bump version on breaking changes only.
+#
+# Reads the commit message from .git/COMMIT_EDITMSG and bumps the project
+# version accordingly using scripts/bump-version.sh.
+#
+#   BREAKING CHANGE / ! → MAJOR bump (4.0.0 → 5.0.0)
+#
+# Runs BEFORE the commit is created, so git add here includes the bumped
+# files in the commit.
+#
+# Install: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GIT_DIR="$(git rev-parse --git-dir)"
+COMMIT_MSG_FILE="$GIT_DIR/COMMIT_EDITMSG"
+
+# Skip if no commit message file exists (e.g. during rebase or merges)
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    exit 0
+fi
+
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+BUMP_SCRIPT="$PROJECT_ROOT/scripts/bump-version.sh"
+
+CURRENT_VERSION=$(cat "$PROJECT_ROOT/version.txt")
+
+# Strip leading "v" if present
+CURRENT_VERSION="${CURRENT_VERSION#v}"
+
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+bump_and_stage() {
+    local new_version="$1"
+    bash "$BUMP_SCRIPT" "$new_version"
+    # Stage all version files so they're included in THIS commit.
+    # pre-commit runs before the commit object is created, so git add
+    # updates the index that the commit uses.
+    git add "$PROJECT_ROOT/version.txt" \
+            "$PROJECT_ROOT/pyproject.toml" \
+            "$PROJECT_ROOT/anicat_media/_version.py" \
+            "$PROJECT_ROOT/web/package.json" \
+            "$PROJECT_ROOT/web/src-tauri/tauri.conf.json" \
+            "$PROJECT_ROOT/flake.nix"
+}
+
+if echo "$COMMIT_MSG" | grep -qiE '^(breaking change|feat!|fix!)\b|!:\s'; then
+    # MAJOR bump
+    new_major=$((MAJOR + 1))
+    bump_and_stage "${new_major}.0.0"
+fi
+
+# If none of the patterns matched, no bump happens — commit as-is.

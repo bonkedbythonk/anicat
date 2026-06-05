@@ -1,0 +1,101 @@
+query (
+  $userId: Int
+  $status: MediaListStatus
+  $type: MediaType
+  $page: Int
+  $perPage: Int
+  $sort: [MediaListSort]
+) {
+  Page(perPage: $perPage, page: $page) {
+    pageInfo {
+      total
+      currentPage
+      hasNextPage
+    }
+    mediaList(userId: $userId, status: $status, type: $type, sort: $sort) {
+      mediaId
+      media {
+        id
+        idMal
+        type
+        format
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          medium
+          large
+        }
+        trailer {
+          site
+          id
+        }
+        popularity
+        streamingEpisodes {
+          title
+          thumbnail
+        }
+        favourites
+        averageScore
+        episodes
+        chapters
+        genres
+        synonyms
+        studios {
+          nodes {
+            name
+            favourites
+            isAnimationStudio
+          }
+        }
+        tags {
+          name
+        }
+        startDate {
+          year
+          month
+          day
+        }
+        endDate {
+          year
+          month
+          day
+        }
+        status
+        bannerImage
+        season
+        seasonYear
+        duration
+        description
+        isAdult
+        mediaListEntry {
+          status
+          id
+          progress
+        }
+        nextAiringEpisode {
+          timeUntilAiring
+          airingAt
+          episode
+        }
+      }
+      status
+      progress
+      score
+      repeat
+      notes
+      startedAt {
+        year
+        month
+        day
+      }
+      completedAt {
+        year
+        month
+        day
+      }
+      createdAt
+    }
+  }
+}

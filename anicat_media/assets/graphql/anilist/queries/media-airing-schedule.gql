@@ -1,0 +1,13 @@
+query ($id: Int, $type: MediaType) {
+  Page {
+    media(id: $id, sort: POPULARITY_DESC, type: $type) {
+      airingSchedule(notYetAired: true) {
+        nodes {
+          airingAt
+          timeUntilAiring
+          episode
+        }
+      }
+    }
+  }
+}

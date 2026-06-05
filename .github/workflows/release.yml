@@ -1,0 +1,137 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check if release already exists
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          if gh release view "$TAG" --json tagName --jq '.tagName' 2>/dev/null; then
+            echo "Release $TAG already exists — skipping duplicate build."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.skip != 'true'
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-14' # Apple Silicon (M1) Runner
+            args: '--target aarch64-apple-darwin'
+            triple: 'aarch64-apple-darwin'
+          # Add Windows/Linux here if needed later
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.jsx', 'web/src/**/*.ts', 'web/src/**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
+
+      - name: install python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: install python dependencies
+        run: uv sync --all-extras
+
+      - name: build sidecar
+        run: |
+          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
+          mkdir -p web/src-tauri/binaries
+          mv dist/anicat-server web/src-tauri/binaries/anicat-server-${{ matrix.triple }}
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            web/src-tauri -> target
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: install frontend dependencies
+        run: cd web && npm install
+
+      - name: Setup Bundled Player Companion
+        run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
+
+      - name: build frontend
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+        run: npm run build
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_TELEMETRY_DISABLED: 1
+        with:
+          projectPath: web
+          # Only create/manage the release from the first platform
+          # to avoid race conditions when multiple matrix builds
+          # try to prune older releases simultaneously.
+          # Other platforms just build and upload workflow artifacts.
+          tagName: ${{ matrix.platform == 'macos-14' && github.ref_name || '' }}
+          releaseName: ${{ matrix.platform == 'macos-14' && format('Anicat {0}', github.ref_name) || '' }}
+          releaseBody: ${{ matrix.platform == 'macos-14' && 'See the assets below to download the latest version of Anicat.' || '' }}
+          releaseDraft: false
+          prerelease: false
+          uploadWorkflowArtifacts: ${{ matrix.platform != 'macos-14' }}
+          args: ${{ matrix.args }}

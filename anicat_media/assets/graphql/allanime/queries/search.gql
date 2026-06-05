@@ -1,0 +1,25 @@
+query (
+  $search: SearchInput
+  $limit: Int
+  $page: Int
+  $translationType: VaildTranslationTypeEnumType
+  $countryOrigin: VaildCountryOriginEnumType
+) {
+  shows(
+    search: $search
+    limit: $limit
+    page: $page
+    translationType: $translationType
+    countryOrigin: $countryOrigin
+  ) {
+    pageInfo {
+      total
+    }
+    edges {
+      _id
+      name
+      availableEpisodes
+      __typename
+    }
+  }
+}

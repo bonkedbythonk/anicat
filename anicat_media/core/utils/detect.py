@@ -158,6 +158,19 @@ def get_clean_env() -> dict[str, str]:
                     env["VK_ICD_FILENAMES"] = icd_path
                     env["VK_DRIVER_FILES"] = icd_path
                     break
+    elif sys.platform.startswith("linux"):
+        path = env.get("PATH", "")
+        extra_paths = [
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            os.path.expanduser("~/.local/bin"),
+        ]
+        current_paths = path.split(os.pathsep)
+        for p in extra_paths:
+            if p not in current_paths:
+                current_paths.append(p)
+        env["PATH"] = os.pathsep.join(current_paths)
     elif sys.platform == "win32":
         path = env.get("PATH", "")
         extra_paths = [

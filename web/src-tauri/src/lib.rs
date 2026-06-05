@@ -1,11 +1,9 @@
-// UX-01: Full macOS menu bar with standard items + keyboard shortcuts
-use tauri::{
-    menu::{
-        MenuBuilder, MenuItemBuilder, SubmenuBuilder,
-        PredefinedMenuItem,
-    },
-    Manager, RunEvent,
+#[cfg(target_os = "macos")]
+use tauri::menu::{
+    MenuBuilder, MenuItemBuilder, SubmenuBuilder,
+    PredefinedMenuItem,
 };
+use tauri::{Manager, RunEvent};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -322,6 +320,15 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 }
 
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = create_command("sh")
+                        .arg("-c")
+                        .arg("fuser -k 13370/tcp 2>/dev/null; pkill -9 -f anicat-server 2>/dev/null; true")
+                        .output();
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+
                 // ── macOS 26 note: WKWebView may log "web content process terminated"
                 //    during startup — this is normal process-pool lifecycle on macOS 26
                 //    and does NOT indicate a crash. The webview auto-recovers. ──
@@ -567,6 +574,15 @@ pub fn run() {
                             std::thread::sleep(std::time::Duration::from_millis(800));
                         }
 
+                        #[cfg(target_os = "linux")]
+                        {
+                            let _ = create_command("sh")
+                                .arg("-c")
+                                .arg("fuser -k 13370/tcp 2>/dev/null; true")
+                                .output();
+                            std::thread::sleep(std::time::Duration::from_millis(800));
+                        }
+
                         log::info!("[sidecar] Restarting (attempt {})...", restart_wd.lock().unwrap());
                         if let Some(new_child) = spawn_backend() {
                             *child_wd.lock().unwrap() = Some(new_child);
@@ -635,7 +651,7 @@ pub fn run() {
                         state.exiting.store(true, std::sync::atomic::Ordering::Relaxed);
                         if let Ok(mut guard) = state.child.lock() {
                             if let Some(ref mut child) = *guard {
-                                let pid = child.id();
+        let _pid = child.id();
                                 log::info!("[sidecar] Sending SIGTERM to process group of backend pid={}", pid);
                                 // Send SIGTERM to the entire process group so
                                 // grandchildren (Python, uvicorn, MPV) can

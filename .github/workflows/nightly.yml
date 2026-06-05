@@ -29,12 +29,12 @@ jobs:
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
             echo "name=Anicat v${VERSION}" >> $GITHUB_OUTPUT
-            echo "body=Anicat v${VERSION} — stable release. Download the .dmg (macOS) or .exe/.msi (Windows) from the assets below." >> $GITHUB_OUTPUT
+            echo "body=Anicat v${VERSION} — stable release. Download the .dmg (macOS), .exe/.msi (Windows), or .AppImage (Linux) from the assets below." >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
             echo "tag=nightly" >> $GITHUB_OUTPUT
             echo "name=Anicat Nightly Build" >> $GITHUB_OUTPUT
-            echo "body=Rolling pre-release from the nightly branch. Updated: ${{ github.event.head_commit.timestamp || 'manual' }} (commit ${{ github.sha }}). Download the .dmg (macOS) or .exe/.msi (Windows) from the assets below." >> $GITHUB_OUTPUT
+            echo "body=Rolling pre-release from the nightly branch. Updated: ${{ github.event.head_commit.timestamp || 'manual' }} (commit ${{ github.sha }}). Download the .dmg (macOS), .exe/.msi (Windows), or .AppImage (Linux) from the assets below." >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
           fi
 
@@ -88,6 +88,10 @@ jobs:
             args: --target x86_64-pc-windows-msvc
             triple: x86_64-pc-windows-msvc
             sidecar_suffix: '.exe'
+          - platform: ubuntu-22.04
+            args: --target x86_64-unknown-linux-gnu
+            triple: x86_64-unknown-linux-gnu
+            sidecar_suffix: ''
     uses: ./.github/workflows/build.yml
     with:
       platform: ${{ matrix.target.platform }}

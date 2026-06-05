@@ -83,6 +83,18 @@ def _find_chrome_path() -> Optional[str]:
         for p in win_paths:
             if os.path.isfile(p):
                 return p
+    elif platform.system() == "Linux":
+        import os
+
+        linux_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ]
+        for p in linux_paths:
+            if os.path.isfile(p):
+                return p
 
     return None
 

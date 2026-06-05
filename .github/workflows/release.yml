@@ -40,6 +40,10 @@ jobs:
             args: --target aarch64-apple-darwin
             triple: aarch64-apple-darwin
             sidecar_suffix: ''
+          - platform: windows-latest
+            args: --target x86_64-pc-windows-msvc
+            triple: x86_64-pc-windows-msvc
+            sidecar_suffix: '.exe'
           - platform: ubuntu-22.04
             args: --target x86_64-unknown-linux-gnu
             triple: x86_64-unknown-linux-gnu

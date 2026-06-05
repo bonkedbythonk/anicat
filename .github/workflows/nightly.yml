@@ -163,14 +163,21 @@ jobs:
             web/src-tauri -> target
 
       - name: install frontend dependencies
-        run: cd web && npm install
+        run: cd web && npm ci
+
+      - name: Cache MPV binaries
+        id: cache-mpv
+        uses: actions/cache@v4
+        with:
+          path: web/src-tauri/resources/mpv*
+          key: mpv-${{ runner.os }}-${{ hashFiles('scripts/setup_bundled_player.sh', 'scripts/setup_bundled_player_windows.ps1') }}
 
       - name: Setup Bundled Player Companion (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.cache-mpv.outputs.cache-hit != 'true'
         run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
 
       - name: Setup Bundled Player Companion (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-mpv.outputs.cache-hit != 'true'
         run: ./scripts/setup_bundled_player_windows.ps1
         shell: powershell
 

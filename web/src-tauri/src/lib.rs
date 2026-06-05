@@ -321,15 +321,6 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 }
 
-                #[cfg(target_os = "linux")]
-                {
-                    let _ = create_command("sh")
-                        .arg("-c")
-                        .arg("fuser -k 13370/tcp 2>/dev/null; pkill -9 -f anicat-server 2>/dev/null; true")
-                        .output();
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-
                 // ── macOS 26 note: WKWebView may log "web content process terminated"
                 //    during startup — this is normal process-pool lifecycle on macOS 26
                 //    and does NOT indicate a crash. The webview auto-recovers. ──
@@ -571,15 +562,6 @@ pub fn run() {
                         {
                             let _ = create_command("cmd")
                                 .args(["/C", "taskkill /F /IM anicat-server.exe /T 2>nul"])
-                                .output();
-                            std::thread::sleep(std::time::Duration::from_millis(800));
-                        }
-
-                        #[cfg(target_os = "linux")]
-                        {
-                            let _ = create_command("sh")
-                                .arg("-c")
-                                .arg("fuser -k 13370/tcp 2>/dev/null; true")
                                 .output();
                             std::thread::sleep(std::time::Duration::from_millis(800));
                         }

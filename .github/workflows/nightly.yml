@@ -23,10 +23,6 @@ jobs:
             args: --target x86_64-pc-windows-msvc
             triple: x86_64-pc-windows-msvc
             sidecar_suffix: '.exe'
-          - platform: ubuntu-22.04
-            args: --target x86_64-unknown-linux-gnu
-            triple: x86_64-unknown-linux-gnu
-            sidecar_suffix: ''
     uses: ./.github/workflows/build.yml
     with:
       platform: ${{ matrix.target.platform }}

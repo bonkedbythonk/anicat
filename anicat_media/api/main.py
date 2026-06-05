@@ -25,19 +25,6 @@ if sys.platform == "darwin":
         if p not in current_paths:
             current_paths.append(p)
     os.environ["PATH"] = os.pathsep.join(current_paths)
-elif sys.platform.startswith("linux"):
-    path = os.environ.get("PATH", "")
-    extra_paths = [
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
-        os.path.expanduser("~/.local/bin"),
-    ]
-    current_paths = path.split(os.pathsep)
-    for p in extra_paths:
-        if p not in current_paths:
-            current_paths.append(p)
-    os.environ["PATH"] = os.pathsep.join(current_paths)
 elif sys.platform == "win32":
     path = os.environ.get("PATH", "")
     extra_paths = [

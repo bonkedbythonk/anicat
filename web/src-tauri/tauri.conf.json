@@ -49,12 +49,6 @@
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico"
       }
-    },
-    "linux": {
-      "appimage": {},
-      "deb": {
-        "depends": ["mpv"]
-      }
     }
   },
   "plugins": {

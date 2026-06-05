@@ -2,7 +2,7 @@
 
 ![Anicat Desktop](assets/branding/dashboard.png)
 
-**A simple way to watch and track anime on your Mac, Windows, or Linux PC.** Search, stream, download, and track everything in one place — with a beautiful GUI app.
+**A simple way to watch and track anime on your Mac or Windows PC.** Search, stream, download, and track everything in one place — with a beautiful GUI app.
 
 ---
 
@@ -58,35 +58,6 @@ That's it! Anicat will start and you can search for anime right away.
 
 ---
 
-### Linux
-
-#### 1. Install Dependencies
-Anicat requires `mpv` and `ffmpeg` for playback. Install them via your package manager:
-
-```bash
-# Ubuntu / Debian
-sudo apt install mpv ffmpeg
-
-# Fedora
-sudo dnf install mpv ffmpeg
-
-# Arch
-sudo pacman -S mpv ffmpeg
-```
-
-#### 2. Download the AppImage
-Go to the [GitHub Releases](https://github.com/bonkedbythonk/anicat/releases) page and download the latest `.AppImage` file.
-
-#### 3. Make it executable and run
-```bash
-chmod +x Anicat_*.AppImage
-./Anicat_*.AppImage
-```
-
-That's it! Anicat will start and you can search for anime right away.
-
----
-
 ## What You Can Do
 
 | Feature | What It Does |
@@ -105,7 +76,6 @@ That's it! Anicat will start and you can search for anime right away.
 | **MPV Integration** | **Highly recommended** — bundled MPV player with built-in Anime4K upscaling shaders for superior visual quality, custom ModernZ skin, and robust subtitle support. |
 | **Alternative Streams** | Choose alternative servers inline with client-side sorting (Hard Sub, Soft Sub, Dub) and ultra-fast lazy resolution. |
 | **macOS Native Integration** | Premium window management via application menu bar (Show Dashboard, Toggle Quick Pane) and smooth Dock reopen behavior. |
-| **Linux Support** | AppImage build with system mpv integration. Works on any distro with mpv and ffmpeg installed. |
 
 ---
 

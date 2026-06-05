@@ -32,6 +32,8 @@ jobs:
   build:
     needs: check
     if: needs.check.outputs.skip != 'true'
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

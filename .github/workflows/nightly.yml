@@ -29,4 +29,3 @@ jobs:
       args: ${{ matrix.target.args }}
       triple: ${{ matrix.target.triple }}
       sidecar_suffix: ${{ matrix.target.sidecar_suffix }}
-      upload-workflow-artifacts: true

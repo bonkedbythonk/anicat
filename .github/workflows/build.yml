@@ -27,9 +27,6 @@ on:
       prerelease:
         type: boolean
         default: false
-      upload-workflow-artifacts:
-        type: boolean
-        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -133,5 +130,4 @@ jobs:
           releaseBody: ${{ inputs.release-body }}
           releaseDraft: false
           prerelease: ${{ inputs.prerelease }}
-          uploadWorkflowArtifacts: ${{ inputs.upload-workflow-artifacts }}
           args: ${{ inputs.args }}

@@ -1,0 +1,139 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      args:
+        required: true
+        type: string
+      triple:
+        required: true
+        type: string
+      sidecar_suffix:
+        required: true
+        type: string
+      release-tag:
+        type: string
+        default: ''
+      release-name:
+        type: string
+        default: ''
+      release-body:
+        type: string
+        default: ''
+      prerelease:
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ${{ inputs.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.jsx', 'web/src/**/*.ts', 'web/src/**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
+
+      - name: install python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install uv
+        if: runner.os == 'macOS'
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: install uv (Windows)
+        if: runner.os == 'Windows'
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: powershell
+
+      - name: install python dependencies
+        run: uv sync --all-extras
+
+      - name: inject commit SHA into version
+        run: |
+          python -c "from pathlib import Path; p=Path('anicat_media/_version.py'); p.write_text(p.read_text().replace('__commit__ = \"\"', '__commit__ = \"${{ github.sha }}\"'))"
+          echo "Injected commit SHA: ${{ github.sha }}"
+
+      - name: build sidecar
+        run: |
+          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
+          mkdir -p web/src-tauri/binaries
+          mv dist/anicat-server${{ inputs.sidecar_suffix }} web/src-tauri/binaries/anicat-server-${{ inputs.triple }}${{ inputs.sidecar_suffix }}
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.triple }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            web/src-tauri -> target
+
+      - name: install dependencies (ubuntu only)
+        if: inputs.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: install frontend dependencies
+        run: cd web && npm ci
+
+      - name: Cache MPV binaries
+        id: cache-mpv
+        uses: actions/cache@v4
+        with:
+          path: web/src-tauri/resources/mpv*
+          key: mpv-${{ runner.os }}-${{ hashFiles('scripts/setup_bundled_player.sh', 'scripts/setup_bundled_player_windows.ps1') }}
+
+      - name: Setup Bundled Player Companion (macOS)
+        if: runner.os == 'macOS' && steps.cache-mpv.outputs.cache-hit != 'true'
+        run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
+
+      - name: Setup Bundled Player Companion (Windows)
+        if: runner.os == 'Windows' && steps.cache-mpv.outputs.cache-hit != 'true'
+        run: ./scripts/setup_bundled_player_windows.ps1
+        shell: powershell
+
+      - name: build frontend
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+        run: npm run build
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_TELEMETRY_DISABLED: 1
+        with:
+          projectPath: web
+          tagName: ${{ inputs.release-tag }}
+          releaseName: ${{ inputs.release-name }}
+          releaseBody: ${{ inputs.release-body }}
+          releaseDraft: false
+          prerelease: ${{ inputs.prerelease }}
+          args: ${{ inputs.args }}

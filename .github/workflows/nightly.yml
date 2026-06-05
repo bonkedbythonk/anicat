@@ -46,13 +46,9 @@ jobs:
           NAME="${{ steps.release_params.outputs.name }}"
           PRERELEASE="${{ steps.release_params.outputs.prerelease }}"
 
-          # Delete the old release + tag so we start fresh
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-
-          # Wait a moment for GitHub to process the deletion
           sleep 2
 
-          # Create the release as NON-DRAFT immediately
           PRERELEASE_FLAG=""
           if [ "$PRERELEASE" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
@@ -70,137 +66,38 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Checking for stale draft releases..."
           DRAFTS=$(gh release list --limit 50 --json tagName,isDraft --jq '.[] | select(.isDraft==true) | .tagName')
           if [ -n "$DRAFTS" ]; then
             echo "$DRAFTS" | while read -r draft_tag; do
               echo "  Deleting draft release: $draft_tag"
               gh release delete "$draft_tag" --yes --cleanup-tag 2>/dev/null || true
             done
-            echo "Cleaned up stale draft releases."
-          else
-            echo "No stale draft releases found."
           fi
 
   build:
     needs: setup
-    permissions:
-      contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    defaults:
-      run:
-        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: 'macos-14' # Apple Silicon (M1) Runner
-            args: '--target aarch64-apple-darwin'
-            triple: 'aarch64-apple-darwin'
+        target:
+          - platform: macos-14
+            args: --target aarch64-apple-darwin
+            triple: aarch64-apple-darwin
             sidecar_suffix: ''
-          - platform: 'windows-latest'
-            args: '--target x86_64-pc-windows-msvc'
-            triple: 'x86_64-pc-windows-msvc'
+          - platform: windows-latest
+            args: --target x86_64-pc-windows-msvc
+            triple: x86_64-pc-windows-msvc
             sidecar_suffix: '.exe'
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Restore Next.js build cache
-        uses: actions/cache@v4
-        with:
-          path: web/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.jsx', 'web/src/**/*.ts', 'web/src/**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
-
-      - name: install python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: install uv
-        if: runner.os == 'macOS'
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: install uv (Windows)
-        if: runner.os == 'Windows'
-        run: irm https://astral.sh/uv/install.ps1 | iex
-        shell: powershell
-
-      - name: install python dependencies
-        run: uv sync --all-extras
-
-      - name: inject commit SHA into version
-        run: |
-          python -c "from pathlib import Path; p=Path('anicat_media/_version.py'); p.write_text(p.read_text().replace('__commit__ = \"\"', '__commit__ = \"${{ github.sha }}\"'))"
-          echo "Injected commit SHA: ${{ github.sha }}"
-
-      - name: build sidecar
-        run: |
-          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
-          mkdir -p web/src-tauri/binaries
-          mv dist/anicat-server${{ matrix.sidecar_suffix }} web/src-tauri/binaries/anicat-server-${{ matrix.triple }}${{ matrix.sidecar_suffix }}
-
-      - name: install rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.triple }}
-
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            web/src-tauri -> target
-
-      - name: install frontend dependencies
-        run: cd web && npm ci
-
-      - name: Cache MPV binaries
-        id: cache-mpv
-        uses: actions/cache@v4
-        with:
-          path: web/src-tauri/resources/mpv*
-          key: mpv-${{ runner.os }}-${{ hashFiles('scripts/setup_bundled_player.sh', 'scripts/setup_bundled_player_windows.ps1') }}
-
-      - name: Setup Bundled Player Companion (macOS)
-        if: runner.os == 'macOS' && steps.cache-mpv.outputs.cache-hit != 'true'
-        run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
-
-      - name: Setup Bundled Player Companion (Windows)
-        if: runner.os == 'Windows' && steps.cache-mpv.outputs.cache-hit != 'true'
-        run: ./scripts/setup_bundled_player_windows.ps1
-        shell: powershell
-
-      - name: build frontend
-        working-directory: web
-        env:
-          NEXT_TELEMETRY_DISABLED: 1
-        run: npm run build
-
-      # tauri-action uploads assets to the EXISTING release created in setup.
-      # releaseDraft=false ensures it won't flip the release to draft.
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEXT_TELEMETRY_DISABLED: 1
-        with:
-          projectPath: web
-          tagName: ${{ needs.setup.outputs.tag }}
-          releaseName: ${{ needs.setup.outputs.name }}
-          releaseBody: ${{ needs.setup.outputs.body }}
-          releaseDraft: false
-          prerelease: ${{ needs.setup.outputs.prerelease }}
-          args: ${{ matrix.args }}
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: ${{ matrix.target.platform }}
+      args: ${{ matrix.target.args }}
+      triple: ${{ matrix.target.triple }}
+      sidecar_suffix: ${{ matrix.target.sidecar_suffix }}
+      release-tag: ${{ needs.setup.outputs.tag }}
+      release-name: ${{ needs.setup.outputs.name }}
+      release-body: ${{ needs.setup.outputs.body }}
+      prerelease: ${{ needs.setup.outputs.prerelease }}
 
   publish:
     needs: [setup, build]
@@ -211,8 +108,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Safety net: ensure the release is not a draft even if tauri-action
-      # touched it. Also handles partial build failures gracefully.
       - name: Ensure release is published (not draft)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -237,11 +132,9 @@ jobs:
           KEEP_TAGS="nightly ${CURRENT_TAG} ${VERSION_TAG}"
           echo "Keeping releases/tags: $KEEP_TAGS"
 
-          # --- Delete old GitHub releases (except the ones we want to keep) ---
           echo ""
           echo "=== Cleaning old releases ==="
           gh release list --limit 100 --json tagName --jq '.[].tagName' 2>/dev/null | while read -r tag; do
-            # Skip if this tag is in our keep list
             skip=false
             for keep in $KEEP_TAGS; do
               if [ "$tag" = "$keep" ]; then
@@ -255,7 +148,6 @@ jobs:
             fi
           done
 
-          # --- Delete orphaned remote git tags ---
           echo ""
           echo "=== Cleaning orphaned git tags ==="
           git ls-remote --tags origin 2>/dev/null | grep -oP 'refs/tags/\K[^^]+' | while read -r tag; do

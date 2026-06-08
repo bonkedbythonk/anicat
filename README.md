@@ -80,7 +80,7 @@ That's it! Anicat will start and you can search for anime right away.
 ---
 
 ## Legal
-Anicat is for educational and personal use only. See [DISCLAIMER.md](docs/DISCLAIMER.md) and [SECURITY.md](SECURITY.md).
+Anicat is for educational and personal use only. See [DISCLAIMER.md](DISCLAIMER.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 

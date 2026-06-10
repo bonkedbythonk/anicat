@@ -290,11 +290,23 @@ export const mediaApi = {
   setConfig,
   searchMedia: searchAnime,
   getMediaDetail: getAnimeDetail,
-  getTrending: async (_type?: string) => getTrending(),
-  getSeasonal: async (_type?: string) => getSeasonal(),
-  getUpcoming: async (_type?: string) => getUpcoming(),
+  getTrending: async (_type?: string) => {
+    const result = await getTrending();
+    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+  },
+  getSeasonal: async (_type?: string) => {
+    const result = await getSeasonal();
+    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+  },
+  getUpcoming: async (_type?: string) => {
+    const result = await getUpcoming();
+    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+  },
   getCharacters,
-  getSmartPlaylist,
+  getSmartPlaylist: async () => {
+    const result = await getSmartPlaylist();
+    return { media: result?.Page?.media || [] };
+  },
   getEpisodes,
   resolveStream,
   searchProvider,
@@ -345,8 +357,8 @@ export const mediaApi = {
   retryQueue: async () => {},
   removeFromQueue: async () => {},
   search: async (query: string = '', _type?: string, page?: number) => {
-    const result = await getTrending(page);
-    return result;
+    const result = await searchAnime(query || '', page);
+    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
   },
   getRecent: async (_type?: string) => {
     const result = await getTrending();

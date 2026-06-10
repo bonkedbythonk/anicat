@@ -87,24 +87,24 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const recentlyWatchedQuery = useQuery({
     queryKey: ["home-recently-watched"],
     queryFn: () => mediaApi.getRecent("ANIME", 20),
-    refetchInterval: 15_000,
-    staleTime: 10_000,
+    refetchInterval: 60_000,
+    staleTime: 48_000,
   });
 
   // 2. Playback Status — shared query key with NowPlaying component (deduped)
   useQuery({
     queryKey: ["playback-status"],
     queryFn: () => mediaApi.getPlaybackStatus().catch(() => null),
-    refetchInterval: 5000,
-    staleTime: 4000,
+    refetchInterval: 120_000,
+    staleTime: 96_000,
   });
 
   // 3. AniList Watching List — used for hero fallback and "New for You"
   const watchingQuery = useQuery({
     queryKey: ["home-watching"],
     queryFn: () => mediaApi.getUserList("watching", "ANIME"),
-    refetchInterval: 30_000,
-    staleTime: 20_000,
+    refetchInterval: 60_000,
+    staleTime: 48_000,
   });
 
   // 4. Background/Non-blocking Discovery Queries
@@ -145,8 +145,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const airingTodayQuery = useQuery({
     queryKey: ["home-airing-today"],
     queryFn: () => mediaApi.getSchedule(0, 0, 1, 15, watchingIds),
-    staleTime: 120_000,
-    refetchInterval: 120_000,
+    staleTime: 240_000,
+    refetchInterval: 300_000,
     enabled: true,
   });
 
@@ -196,6 +196,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
+    staleTime: 240_000,
+    refetchInterval: 300_000,
     queryFn: async () => {
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;

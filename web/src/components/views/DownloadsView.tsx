@@ -269,12 +269,12 @@ export function DownloadsView() {
                             <div className="absolute inset-0 bg-accent/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-md pointer-events-none" />
 
                             {/* Floating EP Badge */}
-                            <div className="absolute top-3 right-3 bg-accent text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg shadow-lg leading-none tracking-wider uppercase backdrop-blur-md">
+                            <div className="absolute top-3 right-3 bg-accent text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg shadow-lg leading-none tracking-wider uppercase">
                               {group.episodes.length} {group.episodes.length === 1 ? "EP" : "EPS"}
                             </div>
 
                             {/* Quick play overlay button on hover */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/45 backdrop-blur-[2px]">
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/45">
                               <div className="w-13 h-13 rounded-full bg-accent text-white flex items-center justify-center shadow-lg transform translate-y-3 group-hover:translate-y-0 transition-all duration-350 ease-out hover:scale-105 active:scale-95">
                                 <Play size={20} fill="currentColor" className="ml-0.5 text-white" />
                               </div>
@@ -399,7 +399,7 @@ export function DownloadsView() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedMediaId(null)}
-              className="absolute inset-0 bg-background/80 backdrop-blur-md"
+              className="absolute inset-0 bg-background/80"
             />
 
             {/* Modal Body */}

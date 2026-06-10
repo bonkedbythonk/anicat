@@ -352,7 +352,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                     {fullItem.format || (isManga ? "MANGA" : "ANIME")}
                   </div>
                   {fullItem.average_score && (
-                    <div className="flex items-center space-x-1 px-2 py-1 bg-background/65 backdrop-blur-md rounded text-[10px] font-bold text-amber-600 dark:text-yellow-400 border border-border">
+                    <div className="flex items-center space-x-1 px-2 py-1 bg-background/65 rounded text-[10px] font-bold text-amber-600 dark:text-yellow-400 border border-border">
                       <Star size={10} fill="currentColor" />
                       <span>{fullItem.average_score}%</span>
                     </div>

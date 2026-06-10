@@ -227,21 +227,11 @@ html[data-style="retro-manga"] .forced-dark-container .bg-gradient-to-r {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, fill 0.3s ease, stroke 0.3s ease, box-shadow 0.3s ease !important;
 }
 
-/* Glass panel — sidebar and drawer only */
-.glass-panel {
-  background-color: var(--glass-bg);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  border-radius: 24px;
-}
-html.light .glass-panel {
-  background-color: rgba(255, 255, 255, 0.6);
-}
-
+/* Sidebar — ONE backdrop-blur element, acceptable */
 .glass-fixed {
   background-color: var(--glass-bg);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-color);
 }
 html.light .glass-fixed {
@@ -249,16 +239,35 @@ html.light .glass-fixed {
   border-right: 1px solid var(--border-color);
 }
 
-/* Detail drawer */
-.media-detail-drawer {
+/* Panels/drawers — solid background, no blur */
+.glass-panel {
   background-color: var(--glass-bg);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  border-left: 1px solid var(--border-color);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 24px;
+}
+html.light .glass-panel {
+  background-color: rgba(255, 255, 255, 0.6);
 }
 
+/* Detail drawer — solid, no blur */
+.media-detail-drawer {
+  background-color: color-mix(in srgb, var(--background) 85%, transparent);
+  border-left: 1px solid var(--border-color);
+}
 html.light .media-detail-drawer {
   background-color: rgba(255, 255, 255, 0.85);
+}
+
+/* Glass button — no backdrop-filter */
+.glass-button {
+  background-color: rgba(40, 40, 40, 0.7);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: white;
+  transition: background-color 0.2s ease;
+}
+.glass-button:hover {
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 .scroll-container {

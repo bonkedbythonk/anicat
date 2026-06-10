@@ -95,7 +95,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={profile.avatar_url} alt="Avatar" className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl object-cover border-4 border-surface shadow-2xl" />
             ) : (
-              <div className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl bg-white/10 border-4 border-surface flex items-center justify-center backdrop-blur-md">
+              <div className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl bg-white/10 border-4 border-surface flex items-center justify-center">
                 <User size={48} className="text-white/50" />
               </div>
             )}

@@ -414,7 +414,7 @@ const Hero = memo(function Hero({
 
               <button
                 onClick={() => onSelect?.(item)}
-                className="flex items-center space-x-2 bg-white/[0.08] hover:bg-white/[0.15] backdrop-blur-sm border border-white/10 text-white px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 cursor-pointer transition-all"
+                className="flex items-center space-x-2 bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-white px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 cursor-pointer transition-all"
               >
                 <Maximize size={16} />
                 <span>Details</span>
@@ -424,7 +424,7 @@ const Hero = memo(function Hero({
 
           {/* Right side: Watchlist Command Center Queue Shelf */}
           {queue.length > 1 && (
-            <div className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 backdrop-blur-md rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide">
+            <div className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">
                   Up Next

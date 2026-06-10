@@ -82,7 +82,7 @@ export function ListsView({ onSelect }: ListsViewProps) {
       <div className="relative">
         {loading && items.length > 0 && (
           <div className="absolute top-0 left-0 right-0 z-10 flex justify-center mt-12 animate-fade-in">
-            <div className="bg-black/60 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
+            <div className="bg-black/80 px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
               <Loader2 className="animate-spin text-accent" size={20} />
               <span className="text-xs font-bold text-white uppercase tracking-widest">Updating List...</span>
             </div>

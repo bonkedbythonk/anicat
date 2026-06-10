@@ -29,20 +29,8 @@ async function loadConfig() {
   }
 }
 
-const VIEWS: Record<string, React.ComponentType> = {
-  home: HomeView,
-  search: SearchView,
-  library: LibraryView,
-  lists: ListsView,
-  schedule: ScheduleView,
-  notifications: NotificationsView,
-  profile: ProfileView,
-  settings: SettingsView,
-  downloads: DownloadsView,
-};
-
 export default function App() {
-  const { currentView, selectedItem, setConnectionState } = useAppStore();
+  const { currentView, selectedItem, setConnectionState, openDetail, closeDetail } = useAppStore();
 
   useKeyboardShortcuts();
 
@@ -71,15 +59,29 @@ export default function App() {
     return () => clearInterval(interval);
   }, [checkConnection]);
 
-  const CurrentView = VIEWS[currentView] || HomeView;
+  const renderView = () => {
+    const onSelect = openDetail;
+    switch (currentView) {
+      case "home": return <HomeView onSelect={onSelect} />;
+      case "search": return <SearchView onSelect={onSelect} />;
+      case "library": return <LibraryView onSelect={onSelect} />;
+      case "lists": return <ListsView onSelect={onSelect} />;
+      case "schedule": return <ScheduleView onSelect={onSelect} />;
+      case "notifications": return <NotificationsView onSelect={onSelect} />;
+      case "profile": return <ProfileView onSelect={onSelect} />;
+      case "settings": return <SettingsView health={null} onUpdateStarted={() => {}} />;
+      case "downloads": return <DownloadsView />;
+      default: return <HomeView onSelect={onSelect} />;
+    }
+  };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <AmbientBackground />
       <Sidebar />
       <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative">
-        <CurrentView />
-        {selectedItem && <MediaDetail item={selectedItem} />}
+        {renderView()}
+        {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
         <AnimePlayer />
       </main>
       <NowPlaying />

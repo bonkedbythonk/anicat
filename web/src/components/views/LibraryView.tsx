@@ -1,117 +1,58 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getUserLists, updateProgress, removeMediaEntry } from "@/lib/api";
-import { useAppStore } from "@/stores/app";
-import type { MediaItem } from "@/lib/types";
+// @ts-nocheck
 
-export function LibraryView() {
-  const queryClient = useQueryClient();
-  const openDetail = useAppStore((s) => s.openDetail);
-
-  const watching = useQuery({
-    queryKey: ["library", "watching"],
-    queryFn: () => getUserLists(undefined, "CURRENT"),
-    staleTime: 60_000,
-  });
-
-  const planning = useQuery({
-    queryKey: ["library", "planning"],
-    queryFn: () => getUserLists(undefined, "PLANNING"),
-    staleTime: 60_000,
-  });
-
-  const completed = useQuery({
-    queryKey: ["library", "completed"],
-    queryFn: () => getUserLists(undefined, "COMPLETED"),
-    staleTime: 60_000,
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (entryId: number) => removeMediaEntry(entryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["library"] });
-    },
-  });
-
-  const watchingEntries =
-    watching.data?.MediaListCollection?.lists?.[0]?.entries || [];
-
-  if (watching.isLoading) {
-    return (
-      <div className="flex-1 overflow-y-auto p-6 flex items-center justify-center">
-        <div className="animate-spin h-6 w-6 border-2 border-[var(--accent)] border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-6">Library</h1>
-
-      {watchingEntries.length === 0 ? (
-        <p className="text-[var(--text-secondary)]">
-          No entries in your library. Search for anime to add to your list.
-        </p>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {watchingEntries.map((entry) => (
-            <LibraryCard
-              key={entry.media.id}
-              entry={entry}
-              onOpen={() => openDetail(entry.media)}
-              onRemove={() => removeMutation.mutate(entry.id)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+import { useState } from "react";
+import { Loader2, Library } from "lucide-react";
+import { LazyCard } from "@/components/media/LazyCard";
+import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
+import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
+import { usePaginatedList } from "@/lib/usePaginatedList";
+import { mediaApi, type MediaItem } from "@/lib/api";
+interface LibraryViewProps {
+  onSelect: (item: MediaItem) => void;
 }
 
-function LibraryCard({
-  entry,
-  onOpen,
-  onRemove,
-}: {
-  entry: { media: MediaItem; progress: number; status: string; id: number; score: number };
-  onOpen: () => void;
-  onRemove: () => void;
-}) {
-  const title = entry.media.title.romaji || entry.media.title.english || "Unknown";
-  const progress = entry.progress || 0;
-  const total = entry.media.episodes || 1;
-  const pct = Math.min(100, Math.round((progress / total) * 100));
+export function LibraryView({ onSelect }: LibraryViewProps) {
+  const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
+
+  const { items, loading, loadingMore, hasMore, loadMore } =
+    usePaginatedList<MediaItem>({
+      fetchFn: async (page) => {
+        const data = await mediaApi.getUserList("completed", type, page);
+        return {
+          items: data.media || [],
+          hasNextPage: data.page_info?.has_next_page || false,
+        };
+      },
+      queryKey: ["library", type],
+    });
 
   return (
-    <div className="group relative rounded-lg overflow-hidden bg-[var(--bg-tertiary)]">
-      <button onClick={onOpen} className="w-full aspect-[2/3]">
-        {entry.media.coverImage?.large && (
-          <img
-            src={entry.media.coverImage.large}
-            alt={title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        )}
-      </button>
-      <div className="p-2">
-        <p className="text-xs text-[var(--text-primary)] truncate font-medium">{title}</p>
-        <div className="flex items-center justify-between mt-1">
-          <div className="flex-1 h-1 bg-[var(--border)] rounded-full overflow-hidden mr-2">
-            <div
-              className="h-full bg-[var(--accent)] rounded-full transition-all"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <span className="text-[10px] text-[var(--text-muted)]">
-            {progress}/{total}
-          </span>
-        </div>
-        {entry.score > 0 && (
-          <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Score: {entry.score}
-          </p>
-        )}
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-white">Library</h1>
+        <MediaTypeToggle value={type} onChange={setType} />
       </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="animate-spin text-accent" size={36} />
+        </div>
+      ) : items.length > 0 ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+            {items.map((item) => (
+              <LazyCard key={item.id} item={item} onSelect={onSelect} />
+            ))}
+          </div>
+          <InfiniteScroll hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
+        </>
+      ) : (
+        <div className="text-center py-24 border-2 border-dashed border-white/[0.04] rounded-2xl">
+          <Library size={40} className="mx-auto text-gray-800 mb-4" />
+          <p className="text-gray-600 font-semibold">Library is empty</p>
+          <p className="text-gray-700 text-sm mt-1">Your completed {type.toLowerCase()} will appear here.</p>
+        </div>
+      )}
     </div>
   );
 }

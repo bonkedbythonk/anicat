@@ -18,14 +18,18 @@ export interface MediaTitle {
 export interface MediaCoverImage {
   large?: string;
   medium?: string;
+  extraLarge?: string;
 }
 
 export interface MediaItem {
   id: number;
-  type: "ANIME" | "MANGA";
+  id_mal?: number;
+  type?: "ANIME" | "MANGA";
   title: MediaTitle;
   coverImage: MediaCoverImage;
+  cover_image?: MediaCoverImage;
   bannerImage?: string;
+  banner_image?: string;
   description?: string;
   format?: string;
   status?: string;
@@ -37,18 +41,39 @@ export interface MediaItem {
   volumes?: number;
   genres?: string[];
   averageScore?: number;
+  average_score?: number;
   meanScore?: number;
   popularity?: number;
   favourites?: number;
   trending?: number;
-  studios?: { nodes?: { name: string }[] };
+  user_status?: {
+    status?: string;
+    progress?: number;
+    score?: number;
+  };
+  studios?: {
+    nodes?: { name: string; isAnimationStudio?: boolean }[];
+  } | { name: string; isAnimationStudio: boolean }[];
   startDate?: { year?: number; month?: number; day?: number };
   endDate?: { year?: number; month?: number; day?: number };
+  end_date?: string;
   nextAiringEpisode?: {
-    airingAt: number;
-    episode: number;
-    timeUntilAiring: number;
+    airingAt?: number;
+    episode?: number;
+    timeUntilAiring?: number;
+    airing_at?: string;
   };
+  next_airing?: {
+    episode?: number;
+    airing_at?: string;
+  };
+  trailer?: {
+    id?: string;
+    site?: string;
+    thumbnail?: string;
+    thumbnail_url?: string;
+  };
+  tags?: { name: string; rank: number }[];
   relations?: {
     edges?: {
       relationType: string;
@@ -71,12 +96,7 @@ export interface MediaItem {
       }[];
     }[];
   };
-  trailer?: {
-    id: string;
-    site: string;
-    thumbnail?: string;
-  };
-  // User list fields
+  autoplay_trailers?: boolean;
   mediaListEntry?: {
     id: number;
     status: string;
@@ -89,14 +109,19 @@ export interface MediaItem {
     startedAt?: { year?: number; month?: number; day?: number };
     completedAt?: { year?: number; month?: number; day?: number };
   };
+  playlist_reason?: string;
+  relation_type?: string;
+  siteUrl?: string;
 }
 
 export interface Episode {
-  number: number;
+  number: string | number;
   title?: string;
   image?: string;
   description?: string;
   filler?: boolean;
+  download_status?: string;
+  is_downloaded?: boolean;
 }
 
 export interface StreamServer {
@@ -109,27 +134,29 @@ export interface StreamServer {
 
 export interface Character {
   id: number;
-  name: string;
-  image?: string;
-  role: string;
+  name: { full: string; native?: string };
+  image?: { large?: string };
+  description?: string;
+  role?: string;
   voiceActors?: {
     id: number;
-    name: string;
-    image?: string;
+    name: { full: string };
+    image: { large?: string };
     language: string;
   }[];
 }
 
 export interface Review {
-  id: number;
-  summary: string;
-  body?: string;
-  score: number;
+  id?: number;
+  summary?: string;
+  body: string;
+  score?: number;
   rating?: number;
   user: {
-    id: number;
+    id?: number;
     name: string;
     avatar?: string;
+    avatar_url?: string;
   };
 }
 
@@ -166,21 +193,15 @@ export interface Notification {
 export interface UserProfile {
   id: number;
   name: string;
-  avatar?: { large?: string };
-  bannerImage?: string;
   about?: string;
+  avatar?: { large?: string; medium?: string };
+  bannerImage?: string;
   statistics?: {
     anime?: {
       count: number;
       meanScore: number;
       minutesWatched: number;
       episodesWatched: number;
-    };
-    manga?: {
-      count: number;
-      meanScore: number;
-      chaptersRead: number;
-      volumesRead: number;
     };
   };
 }

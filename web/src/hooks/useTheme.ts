@@ -1,6 +1,8 @@
+"use client";
+
 import { useEffect } from "react";
 
-export type UiStyle = "neon-abyss" | "sakura-zen" | "retro-manga";
+export type UiStyle = "neon-abyss" | "sakura-zen" | "retro-manga" | "forest-moss";
 
 const SAKURA_ZEN_FONT_URL =
   "https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&display=swap";
@@ -8,6 +10,10 @@ const SAKURA_ZEN_FONT_URL =
 const RETRO_MANGA_FONT_URL =
   "https://fonts.googleapis.com/css2?family=Bangers&family=Noto+Sans+JP:wght@400;700&display=swap";
 
+/**
+ * Dynamically injects the Noto Serif JP font link when Sakura Zen is active.
+ * No-op if the link tag is already present.
+ */
 function loadSakuraFont() {
   if (document.getElementById("font-noto-serif-jp")) return;
   const link = document.createElement("link");
@@ -17,6 +23,9 @@ function loadSakuraFont() {
   document.head.appendChild(link);
 }
 
+/**
+ * Dynamically injects the Bangers and Noto Sans JP fonts link when Retro Manga is active.
+ */
 function loadRetroMangaFont() {
   if (document.getElementById("font-retro-manga")) return;
   const link = document.createElement("link");
@@ -26,13 +35,25 @@ function loadRetroMangaFont() {
   document.head.appendChild(link);
 }
 
+/**
+ * Applies the UI style (skin) by setting `data-style` on <html>.
+ * Reads `anicat_ui_style` from localStorage; defaults to "neon-abyss".
+ */
 function applyStyle() {
   const style = (localStorage.getItem("anicat_ui_style") as UiStyle) || "neon-abyss";
   document.documentElement.setAttribute("data-style", style);
-  if (style === "sakura-zen") loadSakuraFont();
-  else if (style === "retro-manga") loadRetroMangaFont();
+  if (style === "sakura-zen") {
+    loadSakuraFont();
+  } else if (style === "retro-manga") {
+    loadRetroMangaFont();
+  }
 }
 
+/**
+ * Listens to system-level `prefers-color-scheme` changes and
+ * localStorage `anicat_theme` overrides to keep `<html>` class
+ * attributes in sync. Also applies the active UI style (skin).
+ */
 export function useTheme() {
   useEffect(() => {
     if (typeof window === "undefined") return;

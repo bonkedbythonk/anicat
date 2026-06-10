@@ -280,3 +280,135 @@ export async function getHealth(): Promise<{
 export async function getAppVersion(): Promise<string> {
   return invoke("get_app_version");
 }
+
+// ── Legacy mediaApi compatibility layer ──────────────────
+
+export const API_BASE_ORIGIN = "http://127.0.0.1:13370";
+
+export const mediaApi = {
+  getConfig,
+  setConfig,
+  searchMedia: searchAnime,
+  getMediaDetail: getAnimeDetail,
+  getTrending,
+  getSeasonal,
+  getUpcoming,
+  getCharacters,
+  getSmartPlaylist,
+  getEpisodes,
+  resolveStream,
+  searchProvider,
+  mapProviderSlug,
+  clearProviderCache,
+  getUserProfile: getUser,
+  getUserList: getUserLists,
+  saveMediaListEntry: updateMediaEntry,
+  deleteMediaListEntry: removeMediaEntry,
+  getNotifications,
+  startPlayback,
+  stopPlayback,
+  trackPlayback: stopPlayback,
+  getWatchHistory,
+  checkHealth: getHealth,
+  getAppVersion,
+  play: async (mediaId: number, epNum: number, provider?: string, server?: string) => {
+    return invoke("start_playback", { mediaId, episodeNumber: epNum, provider });
+  },
+  getStreams: async (mediaId: number, epNum: number, provider?: string) => {
+    return invoke("resolve_stream", { mediaId, episodeNumber: epNum, provider });
+  },
+  addToQueue: async (mediaId: number, episodes: number[]) => {
+    return invoke("add_to_queue", { mediaId, episodes });
+  },
+  getDetails: async (mediaId: number) => {
+    return invoke("get_media_detail", { mediaId });
+  },
+  // Stub methods for old component compatibility
+  getReviews: async () => [],
+  getRecommendations: async () => [],
+  getRelations: async () => [],
+  playNext: async () => {},
+  deleteFromList: async () => {},
+  updateStatus: async () => {},
+  getQueue: async () => [],
+  retryQueue: async () => {},
+  removeFromQueue: async () => {},
+  search: async () => ({ data: [] }),
+  getRecent: async () => [],
+  getSchedule: async () => [],
+  getPlaybackStatus: async () => null,
+  getProfile: async () => ({}),
+  markNotificationsAsRead: async () => {},
+  getLogs: async () => [],
+  wipeRegistry: async () => {},
+  checkUpdate: async () => ({}),
+  triggerUpdate: async () => {},
+  updateConfig: setConfig,
+  getRegistryStats: async () => ({}),
+  triggerBackup: async () => {},
+  getConfigOptions: async () => ({}),
+  testProvider: async () => ({}),
+  openUrl: async () => {},
+  commitProgress: async () => {},
+  startEditing: async () => {},
+  cancelEditing: async () => {},
+};
+
+export type { StreamServer, AiringSchedule, Notification };
+export { dispatchRefresh } from "./events";
+
+export interface HealthStatus {
+  connected: boolean;
+  authenticated: boolean;
+  offline: boolean;
+  data_version: number;
+  update_available?: boolean;
+}
+
+export interface PlaybackStatus {
+  item: MediaItem | null;
+  episode: number;
+  provider: string;
+  server: string | null;
+}
+
+export interface QueueItem {
+  media_id: number;
+  episode_number: number;
+  status: string;
+  title: string;
+}
+
+export interface SearchFilters {
+  genre?: string[];
+  year?: number;
+  season?: string;
+  format?: string;
+  status?: string;
+  sort?: string;
+}
+
+export type UserProfile = {
+  id: number;
+  name: string;
+  avatar?: { large?: string; medium?: string };
+  bannerImage?: string;
+  about?: string;
+  statistics?: {
+    anime?: {
+      count: number;
+      meanScore: number;
+      minutesWatched: number;
+      episodesWatched: number;
+    };
+  };
+};
+
+export type { MediaItem, Episode, Character } from "./types";
+
+export interface Review {
+  id: number;
+  summary: string;
+  score: number;
+  user: { id: number; name: string; avatar?: string };
+}

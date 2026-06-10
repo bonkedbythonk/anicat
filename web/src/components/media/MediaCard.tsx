@@ -100,7 +100,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
 
         {/* UX-12: Recommendation reason pill */}
         {item.playlist_reason && (
-          <div className="absolute top-3 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm border border-white/10 text-[9px] font-bold text-accent uppercase tracking-wider max-w-[90%] truncate">
+          <div className="absolute top-3 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/60 border border-white/10 text-[9px] font-bold text-accent uppercase tracking-wider max-w-[90%] truncate">
             {item.playlist_reason}
           </div>
         )}

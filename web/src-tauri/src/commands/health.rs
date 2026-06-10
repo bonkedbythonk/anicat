@@ -14,10 +14,8 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let authenticated = state.anilist_client.has_token();
-    let connected = authenticated;
-
     Ok(HealthResponse {
-        connected,
+        connected: true,
         authenticated,
         offline: false,
         data_version: 1,

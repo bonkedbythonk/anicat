@@ -35,6 +35,23 @@
   --glass-border: rgba(255, 255, 255, 0.15);
 }
 
+/* Token bridge: map new component var names to old CSS system */
+:root {
+  --bg-primary:    var(--background);
+  --bg-secondary:  color-mix(in srgb, var(--background) 85%, white 15%);
+  --bg-tertiary:   color-mix(in srgb, var(--background) 70%, white 30%);
+  --bg-glass:      var(--glass-bg);
+  --text-primary:  var(--foreground);
+  --text-secondary: color-mix(in srgb, var(--foreground) 65%, transparent);
+  --text-muted:    color-mix(in srgb, var(--foreground) 35%, transparent);
+  --accent:        var(--accent-color);
+  --accent-hover:  var(--accent-light);
+  --accent-dim:    color-mix(in srgb, var(--accent-color) 15%, transparent);
+  --accent-glow:   0 0 20px color-mix(in srgb, var(--accent-color) 40%, transparent);
+  --border:        var(--border-color);
+  --border-subtle: color-mix(in srgb, var(--border-color) 50%, transparent);
+}
+
 /* Light mode */
 html.light,
 html.system:not(.dark) {

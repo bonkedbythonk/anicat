@@ -74,10 +74,10 @@ export default function App() {
   const CurrentView = VIEWS[currentView] || HomeView;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <AmbientBackground />
       <Sidebar />
-      <main className="flex-1 flex flex-col overflow-hidden relative">
+      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative">
         <CurrentView />
         {selectedItem && <MediaDetail item={selectedItem} />}
         <AnimePlayer />

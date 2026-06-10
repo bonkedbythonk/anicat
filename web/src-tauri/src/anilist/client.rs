@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde::de::DeserializeOwned;
 use log::debug;
@@ -8,23 +9,36 @@ use super::responses::AnilistResponse;
 
 const ANILIST_URL: &str = "https://graphql.anilist.co";
 
-#[derive(Debug, Clone)]
 pub struct AniListClient {
     client: reqwest::Client,
-    token: Option<String>,
+    token: Mutex<Option<String>>,
+}
+
+impl Clone for AniListClient {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            token: Mutex::new(self.token.lock().unwrap().clone()),
+        }
+    }
 }
 
 impl AniListClient {
     pub fn new(client: reqwest::Client, token: Option<String>) -> Self {
-        Self { client, token }
+        Self {
+            client,
+            token: Mutex::new(token),
+        }
     }
 
-    pub fn set_token(&mut self, token: Option<String>) {
-        self.token = token;
+    pub fn set_token(&self, token: Option<String>) {
+        if let Ok(mut t) = self.token.lock() {
+            *t = token;
+        }
     }
 
     pub fn has_token(&self) -> bool {
-        self.token.is_some()
+        self.token.lock().map(|t| t.is_some()).unwrap_or(false)
     }
 
     pub async fn execute<T: DeserializeOwned>(
@@ -44,8 +58,10 @@ impl AniListClient {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
-        if let Some(ref token) = self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
+        if let Ok(guard) = self.token.lock() {
+            if let Some(ref token) = *guard {
+                req = req.header("Authorization", format!("Bearer {}", token));
+            }
         }
 
         let resp = req
@@ -71,7 +87,10 @@ impl AniListClient {
                 let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
                 debug!("GraphQL errors: {:?}", messages);
 
-                if messages.iter().any(|m| m.contains("Invalid token") || m.contains("authentication")) {
+                if messages
+                    .iter()
+                    .any(|m| m.contains("Invalid token") || m.contains("authentication"))
+                {
                     return Err("AniList authentication invalid. Please re-login.".to_string());
                 }
                 return Err(format!("GraphQL error: {}", messages.join("; ")));

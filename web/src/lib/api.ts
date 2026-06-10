@@ -348,7 +348,10 @@ export const mediaApi = {
   triggerBackup: async () => {},
   getConfigOptions: async () => ({}),
   testProvider: async () => ({}),
-  openUrl: async () => {},
+  openUrl: async (url: string) => {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    return open(url);
+  },
   commitProgress: async () => {},
   startEditing: async () => {},
   cancelEditing: async () => {},

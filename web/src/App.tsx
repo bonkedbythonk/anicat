@@ -58,7 +58,11 @@ export default function App() {
     loadConfig();
     checkConnection();
     const interval = setInterval(checkConnection, 30_000);
-    return () => clearInterval(interval);
+    window.addEventListener("anicat_health_recheck", checkConnection);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("anicat_health_recheck", checkConnection);
+    };
   }, [checkConnection]);
 
   const renderView = () => {

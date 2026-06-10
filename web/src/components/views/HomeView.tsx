@@ -273,7 +273,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }
 
   return (
-    <div className="relative space-y-12 pb-12">
+    <div className="relative h-full overflow-y-auto scroll-container space-y-12 pb-12">
       {/* Ambient background glow */}
       <div 
         className="absolute top-[-100px] right-[-60px] w-[500px] h-[500px] rounded-full blur-[140px] opacity-[0.14] pointer-events-none transition-all duration-1000 -z-10"

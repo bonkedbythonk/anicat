@@ -58,7 +58,9 @@ pub async fn update_config(
                     }
                 }
                 "api.anilist_token" => {
-                    config.api.anilist_token = value.as_str().map(|s| s.to_string());
+                    let token = value.as_str().map(|s| s.to_string());
+                    config.api.anilist_token = token.clone();
+                    state.anilist_client.set_token(token);
                 }
                 _ => {}
             }

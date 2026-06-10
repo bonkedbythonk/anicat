@@ -116,6 +116,13 @@ web/src-tauri/target/
 build_sidecar/
 !build_sidecar/sidecar.spec
 !build_sidecar/anicat-server.py
+
+# Compiled sidecar binary output
+build_sidecar/dist/
+
+# Old Next.js source remnants
+web/src.old/
+
 web/src-tauri/target/release/bundle/dmg/
 .copilot/
 docs/

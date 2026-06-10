@@ -17,7 +17,7 @@ export function SearchView() {
     staleTime: 120_000,
   });
 
-  const items: MediaItem[] = data?.data?.Page?.media || [];
+  const items: MediaItem[] = data?.Page?.media || [];
 
   const handleChange = (value: string) => {
     setQuery(value);
@@ -54,7 +54,7 @@ export function SearchView() {
             <button
               key={item.id}
               onClick={() => openDetail(item)}
-              className="group relative aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-tertiary)] hover:ring-2 hover:ring-[var(--accent)] transition-all"
+              className="group relative aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-tertiary)] hover:ring-2 hover:ring-[var(--accent)] hover:shadow-[0_0_20px_rgba(139,92,246,0.3)] transition-all"
             >
               {item.coverImage?.large && (
                 <img

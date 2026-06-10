@@ -32,16 +32,26 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-[60px] flex flex-col items-center py-4 gap-1 border-r border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+    <aside className="w-[60px] flex flex-col items-center py-4 gap-1 border-r border-[var(--border)] shrink-0 relative z-10 bg-[var(--bg-glass)] backdrop-blur-xl">
+      <div className="mb-4 flex items-center justify-center">
+        <img
+          src="/logo.png"
+          alt="Anicat"
+          className="w-8 h-8 rounded-lg"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+          }}
+        />
+      </div>
       {NAV_ITEMS.map((item) => {
         const isActive = currentView === item.view;
         return (
           <button
             key={item.view}
             onClick={() => handleClick(item.view)}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
               isActive
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent)] text-white shadow-[var(--accent-glow)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
             }`}
             title={`${item.label} (${item.key})`}

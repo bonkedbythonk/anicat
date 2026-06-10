@@ -17,7 +17,19 @@ function MediaGrid({ items, title }: { items: MediaItem[]; title: string }) {
           <button
             key={item.id}
             onClick={() => openDetail(item)}
-            className="group relative aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-tertiary)] hover:ring-2 hover:ring-[var(--accent)] transition-all"
+            onMouseEnter={() => {
+              document.documentElement.style.setProperty(
+                "--ambient-color",
+                "rgba(139, 92, 246, 0.12)"
+              );
+            }}
+            onMouseLeave={() => {
+              document.documentElement.style.setProperty(
+                "--ambient-color",
+                "rgba(139, 92, 246, 0.08)"
+              );
+            }}
+            className="group relative aspect-[2/3] rounded-lg overflow-hidden bg-[var(--bg-tertiary)] hover:ring-2 hover:ring-[var(--accent)] hover:shadow-[0_0_20px_rgba(139,92,246,0.3)] transition-all"
           >
             {item.coverImage?.large && (
               <img
@@ -64,10 +76,10 @@ export function HomeView() {
     staleTime: 300_000,
   });
 
-  const trendingItems = trending.data?.data?.Page?.media || [];
-  const seasonalItems = seasonal.data?.data?.Page?.media || [];
-  const upcomingItems = upcoming.data?.data?.Page?.media || [];
-  const smartItems = smart.data?.data?.Page?.media || [];
+  const trendingItems = trending.data?.Page?.media || [];
+  const seasonalItems = seasonal.data?.Page?.media || [];
+  const upcomingItems = upcoming.data?.Page?.media || [];
+  const smartItems = smart.data?.Page?.media || [];
 
   const isLoading =
     trending.isLoading || seasonal.isLoading || upcoming.isLoading || smart.isLoading;

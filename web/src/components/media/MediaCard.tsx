@@ -81,14 +81,14 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           alt={title} 
           loading="lazy"
           decoding="async"
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-[400ms] group-hover:scale-105"
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
         />
         
         {/* Play overlay */}
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-[400ms] flex items-center justify-center z-10">
           <button 
             onClick={handlePlay}
-            className="glass-button p-3.5 rounded-full hover:scale-110 active:scale-95 transition-transform duration-200"
+            className="glass-button p-3.5 rounded-full active:scale-95 transition-transform duration-150"
           >
             {isManga ? (
               <BookOpen size={20} />
@@ -116,7 +116,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         {item.user_status && totalCount > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-10">
             <div 
-              className="h-full bg-accent transition-all duration-700"
+              className="h-full bg-accent transition-[width] duration-300"
               style={{ width: `${(progress / totalCount) * 100}%` }}
             />
           </div>
@@ -125,7 +125,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
 
       {/* Card info */}
       <div className="space-y-2 px-0.5">
-        <h3 className="text-sm font-bold text-white leading-tight line-clamp-2 group-hover:text-accent transition-colors duration-200">
+        <h3 className="text-sm font-bold text-white leading-tight line-clamp-2 group-hover:text-accent transition-colors duration-100">
           {title}
         </h3>
 
@@ -154,7 +154,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         {item.genres && item.genres.length > 0 && (
           <div className="flex gap-1 flex-wrap">
             {item.genres.slice(0, 2).map((g) => (
-              <span key={g} className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-white/[0.04] border border-white/[0.05] text-gray-500 group-hover:text-gray-400 transition-colors">
+              <span key={g} className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-white/[0.04] border border-white/[0.05] text-gray-500 group-hover:text-gray-400">
                 {g}
               </span>
             ))}

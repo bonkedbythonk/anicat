@@ -443,7 +443,7 @@ const Hero = memo(function Hero({
                     <button
                       key={ccItem.item.id}
                       onClick={() => setFocusedIndex(index)}
-                      className={`w-full flex items-center gap-3 p-2 rounded-xl text-left border transition-all duration-300 group cursor-pointer ${
+                      className={`w-full flex items-center gap-3 p-2 rounded-xl text-left border transition-[background-color,border-color] duration-200 group cursor-pointer ${
                         isFocused
                           ? "bg-accent/10 border-accent/30 shadow-[0_0_15px_rgba(0,0,0,0.1)] shadow-accent/25"
                           : "bg-white/[0.02] border-white/[0.04] hover:bg-white/[0.06] hover:border-white/10"
@@ -501,7 +501,7 @@ const Hero = memo(function Hero({
               <button
                 key={ccItem.item.id}
                 onClick={() => setFocusedIndex(index)}
-                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-[background-color,border-color] duration-150 ${
                   isFocused
                     ? "bg-accent/15 border-accent/30 text-accent font-bold"
                     : "bg-white/[0.03] border-white/[0.05] text-gray-400 hover:text-white"

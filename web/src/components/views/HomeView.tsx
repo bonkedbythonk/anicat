@@ -265,7 +265,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
 
   // Global loading only until critical data is loaded
-  if (recentlyWatchedQuery.isLoading && watchingQuery.isLoading) {
+  if (trendingQuery.isLoading && seasonalQuery.isLoading) {
     return (
       <div className="flex items-center justify-center h-full min-h-[400px]">
         <Loader2 className="animate-spin text-accent" size={36} />
@@ -274,10 +274,10 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }
 
   return (
-    <div className="relative h-full overflow-y-auto scroll-container space-y-12 pb-12">
+    <div className="relative h-full space-y-12 pb-12">
       {/* Ambient background glow */}
       <div 
-        className="absolute top-[-100px] right-[-60px] w-[500px] h-[500px] rounded-full blur-[140px] opacity-[0.14] pointer-events-none transition-all duration-1000 -z-10"
+        className="absolute top-[-100px] right-[-60px] w-[500px] h-[500px] rounded-full opacity-[0.14] pointer-events-none -z-10"
         style={{ 
           background: `radial-gradient(circle, ${ambientColor} 0%, transparent 70%)`
         }}

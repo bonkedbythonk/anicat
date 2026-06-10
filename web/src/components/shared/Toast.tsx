@@ -1,1 +1,2 @@
-export function Toast() { return null; }
+import { memo } from "react";
+export const Toast = memo(function Toast() { return null; });

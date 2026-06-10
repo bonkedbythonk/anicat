@@ -596,8 +596,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                           <div className="flex items-center gap-2">
                           {typeof import.meta !== 'undefined' && import.meta.env?.DEV && (
                             <button
-                              onClick={() => {
-                                const { invoke } = require('@tauri-apps/api/core');
+                              onClick={async () => {
+                                const { invoke } = await import("@tauri-apps/api/core");
                                 invoke("debug_provider_streams", {
                                   mediaId: item.id,
                                   episodeNumber: 1,

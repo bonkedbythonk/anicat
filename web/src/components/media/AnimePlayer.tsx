@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 
 export function AnimePlayer() {
-  const { item, episode, server } = usePlaybackStore();
+  const item = usePlaybackStore((s) => s.item);
+  const episode = usePlaybackStore((s) => s.episode);
+  const server = usePlaybackStore((s) => s.server);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);

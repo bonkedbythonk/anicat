@@ -198,6 +198,12 @@ html[data-style="retro-manga"] .forced-dark-container .bg-gradient-to-r {
 }
 
 @layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
   html {
     scroll-behavior: smooth;
     overscroll-behavior: none;
@@ -209,7 +215,6 @@ html[data-style="retro-manga"] .forced-dark-container .bg-gradient-to-r {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow: hidden;
   }
 
   button, input, select, textarea, a, [role="button"] {

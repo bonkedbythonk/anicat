@@ -242,7 +242,15 @@ const Hero = memo(function Hero({
     return () => clearTimeout(timer);
   }, [item?.id, item?.trailer?.id, item?.trailer?.site, config?.stream?.autoplay_trailers, isIntersecting]);
 
-  if (!item) return null;
+  if (!item) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden -mx-6 lg:mx-0 lg:rounded-2xl bg-surface animate-pulse flex items-center justify-center">
+          <div className="h-8 w-64 rounded-lg bg-white/[0.04]" />
+        </div>
+      </div>
+    );
+  }
 
   const title = item.title.english || item.title.romaji || "Unknown";
   const currentProgress = item.user_status?.progress || 0;

@@ -85,7 +85,7 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <AmbientBackground />
       <Sidebar />
-      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative">
+      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative px-6 lg:px-10 pt-8">
         {renderView()}
         {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
         <AnimePlayer />

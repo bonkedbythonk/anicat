@@ -147,7 +147,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
     queryFn: () => mediaApi.getSchedule(0, 0, 1, 15, watchingIds),
     staleTime: 120_000,
     refetchInterval: 120_000,
-    enabled: watchingIds.length > 0,
+    enabled: true,
   });
 
   // UX-15: Genre mood filter state
@@ -196,7 +196,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
-    enabled: watchingQuery.isSuccess,
     queryFn: async () => {
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;

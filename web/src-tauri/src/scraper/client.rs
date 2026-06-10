@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Child, Command};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 
 // ── Public types ──────────────────────────────────────────

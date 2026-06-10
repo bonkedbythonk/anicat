@@ -196,6 +196,7 @@ pub fn upsert_library_entry(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn get_library_entry(
     conn: &rusqlite::Connection,
     media_id: i64,

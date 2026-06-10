@@ -137,6 +137,7 @@ pub struct StaffImage {
     pub medium: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Viewer {
     pub id: Option<i64>,
@@ -149,17 +150,20 @@ pub struct Viewer {
     pub statistics: Option<ViewerStatistics>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewerOptions {
     #[serde(rename = "displayAdultContent")]
     pub display_adult_content: Option<bool>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewerStatistics {
     pub anime: Option<AnimeStatistics>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimeStatistics {
     pub count: Option<i32>,
@@ -171,6 +175,7 @@ pub struct AnimeStatistics {
     pub episodes_watched: Option<i32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaStats {
     #[serde(rename = "scoreDistribution")]
@@ -179,12 +184,14 @@ pub struct MediaStats {
     pub status_distribution: Option<Vec<StatusDistribution>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreDistribution {
     pub score: Option<i32>,
     pub amount: Option<i32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusDistribution {
     pub status: Option<String>,

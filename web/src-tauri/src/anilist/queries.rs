@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub const MEDIA_DETAIL_QUERY: &str = r#"

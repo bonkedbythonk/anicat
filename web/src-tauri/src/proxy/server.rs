@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     extract::{Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
     Router,
 };

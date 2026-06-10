@@ -13,7 +13,8 @@ pub struct GraphQLError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageResponse<T> {
-    pub Page: Page<T>,
+    #[serde(rename = "Page")]
+    pub page: Page<T>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,35 +41,41 @@ pub struct MediaResponse {
     pub media: Option<super::types::MediaItem>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveMediaListEntryResponse {
     #[serde(rename = "SaveMediaListEntry")]
     pub save_media_list_entry: Option<super::types::MediaListEntry>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteMediaListEntryResponse {
     #[serde(rename = "DeleteMediaListEntry")]
     pub delete_media_list_entry: Option<DeleteResult>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteResult {
     pub deleted: Option<bool>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProgressResponse {
     #[serde(rename = "SaveMediaListEntry")]
     pub save_media_list_entry: Option<ProgressResult>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressResult {
     pub id: Option<i64>,
     pub progress: Option<i32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewerResponse {
     #[serde(rename = "Viewer")]

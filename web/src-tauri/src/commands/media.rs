@@ -217,3 +217,44 @@ pub async fn clear_provider_cache(
     let db = state.open_db()?;
     registry::service::clear_provider_cache(&db, media_id)
 }
+
+// ── Local library commands ────────────────────────────────
+
+#[tauri::command]
+pub async fn get_library(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::registry::LibraryEntry>, String> {
+    let db = state.open_db()?;
+    registry::service::get_all_library(&db)
+}
+
+#[tauri::command]
+pub async fn add_to_library(
+    state: State<'_, AppState>,
+    media_id: i64,
+    media_type: String,
+    status: Option<String>,
+    score: Option<f64>,
+    progress: Option<i32>,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let db = state.open_db()?;
+    registry::service::upsert_library_entry(
+        &db,
+        media_id,
+        &media_type,
+        status.as_deref(),
+        score,
+        progress,
+        notes.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn remove_from_library(
+    state: State<'_, AppState>,
+    media_id: i64,
+) -> Result<(), String> {
+    let db = state.open_db()?;
+    registry::service::delete_library_entry(&db, media_id)
+}

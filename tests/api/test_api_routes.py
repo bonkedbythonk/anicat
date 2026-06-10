@@ -332,12 +332,12 @@ def test_test_provider_endpoint(client_and_ctx, monkeypatch):
     # Monkeypatch the provider instantiation
     monkeypatch.setattr(
         "anicat_media.libs.provider.anime.provider.create_provider",
-        lambda name: FakeProvider(None)
+        lambda name: FakeProvider(None),
     )
 
     response = client.post(
         "/api/status/test-provider",
-        json={"provider_name": "animepahe", "is_manga": False, "query": "Naruto"},
+        json={"provider_name": "gogoanime", "is_manga": False, "query": "Naruto"},
     )
 
     assert response.status_code == 200
@@ -347,4 +347,3 @@ def test_test_provider_endpoint(client_and_ctx, monkeypatch):
     assert len(payload["results"]) == 2
     assert payload["results"][0]["id"] == "naruto-1"
     assert payload["results"][0]["title"] == "Naruto Shippuden"
-

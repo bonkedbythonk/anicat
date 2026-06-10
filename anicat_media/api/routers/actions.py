@@ -29,6 +29,8 @@ class RenewStreamRequest(BaseModel):
     media_id: int
     episode: str
     provider: Optional[str] = None
+    translation_type: Optional[str] = None
+    subtitle_type: Optional[str] = None
 
 
 
@@ -208,6 +210,8 @@ async def _resolve_episode_stream(
     episode: Optional[str] = None,
     provider: Optional[str] = None,
     server_name: Optional[str] = None,
+    translation_type: Optional[str] = None,
+    subtitle_type: Optional[str] = None,
 ):
     """
     Shared helper to resolve media search results, select the best anime match,
@@ -258,12 +262,13 @@ async def _resolve_episode_stream(
     # 3. Get streams
     from ...libs.provider.anime.params import EpisodeStreamsParams
 
+    trans_type = translation_type or ctx.config.stream.translation_type
     streams_iter = provider_instance.episode_streams(
         EpisodeStreamsParams(
             query=title,
             anime_id=anime_id,
             episode=episode,
-            translation_type=ctx.config.stream.translation_type,
+            translation_type=trans_type,
             server=server_name,
             resolve_direct=True,
         )
@@ -287,6 +292,12 @@ async def _resolve_episode_stream(
 
     if not streams_list:
         raise HTTPException(status_code=404, detail="No stream servers available")
+
+    if subtitle_type and not server_name:
+        sub_key = "hard sub" if subtitle_type == "hard" else "sort sub"
+        matching = [s for s in streams_list if sub_key in s.name.lower()]
+        if matching:
+            streams_list = matching
 
     # Get server
     server = None
@@ -359,7 +370,13 @@ async def _prepare_playback(
     """
     media_item = ctx.media_api.get_media_item(media_id)
     if not media_item:
-        raise HTTPException(status_code=404, detail="Media not found")
+        # AniList may be offline — check registry for cached provider slug
+        record = ctx.media_registry.get_media_record(media_id)
+        if record and record.provider_mapping:
+            from ...libs.media_api.types import MediaItem, MediaTitle
+            media_item = MediaItem(id=media_id, title=MediaTitle(romaji="", english=""))
+        else:
+            raise HTTPException(status_code=404, detail="Media not found")
 
     # Auto-add to user's watching list if not already tracked, or transition to watching if planning/paused/dropped
     should_update_status = False
@@ -450,6 +467,7 @@ async def play_media(
     fullscreen: bool = False,
     provider: str | None = None,
     server: str | None = None,
+    translation_type: str | None = None,
 ):
     """
     Smart Play: Finds the next episode and triggers playback in MPV.
@@ -583,7 +601,7 @@ async def play_media(
 
             # Streaming playback — resolve stream
             resolved = await _resolve_episode_stream(
-                media_id, episode, provider=provider, server_name=server
+                media_id, episode, provider=provider, server_name=server, translation_type=translation_type
             )
 
             proxy_prefix = "/api/actions/proxy"
@@ -599,6 +617,7 @@ async def play_media(
                 start_time=resolved["start_time"],
                 fullscreen=fullscreen,
                 subtitles=resolved.get("subtitles"),
+                translation_type=translation_type,
             )
 
             # M5: Async AniSkip fetch
@@ -647,6 +666,8 @@ async def resolve_media_stream(
     episode: str | None = None,
     provider: str | None = None,
     server: str | None = None,
+    translation_type: str | None = None,
+    subtitle_type: str | None = None,
 ):
     """
     Resolves the stream details for embedded in-app playback without launching MPV.
@@ -693,7 +714,7 @@ async def resolve_media_stream(
             }
 
         resolved = await _resolve_episode_stream(
-            media_id, episode, provider=provider, server_name=server
+            media_id, episode, provider=provider, server_name=server, translation_type=translation_type, subtitle_type=subtitle_type
         )
 
         set_playback(
@@ -743,6 +764,7 @@ async def get_episode_streams(
     media_id: int,
     episode: str,
     provider: Optional[str] = None,
+    translation_type: Optional[str] = None,
 ):
     """
     Get the list of available stream servers and their links/subtitles for a specific episode.
@@ -750,7 +772,13 @@ async def get_episode_streams(
     ctx = get_ctx()
     media_item = ctx.media_api.get_media_item(media_id)
     if not media_item:
-        raise HTTPException(status_code=404, detail="Media not found")
+        # AniList may be offline — check registry for cached provider slug
+        record = ctx.media_registry.get_media_record(media_id)
+        if record and record.provider_mapping:
+            from ...libs.media_api.types import MediaItem, MediaTitle
+            media_item = MediaItem(id=media_id, title=MediaTitle(romaji="", english=""))
+        else:
+            raise HTTPException(status_code=404, detail="Media not found")
 
     title = media_item.title.romaji or media_item.title.english
     from .media import get_anime_ref
@@ -778,7 +806,7 @@ async def get_episode_streams(
                 query=title,
                 anime_id=anime_id,
                 episode=episode,
-                translation_type=ctx.config.stream.translation_type,
+                translation_type=translation_type or ctx.config.stream.translation_type,
                 resolve_direct=False,
             )
         )
@@ -1079,7 +1107,13 @@ async def renew_stream(req: RenewStreamRequest):
     network error during streaming (expired tokens, server-side kill).
     """
     try:
-        resolved = await _resolve_episode_stream(req.media_id, req.episode, provider=req.provider)
+        resolved = await _resolve_episode_stream(
+            req.media_id,
+            req.episode,
+            provider=req.provider,
+            translation_type=req.translation_type,
+            subtitle_type=req.subtitle_type,
+        )
 
         raw_stream_url = resolved["url"]
         stream_headers = resolved["headers"]

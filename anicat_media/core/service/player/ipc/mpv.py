@@ -380,6 +380,8 @@ class MpvIPCPlayer(BaseIPCPlayer):
         self.anime = anime
         self.media_item = media_item
         self.registry = registry
+        if player_params.translation_type:
+            self.stream_config.translation_type = player_params.translation_type
         self.player_state = PlayerState(
             self.stream_config,
             player_params.query,
@@ -586,11 +588,143 @@ class MpvIPCPlayer(BaseIPCPlayer):
         data = message.get("data")
         if name == "time-pos" and isinstance(data, (int, float)):
             self.player_state.stop_time_secs = data
+            self._check_and_auto_track()
         elif name == "duration" and isinstance(data, (int, float)):
             self.player_state.total_time_secs = data
+            self._check_and_auto_track()
         elif name == "percent-pos" and isinstance(data, (int, float)):
             # Percentage position changed
             pass
+
+    def _check_and_auto_track(self):
+        if not self.media_item or self.player_fetching:
+            return
+
+        stop_secs = self.player_state.stop_time_secs
+        total_secs = self.player_state.total_time_secs
+
+        if total_secs <= 0 or stop_secs <= 0:
+            return
+
+        complete_percent = self.stream_config.episode_complete_at
+        pct = (stop_secs / total_secs) * 100
+
+        if pct >= complete_percent:
+            self._trigger_progress_sync()
+
+    def _trigger_progress_sync(self):
+        current_ep = self.player_state.episode
+        if not current_ep:
+            return
+        
+        # Avoid double-triggering for the same episode
+        if getattr(self.player_state, "synced_episode", None) == current_ep:
+            return
+
+        self.player_state.synced_episode = current_ep
+
+        # Spawn background sync thread to prevent blocking player control UI
+        threading.Thread(
+            target=self._sync_progress_task,
+            args=(current_ep, self.player_state.stop_time_secs, self.player_state.total_time_secs),
+            daemon=True
+        ).start()
+
+    def _sync_progress_task(self, episode: str, stop_secs: float, total_secs: float):
+        try:
+            from anicat_media.core.context import get_ctx
+            ctx = get_ctx()
+            if not self.media_item:
+                return
+
+            # 1. Update local watch history
+            from .....libs.player.types import PlayerResult
+
+            def _to_hhmmss(sec) -> str | None:
+                if sec is None or sec <= 0:
+                    return None
+                try:
+                    total_sec = int(float(sec))
+                    h = total_sec // 3600
+                    m = (total_sec % 3600) // 60
+                    s = total_sec % 60
+                    return f"{h:02d}:{m:02d}:{s:02d}"
+                except (ValueError, TypeError):
+                    return None
+
+            result = PlayerResult(
+                episode=episode,
+                stop_time=_to_hhmmss(stop_secs),
+                total_time=_to_hhmmss(total_secs),
+            )
+            ctx.watch_history.track(self.media_item, result)
+
+            # 2. Update local registry and remote AniList tracking
+            try:
+                ep_num = int(float(episode))
+            except ValueError:
+                ep_num = 0
+
+            # Re-fetch media item from AniList to get latest user status
+            media_item = ctx.media_api.get_media_item(self.media_item.id)
+            if media_item:
+                self.media_item = media_item
+                current_progress = (
+                    media_item.user_status.progress if media_item.user_status else 0
+                )
+            else:
+                current_progress = 0
+
+            if ep_num > current_progress:
+                # Update progress in local registry
+                ctx.media_registry.update_media_index_entry(
+                    media_id=self.media_item.id, progress=str(ep_num)
+                )
+
+                # Sync with AniList
+                from .....libs.media_api.params import UpdateUserMediaListEntryParams
+                params = UpdateUserMediaListEntryParams(
+                    media_id=self.media_item.id, progress=str(ep_num)
+                )
+                ctx.media_api.update_list_entry(params)
+
+            # Increment data version to notify frontend immediately
+            ctx.data_version += 1
+            logger.info(f"Automatically tracked and synced episode {episode} progress.")
+
+        except Exception as e:
+            logger.error(f"Error in automatic background progress tracking: {e}", exc_info=True)
+
+    def _save_current_position_history(self):
+        try:
+            if not self.media_item or not self.player_state.episode:
+                return
+            from anicat_media.core.context import get_ctx
+            ctx = get_ctx()
+
+            def _to_hhmmss(sec) -> str | None:
+                if sec is None or sec <= 0:
+                    return None
+                try:
+                    total_sec = int(float(sec))
+                    h = total_sec // 3600
+                    m = (total_sec % 3600) // 60
+                    s = total_sec % 60
+                    return f"{h:02d}:{m:02d}:{s:02d}"
+                except (ValueError, TypeError):
+                    return None
+
+            from .....libs.player.types import PlayerResult
+            result = PlayerResult(
+                episode=self.player_state.episode,
+                stop_time=_to_hhmmss(self.player_state.stop_time_secs),
+                total_time=_to_hhmmss(self.player_state.total_time_secs),
+            )
+            ctx.watch_history.track(self.media_item, result)
+            ctx.data_version += 1
+            logger.info(f"Saved intermediate watch history for episode {self.player_state.episode}")
+        except Exception as e:
+            logger.error(f"Failed to save intermediate watch history: {e}")
 
     def _handle_client_message(self, message: Dict[str, Any]):
         args = message.get("args", [])
@@ -671,6 +805,7 @@ class MpvIPCPlayer(BaseIPCPlayer):
     ):
         """This function runs in a background thread to fetch episode streams."""
         try:
+            self._save_current_position_history()
             if self.anime and self.provider:
                 available_episodes = getattr(
                     self.anime.episodes, self.stream_config.translation_type
@@ -760,13 +895,22 @@ class MpvIPCPlayer(BaseIPCPlayer):
                 self.player_state.episode = target_episode
                 if self.ipc_client:
                     self.ipc_client.send_command(["loadfile", str(file_path)])
-                # time.sleep(1)
-                # self.ipc_client.send_command(["seek", 0, "absolute"])
-                # self.ipc_client.send_command(
-                #     ["set_property", "title", self.player_state.episode_title]
-                # )
                 self._show_text(f"Fetched {file_path}")
                 self.player_fetching = False
+
+                # Update frontend Now Playing status
+                if self.media_item:
+                    try:
+                        from anicat_media.api.routers.status import set_playback
+                        set_playback(
+                            media_id=self.media_item.id,
+                            media_title=self.media_item.title.english or self.media_item.title.romaji,
+                            episode=target_episode,
+                        )
+                        from anicat_media.core.context import get_ctx
+                        get_ctx().data_version += 1
+                    except Exception as e:
+                        logger.error(f"Failed to update playback status on next local episode: {e}")
 
         except Exception as e:
             logger.error(f"Episode fetch task failed: {e}")
@@ -781,6 +925,20 @@ class MpvIPCPlayer(BaseIPCPlayer):
             self.player_state.reset()
             self._show_text(f"Fetched {self.player_state.episode_title}")
             self._load_current_stream()
+
+            # Update frontend Now Playing status
+            if self.media_item:
+                try:
+                    from anicat_media.api.routers.status import set_playback
+                    set_playback(
+                        media_id=self.media_item.id,
+                        media_title=self.media_item.title.english or self.media_item.title.romaji,
+                        episode=result["target_episode"],
+                    )
+                    from anicat_media.core.context import get_ctx
+                    get_ctx().data_version += 1
+                except Exception as e:
+                    logger.error(f"Failed to update playback status on next episode: {e}")
         else:
             self._show_text(f"Error: {result['message']}")
 

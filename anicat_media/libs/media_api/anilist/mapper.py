@@ -695,30 +695,20 @@ def to_generic_notifications(
     ]
 
 
-def to_generic_global_schedule(data: dict) -> dict:
-    """Maps global airing schedule response to a simplified result."""
+def to_generic_global_schedule(data: dict) -> Optional[MediaSearchResult]:
+    """Maps global airing schedule response to a generic MediaSearchResult."""
     if not data or "data" not in data:
-        return {
-            "media": [],
-            "page_info": {
-                "total": 0,
-                "current_page": 1,
-                "has_next_page": False,
-                "per_page": 50,
-            },
-        }
+        return MediaSearchResult(
+            media=[],
+            page_info=PageInfo(total=0, current_page=1, has_next_page=False, per_page=50),
+        )
 
     page_data = data["data"].get("Page", {})
     if not page_data:
-        return {
-            "media": [],
-            "page_info": {
-                "total": 0,
-                "current_page": 1,
-                "has_next_page": False,
-                "per_page": 50,
-            },
-        }
+        return MediaSearchResult(
+            media=[],
+            page_info=PageInfo(total=0, current_page=1, has_next_page=False, per_page=50),
+        )
 
     page_info = _to_generic_page_info(page_data.get("pageInfo", {}))
     raw_schedules = page_data.get("airingSchedules", [])
@@ -744,12 +734,4 @@ def to_generic_global_schedule(data: dict) -> dict:
             logger.error(f"Failed to map schedule item: {e}")
             continue
 
-    return {
-        "media": media_list,
-        "page_info": {
-            "total": page_info.total,
-            "current_page": page_info.current_page,
-            "has_next_page": page_info.has_next_page,
-            "per_page": page_info.per_page,
-        },
-    }
+    return MediaSearchResult(page_info=page_info, media=media_list)

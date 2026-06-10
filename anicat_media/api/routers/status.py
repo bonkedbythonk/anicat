@@ -87,8 +87,6 @@ def get_logs(lines: int = 100):
         return {"logs": f"Error reading logs: {str(e)}"}
 
 
-
-
 # UX-27: MPV availability detection for onboarding
 class MpvAvailableResponse(BaseModel):
     available: bool
@@ -102,11 +100,41 @@ def mpv_available():
     if mpv_path:
         return {"available": True, "path": mpv_path}
     # Also check bundled MPV paths
+    app_dir = os.path.dirname(sys.executable)
     bundled_paths = [
-        os.path.join(
-            os.path.dirname(sys.executable), "..", "Resources", "resources", "mpv"
+        # macOS .app bundle paths
+        os.path.abspath(os.path.join(app_dir, "..", "Resources", "resources", "mpv")),
+        os.path.abspath(os.path.join(app_dir, "..", "Resources", "mpv")),
+        # Windows / Linux flat directory paths
+        os.path.abspath(os.path.join(app_dir, "resources", "mpv")),
+        os.path.abspath(os.path.join(app_dir, "resources", "mpv.exe")),
+        # Development fallback relative to this source file
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+                "web",
+                "src-tauri",
+                "resources",
+                "mpv",
+            )
         ),
-        os.path.join(os.path.dirname(sys.executable), "..", "Resources", "mpv"),
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+                "web",
+                "src-tauri",
+                "resources",
+                "mpv.exe",
+            )
+        ),
     ]
     for p in bundled_paths:
         if os.path.exists(p):
@@ -1010,22 +1038,30 @@ def test_provider(req: TestProviderRequest):
         results_list = []
         if res and hasattr(res, "results") and res.results:
             for r in res.results:
-                results_list.append({
-                    "id": getattr(r, "id", "") or "",
-                    "title": getattr(r, "title", "") or "",
-                })
+                results_list.append(
+                    {
+                        "id": getattr(r, "id", "") or "",
+                        "title": getattr(r, "title", "") or "",
+                    }
+                )
 
         streams_list = []
         if not is_manga and res and hasattr(res, "results") and res.results:
             first_res = res.results[0]
             try:
-                from anicat_media.libs.provider.anime.params import AnimeParams, EpisodeStreamsParams
+                from anicat_media.libs.provider.anime.params import (
+                    AnimeParams,
+                    EpisodeStreamsParams,
+                )
                 from anicat_media.libs.provider.anime.base import BaseAnimeProvider
+
                 # Cast to anime provider since we're in the `not is_manga` branch
                 assert isinstance(provider, BaseAnimeProvider)
                 anime_provider = provider
                 # Get detailed anime object (to extract episode list)
-                detail = anime_provider.get(AnimeParams(id=first_res.id, query=first_res.title))
+                detail = anime_provider.get(
+                    AnimeParams(id=first_res.id, query=first_res.title)
+                )
                 if detail and detail.episodes:
                     episode_num = None
                     tt: Literal["sub", "dub"] = "sub"
@@ -1057,25 +1093,31 @@ def test_provider(req: TestProviderRequest):
                                         if hasattr(link.translation_type, "value")
                                         else str(link.translation_type)
                                     )
-                                    links.append({
-                                        "link": link.link,
-                                        "hls": link.hls,
-                                        "translation_type": t_type,
-                                        "quality": link.quality,
-                                    })
+                                    links.append(
+                                        {
+                                            "link": link.link,
+                                            "hls": link.hls,
+                                            "translation_type": t_type,
+                                            "quality": link.quality,
+                                        }
+                                    )
                                 subs = []
                                 if s.subtitles:
                                     for sub in s.subtitles:
-                                        subs.append({
-                                            "url": sub.url,
-                                            "language": sub.language,
-                                        })
-                                streams_list.append({
-                                    "server": s.name,
-                                    "links": links,
-                                    "subtitles": subs,
-                                    "episode": episode_num,
-                                })
+                                        subs.append(
+                                            {
+                                                "url": sub.url,
+                                                "language": sub.language,
+                                            }
+                                        )
+                                streams_list.append(
+                                    {
+                                        "server": s.name,
+                                        "links": links,
+                                        "subtitles": subs,
+                                        "episode": episode_num,
+                                    }
+                                )
             except Exception as stream_err:
                 logger.warning(
                     f"Failed to fetch streams during provider test: {stream_err}"
@@ -1090,11 +1132,12 @@ def test_provider(req: TestProviderRequest):
         }
     except Exception as e:
         duration = (time.perf_counter() - start_time) * 1000
-        logger.exception(f"Scraper test failed for '{provider_name}' (manga={is_manga})")
+        logger.exception(
+            f"Scraper test failed for '{provider_name}' (manga={is_manga})"
+        )
         return {
             "status": "failed",
             "duration_ms": round(duration, 2),
             "result_count": 0,
             "error": str(e),
         }
-

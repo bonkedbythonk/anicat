@@ -11,7 +11,7 @@ def test_sanitize_invalid_providers():
             "provider_fallbacks": [
                 "gogoanime",
                 "hianime",  # Invalid
-                "animepahe",
+                "anizone",
                 "nonexistent",  # Invalid
             ],
             "manga_provider": "invalid_manga_provider",  # Invalid
@@ -27,7 +27,7 @@ def test_sanitize_invalid_providers():
     # Check that invalid fallbacks were removed and valid ones preserved
     assert app_config.general.provider_fallbacks == [
         ProviderName.GOGOANIME,
-        ProviderName.ANIMEPAHE,
+        ProviderName.ANIZONE,
     ]
 
     # Check that invalid manga provider fallback was used
@@ -45,11 +45,6 @@ def test_provider_server_dynamic():
     assert ps.value == server_name
 
     # Validate that AppConfig stream config supports it via Pydantic model validation
-    config_dict = {
-        "stream": {
-            "server": "AniNeko - HD-1 Sort Sub"
-        }
-    }
+    config_dict = {"stream": {"server": "AniNeko - HD-1 Sort Sub"}}
     app_config = AppConfig.model_validate(config_dict)
     assert app_config.stream.server == "AniNeko - HD-1 Sort Sub"
-

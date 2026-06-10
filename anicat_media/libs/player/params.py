@@ -38,3 +38,4 @@ class PlayerParams:
     fullscreen: bool = False
     auto_next: bool = False
     accent: str | None = None
+    translation_type: str | None = None

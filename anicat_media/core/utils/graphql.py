@@ -45,8 +45,9 @@ _TOKEN_BUCKET_REFILL_RATE = 90 / 60.0  # tokens per second
 _TOKEN_BUCKET_BURST = 5  # initial burst to allow first batch through
 
 _MIN_INTERVAL = 0.75  # minimum seconds between requests when within limit
-_RETRIES_ON_429 = 3  # how many times to retry a 429 with backoff
+_RETRIES_ON_429 = 2  # how many times to retry a 429 with backoff
 _MAX_JITTER = 0.3  # max jitter fraction added to backoff delays
+_MAX_COOLDOWN = 10.0  # cap on cool-down delay to keep the app responsive
 
 
 def _get_domain(url: str) -> str:
@@ -109,22 +110,15 @@ def _drain_token_bucket(url: str) -> None:
 def _compute_cool_down_delay(
     url: str, retry_after: float | None = None, attempt: int = 0
 ) -> float:
-    """Compute the cool-down delay after receiving a 429.
-
-    Uses the Retry-After header if available, otherwise falls back to
-    jittered exponential backoff.
-
-    Returns the delay in seconds. Does NOT sleep — caller is responsible.
-    """
     import random as _random
 
     if retry_after is not None and retry_after > 0:
-        # Use server-specified delay (add small jitter up to 10% or 1s)
-        delay = retry_after + _random.uniform(0, min(1.0, retry_after * _MAX_JITTER))
+        delay = min(retry_after, _MAX_COOLDOWN) + _random.uniform(
+            0, min(1.0, _MAX_COOLDOWN * _MAX_JITTER)
+        )
     else:
-        # Jittered exponential backoff: base * 2^attempt + random jitter
         base = 2.0
-        delay = min(base * (2**attempt), 30.0)
+        delay = min(base * (2**attempt), _MAX_COOLDOWN)
         jitter = _random.uniform(0, delay * _MAX_JITTER)
         delay += jitter
 
@@ -285,7 +279,7 @@ def execute_graphql(
     json_body = {"query": query, "variables": variables}
     domain = _get_domain(url)
     lock = _DOMAIN_LOCKS.setdefault(domain, threading.RLock())
-    in_flight = _DOMAIN_IN_FLIGHT.setdefault(domain, threading.Semaphore(1))
+    in_flight = _DOMAIN_IN_FLIGHT.setdefault(domain, threading.Semaphore(5))
 
     # ── Retry loop ──────────────────────────────────────────────────────
     # KEY DESIGN: The RLock is held ONLY for microsecond-scale state
@@ -413,9 +407,24 @@ def execute_graphql(
                 )
                 response.raise_for_status()
 
-            # -- Phase 7: Other 4xx -- don't retry --
+            # -- Phase 7: Other 4xx -- cache fallback for reads (auth/server errors) --
             released = True
             in_flight.release()
+            if response.status_code in (401, 403) and not query.strip().startswith("mutation") and not force_refresh:
+                cached_data = _cache.get(url, query, variables, ttl=float("inf"))
+                if cached_data:
+                    logger.info(
+                        f"Returning cached response for {graphql_file.name} "
+                        f"after {response.status_code} (offline fallback)."
+                    )
+                    return Response(
+                        status_code=200,
+                        content=json.dumps(cached_data).encode("utf-8"),
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Offline-Fallback": "true",
+                        },
+                    )
             logger.error(
                 f"[AniList] API request failed with status code "
                 f"{response.status_code}"

@@ -1,6 +1,10 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 import logging
+import random
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..deps import get_ctx
 
 
@@ -29,13 +33,46 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# In-memory cache for scraped episodes/chapters
+# Key: (media_id, provider_name, translation_type)
+# Value: (timestamp, result_list)
+_episodes_cache = {}
 
-def _filter_pending_deletions(result: MediaSearchResult) -> MediaSearchResult:
-    """Filter out items pending AniList deletion from a list result."""
+
+def _merge_and_filter_media_result(result: Optional[MediaSearchResult]) -> Optional[MediaSearchResult]:
+    """Filter out items pending AniList deletion and merge local registry entries for live updates."""
+    if not result:
+        return result
+
     from .user import _pending_deletions  # noqa: PLC0415
+    ctx = get_ctx()
 
-    if _pending_deletions and result.media:
-        result.media = [m for m in result.media if m.id not in _pending_deletions]
+    if result.media:
+        # 1. Filter out items pending deletion
+        if _pending_deletions:
+            result.media = [m for m in result.media if m.id not in _pending_deletions]
+            if result.page_info:
+                result.page_info.total = len(result.media)
+
+        # 2. Enrich and override with local registry status/progress/score
+        for media in result.media:
+            local_entry = ctx.media_registry.get_media_index_entry(media.id)
+            if local_entry:
+                if not media.user_status:
+                    from ...libs.media_api.types import UserListItem  # noqa: PLC0415
+                    media.user_status = UserListItem(
+                        status=local_entry.status,
+                        progress=int(local_entry.progress) if local_entry.progress.isdigit() else 0,
+                        score=local_entry.score,
+                    )
+                else:
+                    if local_entry.progress.isdigit():
+                        media.user_status.progress = int(local_entry.progress)
+                    if local_entry.status:
+                        media.user_status.status = local_entry.status
+                    if local_entry.score is not None:
+                        media.user_status.score = local_entry.score
+
     return result
 
 
@@ -56,12 +93,14 @@ def get_schedule(
         end = int((now + timedelta(days=days_after)).timestamp())
 
         ctx = get_ctx()
-        return ctx.media_api.get_global_airing_schedule(
-            airingAt_greater=start,
-            airingAt_lesser=end,
-            page=page,
-            per_page=per_page,
-            media_ids=media_ids,
+        return _merge_and_filter_media_result(
+            ctx.media_api.get_global_airing_schedule(
+                airingAt_greater=start,
+                airingAt_lesser=end,
+                page=page,
+                per_page=per_page,
+                media_ids=media_ids,
+            )
         )
     except Exception as e:
         logger.error(f"Failed to fetch schedule: {e}")
@@ -111,11 +150,13 @@ def get_trending(type: MediaType = MediaType.ANIME, page: int = 1, per_page: int
             sort=MediaSort.TRENDING_DESC,
         )
         result = ctx.media_api.search_media(params)
-        return result or MediaSearchResult(
-            page_info=PageInfo(
-                total=0, current_page=1, has_next_page=False, per_page=per_page
-            ),
-            media=[],
+        return _merge_and_filter_media_result(
+            result or MediaSearchResult(
+                page_info=PageInfo(
+                    total=0, current_page=1, has_next_page=False, per_page=per_page
+                ),
+                media=[],
+            )
         )
     except HTTPException:
         raise
@@ -138,11 +179,13 @@ def get_seasonal(type: MediaType = MediaType.ANIME, page: int = 1, per_page: int
             seasonYear=year,
         )
         result = ctx.media_api.search_media(params)
-        return result or MediaSearchResult(
-            page_info=PageInfo(
-                total=0, current_page=1, has_next_page=False, per_page=per_page
-            ),
-            media=[],
+        return _merge_and_filter_media_result(
+            result or MediaSearchResult(
+                page_info=PageInfo(
+                    total=0, current_page=1, has_next_page=False, per_page=per_page
+                ),
+                media=[],
+            )
         )
     except HTTPException:
         raise
@@ -183,7 +226,7 @@ def search_media(
             status=status,
             format_in=format_list,
         )
-        return ctx.media_api.search_media(params)
+        return _merge_and_filter_media_result(ctx.media_api.search_media(params))
     except HTTPException:
         raise
     except Exception as e:
@@ -244,21 +287,31 @@ def get_media_details(media_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Phase 2.5: Smart playlist endpoint-level cache (5-minute TTL)
+# to eliminate recomputation on rapid homepage revisits.
+_smart_playlist_cache: Optional[tuple[float, MediaSearchResult]] = None
+_SMART_PLAYLIST_CACHE_TTL = 300  # 5 minutes
+
+
 @router.get("/smart-playlist", response_model=MediaSearchResult)
 def get_smart_playlist():
     """Generate a personalized Smart Playlist.
 
-    Combines three sources, ranked by priority:
-    1. Currently watching shows with new unaired episodes (direct schedule lookup)
-    2. Recommendations based on your highest-rated shows
-    3. Your plan-to-watch list (shuffled subset)
+    Combines two sources:
+    1. Recommendations based on your highest-rated shows
+    2. Your plan-to-watch list (shuffled subset)
 
     Rate-limit safety: Maximum 8 GraphQL requests (well under 90 req/min limit).
     All list queries use 5-minute cache; recommendation queries use 1-hour cache.
+    Result cached for 5 minutes at endpoint level to eliminate recomputation on
+    rapid homepage revisits.
     """
-    import random
-    import time as _time
-
+    global _smart_playlist_cache
+    # Phase 2.5: Return cached result if still valid (5-minute TTL)
+    if _smart_playlist_cache is not None:
+        cached_time, cached_result = _smart_playlist_cache
+        if time.time() - cached_time < _SMART_PLAYLIST_CACHE_TTL:
+            return cached_result
     from ...libs.media_api.params import (
         UserMediaListSearchParams,
         MediaRecommendationParams,
@@ -269,35 +322,7 @@ def get_smart_playlist():
     all_items: list = []
     seen_ids: set[int] = set()
 
-    # ── Source 1: New episodes from your watching list ──
-    try:
-        watching = ctx.media_api.search_media_list(
-            UserMediaListSearchParams(
-                status=UserMediaListStatus.WATCHING,
-                type=MediaType.ANIME,
-                sort=UserMediaListSort.UPDATED_TIME_DESC,
-                per_page=20,
-            )
-        )
-        if watching and watching.media:
-            # Find shows with upcoming episodes the user hasn't watched
-            watching_ids = [m.id for m in watching.media]
-            schedule = ctx.media_api.get_global_airing_schedule(
-                airingAt_greater=int(_time.time()),
-                airingAt_lesser=int(_time.time()) + 86400 * 7,
-                per_page=50,
-                media_ids=watching_ids,
-            )
-            if schedule and hasattr(schedule, "media") and schedule.media:
-                for item in schedule.media:
-                    if item.id not in seen_ids:
-                        item.playlist_reason = "New episode soon"
-                        all_items.append(item)
-                        seen_ids.add(item.id)
-    except Exception as e:
-        logger.warning(f"Smart playlist source 1 (schedule) failed: {e}")
-
-    # ── Source 2: Recommendations from your top-rated shows ──
+    # ── Source 1: Recommendations from your top-rated shows ──
     try:
         completed = ctx.media_api.search_media_list(
             UserMediaListSearchParams(
@@ -313,23 +338,44 @@ def get_smart_playlist():
                 for m in completed.media
                 if m.user_status and (m.user_status.score or 0) >= 70
             ][:5]
-            for show in top_shows:
-                try:
-                    recs = ctx.media_api.get_recommendation_for(
-                        MediaRecommendationParams(id=show.id, per_page=15)
-                    )
-                    if recs:
-                        for rec in recs:
-                            if rec.id not in seen_ids:
-                                rec.playlist_reason = f"Because you liked {show.title.romaji or show.title.english}"
-                                all_items.append(rec)
-                                seen_ids.add(rec.id)
-                except Exception:
-                    continue
-    except Exception as e:
-        logger.warning(f"Smart playlist source 2 (recommendations) failed: {e}")
+            # Phase 2.1: Parallelize recommendation GraphQL calls using the full
+            # semaphore capacity of 5 concurrent requests. Reduces worst-case
+            # wait from ~5.25s (serial MIN_INTERVAL stacking) to ~1.5s.
+            if top_shows:
+                results_lock = threading.Lock()
 
-    # ── Source 3: Plan-to-watch (shuffled, capped) ──
+                def _fetch_recommendations(show):
+                    try:
+                        return (
+                            ctx.media_api.get_recommendation_for(
+                                MediaRecommendationParams(id=show.id, per_page=15)
+                            ),
+                            show,
+                        )
+                    except Exception:
+                        return None, show
+
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = {
+                        executor.submit(_fetch_recommendations, show): show
+                        for show in top_shows
+                    }
+                    for future in as_completed(futures, timeout=15):
+                        try:
+                            recs, show = future.result()
+                            if recs:
+                                with results_lock:
+                                    for rec in recs:
+                                        if rec.id not in seen_ids:
+                                            rec.playlist_reason = f"Because you liked {show.title.romaji or show.title.english}"
+                                            all_items.append(rec)
+                                            seen_ids.add(rec.id)
+                        except Exception:
+                            continue
+    except Exception as e:
+        logger.warning(f"Smart playlist source 1 (recommendations) failed: {e}")
+
+    # ── Source 2: Plan-to-watch (shuffled, capped) ──
     try:
         planning = ctx.media_api.search_media_list(
             UserMediaListSearchParams(
@@ -340,8 +386,6 @@ def get_smart_playlist():
             )
         )
         if planning and planning.media:
-            import random
-
             sample = planning.media[:]
             random.shuffle(sample)
             for item in sample[:10]:
@@ -352,7 +396,7 @@ def get_smart_playlist():
     except Exception as e:
         logger.warning(f"Smart playlist source 3 (planning) failed: {e}")
 
-    return _filter_pending_deletions(
+    result = _merge_and_filter_media_result(
         MediaSearchResult(
             page_info=PageInfo(
                 total=len(all_items),
@@ -363,6 +407,8 @@ def get_smart_playlist():
             media=all_items,
         )
     )
+    _smart_playlist_cache = (time.time(), result)
+    return result
 
 
 def get_anime_ref(ctx, media, media_id: int, provider_name: Optional[str] = None):
@@ -524,23 +570,55 @@ def clear_provider_cache(media_id: int):
             record.provider_mapping.clear()
             ctx.media_registry.save_media_record(record)
             logger.info(f"Cleared provider cache for media {media_id}")
+        
+        # Clear the episodes cache for this media_id
+        keys_to_remove = [k for k in _episodes_cache if k[0] == media_id]
+        for k in keys_to_remove:
+            _episodes_cache.pop(k, None)
+            
         return {"status": "cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{media_id:int}/episodes")
-def get_media_episodes(media_id: int, provider: Optional[str] = None):
+def get_media_episodes(
+    media_id: int,
+    provider: Optional[str] = None,
+    translation_type: Optional[str] = None,
+):
     """Get episodes/chapters for a given media from the configured provider."""
     try:
         ctx = get_ctx()
         media = ctx.media_api.get_media_item(media_id)
         if not media:
-            raise HTTPException(status_code=404, detail="Media not found")
+            # AniList may be offline — check registry for cached provider slug
+            from ...libs.provider.anime.types import ProviderName
+            p_name = provider or ctx.config.general.provider.value
+            record = ctx.media_registry.get_media_record(media_id)
+            if record and record.provider_mapping and p_name in record.provider_mapping:
+                from ...libs.media_api.types import MediaItem, MediaTitle, MediaType as Mt
+                media = MediaItem(id=media_id, title=MediaTitle(romaji="", english=""))
+            else:
+                raise HTTPException(status_code=404, detail="Media not found")
 
         from ...libs.media_api.types import MediaType
 
         is_manga = media.type == MediaType.MANGA
+
+        # Cache lookup
+        p_name = provider or (ctx.config.general.manga_provider.value if is_manga else ctx.config.general.provider.value)
+        trans_type = translation_type or (None if is_manga else ctx.config.stream.translation_type)
+        cache_key = (media_id, p_name, trans_type)
+        now = time.time()
+
+        if cache_key in _episodes_cache:
+            cache_time, cached_episodes = _episodes_cache[cache_key]
+            status_str = media.status.value if hasattr(media.status, "value") else str(media.status)
+            ttl = 43200 if status_str == "FINISHED" else 600
+            if now - cache_time < ttl:
+                logger.debug(f"Serving cached episodes for media {media_id} from {p_name}")
+                return cached_episodes
 
         if is_manga:
             from ...libs.provider.manga.params import MangaParams
@@ -574,6 +652,7 @@ def get_media_episodes(media_id: int, provider: Optional[str] = None):
                         else False,
                     }
                 )
+            _episodes_cache[cache_key] = (now, result)
             return result
         else:
             # --- Anime Logic ---
@@ -601,7 +680,7 @@ def get_media_episodes(media_id: int, provider: Optional[str] = None):
                 {e.episode_number: e for e in record.media_episodes} if record else {}
             )
 
-            trans_type = ctx.config.stream.translation_type
+            trans_type = translation_type or ctx.config.stream.translation_type
             available_eps = getattr(full_anime.episodes, trans_type)
             if not available_eps:
                 available_eps = full_anime.episodes.sub or []
@@ -627,6 +706,7 @@ def get_media_episodes(media_id: int, provider: Optional[str] = None):
                         else False,
                     }
                 )
+            _episodes_cache[cache_key] = (now, result)
             return result
     except HTTPException:
         raise

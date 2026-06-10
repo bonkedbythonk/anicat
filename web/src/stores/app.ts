@@ -6,7 +6,6 @@ interface PlaybackState {
   episode: Episode | null;
   provider: string;
   server: string | null;
-  subtitleType: "sub" | "dub";
 }
 
 interface AppState {
@@ -69,7 +68,6 @@ export const usePlaybackStore = create<PlaybackState>(() => ({
   episode: null,
   provider: "gogoanime",
   server: null,
-  subtitleType: "sub",
 }));
 
 export function setPlayback(
@@ -77,9 +75,8 @@ export function setPlayback(
   episode: Episode,
   provider: string,
   server: string | null,
-  subtitleType: "sub" | "dub",
 ) {
-  usePlaybackStore.setState({ item, episode, provider, server, subtitleType });
+  usePlaybackStore.setState({ item, episode, provider, server });
 }
 
 export function clearPlayback() {
@@ -88,7 +85,6 @@ export function clearPlayback() {
     episode: null,
     provider: "gogoanime",
     server: null,
-    subtitleType: "sub",
   });
 }
 

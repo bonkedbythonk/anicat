@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from typing import Iterator, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
@@ -57,46 +58,67 @@ class GogoAnime(BaseAnimeProvider):
 
     def search(self, params: SearchParams) -> Optional[SearchResults]:
         search_url = f"{constants.SEARCH_URL}?keyword={params.query}"
-        try:
-            response = self.client.get(search_url, follow_redirects=True)
-            response.raise_for_status()
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = self.client.get(search_url, allow_redirects=True)
+                response.raise_for_status()
 
-            if response.status_code == 404:
-                logger.debug(f"No results found on AniNeko for '{params.query}'")
-                return None
+                if response.status_code == 404:
+                    logger.debug(f"No results found on AniNeko for '{params.query}'")
+                    return None
 
-            results = mappers.map_to_search_results(response.text)
-            if not results or not results.results:
-                logger.debug(f"No search results parsed for '{params.query}'")
-                return None
+                results = mappers.map_to_search_results(response.text)
+                if not results or not results.results:
+                    logger.debug(f"No search results parsed for '{params.query}'")
+                    return None
 
-            return results
-        except Exception as e:
-            logger.error(f"Failed to search AniNeko for '{params.query}': {e}")
-            return None
+                return results
+            except Exception as e:
+                last_error = e
+                logger.debug(
+                    f"AniNeko search attempt {attempt + 1}/3 failed for "
+                    f"'{params.query}': {e}"
+                )
+                if attempt < 2:
+                    time.sleep(1 + attempt)
+                continue
+        logger.error(f"Failed to search AniNeko for '{params.query}' after 3 attempts: {last_error}")
+        return None
 
     def get(self, params: AnimeParams) -> Optional[Anime]:
-        try:
-            slug = params.id.split("?")[0]
-            detail_url = f"{constants.WATCH_URL}/{slug}"
-            response = self.client.get(detail_url, follow_redirects=True)
-            response.raise_for_status()
+        slug = params.id.split("?")[0]
+        detail_url = f"{constants.WATCH_URL}/{slug}"
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = self.client.get(detail_url, allow_redirects=True)
+                response.raise_for_status()
 
-            if response.status_code == 404:
-                logger.warning(f"AniNeko anime not found: '{slug}'")
-                return None
+                if response.status_code == 404:
+                    logger.warning(f"AniNeko anime not found: '{slug}'")
+                    return None
 
-            anime = mappers.map_to_anime_result(slug, response.text)
-            if not anime:
-                logger.warning(f"Failed to parse anime details for '{slug}'")
-                return None
+                anime = mappers.map_to_anime_result(slug, response.text)
+                if not anime:
+                    logger.warning(f"Failed to parse anime details for '{slug}'")
+                    return None
 
-            return anime
-        except Exception:
-            logger.debug(
-                f"GogoAnime ID lookup failed for '{params.id}', "
-                f"trying query-based search..."
-            )
+                return anime
+            except Exception as e:
+                last_error = e
+                logger.debug(
+                    f"AniNeko get attempt {attempt + 1}/3 failed for "
+                    f"'{params.id}': {e}"
+                )
+                if attempt < 2:
+                    time.sleep(1 + attempt)
+                continue
+
+        logger.debug(
+            f"AniNeko ID lookup failed for '{params.id}' after 3 attempts "
+            f"({last_error}), trying query-based search..."
+        )
 
         if not params.query:
             logger.debug(f"No query provided to fallback search for '{params.id}'")
@@ -123,7 +145,7 @@ class GogoAnime(BaseAnimeProvider):
 
             slug = matched.id.split("?")[0]
             detail_url = f"{constants.WATCH_URL}/{slug}"
-            response = self.client.get(detail_url, follow_redirects=True)
+            response = self.client.get(detail_url, allow_redirects=True)
             response.raise_for_status()
 
             anime = mappers.map_to_anime_result(slug, response.text)
@@ -146,8 +168,25 @@ class GogoAnime(BaseAnimeProvider):
 
         def _fetch_servers(s: str) -> Optional[list]:
             url = f"{constants.WATCH_URL}/{s}/ep-{ep_num}"
-            resp = self.client.get(url, follow_redirects=True)
-            resp.raise_for_status()
+            last_error = None
+            for attempt in range(2):
+                try:
+                    resp = self.client.get(url, allow_redirects=True)
+                    resp.raise_for_status()
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        f"AniNeko episode fetch attempt {attempt + 1}/2 "
+                        f"failed for '{s}' ep {ep_num}: {e}"
+                    )
+                    if attempt < 1:
+                        time.sleep(1)
+                    continue
+            else:
+                if last_error:
+                    raise last_error
+                return None
             if resp.status_code == 404:
                 logger.warning(f"Episode not found on AniNeko: '{s}' episode {ep_num}")
                 return None
@@ -345,7 +384,7 @@ class GogoAnime(BaseAnimeProvider):
             return f"https://otakuvid.com/public/stream/{vid}/master.m3u8"
 
         try:
-            response = self.client.get(embed_url, follow_redirects=True)
+            response = self.client.get(embed_url, allow_redirects=True)
             response.raise_for_status()
 
             text = response.text

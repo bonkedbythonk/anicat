@@ -96,21 +96,7 @@ impl AppState {
             let db_path = db_path.clone();
             std::thread::spawn(move || {
                 if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                    let _ = conn.execute_batch(
-                        "CREATE TABLE IF NOT EXISTS media_records (
-                            media_id INTEGER PRIMARY KEY,
-                            provider_mapping TEXT NOT NULL DEFAULT '{}',
-                            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-                        );
-                        CREATE TABLE IF NOT EXISTS watched_episodes (
-                            media_id INTEGER NOT NULL,
-                            episode_number INTEGER NOT NULL,
-                            stop_time INTEGER NOT NULL DEFAULT 0,
-                            duration INTEGER NOT NULL DEFAULT 0,
-                            watched_at TEXT NOT NULL DEFAULT (datetime('now')),
-                            PRIMARY KEY (media_id, episode_number)
-                        );",
-                    );
+                    let _ = crate::registry::service::initialize(&conn);
                 }
             })
             .join()

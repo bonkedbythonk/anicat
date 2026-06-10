@@ -1,12 +1,9 @@
 import logging
 
-from httpx import Client
-
 from .base import BaseAnimeProvider
 from .types import ProviderName
 
 # Explicit imports — avoids importlib fragility and helps PyInstaller detect modules
-from .animepahe.provider import AnimePahe
 from .anizone.provider import AniZone
 from .gogoanime.provider import GogoAnime
 
@@ -17,7 +14,6 @@ class AnimeProviderFactory:
     """Factory for creating anime provider instances."""
 
     _PROVIDER_CLASSES = {
-        "animepahe": AnimePahe,
         "anizone": AniZone,
         "gogoanime": GogoAnime,
     }
@@ -43,15 +39,29 @@ class AnimeProviderFactory:
         if provider_class is None:
             raise ValueError(f"Unsupported anime provider: {provider_name.value}")
 
-        client = Client(
-            headers={
+        if key == "gogoanime":
+            from curl_cffi import requests
+
+            session = requests.Session(impersonate="chrome131")
+            session.headers.update({
                 "User-Agent": random_user_agent(),
                 "Accept-Encoding": "identity",
                 **provider_class.HEADERS,
-            },
-            follow_redirects=True,
-            verify=False,
-        )
+            })
+            session.verify = False
+            client = session
+        else:
+            from httpx import Client
+
+            client = Client(
+                headers={
+                    "User-Agent": random_user_agent(),
+                    "Accept-Encoding": "identity",
+                    **provider_class.HEADERS,
+                },
+                follow_redirects=True,
+                verify=False,
+            )
 
         return provider_class(client)
 

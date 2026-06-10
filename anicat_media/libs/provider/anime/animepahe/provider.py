@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from collections import OrderedDict
 from typing import Iterator, Optional, TypeVar, Callable
 
@@ -39,6 +40,7 @@ class AnimePahe(BaseAnimeProvider):
         self._cloudflare_solved = False
         self._last_error: Optional[str] = None
         self._cache: OrderedDict[str, object] = OrderedDict()
+        self._last_solve_attempt = 0.0
 
     def _cached(self, key: str, compute: Callable[[], T]) -> T:
         if key in self._cache:
@@ -80,9 +82,7 @@ class AnimePahe(BaseAnimeProvider):
                     ANIMEPAHE_BASE, follow_redirects=True, timeout=10.0
                 )
                 if resp.status_code == 200:
-                    logger.debug(
-                        "AnimePahe accessible without Cloudflare challenge"
-                    )
+                    logger.debug("AnimePahe accessible without Cloudflare challenge")
                     self._cloudflare_solved = True
                     return
             except Exception:
@@ -127,7 +127,17 @@ class AnimePahe(BaseAnimeProvider):
 
     def _ensure_connection(self):
         """Re-solve Cloudflare challenge if the provider is currently marked unavailable or not yet solved."""
+        now = time.time()
+        # If we failed recently, don't spam attempts (5-minute cooldown)
+        if not self._available and now - self._last_solve_attempt < 300:
+            logger.debug(
+                "Skipping Cloudflare solve for AnimePahe: "
+                "in cooldown period after previous failure."
+            )
+            return
+
         if not self._available or not self._cloudflare_solved:
+            self._last_solve_attempt = now
             try:
                 self._solve_cloudflare()
                 self._available = True
@@ -148,6 +158,15 @@ class AnimePahe(BaseAnimeProvider):
         except Exception:
             # Network error on first attempt — try re-solving and retry
             logger.warning("AnimePahe request failed, re-trying Cloudflare bypass")
+            now = time.time()
+            if now - self._last_solve_attempt < 300:
+                logger.warning(
+                    "Skipping Cloudflare solve retry for AnimePahe: in cooldown period."
+                )
+                self._available = False
+                self._last_error = "AnimePahe request failed and solve is in cooldown."
+                raise
+            self._last_solve_attempt = now
             try:
                 self._solve_cloudflare()
                 return method(*args, **kwargs)
@@ -159,6 +178,15 @@ class AnimePahe(BaseAnimeProvider):
 
         if response.status_code == 403:
             logger.warning("Got 403 from AnimePahe, re-trying Cloudflare bypass")
+            now = time.time()
+            if now - self._last_solve_attempt < 300:
+                logger.warning(
+                    "Skipping Cloudflare solve retry for AnimePahe: in cooldown period."
+                )
+                self._available = False
+                self._last_error = "AnimePahe returned 403 and solve is in cooldown."
+                return response
+            self._last_solve_attempt = now
             try:
                 self._solve_cloudflare()
                 response = method(*args, **kwargs)
@@ -341,7 +369,9 @@ class AnimePahe(BaseAnimeProvider):
 
     def _anime_page_loader(self, m, id, sort, page) -> AnimePaheAnimePage:
         key = _make_cache_key("_anime_page_loader", m, id, sort, page)
-        return self._cached(key, lambda: self._anime_page_loader_impl(m, id, sort, page))
+        return self._cached(
+            key, lambda: self._anime_page_loader_impl(m, id, sort, page)
+        )
 
     def _anime_page_loader_impl(self, m, id, sort, page) -> AnimePaheAnimePage:
         url_params = {
@@ -385,9 +415,7 @@ class AnimePahe(BaseAnimeProvider):
             )
 
         url = f"{ANIMEPAHE_BASE}/play/{resolved_id}/{episode.session_id}"
-        response = self._request_with_retry(
-            self.client.get, url, follow_redirects=True
-        )
+        response = self._request_with_retry(self.client.get, url, follow_redirects=True)
         response.raise_for_status()
 
         c = get_element_by_id("resolutionMenu", response.text)

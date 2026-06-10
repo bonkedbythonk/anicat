@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Child, Command};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration};
+use tokio::sync::{Mutex, RwLock};
+use tokio::time::{sleep, Duration, Instant};
+
+// ── Public types ──────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimeRef {
@@ -33,76 +35,66 @@ pub struct AnimeInfo {
     pub episodes: Vec<Episode>,
 }
 
-#[derive(Clone)]
+// ── Manager ───────────────────────────────────────────────
+
+const IDLE_TIMEOUT_SECS: u64 = 60;
+const READY_RETRY_MS: u64 = 100;
+const MAX_READY_ATTEMPTS: u32 = 50;
+
+struct ScraperProcess {
+    child: Child,
+    port: u16,
+    last_used: Instant,
+}
+
 pub struct ScraperManager {
-    process: Arc<RwLock<Option<Child>>>,
-    port: Arc<RwLock<Option<u16>>>,
+    process: Arc<Mutex<Option<ScraperProcess>>>,
     http_client: reqwest::Client,
     python_path: String,
     scraper_script: String,
 }
 
-impl ScraperManager {
-    pub fn new(http_client: reqwest::Client, python_path: String, scraper_script: String) -> Self {
+impl Clone for ScraperManager {
+    fn clone(&self) -> Self {
         Self {
-            process: Arc::new(RwLock::new(None)),
-            port: Arc::new(RwLock::new(None)),
+            process: self.process.clone(),
+            http_client: self.http_client.clone(),
+            python_path: self.python_path.clone(),
+            scraper_script: self.scraper_script.clone(),
+        }
+    }
+}
+
+impl ScraperManager {
+    pub fn new(
+        http_client: reqwest::Client,
+        python_path: String,
+        scraper_script: String,
+    ) -> Self {
+        Self {
+            process: Arc::new(Mutex::new(None)),
             http_client,
             python_path,
             scraper_script,
         }
     }
 
-    pub async fn ensure_running(&self) -> Result<u16, String> {
-        if let Some(port) = *self.port.read().await {
-            return Ok(port);
-        }
-
-        let port = find_free_port()?;
-
-        let child = Command::new(&self.python_path)
-            .arg(&self.scraper_script)
-            .arg("--port")
-            .arg(port.to_string())
-            .spawn()
-            .map_err(|e| format!("Failed to start scraper: {}", e))?;
-
-        *self.process.write().await = Some(child);
-        *self.port.write().await = Some(port);
-
-        // Wait for the service to be ready
-        for _ in 0..20 {
-            let url = format!("http://127.0.0.1:{}/health", port);
-            if let Ok(resp) = self.http_client.get(&url).send().await {
-                if resp.status().is_success() {
-                    // Start idle monitor
-                    let http_client = self.http_client.clone();
-                    let process = self.process.clone();
-                    let port_arc = self.port.clone();
-                    tokio::spawn(async move {
-                        idle_monitor(http_client, process, port_arc, port).await;
-                    });
-                    return Ok(port);
-                }
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-
-        Err("Scraper failed to start within timeout".into())
-    }
-
     pub async fn search(&self, query: &str) -> Result<Vec<AnimeRef>, String> {
         let port = self.ensure_running().await?;
-        let url = format!("http://127.0.0.1:{}/search?query={}", port, urlencoding::encode(query));
+        let url = format!(
+            "http://127.0.0.1:{}/search?query={}",
+            port,
+            percent_encode(query)
+        );
         let resp = self
             .http_client
             .get(&url)
+            .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Search request failed: {}", e))?;
-        resp.json()
-            .await
-            .map_err(|e| format!("Failed to parse search results: {}", e))
+            .map_err(|e| format!("Scraper search failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse search: {}", e))
     }
 
     pub async fn get_anime(&self, slug: &str) -> Result<AnimeInfo, String> {
@@ -111,12 +103,12 @@ impl ScraperManager {
         let resp = self
             .http_client
             .get(&url)
+            .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Get request failed: {}", e))?;
-        resp.json()
-            .await
-            .map_err(|e| format!("Failed to parse anime info: {}", e))
+            .map_err(|e| format!("Scraper get_anime failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse anime: {}", e))
     }
 
     pub async fn get_streams(
@@ -132,116 +124,140 @@ impl ScraperManager {
         let resp = self
             .http_client
             .get(&url)
+            .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Streams request failed: {}", e))?;
-        resp.json()
-            .await
-            .map_err(|e| format!("Failed to parse stream servers: {}", e))
+            .map_err(|e| format!("Scraper streams failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse streams: {}", e))
+    }
+
+    // ── Lifecycle ──────────────────────────────────────
+
+    async fn ensure_running(&self) -> Result<u16, String> {
+        // Check if existing process is alive
+        {
+            let mut proc = self.process.lock().await;
+            if let Some(ref mut sp) = *proc {
+                // Check if child is still alive
+                let exited = sp.child.try_wait().map(|r| r.is_some()).unwrap_or(true);
+                if !exited {
+                    sp.last_used = Instant::now();
+                    return Ok(sp.port);
+                }
+                // Process died — clean up
+                *proc = None;
+            }
+        }
+
+        // Start new process
+        self.start_process().await
+    }
+
+    async fn start_process(&self) -> Result<u16, String> {
+        let port = find_free_port()?;
+
+        let mut child = Command::new(&self.python_path)
+            .arg(&self.scraper_script)
+            .arg("--port")
+            .arg(port.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to start scraper: {}", e))?;
+
+        // Wait for readiness with backoff
+        let mut delay_ms = READY_RETRY_MS;
+        for attempt in 0..MAX_READY_ATTEMPTS {
+            sleep(Duration::from_millis(delay_ms)).await;
+
+            let health_url = format!("http://127.0.0.1:{}/health", port);
+            match self.http_client.get(&health_url).timeout(Duration::from_secs(2)).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let sp = ScraperProcess {
+                        child,
+                        port,
+                        last_used: Instant::now(),
+                    };
+                    *self.process.lock().await = Some(sp);
+
+                    // Spawn idle watchdog
+                    let process = self.process.clone();
+                    let http_client = self.http_client.clone();
+                    tokio::spawn(async move {
+                        idle_watchdog(process, http_client).await;
+                    });
+
+                    log::info!("Scraper ready on port {} (attempt {})", port, attempt + 1);
+                    return Ok(port);
+                }
+                _ => {
+                    // Increase delay on each attempt
+                    delay_ms = (delay_ms * 2).min(2000);
+                }
+            }
+        }
+
+        // Kill the process if it didn't become ready
+        let _ = child.kill();
+        Err(format!(
+            "Scraper failed to become ready within {} attempts",
+            MAX_READY_ATTEMPTS
+        ))
     }
 }
 
-async fn idle_monitor(
-    client: reqwest::Client,
-    process: Arc<RwLock<Option<Child>>>,
-    port_arc: Arc<RwLock<Option<u16>>>,
-    port: u16,
-) {
-    let mut idle_seconds = 0u32;
+// ── Idle watchdog ─────────────────────────────────────────
 
+async fn idle_watchdog(
+    process: Arc<Mutex<Option<ScraperProcess>>>,
+    _client: reqwest::Client,
+) {
     loop {
         sleep(Duration::from_secs(5)).await;
 
-        // Check if process is still alive
-        {
-            let mut proc_guard = process.write().await;
-            if let Some(ref mut child) = *proc_guard {
-                match child.try_wait() {
-                    Ok(Some(_)) => {
-                        // Process exited
-                        *proc_guard = None;
-                        *port_arc.write().await = None;
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(_) => {
-                        *proc_guard = None;
-                        *port_arc.write().await = None;
-                        return;
-                    }
-                }
+        let mut proc = process.lock().await;
+        let should_kill = if let Some(ref mut sp) = *proc {
+            // Check if child exited on its own
+            if let Ok(Some(_status)) = sp.child.try_wait() {
+                true
             } else {
-                *port_arc.write().await = None;
-                return;
-            }
-        }
-
-        // Check if service was recently used
-        let health_url = format!("http://127.0.0.1:{}/last_used", port);
-        let was_active = if let Ok(resp) = client.get(&health_url).send().await {
-            if resp.status().is_success() {
-                if let Ok(data) = resp.json::<serde_json::Value>().await {
-                    data.get("seconds_since_last_use")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0)
-                        < 10
-                } else {
-                    false
-                }
-            } else {
-                false
+                // Check idle time
+                sp.last_used.elapsed().as_secs() >= IDLE_TIMEOUT_SECS
             }
         } else {
-            false
+            return;
         };
 
-        if !was_active {
-            idle_seconds += 5;
-            if idle_seconds >= 60 {
-                log::info!("Scraper idle for 60s, terminating");
-                let mut proc_guard = process.write().await;
-                if let Some(ref mut child) = *proc_guard {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                *proc_guard = None;
-                *port_arc.write().await = None;
-                return;
+        if should_kill {
+            log::info!("Stopping idle scraper (pid={})", if let Some(ref sp) = *proc { sp.child.id() } else { 0 });
+            if let Some(mut sp) = proc.take() {
+                let _ = sp.child.kill();
+                let _ = sp.child.wait();
             }
-        } else {
-            idle_seconds = 0;
+            return;
         }
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────
 
 fn find_free_port() -> Result<u16, String> {
-    use std::net::TcpListener;
-    let listener =
-        TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Failed to find free port: {}", e))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to get port: {}", e))?
-        .port();
-    drop(listener);
-    Ok(port)
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("No free port: {}", e))?;
+    listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
 }
 
-// urlencoding is a simple encoding; for production use a proper crate
-mod urlencoding {
-    pub fn encode(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        for byte in s.bytes() {
-            match byte {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                    result.push(byte as char)
-                }
-                b' ' => result.push('+'),
-                _ => {
-                    result.push('%');
-                    result.push_str(&format!("{:02X}", byte));
-                }
+fn percent_encode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(byte as char);
             }
+            b' ' => result.push('+'),
+            _ => result.push_str(&format!("%{:02X}", byte)),
         }
-        result
     }
+    result
 }

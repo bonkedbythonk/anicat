@@ -162,13 +162,12 @@ class GeneralConfig(BaseConfig):
         default=defaults.GENERAL_WELCOME_SCREEN, description=desc.GENERAL_WELCOME_SCREEN
     )
     provider: ProviderName = Field(
-        default=ProviderName.ANIZONE,
+        default=ProviderName.GOGOANIME,
         description=desc.GENERAL_PROVIDER,
     )
     provider_fallbacks: List[ProviderName] = Field(
         default_factory=lambda: [
-            ProviderName.GOGOANIME,
-            ProviderName.ANIMEPAHE,
+            ProviderName.ANIZONE,
         ],
         description="Providers to try in order when the primary provider fails to find results or streams.",
     )
@@ -245,6 +244,7 @@ class GeneralConfig(BaseConfig):
     @classmethod
     def sanitize_provider(cls, v):
         from ...libs.provider.anime.types import ProviderName
+
         valid_values = {e.value for e in ProviderName}
         if isinstance(v, str):
             if v not in valid_values:
@@ -258,6 +258,7 @@ class GeneralConfig(BaseConfig):
     @classmethod
     def sanitize_provider_fallbacks(cls, v):
         from ...libs.provider.anime.types import ProviderName
+
         valid_values = {e.value for e in ProviderName}
         if isinstance(v, list):
             sanitized = []
@@ -275,6 +276,7 @@ class GeneralConfig(BaseConfig):
     @classmethod
     def sanitize_manga_provider(cls, v):
         from ...libs.provider.manga.types import MangaProviderName
+
         valid_values = {e.value for e in MangaProviderName}
         if isinstance(v, str):
             if v not in valid_values:

@@ -30,6 +30,8 @@ export interface UsePaginatedListReturn<T> {
   hasMore: boolean;
   /** Load the next page (no-op if already loading or no more pages). */
   loadMore: () => Promise<void>;
+  /** Whether the latest fetch resulted in an error. */
+  isError: boolean;
 }
 
 /**
@@ -45,12 +47,13 @@ export function usePaginatedList<T>({
   fetchFn,
   enabled = true,
 }: UsePaginatedListOptions<T>): UsePaginatedListReturn<T> {
-  const {
+    const {
     data,
     isLoading,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
+    isError,
   } = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam = 1 }) => fetchFn(pageParam),
@@ -77,5 +80,6 @@ export function usePaginatedList<T>({
     loadingMore: isFetchingNextPage,
     hasMore: !!hasNextPage,
     loadMore,
+    isError,
   };
 }

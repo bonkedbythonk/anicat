@@ -39,17 +39,11 @@ function syncLiquidGlass(enabled: boolean) {
  * Users can toggle via Settings. The setting persists in localStorage.
  */
 export function useLiquidGlass() {
-  const [enabled, setEnabled] = useState(false);
-
-  // Initialize from localStorage on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
+  const [enabled, setEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
     const stored = localStorage.getItem(STORAGE_KEY);
-    const isEnabled = stored === "1";
-    setEnabled(isEnabled);
-    syncLiquidGlass(isEnabled);
-  }, []);
+    return stored === "1";
+  });
 
   // React to style switches (e.g. user changes UI skin in Settings)
   useEffect(() => {

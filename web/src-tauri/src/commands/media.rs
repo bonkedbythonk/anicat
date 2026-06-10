@@ -251,6 +251,30 @@ pub async fn clear_provider_cache(
     registry::service::clear_provider_cache(&db, media_id)
 }
 
+#[tauri::command]
+pub async fn debug_provider_streams(
+    state: State<'_, AppState>,
+    media_id: i64,
+    episode_number: i32,
+    provider: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let provider_name = provider.unwrap_or_else(|| "gogoanime".to_string());
+    let db = state.open_db()?;
+    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
+        .ok_or_else(|| {
+            format!(
+                r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"Go to Episodes tab and open this anime — the provider slug auto-searches on first load"}}"#,
+                media_id, provider_name
+            )
+        })?;
+    let mut result = state.scraper_manager.debug_streams(&slug, episode_number).await?;
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("resolved_slug".to_string(), serde_json::json!(slug));
+        obj.insert("provider".to_string(), serde_json::json!(provider_name));
+    }
+    Ok(result)
+}
+
 // ── Local library commands ────────────────────────────────
 
 #[tauri::command]

@@ -1,19 +1,18 @@
-"""AniNeko provider — curl_cffi scraping with verified CSS selectors.
+"""AniNeko provider — verified against live site DOM (2026-06-11).
 
-Real DOM structure (verified 2026-06-10):
-  Search: article.nv-anime-card > a.nv-anime-thumb[href^="/watch/"] (slug)
-          div.nv-anime-title > a (title)
-  Detail: article.nv-info-episode-item > a.nv-info-episode-main (ep link)
-          strong (episode number: "Episode N")
-          span (episode title)
-  Servers: regex data-video="URL" from episode page HTML
+Real DOM structure:
+  Search: article.nv-anime-card > a.nv-anime-thumb (slug), img alt (title)
+  Episode page: button.nv-server-btn with data-video=URL, data-tab=tab_N
+     <span>Hard Sub</span> / <span>DUB</span> for group labels
+  Embed URLs: third-party sites that require follow-up fetch for stream URLs
 """
 
 import re
 import asyncio
-from dataclasses import dataclass, field
-from typing import Optional
-
+import json
+import time
+from dataclasses import dataclass, field, asdict
+from typing import Optional, List, Tuple
 from curl_cffi import requests
 from selectolax.parser import HTMLParser
 
@@ -47,6 +46,8 @@ class StreamServer:
     quality: Optional[str] = None
     is_m3u8: Optional[bool] = None
     headers: Optional[dict] = None
+    group: str = "unknown"
+    source_type: str = "unknown"
 
 
 class AniNekoProvider:
@@ -67,8 +68,11 @@ class AniNekoProvider:
     async def search(self, query: str) -> list[AnimeRef]:
         for attempt in range(3):
             try:
-                url = f"{BASE_URL}/browser"
-                resp = self.session.get(url, params={"keyword": query}, timeout=20)
+                resp = self.session.get(
+                    f"{BASE_URL}/browser",
+                    params={"keyword": query},
+                    timeout=20,
+                )
                 resp.raise_for_status()
                 return self._parse_search(resp.text)
             except Exception as e:
@@ -80,8 +84,7 @@ class AniNekoProvider:
     async def get(self, slug: str) -> Optional[AnimeInfo]:
         for attempt in range(3):
             try:
-                url = f"{BASE_URL}/watch/{slug}"
-                resp = self.session.get(url, timeout=20)
+                resp = self.session.get(f"{BASE_URL}/watch/{slug}", timeout=20)
                 resp.raise_for_status()
                 return self._parse_anime(resp.text)
             except Exception as e:
@@ -90,158 +93,313 @@ class AniNekoProvider:
                 await self._sleep(1 + attempt)
         return None
 
-    async def streams(self, slug: str, episode: int) -> list[StreamServer]:
+    async def streams(
+        self, slug: str, episode: int, debug: bool = False
+    ) -> Tuple[List[StreamServer], List[dict]]:
+        """Multi-pass extraction with optional debug output."""
+        debug_log = []
+        url = f"{BASE_URL}/watch/{slug}/ep-{episode}"
+
         for attempt in range(3):
             try:
-                url = f"{BASE_URL}/watch/{slug}/ep-{episode}"
-                resp = self.session.get(url, timeout=20)
+                resp = self.session.get(url, timeout=30)
                 resp.raise_for_status()
-                return self._parse_servers(resp.text)
+                html = resp.text
+                page_title = self._extract_title(html)
+
+                if debug:
+                    debug_log.append({
+                        "pass": "request",
+                        "status": resp.status_code,
+                        "final_url": str(resp.url),
+                        "html_length": len(html),
+                        "page_title": page_title,
+                    })
+
+                sources: List[StreamServer] = []
+
+                # Pass A — DOM data-video elements
+                sources_a, debug_a = self._pass_dom(html)
+                sources.extend(sources_a)
+                if debug:
+                    debug_log.append(debug_a)
+
+                # Pass B — Regex over raw HTML
+                sources_b, debug_b = self._pass_regex(html)
+                sources.extend(sources_b)
+                if debug:
+                    debug_log.append(debug_b)
+
+                # Pass C — Script JSON blobs
+                sources_c, debug_c = self._pass_script_json(html)
+                sources.extend(sources_c)
+                if debug:
+                    debug_log.append(debug_c)
+
+                # Pass D — Server groups (Hard Sub / Soft Sub / DUB)
+                sources_d, debug_d = self._pass_server_groups(html)
+                sources.extend(sources_d)
+                if debug:
+                    debug_log.append(debug_d)
+
+                # Deduplicate by URL
+                seen = set()
+                unique = []
+                for s in sources:
+                    if s.url and s.url not in seen:
+                        seen.add(s.url)
+                        unique.append(s)
+
+                if debug:
+                    return unique, debug_log
+                return unique, []
+
             except Exception as e:
                 if attempt == 2:
+                    if debug:
+                        return [], [{"pass": "error", "error": str(e)}]
                     raise RuntimeError(
                         f"Stream resolution failed after 3 attempts: {e}"
                     )
                 await self._sleep(1 + attempt)
-        return []
+
+        return [], []
 
     # ── Parsers ────────────────────────────────────────
 
     def _parse_search(self, html: str) -> list[AnimeRef]:
         tree = HTMLParser(html)
         results = []
-
         for card in tree.css("article.nv-anime-card"):
             thumb = card.css_first("a.nv-anime-thumb")
-            title_div = card.css_first(".nv-anime-title")
-            title_a = title_div.css_first("a") if title_div else None
-
             href = thumb.attributes.get("href", "") if thumb else ""
             if not href or not href.startswith("/watch/"):
                 continue
-
-            slug = href.replace("/watch/", "").split("?")[0]
-
-            # Title: prefer img alt from thumbnail, fallback to title div link
-            title = ""
-            if thumb:
-                img = thumb.css_first("img")
-                if img:
-                    title = img.attributes.get("alt", "")
-            if not title and title_a:
-                title = title_a.text(strip=True)
+            slug = href.replace("/watch/", "")
+            img = thumb.css_first("img") if thumb else None
+            title = img.attributes.get("alt", "") if img else ""
+            if not title:
+                title_div = card.css_first(".nv-anime-title")
+                if title_div:
+                    title_a = title_div.css_first("a")
+                    if title_a:
+                        title = title_a.text(strip=True)
             if not title:
                 continue
-
-            # Year: check meta or search text for 4-digit year
-            year = None
-            meta = card.css_first(".nv-anime-meta")
-            if meta:
-                year_match = re.search(r"\b(19|20)\d{2}\b", meta.text(strip=True))
-                if year_match:
-                    year = int(year_match.group())
-
-            results.append(AnimeRef(id=slug, title=title, year=year))
-
+            results.append(AnimeRef(id=slug, title=title))
         return results
 
     def _parse_anime(self, html: str) -> Optional[AnimeInfo]:
         tree = HTMLParser(html)
-
-        # Title: from h1 or title tag
         title = ""
         h1 = tree.css_first("h1")
         if h1:
             title = h1.text(strip=True)
         if not title:
-            title_match = re.search(r"<title>([^-]+)", html)
-            if title_match:
-                title = title_match.group(1).strip()
+            m = re.search(r"<title>([^-]+)", html)
+            if m:
+                title = m.group(1).strip()
         if not title:
             return None
 
-        # Episodes: from the episode grid items
         episodes = []
         for ep_card in tree.css("article.nv-info-episode-item"):
             ep_link = ep_card.css_first("a.nv-info-episode-main")
             if not ep_link:
                 continue
-
             href = ep_link.attributes.get("href", "")
             number_el = ep_link.css_first("strong")
             title_el = ep_link.css_first("span")
-
             ep_num = 0
             if number_el:
-                num_text = number_el.text(strip=True)
-                match = re.search(r"\d+", num_text)
-                if match:
-                    ep_num = int(match.group())
-
-            # Also try href fallback: /watch/slug/ep-N
+                m = re.search(r"\d+", number_el.text(strip=True))
+                if m:
+                    ep_num = int(m.group())
             if ep_num == 0 and href:
-                match = re.search(r"/ep-(\d+)", href)
-                if match:
-                    ep_num = int(match.group(1))
-
+                m = re.search(r"/ep-(\d+)", href)
+                if m:
+                    ep_num = int(m.group(1))
             if ep_num <= 0:
                 continue
-
-            ep_title = title_el.text(strip=True) if title_el else None
-            episodes.append(Episode(number=ep_num, title=ep_title))
-
+            episodes.append(
+                Episode(
+                    number=ep_num,
+                    title=title_el.text(strip=True) if title_el else None,
+                )
+            )
         return AnimeInfo(title=title, episodes=episodes)
 
-    def _parse_servers(self, html: str) -> list[StreamServer]:
-        servers = []
+    def _extract_title(self, html: str) -> str:
+        m = re.search(r"<title>([^<]+)</title>", html)
+        return m.group(1).strip() if m else ""
 
-        # Find all data-video attributes and their surrounding context
-        matches = list(
-            re.finditer(
-                r'<(\w+)[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</\1>',
-                html,
-                re.DOTALL | re.IGNORECASE,
-            )
+    # ── Pass A: DOM data-video elements ─────────────────
+
+    def _pass_dom(self, html: str) -> Tuple[List[StreamServer], dict]:
+        found, notes = [], []
+        # data-video attributes on server buttons
+        matches = re.findall(
+            r'<button[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</button>',
+            html,
+            re.DOTALL | re.IGNORECASE,
         )
+        for url, rest_attrs, inner in matches:
+            data_tab = ""
+            tab_m = re.search(r'data-tab\s*=\s*"([^"]+)"', rest_attrs)
+            if tab_m:
+                data_tab = tab_m.group(1)
+            # Server name from text inside button
+            name = re.sub(r"<[^>]+>", "", inner).strip()[:40]
+            # Group from span inside button
+            group = "unknown"
+            span_m = re.search(r"<span[^>]*>([^<]+)</span>", inner)
+            if span_m:
+                group = span_m.group(1).strip().lower().replace(" ", "_")
+                if "hard" in group:
+                    group = "hard_sub"
+                elif "soft" in group:
+                    group = "soft_sub"
+                elif "dub" in group:
+                    group = "dub"
 
-        for match in matches:
-            embed_url = match.group(2)
-            tag_content = match.group(4)
-
-            # Extract server name from tag content
-            name = re.sub(r"<[^>]+>", "", tag_content).strip()
-
-            # If no name from content, look at text before this element
-            if not name or len(name) < 2:
-                before = html[: match.start()]
-                text_before = re.findall(r">\s*([^<]{2,40})\s*<", before)
-                if text_before:
-                    name = text_before[-1].strip()
-
-            if not name or len(name) < 2:
-                name = f"Server {len(servers) + 1}"
-
-            servers.append(
+            found.append(
                 StreamServer(
-                    name=name.strip(),
-                    url=embed_url,
-                    is_m3u8=True,
+                    name=name or f"server_{len(found)}",
+                    url=url,
+                    group=group,
+                    source_type="dom_data_video",
                 )
             )
+        # Also check iframe src
+        iframes = re.findall(r'<iframe[^>]+src\s*=\s*"([^"]+)"', html)
+        for url in iframes:
+            found.append(
+                StreamServer(
+                    name="iframe",
+                    url=url,
+                    group="unknown",
+                    source_type="dom_iframe",
+                )
+            )
+        return found, {"pass": "dom_iframe", "found": len(found), "notes": notes}
 
-        # Fallback: just find all data-video URLs
-        if not servers:
-            data_urls = re.findall(r'data-video\s*=\s*"([^"]+)"', html)
-            for i, url in enumerate(data_urls):
-                servers.append(
+    # ── Pass B: Regex over raw HTML ─────────────────────
+
+    def _pass_regex(self, html: str) -> Tuple[List[StreamServer], dict]:
+        found = []
+        patterns = [
+            r'data-video\s*=\s*"([^"]+)"',
+            r'src\s*=\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"',
+            r'"((?:https?:)?//[^"]+\.(?:m3u8|mp4)[^"]*)"',
+            r'"((?:https?:)?//[^"]+/embed/[^"]*)"',
+        ]
+        for pat in patterns:
+            for url in re.findall(pat, html):
+                found.append(
                     StreamServer(
-                        name=f"Server {i + 1}",
+                        name="regex",
                         url=url,
-                        is_m3u8=True,
+                        group="unknown",
+                        source_type="regex",
+                        is_m3u8=(".m3u8" in url) or None,
                     )
                 )
+        return found, {
+            "pass": "regex",
+            "found": len(found),
+            "notes": [],
+        }
 
-        return servers
+    # ── Pass C: Script JSON blobs ───────────────────────
+
+    def _pass_script_json(self, html: str) -> Tuple[List[StreamServer], dict]:
+        found, notes = [], []
+        scripts = re.findall(
+            r"<script[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE
+        )
+        for i, s in enumerate(scripts):
+            s = s.strip()
+            if not s:
+                continue
+            # Try to find JSON objects in the script
+            json_objects = re.findall(r"\{[^{}]*\}", s)
+            for obj_str in json_objects:
+                try:
+                    obj = json.loads(obj_str)
+                except (json.JSONDecodeError, ValueError):
+                    # Try braces balancing
+                    depth = 0
+                    start = obj_str.find("{")
+                    if start < 0:
+                        start = s.find(obj_str)
+                        if start < 0:
+                            continue
+                        obj_str = s[start : start + 500]
+                    try:
+                        obj = json.loads(obj_str)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                # Look for video URLs in the JSON
+                for key in ["sources", "file", "src", "url", "stream", "hls", "video"]:
+                    if isinstance(obj, dict) and key in obj:
+                        val = obj[key]
+                        if isinstance(val, str):
+                            found.append(
+                                StreamServer(
+                                    name=f"script_{key}",
+                                    url=val,
+                                    group="unknown",
+                                    source_type="script_json",
+                                    is_m3u8=(".m3u8" in val) or None,
+                                )
+                            )
+                        elif isinstance(val, list):
+                            for item in val:
+                                if isinstance(item, str):
+                                    found.append(
+                                        StreamServer(
+                                            name=f"script_{key}",
+                                            url=item,
+                                            group="unknown",
+                                            source_type="script_json",
+                                            is_m3u8=(".m3u8" in item) or None,
+                                        )
+                                    )
+            if found:
+                notes.append(f"Script #{i} produced {len(found)} URLs")
+                break
+        return found, {
+            "pass": "script_json",
+            "found": len(found),
+            "notes": notes,
+        }
+
+    # ── Pass D: Server groups ───────────────────────────
+
+    def _pass_server_groups(self, html: str) -> Tuple[List[StreamServer], dict]:
+        found = []
+        # Match server buttons with data-video AND extract group from span
+        matches = re.findall(
+            r'data-video\s*=\s*"([^"]+)"',
+            html,
+        )
+        for url in matches:
+            # Already captured in Pass A as dom_data_video, but add as
+            # embedding-friendly version for multi-server display
+            if url not in {s.url for s in found}:
+                found.append(
+                    StreamServer(
+                        name="server",
+                        url=url,
+                        group="unknown",
+                        source_type="server_group",
+                    )
+                )
+        return found, {
+            "pass": "server_groups",
+            "found": len(found),
+            "notes": [],
+        }
 
     async def _sleep(self, seconds: float):
         await asyncio.sleep(seconds)
@@ -255,7 +413,6 @@ if __name__ == "__main__":
         provider = AniNekoProvider()
         print("Testing AniNeko scraper...\n")
 
-        # Search
         print("Search: naruto")
         results = await provider.search("naruto")
         print(f"  Found {len(results)} results")
@@ -266,7 +423,6 @@ if __name__ == "__main__":
             print("  FAILED: no search results")
             return
 
-        # Get episodes
         slug = results[0].id
         print(f"\nGet episodes: {slug}")
         info = await provider.get(slug)
@@ -278,13 +434,16 @@ if __name__ == "__main__":
         else:
             print("  FAILED: no anime info")
 
-        # Streams for first episode
         if info and info.episodes:
             ep_num = info.episodes[0].number
-            print(f"\nStream servers: {slug} ep {ep_num}")
-            servers = await provider.streams(slug, ep_num)
-            print(f"  Found {len(servers)} servers")
-            for s in servers[:3]:
-                print(f"    {s.name}: {s.url[:80]}...")
+            slug2 = "classroom-of-the-elite-iv"
+            print(f"\nDebug streams: {slug2} ep 1")
+            sources, debug = await provider.streams(slug2, 1, debug=True)
+            print(f"  Found {len(sources)} sources")
+            for s in sources[:5]:
+                print(f"    [{s.source_type}] {s.name}: {s.url[:80]}...")
+            print(f"\n  Debug log: {len(debug)} passes")
+            for d in debug:
+                print(f"    {d.get('pass', 'unknown')}: {d.get('found', '?')} items")
 
     asyncio.run(main())

@@ -555,12 +555,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               </div>
             )}
 
+
             {/* Tabs */}
             <div className="space-y-6">
               <div className="flex border-b border-white/[0.06] pb-0 relative">
                 {([
                   "episodes",
-                  "characters",
+                  "characters", 
                   "more"
                 ] as const).map((tab) => (
                   <button
@@ -592,6 +593,29 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       {!isManga && (
                         <div className="flex items-center justify-between mb-3">
                           <p className="text-xs text-muted-foreground">Streaming source</p>
+                          <div className="flex items-center gap-2">
+                          {typeof import.meta !== 'undefined' && import.meta.env?.DEV && (
+                            <button
+                              onClick={() => {
+                                const { invoke } = require('@tauri-apps/api/core');
+                                invoke("debug_provider_streams", {
+                                  mediaId: item.id,
+                                  episodeNumber: 1,
+                                  provider: selectedProvider,
+                                }).then((data: any) => {
+                                  const win = window.open("", "_blank", "width=900,height=700");
+                                  if (win) {
+                                    win.document.write("<html><head><title>Provider Debug</title><style>body{margin:0;background:#0a0a0a;color:#e0e0e0;font:12px monospace}pre{padding:16px;white-space:pre-wrap;word-break:break-all}</style></head><body><pre>" + JSON.stringify(data, null, 2) + "</pre></body></html>");
+                                  }
+                                }).catch((err: any) => {
+                                  alert("Debug error: " + String(err));
+                                });
+                              }}
+                              className="text-[10px] px-2 py-1 rounded-md bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 font-mono hover:bg-yellow-500/20"
+                            >
+                              Debug Provider
+                            </button>
+                          )}
                           <select
                             value={selectedProvider}
                             onChange={(e) => setSelectedProvider(e.target.value)}
@@ -599,6 +623,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                           >
                             <option value="gogoanime">AniNeko</option>
                           </select>
+                          </div>
                         </div>
                       )}
                       <EpisodeList 

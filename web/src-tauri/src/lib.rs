@@ -47,6 +47,7 @@ pub fn run() {
             commands::media::search_provider,
             commands::media::map_provider_slug,
             commands::media::clear_provider_cache,
+            commands::media::debug_provider_streams,
             commands::media::get_library,
             commands::media::add_to_library,
             commands::media::remove_from_library,

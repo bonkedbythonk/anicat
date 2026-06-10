@@ -132,6 +132,27 @@ impl ScraperManager {
         serde_json::from_str(&body).map_err(|e| format!("Parse streams: {}", e))
     }
 
+    pub async fn debug_streams(
+        &self,
+        slug: &str,
+        episode: i32,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/debug/streams?slug={}&episode={}",
+            port, slug, episode
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|e| format!("Debug streams request failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse debug response: {}", e))
+    }
+
     // ── Lifecycle ──────────────────────────────────────
 
     async fn ensure_running(&self) -> Result<u16, String> {

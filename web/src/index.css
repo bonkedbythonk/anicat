@@ -244,6 +244,18 @@ html.light .glass-fixed {
   border-right: 1px solid var(--border-color);
 }
 
+/* Detail drawer */
+.media-detail-drawer {
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-left: 1px solid var(--border-color);
+}
+
+html.light .media-detail-drawer {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+
 .scroll-container {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;

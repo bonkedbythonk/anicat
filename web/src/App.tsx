@@ -19,6 +19,7 @@ import { MediaDetail } from "@/components/media/MediaDetail";
 import { AnimePlayer } from "@/components/media/AnimePlayer";
 import { Toast } from "@/components/shared/Toast";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useTheme } from "@/hooks/useTheme";
 
 async function loadConfig() {
   try {
@@ -33,6 +34,7 @@ export default function App() {
   const { currentView, selectedItem, setConnectionState, openDetail, closeDetail } = useAppStore();
 
   useKeyboardShortcuts();
+  useTheme();
 
   const checkConnection = useCallback(async () => {
     try {

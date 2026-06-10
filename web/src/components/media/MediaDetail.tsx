@@ -245,6 +245,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const queryClient = useQueryClient();
   const appState = useAppStore();
+  const selectItem = appState.openDetail;
 
 
   const title = fullItem?.title?.english || fullItem?.title?.romaji || item?.title?.english || item?.title?.romaji || '';
@@ -680,7 +681,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 {activeTab === "recommendations" && (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     {recommendations.map(rec => (
-                      <button key={rec.id} onClick={() => appState.selectItem(rec)} className="group space-y-2 text-left">
+                      <button key={rec.id} onClick={() => selectItem(rec)} className="group space-y-2 text-left">
                         <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
                           <img src={rec.cover_image.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                         </div>
@@ -702,7 +703,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         return (
                           <button
                             key={rel.id}
-                            onClick={() => appState.selectItem(rel)}
+                            onClick={() => selectItem(rel)}
                             className={`w-full flex items-center space-x-4 p-3 rounded-2xl border transition-all text-left group ${
                               isMainSeason
                                 ? "bg-accent/[0.04] border-accent/20 hover:bg-accent/[0.08]"

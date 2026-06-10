@@ -5,6 +5,8 @@ import { setQueryClient } from "@/lib/events";
 import App from "./App";
 import "./index.css";
 
+document.documentElement.classList.add("dark");
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

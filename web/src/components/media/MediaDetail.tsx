@@ -35,7 +35,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
   const [isTrailerVisible, setIsTrailerVisible] = useState(false);
-  const [activeTab, setActiveTab] = useState<"episodes" | "sources" | "characters" | "reviews" | "recommendations" | "seasons">("episodes");
+  const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "more">("episodes");
   // Two-step delete confirm (replaces window.confirm which is broken in Tauri WebView)
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -50,7 +50,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     staleTime: 60_000,
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("anizone");
+  const [selectedProvider, setSelectedProvider] = useState<string>("gogoanime");
 
   useEffect(() => {
     if (config?.general?.provider) {
@@ -114,21 +114,12 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   });
 
   const {
-    data: reviews = [],
-  } = useQuery({
-    queryKey: ["media-reviews", item.id],
-    queryFn: () => mediaApi.getReviews(item.id),
-    staleTime: 600_000,  // 10 min
-    enabled: activeTab === "reviews",
-  });
-
-  const {
     data: recommendations = [],
   } = useQuery({
     queryKey: ["media-recommendations", item.id],
     queryFn: () => mediaApi.getRecommendations(item.id),
     staleTime: 600_000,  // 10 min
-    enabled: activeTab === "recommendations",
+    enabled: activeTab === "more",
   });
 
   const {
@@ -137,7 +128,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     queryKey: ["media-relations", item.id],
     queryFn: () => mediaApi.getRelations(item.id),
     staleTime: 600_000,  // 10 min — relations are static
-    enabled: activeTab === "seasons",
+    enabled: activeTab === "more",
   });
 
   const [hasTriggeredInitial, setHasTriggeredInitial] = useState(false);
@@ -566,186 +557,150 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
             {/* Tabs */}
             <div className="space-y-6">
-              <div className="flex space-x-1 p-1 bg-foreground/5 border border-border rounded-2xl">
+              <div className="flex border-b border-white/[0.06] pb-0 relative">
                 {([
                   "episodes",
-                  ...(!isManga ? ["sources"] : []),
                   "characters",
-                  "reviews",
-                  "recommendations",
-                  "seasons"
+                  "more"
                 ] as const).map((tab) => (
-                  <button 
-                    key={tab} 
-                    onClick={() => setActiveTab(tab as any)} 
-                    className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all ${activeTab === tab ? "bg-accent text-white shadow-lg" : "text-muted-foreground hover:text-foreground"}`}
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab as any)}
+                    className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${
+                      activeTab === tab ? "text-white" : "text-gray-400 hover:text-white"
+                    }`}
                   >
                     {tab === "episodes" ? (isManga ? "Chapters" : "Episodes") : tab}
+                    {activeTab === tab && (
+                      <motion.div layoutId="tab-indicator"
+                        className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full" />
+                    )}
                   </button>
                 ))}
               </div>
 
-              <div className="animate-fade-in min-h-[300px]">
-                {activeTab === "episodes" && (
-                  <EpisodeList 
-                    mediaId={item.id} 
-                    episodes={episodes} 
-                    loading={loadingEps} 
-                    progress={fullItem.user_status?.progress} 
-                    isManga={isManga} 
-                    onRead={onRead} 
-                    onPlayEpisode={(epNum, prov, serv) => {
-                      if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv);
-                      onClose(); // Automatically close detail drawer upon playing
-                    }}
-                    playerType={config?.stream?.player_type}
-                    selectedProvider={selectedProvider}
-                    onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)} 
-                    nextAiringEpisode={fullItem.next_airing?.episode}
-                    onRetry={async () => {
-                      // Clear the backend provider cache first, THEN invalidate
-                      // the React Query cache so the refetch hits a fresh search.
-                      await mediaApi.clearProviderCache(item.id).catch(() => {});
-                      queryClient.invalidateQueries({
-                        queryKey: ["media-episodes", item.id],
-                        refetchType: "all",
-                      });
-                    }}
-                  />
-                )}
-                {activeTab === "sources" && !isManga && (
-                  <div className="space-y-4 animate-fade-in">
-                    <div className="p-5 rounded-2xl bg-foreground/[0.02] border border-border space-y-3">
-                      <div className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Source Provider</div>
-                      <div className="flex flex-wrap gap-2">
-                        {["anizone", "gogoanime", "animepahe"].map((prov) => {
-                          const displayName = prov === "anizone" ? "AniZone" : prov === "gogoanime" ? "AniNeko" : "AnimePahe";
-                          const isActive = selectedProvider === prov;
-                          return (
-                            <button
-                              key={prov}
-                              onClick={() => setSelectedProvider(prov)}
-                              className={`px-4 py-2 text-xs font-bold rounded-xl border transition-all duration-300 active:scale-95 ${
-                                isActive
-                                  ? "bg-accent/15 border-accent text-accent shadow-lg shadow-accent/10"
-                                  : "bg-foreground/5 border-transparent text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                              }`}
-                            >
-                              {displayName}
-                            </button>
-                          );
-                        })}
+              <div className="min-h-[300px]">
+                <AnimatePresence mode="wait">
+                  {activeTab === "episodes" && (
+                    <motion.div
+                      key="episodes"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      {!isManga && (
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-xs text-muted-foreground">Streaming source</p>
+                          <select
+                            value={selectedProvider}
+                            onChange={(e) => setSelectedProvider(e.target.value)}
+                            className="text-xs bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-foreground outline-none"
+                          >
+                            <option value="gogoanime">AniNeko</option>
+                          </select>
+                        </div>
+                      )}
+                      <EpisodeList 
+                        mediaId={item.id} 
+                        episodes={episodes} 
+                        loading={loadingEps} 
+                        progress={fullItem.user_status?.progress} 
+                        isManga={isManga} 
+                        onRead={onRead} 
+                        onPlayEpisode={(epNum, prov, serv) => {
+                          if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv);
+                          onClose();
+                        }}
+                        playerType={config?.stream?.player_type}
+                        selectedProvider={selectedProvider}
+                        onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)} 
+                        nextAiringEpisode={fullItem.next_airing?.episode}
+                        onRetry={async () => {
+                          await mediaApi.clearProviderCache(item.id).catch(() => {});
+                          queryClient.invalidateQueries({
+                            queryKey: ["media-episodes", item.id],
+                            refetchType: "all",
+                          });
+                        }}
+                      />
+                    </motion.div>
+                  )}
+                  {activeTab === "characters" && (
+                    <motion.div
+                      key="characters"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      <div className="grid grid-cols-2 gap-4">
+                        {loadingChars ? (
+                          <div className="col-span-2 py-20 flex justify-center">
+                            <Loader2 className="animate-spin text-accent" size={24} />
+                          </div>
+                        ) : characters.length > 0 ? (
+                          characters.map(char => (
+                            <div key={char.id || char.name.full} className="flex items-center space-x-3 p-3 bg-foreground/[0.02] border border-border rounded-2xl hover:bg-foreground/[0.04] transition-colors group character-card">
+                              {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
+                              <div className="min-w-0">
+                                <div className="text-[13px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
+                                {char.description && <div className="text-[10px] text-muted-foreground line-clamp-1">{char.description.replace(/<[^>]*>?/gm, '')}</div>}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="col-span-2 py-20 text-center text-muted-foreground text-xs font-bold">No character data available.</div>
+                        )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground leading-relaxed mt-2">
-                        Select which provider is used to fetch anime episode links and download streams.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {activeTab === "characters" && (
-                  <div className="grid grid-cols-2 gap-4">
-                    {loadingChars ? (
-                      <div className="col-span-2 py-20 flex justify-center">
-                        <Loader2 className="animate-spin text-accent" size={24} />
-                      </div>
-                    ) : characters.length > 0 ? (
-                      characters.map(char => (
-                        <div key={char.id || char.name.full} className="flex items-center space-x-3 p-3 bg-foreground/[0.02] border border-border rounded-2xl hover:bg-foreground/[0.04] transition-colors group character-card">
-                          {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
-                          <div className="min-w-0">
-                            <div className="text-[13px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
-                            {char.description && <div className="text-[10px] text-muted-foreground line-clamp-1">{char.description.replace(/<[^>]*>?/gm, '')}</div>}
+                    </motion.div>
+                  )}
+                  {activeTab === "more" && (
+                    <motion.div
+                      key="more"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      {recommendations.length > 0 ? (
+                        <div className="space-y-4">
+                          <p className="text-xs font-semibold text-foreground">Recommendations</p>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                            {recommendations.map(rec => (
+                              <button key={rec.id} onClick={() => selectItem(rec)} className="group space-y-2 text-left">
+                                <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
+                                  <img src={rec.cover_image.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                </div>
+                                <div className="text-[11px] font-bold text-muted-foreground line-clamp-1 group-hover:text-foreground transition-colors">{rec.title.english || rec.title.romaji}</div>
+                              </button>
+                            ))}
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="col-span-2 py-20 text-center text-muted-foreground text-xs font-bold">No character data available.</div>
-                    )}
-                  </div>
-                )}
-                {activeTab === "reviews" && (
-                  <div className="space-y-4">
-                    {reviews.length > 0 ? (
-                      reviews.map((rev, idx) => (
-                        <div key={idx} className="p-5 bg-foreground/[0.02] border border-border rounded-2xl space-y-3 review-card">
-                           {rev.summary && <div className="text-xs font-black text-foreground/90 tracking-wide uppercase italic leading-snug">"{rev.summary}"</div>}
-                           <div className="text-xs text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: rev.body.substring(0, 300) + '...' }} />
-                        </div>
-                      ))
-                    ) : (
-                      <div className="py-20 text-center text-muted-foreground text-xs font-bold">No reviews found.</div>
-                    )}
-                  </div>
-                )}
-                {activeTab === "recommendations" && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {recommendations.map(rec => (
-                      <button key={rec.id} onClick={() => selectItem(rec)} className="group space-y-2 text-left">
-                        <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
-                          <img src={rec.cover_image.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                        </div>
-                        <div className="text-[11px] font-bold text-muted-foreground line-clamp-1 group-hover:text-foreground transition-colors">{rec.title.english || rec.title.romaji}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {activeTab === "seasons" && (
-                  <div className="space-y-3">
-                    {relations.length > 0 ? (
-                      relations.map(rel => {
-                        const relLabel = rel.relation_type
-                          ? rel.relation_type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-                          : "Related";
-                        const isSequel = rel.relation_type === "SEQUEL";
-                        const isPrequel = rel.relation_type === "PREQUEL";
-                        const isMainSeason = isSequel || isPrequel;
-                        return (
-                          <button
-                            key={rel.id}
-                            onClick={() => selectItem(rel)}
-                            className={`w-full flex items-center space-x-4 p-3 rounded-2xl border transition-all text-left group ${
-                              isMainSeason
-                                ? "bg-accent/[0.04] border-accent/20 hover:bg-accent/[0.08]"
-                                : "bg-foreground/[0.02] border-border hover:bg-foreground/[0.04]"
-                            }`}
-                          >
-                            <div className={`w-12 h-16 rounded-lg overflow-hidden flex-shrink-0 border ${isMainSeason ? "border-accent/30" : "border-border"}`}>
-                              {rel.cover_image?.large ? (
-                                <img src={rel.cover_image.large} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full bg-foreground/5 flex items-center justify-center text-muted-foreground text-[8px] font-bold">N/A</div>
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center space-x-2">
-                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                  isMainSeason ? "bg-accent/15 text-accent" : "bg-foreground/10 text-muted-foreground"
-                                }`}>
-                                  {relLabel}
-                                </span>
-                                {rel.format && (
-                                  <span className="text-[9px] font-medium text-muted-foreground/60">{rel.format.replace(/_/g, " ")}</span>
+                      ) : (
+                        <div className="py-20 text-center text-muted-foreground text-xs font-bold">No additional content.</div>
+                      )}
+                      {relations.length > 0 && (
+                        <div className="space-y-4 mt-6">
+                          <p className="text-xs font-semibold text-foreground">Related</p>
+                          <div className="grid grid-cols-2 gap-4">
+                            {relations.map(rel => (
+                              <button key={rel.id} onClick={() => selectItem(rel)} className="flex items-start gap-3 group text-left">
+                                {rel.cover_image?.large && (
+                                  <img src={rel.cover_image.large} className="w-12 h-16 rounded-lg object-cover shrink-0" />
                                 )}
-                              </div>
-                              <div className="text-[12px] font-bold text-foreground group-hover:text-accent transition-colors truncate mt-1">
-                                {rel.title.english || rel.title.romaji}
-                              </div>
-                              <div className="flex items-center space-x-3 mt-1 text-[10px] text-muted-foreground">
-                                {rel.episodes && <span>{rel.episodes} episodes</span>}
-                                {rel.status && <span className="capitalize">{rel.status.toLowerCase().replace(/_/g, " ")}</span>}
-                              </div>
-                            </div>
-                            <div className="text-muted-foreground/30 flex-shrink-0">
-                              <ChevronDown size={16} className="rotate-[-90deg]" />
-                            </div>
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="py-20 text-center text-muted-foreground text-xs font-bold">No related seasons found.</div>
-                    )}
-                  </div>
-                )}
+                                <div>
+                                  <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{rel.title.english || rel.title.romaji}</div>
+                                  {rel.format && <div className="text-[10px] text-muted-foreground">{rel.format}</div>}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>

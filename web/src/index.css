@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scroll-container {
+  scroll-behavior: smooth;
+}
+
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

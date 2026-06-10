@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore } from "@/stores/app";
 import { useSettingsStore } from "@/stores/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -31,7 +32,11 @@ async function loadConfig() {
 }
 
 export default function App() {
-  const { currentView, selectedItem, setConnectionState, openDetail, closeDetail } = useAppStore();
+  const currentView = useAppStore((s) => s.currentView);
+  const selectedItem = useAppStore((s) => s.selectedItem);
+  const setConnectionState = useAppStore((s) => s.setConnectionState);
+  const openDetail = useAppStore((s) => s.openDetail);
+  const closeDetail = useAppStore((s) => s.closeDetail);
 
   useKeyboardShortcuts();
   useTheme();
@@ -85,8 +90,21 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <AmbientBackground />
       <Sidebar />
-      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative px-6 lg:px-10 pt-8">
-        {renderView()}
+      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative">
+        <div className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pt-8">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentView}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className="h-full"
+            >
+              {renderView()}
+            </motion.div>
+          </AnimatePresence>
+        </div>
         {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
         <AnimePlayer />
       </main>

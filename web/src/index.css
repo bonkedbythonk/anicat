@@ -197,6 +197,11 @@ html[data-style="retro-manga"] .forced-dark-container .bg-gradient-to-r {
   background-image: linear-gradient(to right, rgba(25, 20, 16, 0.80) 0%, rgba(25, 20, 16, 0.18) 50%, transparent 100%) !important;
 }
 
+html, body, #root {
+  background-color: #050505;
+  min-height: 100vh;
+}
+
 @layer base {
   html, body, #root {
     height: 100%;
@@ -307,16 +312,6 @@ html.light .media-detail-drawer {
 }
 .animate-fade-in { animation: fadeIn 0.25s ease-out; }
 .animate-fade-in-fast { animation: fadeIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
-
-@keyframes blob {
-  0% { transform: scale(1) translate(0px, 0px); }
-  33% { transform: scale(1.1) translate(30px, -50px); }
-  66% { transform: scale(0.9) translate(-20px, 20px); }
-  100% { transform: scale(1) translate(0px, 0px); }
-}
-.animate-blob { animation: blob 20s infinite alternate; }
-.animation-delay-2000 { animation-delay: 2s; }
-.animation-delay-4000 { animation-delay: 4s; }
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(100%); }
@@ -537,16 +532,6 @@ html[data-style="sakura-zen"] button:focus-visible,
 html[data-style="sakura-zen"] a:focus-visible,
 html[data-style="sakura-zen"] [role="button"]:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-color), 0 0 0 4px rgba(232, 160, 180, 0.24) !important;
-}
-
-html[data-style="sakura-zen"] .animate-blob {
-  animation: sakuraDrift 14s ease-in-out infinite alternate;
-}
-
-@keyframes sakuraDrift {
-  0%   { transform: translateY(0px) rotate(0deg);  opacity: 0.5; }
-  50%  { transform: translateY(-8px) rotate(4deg); opacity: 0.85; }
-  100% { transform: translateY(0px) rotate(0deg);  opacity: 0.5; }
 }
 
 /* ═══════════════════════════════════════════════════════════

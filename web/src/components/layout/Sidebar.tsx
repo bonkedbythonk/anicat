@@ -1,3 +1,5 @@
+import { memo } from "react";
+import { motion } from "framer-motion";
 import { useAppStore } from "@/stores/app";
 import {
   Home,
@@ -26,7 +28,7 @@ const secondaryItems = [
   { icon: Settings, label: "Settings", view: "settings" as const },
 ];
 
-export function Sidebar() {
+export const Sidebar = memo(function Sidebar() {
   const currentView = useAppStore((s) => s.currentView);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const selectedItem = useAppStore((s) => s.selectedItem);
@@ -62,22 +64,27 @@ export function Sidebar() {
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className={`w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-all duration-200 group border cursor-pointer ${
-                isActive
-                  ? "bg-gradient-to-r from-accent/15 to-accent-light/10 border-accent/15 shadow-[0_0_15px_rgba(0,0,0,0.15)] shadow-accent/10 text-accent font-bold"
-                  : "text-gray-500 dark:text-gray-400 hover:text-foreground hover:bg-foreground/[0.04] border-transparent"
-              }`}
+              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
             >
+              {isActive && (
+                <motion.div
+                  layoutId="nav-active-pill"
+                  className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
+                  transition={{ type: "spring", stiffness: 380, damping: 35 }}
+                />
+              )}
               <item.icon
                 size={20}
-                className={`shrink-0 transition-colors ${
+                className={`relative shrink-0 transition-colors ${
                   isActive
                     ? "text-accent"
                     : "text-gray-500 dark:text-gray-400 group-hover:text-accent"
                 }`}
               />
-              <span className="hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
-                <span>{item.label}</span>
+              <span className="relative hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
+                <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
+                  {item.label}
+                </span>
                 {item.shortcut && (
                   <kbd className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
                     {item.shortcut}
@@ -96,12 +103,15 @@ export function Sidebar() {
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className={`w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-all duration-200 group border cursor-pointer ${
-                isActive
-                  ? "bg-gradient-to-r from-accent/15 to-accent-light/10 border-accent/15 shadow-[0_0_15px_rgba(0,0,0,0.15)] shadow-accent/10 text-accent font-bold"
-                  : "text-gray-500 dark:text-gray-400 hover:text-foreground hover:bg-foreground/[0.04] border-transparent"
-              }`}
+              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
             >
+              {isActive && (
+                <motion.div
+                  layoutId="nav-active-pill"
+                  className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
+                  transition={{ type: "spring", stiffness: 380, damping: 35 }}
+                />
+              )}
               <div className="relative shrink-0 flex items-center justify-center">
                 <item.icon
                   size={20}
@@ -112,8 +122,10 @@ export function Sidebar() {
                   }`}
                 />
               </div>
-              <span className="hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
-                <span>{item.label}</span>
+              <span className="relative hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
+                <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
+                  {item.label}
+                </span>
                 {item.shortcut && (
                   <kbd className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
                     {item.shortcut}
@@ -126,4 +138,4 @@ export function Sidebar() {
       </nav>
     </aside>
   );
-}
+});

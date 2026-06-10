@@ -6,14 +6,14 @@ import type { Notification } from "@/lib/types";
 export function NotificationsView() {
   const openDetail = useAppStore((s) => s.openDetail);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => getNotifications(),
     staleTime: 60_000,
+    retry: false,
   });
 
-  const notifications: Notification[] =
-    (data?.data?.Page?.notifications as Notification[]) || [];
+  const notifications: Notification[] = data?.Page?.notifications || [];
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -23,6 +23,8 @@ export function NotificationsView() {
         <div className="flex justify-center py-12">
           <div className="animate-spin h-6 w-6 border-2 border-[var(--accent)] border-t-transparent rounded-full" />
         </div>
+      ) : isError ? (
+        <p className="text-[var(--text-secondary)]">Sign in to AniList to see notifications.</p>
       ) : notifications.length === 0 ? (
         <p className="text-[var(--text-secondary)]">No notifications yet.</p>
       ) : (

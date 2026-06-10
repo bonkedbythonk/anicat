@@ -8,7 +8,7 @@ export function ProfileView() {
     staleTime: 120_000,
   });
 
-  const viewer = data?.data?.Viewer;
+  const viewer = data?.Viewer;
 
   if (isLoading) {
     return (

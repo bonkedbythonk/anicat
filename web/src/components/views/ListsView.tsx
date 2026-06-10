@@ -11,7 +11,7 @@ export function ListsView() {
     staleTime: 120_000,
   });
 
-  const lists = data?.data?.MediaListCollection?.lists || [];
+  const lists = data?.MediaListCollection?.lists || [];
 
   return (
     <div className="flex-1 overflow-y-auto p-6">

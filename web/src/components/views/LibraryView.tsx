@@ -33,7 +33,7 @@ export function LibraryView() {
   });
 
   const watchingEntries =
-    watching.data?.data?.MediaListCollection?.lists?.[0]?.entries || [];
+    watching.data?.MediaListCollection?.lists?.[0]?.entries || [];
 
   if (watching.isLoading) {
     return (

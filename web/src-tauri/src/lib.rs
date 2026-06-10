@@ -10,8 +10,6 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
-
     let app_state = AppState::new();
 
     tauri::Builder::default()

@@ -1,38 +1,28 @@
-
-export function formatTime(date: Date, format: '12h' | '24h' = '24h'): string {
-  if (format === '24h') {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-  }
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+export function formatTime(seconds: number): string {
+  if (!seconds || seconds < 0) return "0:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function formatRelativeTime(date: Date): string {
+export function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
   const now = new Date();
-  const diffInMs = date.getTime() - now.getTime();
-  const diffInSeconds = Math.round(diffInMs / 1000);
-  const diffInMinutes = Math.round(diffInSeconds / 60);
-  const diffInHours = Math.round(diffInMinutes / 60);
-  const diffInDays = Math.round(diffInHours / 24);
+  const diff = now.getTime() - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
 
-  if (diffInSeconds < 0) {
-    return "Airing now or already aired";
-  }
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
 
-  if (diffInSeconds < 60) {
-    return `in ${diffInSeconds}s`;
-  }
-
-  if (diffInMinutes < 60) {
-    return `in ${diffInMinutes}m`;
-  }
-
-  if (diffInHours < 24) {
-    return `in ${diffInHours}h`;
-  }
-
-  if (diffInDays < 7) {
-    return `in ${diffInDays} day${diffInDays > 1 ? 's' : ''}`;
-  }
-
-  return date.toLocaleDateString();
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() && { year: "numeric" }),
+  });
 }

@@ -1,11 +1,8 @@
-const DANGEROUS_TAGS = /<\/?(script|iframe|object|embed|form|input|button|link|meta|style|applet|frame|frameset|ilayer|layer|bgsound|title|base)[^>]*>/gi;
-const EVENT_HANDLERS = /\s+on\w+\s*=\s*(["'][^"']*["']|[^\s>]*)/gi;
-const JAVASCRIPT_URL = /(?:href|src|action|formaction)\s*=\s*(["'])javascript:/gi;
-
 export function sanitizeHtml(html: string): string {
+  // Basic HTML sanitizer stub — strips script tags and event handlers
   if (!html) return "";
   return html
-    .replace(DANGEROUS_TAGS, "")
-    .replace(EVENT_HANDLERS, "")
-    .replace(JAVASCRIPT_URL, '$1#');
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/\son\w+='[^']*'/gi, "");
 }

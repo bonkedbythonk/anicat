@@ -6,6 +6,7 @@ use axum::{
     routing::get,
     Router,
 };
+use futures_util::TryStreamExt;
 use std::net::SocketAddr;
 
 #[derive(serde::Deserialize)]
@@ -56,7 +57,6 @@ async fn proxy_handler(
         req_builder = req_builder.header("range", range);
     }
 
-    // Forward critical headers
     if let Some(ua) = headers.get("user-agent") {
         req_builder = req_builder.header("user-agent", ua);
     } else {
@@ -80,19 +80,24 @@ async fn proxy_handler(
     let status = upstream.status();
     let upstream_headers = upstream.headers().clone();
 
-    let body_bytes = upstream
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    // Stream the response body instead of buffering
+    let stream = upstream
+        .bytes_stream()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
 
     let mut response = Response::builder().status(status);
 
-    // Copy upstream headers, skipping hop-by-hop
+    // Copy upstream headers, skipping hop-by-hop and content-length (streaming)
     for (key, value) in upstream_headers.iter() {
         let key_lower = key.as_str().to_lowercase();
         if matches!(
             key_lower.as_str(),
-            "transfer-encoding" | "connection" | "keep-alive" | "trailer" | "upgrade"
+            "transfer-encoding"
+                | "connection"
+                | "keep-alive"
+                | "trailer"
+                | "upgrade"
+                | "content-length"
         ) {
             continue;
         }
@@ -101,12 +106,11 @@ async fn proxy_handler(
         }
     }
 
-    // CORS for webview playback
     response = response
         .header("access-control-allow-origin", "*")
         .header("access-control-expose-headers", "*");
 
     response
-        .body(Body::from(body_bytes))
+        .body(Body::from_stream(stream))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

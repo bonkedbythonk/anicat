@@ -1,6 +1,16 @@
-"""AniNeko provider - curl_cffi scraping with Chrome TLS impersonation."""
+"""AniNeko provider — curl_cffi scraping with verified CSS selectors.
+
+Real DOM structure (verified 2026-06-10):
+  Search: article.nv-anime-card > a.nv-anime-thumb[href^="/watch/"] (slug)
+          div.nv-anime-title > a (title)
+  Detail: article.nv-info-episode-item > a.nv-info-episode-main (ep link)
+          strong (episode number: "Episode N")
+          span (episode title)
+  Servers: regex data-video="URL" from episode page HTML
+"""
 
 import re
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -58,133 +68,223 @@ class AniNekoProvider:
         for attempt in range(3):
             try:
                 url = f"{BASE_URL}/browser"
-                params = {"keyword": query}
-                resp = self.session.get(url, params=params, timeout=15)
+                resp = self.session.get(url, params={"keyword": query}, timeout=20)
                 resp.raise_for_status()
                 return self._parse_search(resp.text)
             except Exception as e:
                 if attempt == 2:
                     raise RuntimeError(f"Search failed after 3 attempts: {e}")
                 await self._sleep(1 + attempt)
-
         return []
 
     async def get(self, slug: str) -> Optional[AnimeInfo]:
         for attempt in range(3):
             try:
                 url = f"{BASE_URL}/watch/{slug}"
-                resp = self.session.get(url, timeout=15)
+                resp = self.session.get(url, timeout=20)
                 resp.raise_for_status()
                 return self._parse_anime(resp.text)
             except Exception as e:
                 if attempt == 2:
                     raise RuntimeError(f"Get failed after 3 attempts: {e}")
                 await self._sleep(1 + attempt)
-
         return None
 
-    async def streams(
-        self, slug: str, episode: int
-    ) -> list[StreamServer]:
+    async def streams(self, slug: str, episode: int) -> list[StreamServer]:
         for attempt in range(3):
             try:
-                url = f"{BASE_URL}/watch/{slug}-episode-{episode}"
-                resp = self.session.get(url, timeout=15)
+                url = f"{BASE_URL}/watch/{slug}/ep-{episode}"
+                resp = self.session.get(url, timeout=20)
                 resp.raise_for_status()
                 return self._parse_servers(resp.text)
             except Exception as e:
                 if attempt == 2:
-                    raise RuntimeError(f"Stream resolution failed after 3 attempts: {e}")
+                    raise RuntimeError(
+                        f"Stream resolution failed after 3 attempts: {e}"
+                    )
                 await self._sleep(1 + attempt)
-
         return []
+
+    # ── Parsers ────────────────────────────────────────
 
     def _parse_search(self, html: str) -> list[AnimeRef]:
         tree = HTMLParser(html)
         results = []
 
-        for item in tree.css(".browser-item, .anime-item, .film_list-wrap .flw-item"):
-            link = item.css_first("a")
-            title_el = item.css_first(".film-name, .anime-name, h3")
-            year_el = item.css_first(".fdi-item, .anime-year, .year")
+        for card in tree.css("article.nv-anime-card"):
+            thumb = card.css_first("a.nv-anime-thumb")
+            title_div = card.css_first(".nv-anime-title")
+            title_a = title_div.css_first("a") if title_div else None
 
-            if not link or not title_el:
+            href = thumb.attributes.get("href", "") if thumb else ""
+            if not href or not href.startswith("/watch/"):
                 continue
 
-            href = link.attributes.get("href", "")
-            slug = href.strip("/").split("/")[-1]
+            slug = href.replace("/watch/", "").split("?")[0]
 
-            title = title_el.text(strip=True)
+            # Title: prefer img alt from thumbnail, fallback to title div link
+            title = ""
+            if thumb:
+                img = thumb.css_first("img")
+                if img:
+                    title = img.attributes.get("alt", "")
+            if not title and title_a:
+                title = title_a.text(strip=True)
+            if not title:
+                continue
+
+            # Year: check meta or search text for 4-digit year
             year = None
-            if year_el:
-                year_text = year_el.text(strip=True)
-                match = re.search(r"\d{4}", year_text)
-                if match:
-                    year = int(match.group())
+            meta = card.css_first(".nv-anime-meta")
+            if meta:
+                year_match = re.search(r"\b(19|20)\d{2}\b", meta.text(strip=True))
+                if year_match:
+                    year = int(year_match.group())
 
             results.append(AnimeRef(id=slug, title=title, year=year))
 
         return results
 
-    def _parse_anime(self, html: str) -> AnimeInfo:
+    def _parse_anime(self, html: str) -> Optional[AnimeInfo]:
         tree = HTMLParser(html)
 
-        title_el = tree.css_first("h2.film-name, h1.anime-name, h1.entry-title")
-        title = title_el.text(strip=True) if title_el else ""
+        # Title: from h1 or title tag
+        title = ""
+        h1 = tree.css_first("h1")
+        if h1:
+            title = h1.text(strip=True)
+        if not title:
+            title_match = re.search(r"<title>([^-]+)", html)
+            if title_match:
+                title = title_match.group(1).strip()
+        if not title:
+            return None
 
+        # Episodes: from the episode grid items
         episodes = []
-        ep_items = tree.css(".ep-item, .episodes-list a, .episode-list li a")
-        for ep in ep_items:
-            ep_number = 0
-            ep_title = ""
+        for ep_card in tree.css("article.nv-info-episode-item"):
+            ep_link = ep_card.css_first("a.nv-info-episode-main")
+            if not ep_link:
+                continue
 
-            number_el = ep.css_first(".ep-no, .episode-number, .ep-label")
-            title_el = ep.css_first(".ep-title, .episode-title")
+            href = ep_link.attributes.get("href", "")
+            number_el = ep_link.css_first("strong")
+            title_el = ep_link.css_first("span")
 
+            ep_num = 0
             if number_el:
                 num_text = number_el.text(strip=True)
                 match = re.search(r"\d+", num_text)
                 if match:
-                    ep_number = int(match.group())
+                    ep_num = int(match.group())
 
-            if title_el:
-                ep_title = title_el.text(strip=True)
+            # Also try href fallback: /watch/slug/ep-N
+            if ep_num == 0 and href:
+                match = re.search(r"/ep-(\d+)", href)
+                if match:
+                    ep_num = int(match.group(1))
 
-            if ep_number > 0:
-                episodes.append(Episode(number=ep_number, title=ep_title))
+            if ep_num <= 0:
+                continue
+
+            ep_title = title_el.text(strip=True) if title_el else None
+            episodes.append(Episode(number=ep_num, title=ep_title))
 
         return AnimeInfo(title=title, episodes=episodes)
 
     def _parse_servers(self, html: str) -> list[StreamServer]:
-        tree = HTMLParser(html)
         servers = []
 
-        server_els = tree.css(
-            ".server-item, .ps_-list .ps_-item, .servers-list .server, "
-            ".playlist-server-item, .sv-list li"
+        # Find all data-video attributes and their surrounding context
+        matches = list(
+            re.finditer(
+                r'<(\w+)[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</\1>',
+                html,
+                re.DOTALL | re.IGNORECASE,
+            )
         )
-        for s in server_els:
-            data_id = s.attributes.get("data-id") or s.attributes.get("data-server")
-            name = data_id or s.text(strip=True) or "Server"
 
-            payload = s.attributes.get("data-url", "")
-            if not payload:
-                payload = s.attributes.get("data-src", "")
+        for match in matches:
+            embed_url = match.group(2)
+            tag_content = match.group(4)
 
-            if not payload:
-                continue
+            # Extract server name from tag content
+            name = re.sub(r"<[^>]+>", "", tag_content).strip()
+
+            # If no name from content, look at text before this element
+            if not name or len(name) < 2:
+                before = html[: match.start()]
+                text_before = re.findall(r">\s*([^<]{2,40})\s*<", before)
+                if text_before:
+                    name = text_before[-1].strip()
+
+            if not name or len(name) < 2:
+                name = f"Server {len(servers) + 1}"
 
             servers.append(
                 StreamServer(
-                    name=name,
-                    url=payload,
+                    name=name.strip(),
+                    url=embed_url,
                     is_m3u8=True,
                 )
             )
 
+        # Fallback: just find all data-video URLs
+        if not servers:
+            data_urls = re.findall(r'data-video\s*=\s*"([^"]+)"', html)
+            for i, url in enumerate(data_urls):
+                servers.append(
+                    StreamServer(
+                        name=f"Server {i + 1}",
+                        url=url,
+                        is_m3u8=True,
+                    )
+                )
+
         return servers
 
     async def _sleep(self, seconds: float):
-        import asyncio
-
         await asyncio.sleep(seconds)
+
+
+# ── Quick test ─────────────────────────────────────────
+
+if __name__ == "__main__":
+
+    async def main():
+        provider = AniNekoProvider()
+        print("Testing AniNeko scraper...\n")
+
+        # Search
+        print("Search: naruto")
+        results = await provider.search("naruto")
+        print(f"  Found {len(results)} results")
+        for r in results[:3]:
+            print(f"    {r.title[:50]}  (slug={r.id})")
+
+        if not results:
+            print("  FAILED: no search results")
+            return
+
+        # Get episodes
+        slug = results[0].id
+        print(f"\nGet episodes: {slug}")
+        info = await provider.get(slug)
+        if info:
+            print(f"  Title: {info.title}")
+            print(f"  Episodes: {len(info.episodes)}")
+            for ep in info.episodes[:3]:
+                print(f"    Ep {ep.number}: {ep.title or '(no title)'}")
+        else:
+            print("  FAILED: no anime info")
+
+        # Streams for first episode
+        if info and info.episodes:
+            ep_num = info.episodes[0].number
+            print(f"\nStream servers: {slug} ep {ep_num}")
+            servers = await provider.streams(slug, ep_num)
+            print(f"  Found {len(servers)} servers")
+            for s in servers[:3]:
+                print(f"    {s.name}: {s.url[:80]}...")
+
+    asyncio.run(main())

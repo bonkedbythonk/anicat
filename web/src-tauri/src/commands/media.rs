@@ -163,7 +163,40 @@ pub async fn get_episodes(
             }
         }
     } else {
-        vec![]
+        // No mapping yet — auto-search by media title from AniList
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(media_id));
+        vars.insert("type".to_string(), serde_json::json!("ANIME"));
+
+        let detail: crate::anilist::responses::MediaResponse = state
+            .anilist_client
+            .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let title = detail.media
+            .and_then(|m| m.title)
+            .and_then(|t| t.romaji.or(t.english))
+            .unwrap_or_default();
+
+        if title.is_empty() {
+            return serde_json::to_value(Vec::<crate::scraper::Episode>::new())
+                .map_err(|e| e.to_string());
+        }
+
+        let results = state.scraper_manager.search(&title).await.unwrap_or_default();
+
+        if let Some(best) = results.into_iter().next() {
+            let _ = registry::service::set_provider_slug(
+                &db, media_id, &provider_name, &best.id,
+            );
+            match state.scraper_manager.get_anime(&best.id).await {
+                Ok(anime_info) => anime_info.episodes,
+                Err(_) => vec![],
+            }
+        } else {
+            vec![]
+        }
     };
 
     serde_json::to_value(episodes).map_err(|e| e.to_string())

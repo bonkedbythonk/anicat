@@ -7,7 +7,7 @@ import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, Che
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { dispatchRefresh } from "@/lib/events";
-import { formatTime, formatRelativeTime } from "@/lib/date";
+import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore } from "@/stores/app";
@@ -244,8 +244,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const queryClient = useQueryClient();
-  const appState = useAppStore();
-  const selectItem = appState.openDetail;
+  const selectItem = useAppStore((s) => s.openDetail);
 
 
   const title = fullItem?.title?.english || fullItem?.title?.romaji || item?.title?.english || item?.title?.romaji || '';
@@ -559,7 +558,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 <div>
                   <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
                   <div className="text-base text-foreground font-bold">
-                    Episode {fullItem.next_airing.episode} <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTime(new Date(fullItem.next_airing.airing_at + "Z"))}</span>
+                    Episode {fullItem.next_airing.episode} <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at)}</span>
                   </div>
                 </div>
               </div>

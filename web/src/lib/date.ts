@@ -26,3 +26,19 @@ export function formatRelativeTime(dateStr: string): string {
     ...(date.getFullYear() !== now.getFullYear() && { year: "numeric" }),
   });
 }
+
+export function formatRelativeTimeFromUnix(unixSeconds: number): string {
+  if (!unixSeconds) return "Unknown";
+  const date = new Date(unixSeconds * 1000);
+  const now = new Date();
+  const diff = date.getTime() - now.getTime();
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (diff < 0) return "aired";
+  if (minutes < 60) return `in ${minutes}m`;
+  if (hours < 24) return `in ${hours}h`;
+  if (days < 7) return `in ${days}d`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

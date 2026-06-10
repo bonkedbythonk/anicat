@@ -1,3 +1,3 @@
 pub mod client;
 
-pub use client::{AnimeRef, StreamServer, ScraperManager};
+pub use client::{AnimeRef, Episode, StreamServer, ScraperManager};

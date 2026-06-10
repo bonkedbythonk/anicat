@@ -20,7 +20,7 @@ pub async fn start_playback(
     episode_number: i64,
     provider: Option<String>,
 ) -> Result<PlaybackStart, String> {
-    let provider_name = provider.unwrap_or_else(|| "gogoanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
 
     let db = state.open_db()?;
 

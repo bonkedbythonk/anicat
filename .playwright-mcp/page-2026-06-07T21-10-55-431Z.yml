@@ -1,0 +1,469 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "AniNeko Home" [ref=e5] [cursor=pointer]:
+          - /url: https://anineko.to/home
+          - img "AniNeko" [ref=e6]
+        - navigation [ref=e7]:
+          - link "Home" [ref=e8] [cursor=pointer]:
+            - /url: https://anineko.to/home
+            - text: Home
+          - link "Browse" [ref=e9] [cursor=pointer]:
+            - /url: /browse
+            - text: Browse
+          - link "Latest" [ref=e10] [cursor=pointer]:
+            - /url: /updates
+            - text: Latest
+          - link "Ongoing" [ref=e11] [cursor=pointer]:
+            - /url: /ongoing
+            - text: Ongoing
+          - link "Schedule" [ref=e12] [cursor=pointer]:
+            - /url: /schedule
+            - text: Schedule
+        - generic [ref=e13]:
+          - textbox "Search anime, genres, or episodes..." [ref=e14]
+          - generic [ref=e15]: Ctrl K
+        - button "Toggle theme" [ref=e16]:
+          - generic [ref=e17]: ☾
+        - 'button "Anime title language: English" [ref=e18] [cursor=pointer]':
+          - generic [ref=e19]: 文
+          - generic [ref=e20]: EN
+        - generic [ref=e21]:
+          - link "Login" [ref=e22] [cursor=pointer]:
+            - /url: https://anineko.to/login
+          - link "Sign Up" [ref=e23] [cursor=pointer]:
+            - /url: https://anineko.to/register
+            - text: Sign Up
+    - main [ref=e24]:
+      - generic [ref=e25]:
+        - navigation "Breadcrumb" [ref=e26]:
+          - link "Home" [ref=e27] [cursor=pointer]:
+            - /url: https://anineko.to/home
+          - generic [ref=e28]: /
+          - link "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [ref=e29] [cursor=pointer]:
+            - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2
+          - generic [ref=e30]: /
+          - strong [ref=e31]: Episode 1
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - article [ref=e34]:
+              - generic [ref=e35]:
+                - iframe [ref=e36]:
+                  - application "Video Player - VibePlayer - Fast Streaming with FullHD" [ref=f1e3]:
+                    - generic [ref=f1e9]: 0 seconds of 0 secondsVolume 80%
+                - generic [ref=e37]:
+                  - generic [ref=e38]: AniNeko Player
+                  - generic [ref=e39]: HD
+                  - generic [ref=e40]: SUB
+                  - generic [ref=e41]: DUB
+              - generic [ref=e42]:
+                - generic [ref=e43]:
+                  - generic [ref=e44]:
+                    - heading "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [level=1] [ref=e45]
+                    - generic [ref=e46]:
+                      - generic [ref=e47]: Episode 1
+                      - generic [ref=e48]: •
+                      - generic [ref=e49]: TV
+                      - generic [ref=e50]: •
+                      - generic [ref=e51]: Finished Airing
+                      - generic [ref=e52]: •
+                      - generic [ref=e53]: SUB / DUB
+                  - generic [ref=e54]:
+                    - link "Download" [ref=e55] [cursor=pointer]:
+                      - /url: /download/rezero-starting-life-in-another-world-2nd-season-part-2/ep-1
+                    - link "Next →" [ref=e56] [cursor=pointer]:
+                      - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-2
+                - generic [ref=e57]:
+                  - generic [ref=e58]:
+                    - heading "Watch Server" [level=2] [ref=e59]
+                    - generic [ref=e60]: Change server if video is slow
+                  - generic [ref=e61]:
+                    - generic [ref=e62]:
+                      - button "Hard Sub Subtitle version" [ref=e63] [cursor=pointer]:
+                        - strong [ref=e64]: Hard Sub
+                        - generic [ref=e65]: Subtitle version
+                      - button "Sort Sub Subtitle version" [ref=e66] [cursor=pointer]:
+                        - strong [ref=e67]: Sort Sub
+                        - generic [ref=e68]: Subtitle version
+                      - button "DUB Subtitle version" [ref=e69] [cursor=pointer]:
+                        - strong [ref=e70]: DUB
+                        - generic [ref=e71]: Subtitle version
+                    - generic [ref=e72]:
+                      - generic [ref=e73]:
+                        - generic [ref=e74]: Available servers
+                        - strong [ref=e75]: Hard Sub
+                      - button "HD-1 Hard Sub" [ref=e76] [cursor=pointer]:
+                        - text: HD-1
+                        - generic [ref=e77]: Hard Sub
+                      - button "HD-2 Hard Sub" [ref=e78] [cursor=pointer]:
+                        - text: HD-2
+                        - generic [ref=e79]: Hard Sub
+                      - button "StreamHG Hard Sub" [ref=e80] [cursor=pointer]:
+                        - text: StreamHG
+                        - generic [ref=e81]: Hard Sub
+                      - button "Earnvids Hard Sub" [ref=e82] [cursor=pointer]:
+                        - text: Earnvids
+                        - generic [ref=e83]: Hard Sub
+                      - button "Doodstream Hard Sub" [ref=e84] [cursor=pointer]:
+                        - text: Doodstream
+                        - generic [ref=e85]: Hard Sub
+                - generic [ref=e86]:
+                  - button "+ Watchlist Save anime" [ref=e87] [cursor=pointer]:
+                    - text: + Watchlist
+                    - generic [ref=e88]: Save anime
+                  - link "Download Get links" [ref=e89] [cursor=pointer]:
+                    - /url: /download/rezero-starting-life-in-another-world-2nd-season-part-2/ep-1
+                    - text: Download
+                    - generic [ref=e90]: Get links
+                  - button "Report Video issue" [ref=e91] [cursor=pointer]:
+                    - text: Report
+                    - generic [ref=e92]: Video issue
+                  - button "Share Copy link" [ref=e93] [cursor=pointer]:
+                    - text: Share
+                    - generic [ref=e94]: Copy link
+                - paragraph [ref=e95]: After the battle with the Witch Cult, Subaru travels back to Crusch's manor with Emilia, when he discovers, to his horror, that everyone has forgotten Rem. Earlier, she and Crusch were ambushed by the Sin Archbishops of Gluttony, Lye Batenkaitos, and Greed, Regulus Corneus. Although they fought fiercely, both ended up having their existences eaten by Lye. This caused Rem to fall into a coma, with noone but Subaru remembering her, and Crusch lost her memories. After learning what happened, a devastated Subaru commits suicide in hopes of going back in time to before the ambush to prevent it. However, it fails as he returns to after the ambush had already occurred. Subaru later attends a meeting with Emilia, the amnesiac Crusch, Felis and Wilhelm. After a heated discussion, they decide to continue their alliance. After the meeting, Emilia comforts Subaru as he grieves for Rem.
+            - generic [ref=e96]:
+              - generic [ref=e97]:
+                - heading "Comments" [level=2] [ref=e98]
+                - generic [ref=e99]: Episode discussion
+              - main "Comments Embed" [ref=e107]:
+                - navigation "Main Tablist" [ref=e108]:
+                  - tablist [ref=e109]:
+                    - 'tab "active Tab: Comments" [selected] [ref=e110] [cursor=pointer]':
+                      - text: active
+                      - generic [ref=e111]: "Tab:"
+                      - text: Comments
+                - 'region "active Tab: Comments" [ref=e113]':
+                  - generic [ref=e114]:
+                    - region "Community Guidelines" [ref=e115]:
+                      - generic [ref=e116]:
+                        - heading "Before you enter the comment arc..." [level=3] [ref=e117]
+                        - list [ref=e118]:
+                          - listitem [ref=e119]: Be cool. Don’t start a villain backstory in the comments.
+                          - listitem [ref=e120]: No spam, fake links, or drama farming.
+                          - listitem [ref=e121]: Spoilers? Please warn first.
+                          - listitem [ref=e122]: Respect other fans, even if their best girl choice is wrong.
+                          - listitem [ref=e123]: Keep it fun, friendly, and anime-related.
+                    - region "Post a Comment" [ref=e124]:
+                      - generic [ref=e126]:
+                        - iframe [ref=e128]:
+                          - generic [ref=f2e4]:
+                            - generic [ref=f2e5]:
+                              - generic: Post a comment
+                            - generic [ref=f2e8]:
+                              - button "Bold" [ref=f2e9] [cursor=pointer]:
+                                - generic [ref=f2e10]: format_bold
+                              - button "Italic" [ref=f2e11] [cursor=pointer]:
+                                - generic [ref=f2e12]: format_italic
+                              - button "Blockquote" [ref=f2e13] [cursor=pointer]:
+                                - generic [ref=f2e14]: format_quote
+                              - button "Bulleted List" [ref=f2e15] [cursor=pointer]:
+                                - generic [ref=f2e16]: format_list_bulleted
+                        - button "Sign in and Join the Conversation" [ref=e129] [cursor=pointer]
+                    - generic [ref=e130]:
+                      - navigation "Secondary Tablist" [ref=e131]:
+                        - tablist
+                        - generic [ref=e132]:
+                          - generic [ref=e133]: Sort by
+                          - generic [ref=e134]:
+                            - combobox "Sort by" [ref=e135]:
+                              - option "Newest" [selected]
+                              - option "Oldest"
+                              - option "Most replies"
+                              - option "Most Sugoi"
+                            - generic:
+                              - generic: expand_more
+                      - region [ref=e136]:
+                        - log [ref=e137]:
+                          - generic [ref=e140]:
+                            - article "Comment from Qu4ke989 3 days ago" [ref=e143]:
+                              - generic [ref=e147]:
+                                - button "Hide comment by Qu4ke989 and its replies" [ref=e148] [cursor=pointer]:
+                                  - generic [ref=e149]: remove
+                                - generic [ref=e150]:
+                                  - generic [ref=e152]:
+                                    - button "User Qu4ke989" [ref=e155] [cursor=pointer]: Qu4ke989
+                                    - button "3 days ago" [ref=e157] [cursor=pointer]:
+                                      - time [ref=e158]: 3 days ago
+                                  - generic [ref=e159]:
+                                    - generic [ref=e161]: No way Emilia said 6 or 7 that was not funny😠
+                                    - generic [ref=e162]:
+                                      - generic [ref=e163]:
+                                        - button "Sugoi comment by Qu4ke989" [ref=e164] [cursor=pointer]:
+                                          - generic [ref=e165]:
+                                            - generic [ref=e166]: thumb_up
+                                            - generic [ref=e167]: Sugoi
+                                        - button "Reply to comment by Qu4ke989" [ref=e168] [cursor=pointer]:
+                                          - generic [ref=e169]:
+                                            - generic [ref=e170]: reply
+                                            - generic [ref=e171]: Reply
+                                        - button "Share comment by Qu4ke989" [ref=e173] [cursor=pointer]:
+                                          - generic [ref=e174]:
+                                            - generic [ref=e175]: share
+                                            - generic [ref=e176]: Share
+                                      - button "Report comment by Qu4ke989" [ref=e178] [cursor=pointer]:
+                                        - generic [ref=e179]:
+                                          - generic [ref=e180]: flag
+                                          - generic [ref=e181]: Report
+                            - article "Comment from Kaizouxcluvsmeztizas 6 days ago" [ref=e184]:
+                              - generic [ref=e188]:
+                                - button "Hide comment by Kaizouxcluvsmeztizas and its replies" [ref=e189] [cursor=pointer]:
+                                  - generic [ref=e190]: remove
+                                - generic [ref=e191]:
+                                  - generic [ref=e193]:
+                                    - button "User Kaizouxcluvsmeztizas" [ref=e196] [cursor=pointer]: Kaizouxcluvsmeztizas
+                                    - generic [ref=e197]:
+                                      - button "6 days ago" [ref=e198] [cursor=pointer]:
+                                        - time [ref=e199]: 6 days ago
+                                      - generic [ref=e200]: (Edited)
+                                  - generic [ref=e201]:
+                                    - generic [ref=e203]: w assist otto
+                                    - generic [ref=e204]:
+                                      - generic [ref=e205]:
+                                        - button "Sugoi comment by Kaizouxcluvsmeztizas" [ref=e206] [cursor=pointer]:
+                                          - generic [ref=e207]:
+                                            - generic [ref=e208]: thumb_up
+                                            - generic [ref=e209]: Sugoi
+                                        - button "Reply to comment by Kaizouxcluvsmeztizas" [ref=e210] [cursor=pointer]:
+                                          - generic [ref=e211]:
+                                            - generic [ref=e212]: reply
+                                            - generic [ref=e213]: Reply
+                                        - button "Share comment by Kaizouxcluvsmeztizas" [ref=e215] [cursor=pointer]:
+                                          - generic [ref=e216]:
+                                            - generic [ref=e217]: share
+                                            - generic [ref=e218]: Share
+                                      - button "Report comment by Kaizouxcluvsmeztizas" [ref=e220] [cursor=pointer]:
+                                        - generic [ref=e221]:
+                                          - generic [ref=e222]: flag
+                                          - generic [ref=e223]: Report
+                          - navigation "Comments Footer" [ref=e224]:
+                            - button "Top of comments" [ref=e225] [cursor=pointer]:
+                              - generic [ref=e226]: forum
+                              - generic [ref=e227]: Top of comments
+                            - button "Top of article" [ref=e228] [cursor=pointer]:
+                              - generic [ref=e229]: description
+                              - generic [ref=e230]: Top of article
+          - complementary [ref=e231]:
+            - generic [ref=e232]:
+              - generic [ref=e233]:
+                - heading "Episodes" [level=2] [ref=e234]
+                - generic [ref=e235]: 12 total
+              - generic [ref=e236]:
+                - link "EP 1 Watching ►" [ref=e237] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-1
+                  - generic [ref=e238]:
+                    - strong [ref=e239]: EP 1
+                    - text: Watching
+                  - generic [ref=e240]: ►
+                - link "EP 2 Available ►" [ref=e241] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-2
+                  - generic [ref=e242]:
+                    - strong [ref=e243]: EP 2
+                    - text: Available
+                  - generic [ref=e244]: ►
+                - link "EP 3 Available ►" [ref=e245] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-3
+                  - generic [ref=e246]:
+                    - strong [ref=e247]: EP 3
+                    - text: Available
+                  - generic [ref=e248]: ►
+                - link "EP 4 Available ►" [ref=e249] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-4
+                  - generic [ref=e250]:
+                    - strong [ref=e251]: EP 4
+                    - text: Available
+                  - generic [ref=e252]: ►
+                - link "EP 5 Available ►" [ref=e253] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-5
+                  - generic [ref=e254]:
+                    - strong [ref=e255]: EP 5
+                    - text: Available
+                  - generic [ref=e256]: ►
+                - link "EP 6 Available ►" [ref=e257] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-6
+                  - generic [ref=e258]:
+                    - strong [ref=e259]: EP 6
+                    - text: Available
+                  - generic [ref=e260]: ►
+                - link "EP 7 Available ►" [ref=e261] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-7
+                  - generic [ref=e262]:
+                    - strong [ref=e263]: EP 7
+                    - text: Available
+                  - generic [ref=e264]: ►
+                - link "EP 8 Available ►" [ref=e265] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-8
+                  - generic [ref=e266]:
+                    - strong [ref=e267]: EP 8
+                    - text: Available
+                  - generic [ref=e268]: ►
+                - link "EP 9 Available ►" [ref=e269] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-9
+                  - generic [ref=e270]:
+                    - strong [ref=e271]: EP 9
+                    - text: Available
+                  - generic [ref=e272]: ►
+                - link "EP 10 Available ►" [ref=e273] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-10
+                  - generic [ref=e274]:
+                    - strong [ref=e275]: EP 10
+                    - text: Available
+                  - generic [ref=e276]: ►
+                - link "EP 11 Available ►" [ref=e277] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-11
+                  - generic [ref=e278]:
+                    - strong [ref=e279]: EP 11
+                    - text: Available
+                  - generic [ref=e280]: ►
+                - link "EP 12 Available ►" [ref=e281] [cursor=pointer]:
+                  - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-12
+                  - generic [ref=e282]:
+                    - strong [ref=e283]: EP 12
+                    - text: Available
+                  - generic [ref=e284]: ►
+            - generic [ref=e285]:
+              - heading "Up Next" [level=2] [ref=e287]
+              - link "Re:Zero - Starting Life in Another World 2nd Season (Part 2) Episode 2 Continue watching the next episode. Watch now →" [ref=e288] [cursor=pointer]:
+                - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2/ep-2
+                - img "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [ref=e289]
+                - generic [ref=e290]:
+                  - heading "Episode 2" [level=3] [ref=e291]
+                  - paragraph [ref=e292]: Continue watching the next episode.
+                  - text: Watch now →
+            - generic [ref=e293]:
+              - heading "Related" [level=2] [ref=e295]
+              - generic [ref=e296]:
+                - article [ref=e297]:
+                  - link "Re:ZERO -Starting Life in Another World-" [ref=e298] [cursor=pointer]:
+                    - /url: /watch/rezero-starting-life-in-another-world
+                    - img "Re:ZERO -Starting Life in Another World-" [ref=e299]
+                  - generic [ref=e300]:
+                    - heading "Re:ZERO -Starting Life in Another World-" [level=4] [ref=e301]:
+                      - link "Re:ZERO -Starting Life in Another World-" [ref=e302] [cursor=pointer]:
+                        - /url: /watch/rezero-starting-life-in-another-world
+                    - paragraph [ref=e303]: When Subaru Natsuki leaves the convenience store, the last thing he expects is to be wrenc
+                    - generic [ref=e304]:
+                      - generic [ref=e305]: SUB
+                      - generic [ref=e306]: DUB
+                      - generic [ref=e307]: HD
+                - article [ref=e308]:
+                  - link "Re:ZERO -Starting Life in Another World- Season 2" [ref=e309] [cursor=pointer]:
+                    - /url: /watch/rezero-starting-life-in-another-world-season-2
+                    - img "Re:ZERO -Starting Life in Another World- Season 2" [ref=e310]
+                  - generic [ref=e311]:
+                    - heading "Re:ZERO -Starting Life in Another World- Season 2" [level=4] [ref=e312]:
+                      - link "Re:ZERO -Starting Life in Another World- Season 2" [ref=e313] [cursor=pointer]:
+                        - /url: /watch/rezero-starting-life-in-another-world-season-2
+                    - paragraph [ref=e314]: A reunion that was supposed to spell the arrival of peaceful times is quickly shattered wh
+                    - generic [ref=e315]:
+                      - generic [ref=e316]: SUB
+                      - generic [ref=e317]: DUB
+                      - generic [ref=e318]: HD
+                - article [ref=e319]:
+                  - link "Re:ZERO -Starting Life in Another World- Season 3" [ref=e320] [cursor=pointer]:
+                    - /url: /watch/rezero-starting-life-in-another-world-season-3
+                    - img "Re:ZERO -Starting Life in Another World- Season 3" [ref=e321]
+                  - generic [ref=e322]:
+                    - heading "Re:ZERO -Starting Life in Another World- Season 3" [level=4] [ref=e323]:
+                      - link "Re:ZERO -Starting Life in Another World- Season 3" [ref=e324] [cursor=pointer]:
+                        - /url: /watch/rezero-starting-life-in-another-world-season-3
+                    - paragraph [ref=e325]: One year after the events at the Sanctuary, Subaru Natsuki trains hard to better face futu
+                    - generic [ref=e326]:
+                      - generic [ref=e327]: SUB
+                      - generic [ref=e328]: DUB
+                      - generic [ref=e329]: HD
+                - article [ref=e330]:
+                  - link "Re:ZERO -Starting Life in Another World- Season 4" [ref=e331] [cursor=pointer]:
+                    - /url: /watch/rezero-starting-life-in-another-world-season-4
+                    - img "Re:ZERO -Starting Life in Another World- Season 4" [ref=e332]
+                  - generic [ref=e333]:
+                    - heading "Re:ZERO -Starting Life in Another World- Season 4" [level=4] [ref=e334]:
+                      - link "Re:ZERO -Starting Life in Another World- Season 4" [ref=e335] [cursor=pointer]:
+                        - /url: /watch/rezero-starting-life-in-another-world-season-4
+                    - paragraph [ref=e336]: In the deadly battle at the Watergate City of Priestella, Subaru and his allies barely eme
+                    - generic [ref=e337]:
+                      - generic [ref=e338]: SUB
+                      - generic [ref=e339]: DUB
+                      - generic [ref=e340]: HD
+            - generic [ref=e341]:
+              - heading "Recommended" [level=2] [ref=e343]
+              - generic [ref=e344]:
+                - article [ref=e345]:
+                  - link "That Time I Got Reincarnated as a Slime 2nd Season Part 2" [ref=e346] [cursor=pointer]:
+                    - /url: /watch/that-time-i-got-reincarnated-as-a-slime-2nd-season-part-2
+                    - img "That Time I Got Reincarnated as a Slime 2nd Season Part 2" [ref=e347]
+                  - generic [ref=e348]:
+                    - heading "That Time I Got Reincarnated as a Slime 2nd Season Part 2" [level=4] [ref=e349]:
+                      - link "That Time I Got Reincarnated as a Slime 2nd Season Part 2" [ref=e350] [cursor=pointer]:
+                        - /url: /watch/that-time-i-got-reincarnated-as-a-slime-2nd-season-part-2
+                    - paragraph [ref=e351]: Second half of Tensei shitara Slime Datta Ken 2nd Season. The series follows a man who is
+                    - generic [ref=e352]:
+                      - generic [ref=e353]: SUB
+                      - generic [ref=e354]: DUB
+                      - generic [ref=e355]: HD
+                - article [ref=e356]:
+                  - link "Trese" [ref=e357] [cursor=pointer]:
+                    - /url: /watch/trese
+                    - img "Trese" [ref=e358]
+                  - generic [ref=e359]:
+                    - heading "Trese" [level=4] [ref=e360]:
+                      - link "Trese" [ref=e361] [cursor=pointer]:
+                        - /url: /watch/trese
+                    - paragraph [ref=e362]: Set in Manila where the mythical creatures of Philippine folklore live in hiding amongst h
+                    - generic [ref=e363]:
+                      - generic [ref=e364]: SUB
+                      - generic [ref=e365]: DUB
+                      - generic [ref=e366]: HD
+                - article [ref=e367]:
+                  - link "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [ref=e368] [cursor=pointer]:
+                    - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2
+                    - img "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [ref=e369]
+                  - generic [ref=e370]:
+                    - heading "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [level=4] [ref=e371]:
+                      - link "Re:Zero - Starting Life in Another World 2nd Season (Part 2)" [ref=e372] [cursor=pointer]:
+                        - /url: /watch/rezero-starting-life-in-another-world-2nd-season-part-2
+                    - paragraph [ref=e373]: After the battle with the Witch Cult, Subaru travels back to Crusch's manor with Emilia, w
+                    - generic [ref=e374]:
+                      - generic [ref=e375]: SUB
+                      - generic [ref=e376]: DUB
+                      - generic [ref=e377]: HD
+                - article [ref=e378]:
+                  - link "Odd Taxi" [ref=e379] [cursor=pointer]:
+                    - /url: /watch/odd-taxi
+                    - img "Odd Taxi" [ref=e380]
+                  - generic [ref=e381]:
+                    - heading "Odd Taxi" [level=4] [ref=e382]:
+                      - link "Odd Taxi" [ref=e383] [cursor=pointer]:
+                        - /url: /watch/odd-taxi
+                    - paragraph [ref=e384]: In a city which should be familiar, there is the feeling of something a little different.
+                    - generic [ref=e385]:
+                      - generic [ref=e386]: SUB
+                      - generic [ref=e387]: DUB
+                      - generic [ref=e388]: HD
+    - contentinfo [ref=e389]:
+      - generic [ref=e390]:
+        - paragraph [ref=e391]: © AniNeko. All rights reserved.
+        - navigation [ref=e392]:
+          - link "About" [ref=e393] [cursor=pointer]:
+            - /url: https://anineko.to/home
+          - link "Contact" [ref=e394] [cursor=pointer]:
+            - /url: https://anineko.to/contact
+          - link "Privacy Policy" [ref=e395] [cursor=pointer]:
+            - /url: /privacy-policy
+          - link "Terms of Service" [ref=e396] [cursor=pointer]:
+            - /url: /terms-of-service
+          - link "DMCA" [ref=e397] [cursor=pointer]:
+            - /url: /dmca
+        - generic "Social links":
+          - link "Discord":
+            - /url: javascript:;
+          - link "Telegram":
+            - /url: javascript:;
+          - link "Reddit":
+            - /url: javascript:;
+          - link "Twitter":
+            - /url: javascript:;
+          - link "Email":
+            - /url: https://anineko.to/contact
+  - img [ref=e398]

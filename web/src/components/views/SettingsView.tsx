@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Search, Activity } from "lucide-react";
 import { mediaApi, type HealthStatus, API_BASE_ORIGIN } from "@/lib/api";
 import type { UiStyle } from "@/hooks/useTheme";
@@ -54,6 +55,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const [releaseNotes, setReleaseNotes] = useState<string>("");
   const [releaseUrl, setReleaseUrl] = useState<string>("");
   const [options, setOptions] = useState<ConfigOptions | null>(null);
+  const [authPending, setAuthPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [autoSkip, setAutoSkip] = useState(false);
@@ -64,10 +66,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
 
   const [testQuery, setTestQuery] = useState("Naruto");
   const [scraperStates, setScraperStates] = useState<Record<string, ScraperTestState>>({
-    animepahe: { status: "idle" },
-    anizone: { status: "idle" },
-    gogoanime: { status: "idle" },
-    mangadex: { status: "idle" },
+    anineko: { status: "idle" },
     mangakatana: { status: "idle" },
   });
 
@@ -104,9 +103,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
 
   const handleTestAll = () => {
     const list = [
-      { name: "animepahe", isManga: false },
-      { name: "anizone", isManga: false },
-      { name: "gogoanime", isManga: false },
+      { name: "anineko", isManga: false },
       { name: "mangadex", isManga: true },
       { name: "mangakatana", isManga: true },
     ];
@@ -739,63 +736,19 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   description="Primary source for streaming video."
                 >
                   <select
-                    value={String(config.general?.provider || "anizone")}
+                    value={String(config.general?.provider || "anineko")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
-                    <option value="animepahe">AnimePahe</option>
-                    <option value="anizone">AniZone</option>
-                    <option value="gogoanime">AniNeko</option>
+                    <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
 
                 <SettingField
                   label="Fallback Providers"
-                  description="Providers to try in order if the primary fails to find results. Leave empty to use only the primary."
+                  description="Only one provider is configured. Fallbacks are not needed."
                 >
-                  <div className="space-y-2">
-                    {(() => {
-                      const fallbacks: string[] = (config.general?.provider_fallbacks as string[]) || [];
-                      const allProviders = ["anizone", "gogoanime", "animepahe"];
-                      const slots = Array.from({ length: allProviders.length - 1 }, (_, i) => i);
-                      return slots.map((i) => {
-                        const current = fallbacks[i] || "none";
-                        // Filter out the primary provider and already-selected fallbacks
-                         const primary = String(config.general?.provider || "anizone");
-                        const otherSelected = fallbacks.filter((_, idx) => idx !== i);
-                        return (
-                          <select
-                            key={i}
-                            value={current}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              const newFallbacks = [...fallbacks];
-                              if (i < newFallbacks.length) {
-                                newFallbacks[i] = val;
-                              } else if (val !== "none") {
-                                newFallbacks.push(val);
-                              }
-                              // Remove "none" entries and filter to non-empty
-                              const cleaned = newFallbacks.filter(v => v && v !== "none");
-                              updateField("general", "provider_fallbacks", cleaned);
-                            }}
-                            className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                          >
-                            <option value="none">-- Disabled --</option>
-                            {allProviders
-                              .filter(p => p !== primary && !otherSelected.includes(p))
-                              .map(p => (
-                                <option key={p} value={p}>
-                                  {p === "anizone" ? "AniZone" :
-                                   p === "gogoanime" ? "AniNeko" :
-                                   p === "animepahe" ? "AnimePahe" : p}
-                                </option>
-                              ))}
-                          </select>
-                        );
-                      });
-                    })()}
-                  </div>
+                  <p className="text-xs text-muted-foreground">No fallbacks available.</p>
                 </SettingField>
 
                 <SettingField
@@ -931,20 +884,44 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
               <CardSection title="AniList">
                 <SettingField label="Login" description="Authorize Anicat to access your AniList account.">
                   <button
-                    onClick={() => mediaApi.openUrl("https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")}
+                    onClick={() => {
+                      setAuthPending(true);
+                      invoke("start_anilist_auth").then(() => {
+                        setAuthPending(false);
+                      }).catch(() => {
+                        setAuthPending(false);
+                      });
+                    }}
                     className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl bg-accent/10 border border-accent/20 hover:bg-accent/20 text-accent font-semibold text-sm transition-all"
                   >
-                    <Globe size={16} />
-                    <span>Open AniList Authorization</span>
+                    {authPending ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        <span>Waiting for authorization...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Globe size={16} />
+                        <span>Connect AniList</span>
+                      </>
+                    )}
                   </button>
                 </SettingField>
 
-                <SettingField label="API Token" description="Your AniList token. Paste it here after authorizing.">
+                <SettingField label="API Token" description="After authorizing, paste the full URL you were redirected to (or just the token).">
                   <input
-                    type="password"
-                    value={String(config.anilist?.token || "")}
-                    onChange={(e) => updateField("anilist", "token", e.target.value)}
-                    placeholder="Paste your token..."
+                    type="text"
+                    value={String(config.api?.anilist_token || "")}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      const hashMatch = val.match(/#.*access_token=([^&]+)/);
+                      const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
+                      updateField("api", "anilist_token", token);
+                      if (token.length > 20) {
+                        window.dispatchEvent(new Event("anicat_health_recheck"));
+                      }
+                    }}
+                    placeholder="Paste redirect URL or token..."
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
                   />
                   <button
@@ -1248,9 +1225,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                 <div>
                   <h2 className="text-lg font-bold text-white mb-3">Anime Scrapers</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {renderScraperCard("animepahe", "AnimePahe", false)}
-                    {renderScraperCard("anizone", "AniZone", false)}
-                    {renderScraperCard("gogoanime", "AniNeko", false)}
+                    {renderScraperCard("anineko", "AniNeko", false)}
                   </div>
                 </div>
 

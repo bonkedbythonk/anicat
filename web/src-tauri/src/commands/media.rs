@@ -149,7 +149,7 @@ pub async fn get_episodes(
     media_id: i64,
     provider: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "gogoanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
 
     let db = state.open_db().map_err(|e| e.to_string())?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name);
@@ -209,7 +209,7 @@ pub async fn resolve_stream(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "gogoanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
 
     let db = state.open_db()?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
@@ -258,7 +258,7 @@ pub async fn debug_provider_streams(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "gogoanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
     let db = state.open_db()?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
         .ok_or_else(|| {

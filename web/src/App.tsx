@@ -105,7 +105,9 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
         </div>
-        {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
+        <AnimatePresence>
+          {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
+        </AnimatePresence>
         <AnimePlayer />
       </main>
       <NowPlaying />

@@ -36,7 +36,16 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_watch_history_watched
             ON watch_history(watched_at);",
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Migration: rename provider key gogoanime → anineko
+    let _ = conn.execute(
+        "UPDATE media_records SET provider_mapping = REPLACE(provider_mapping, ?1, ?2)
+         WHERE provider_mapping LIKE ?3",
+        params!["\"gogoanime\"", "\"anineko\"", "%\"gogoanime\"%"],
+    );
+
+    Ok(())
 }
 
 // ── Provider mapping ──────────────────────────────────────

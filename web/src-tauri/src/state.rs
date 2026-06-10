@@ -45,7 +45,7 @@ pub struct ApiConfig {
 }
 
 fn default_provider() -> String {
-    "gogoanime".into()
+    "anineko".into()
 }
 fn default_true() -> bool {
     true
@@ -117,9 +117,9 @@ impl AppState {
             .unwrap_or_else(|_| "python3".to_string());
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
-                let exe = std::env::current_exe().unwrap_or_default();
-                let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
-                exe_dir
+                let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+                manifest_dir
+                    .join("..")
                     .join("..")
                     .join("scraper")
                     .join("main.py")

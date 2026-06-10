@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { useEffect, useState, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check } from "lucide-react";
@@ -50,7 +51,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     staleTime: 60_000,
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("gogoanime");
+  const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
+
+  // Debug overlay state (DEV only)
+  const [debugData, setDebugData] = useState<string | null>(null);
 
   useEffect(() => {
     if (config?.general?.provider) {
@@ -596,19 +600,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                           <div className="flex items-center gap-2">
                           {typeof import.meta !== 'undefined' && import.meta.env?.DEV && (
                             <button
-                              onClick={async () => {
-                                const { invoke } = await import("@tauri-apps/api/core");
+                              onClick={() => {
                                 invoke("debug_provider_streams", {
                                   mediaId: item.id,
                                   episodeNumber: 1,
                                   provider: selectedProvider,
-                                }).then((data: any) => {
-                                  const win = window.open("", "_blank", "width=900,height=700");
-                                  if (win) {
-                                    win.document.write("<html><head><title>Provider Debug</title><style>body{margin:0;background:#0a0a0a;color:#e0e0e0;font:12px monospace}pre{padding:16px;white-space:pre-wrap;word-break:break-all}</style></head><body><pre>" + JSON.stringify(data, null, 2) + "</pre></body></html>");
-                                  }
-                                }).catch((err: any) => {
-                                  alert("Debug error: " + String(err));
+                                }).then((data: unknown) => {
+                                  setDebugData(JSON.stringify(data, null, 2));
+                                }).catch((err: unknown) => {
+                                  setDebugData("Error: " + String(err));
                                 });
                               }}
                               className="text-[10px] px-2 py-1 rounded-md bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 font-mono hover:bg-yellow-500/20"
@@ -621,7 +621,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             onChange={(e) => setSelectedProvider(e.target.value)}
                             className="text-xs bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-foreground outline-none"
                           >
-                            <option value="gogoanime">AniNeko</option>
+                            <option value="anineko">AniNeko</option>
                           </select>
                           </div>
                         </div>
@@ -731,6 +731,23 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
           </div>
         </div>
       </motion.div>
-    </div>
-  );
-}
+        {debugData && (
+          <div
+            className="absolute inset-0 z-[200] bg-[#0a0a0a] border border-white/10 rounded-lg flex flex-col m-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 shrink-0">
+              <span className="text-xs font-mono text-yellow-400 font-bold">Provider Debug</span>
+              <button
+                onClick={() => setDebugData(null)}
+                className="text-gray-400 hover:text-white text-xs font-mono"
+              >
+                Close
+              </button>
+            </div>
+            <pre className="flex-1 overflow-auto p-4 text-[11px] font-mono text-gray-300 leading-relaxed whitespace-pre-wrap break-all">{debugData}</pre>
+          </div>
+        )}
+      </div>
+    );
+  }

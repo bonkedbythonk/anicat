@@ -66,7 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
 export const usePlaybackStore = create<PlaybackState>(() => ({
   item: null,
   episode: null,
-  provider: "gogoanime",
+  provider: "anineko",
   server: null,
 }));
 
@@ -83,7 +83,7 @@ export function clearPlayback() {
   usePlaybackStore.setState({
     item: null,
     episode: null,
-    provider: "gogoanime",
+    provider: "anineko",
     server: null,
   });
 }
@@ -115,7 +115,7 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   playerType: "embedded",
-  defaultProvider: "gogoanime",
+  defaultProvider: "anineko",
   autoplay: true,
   autoskip: true,
   animePreview: true,
@@ -139,7 +139,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   loadFromConfig: (config) =>
     set({
       playerType: (config.player_type as "embedded" | "external") || "embedded",
-      defaultProvider: (config.provider as string) || "gogoanime",
+      defaultProvider: (config.provider as string) || "anineko",
       autoplay: (config.autoplay as boolean) ?? true,
       autoskip: (config.autoskip as boolean) ?? true,
       animePreview: (config.anime_preview as boolean) ?? true,

@@ -61,6 +61,7 @@ pub fn run() {
             commands::playback::get_watched_episodes,
             commands::health::check_health,
             commands::health::get_app_version,
+            commands::auth::start_anilist_auth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

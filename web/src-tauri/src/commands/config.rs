@@ -62,6 +62,14 @@ pub async fn update_config(
                     config.api.anilist_token = token.clone();
                     state.anilist_client.set_token(token);
                 }
+                "api" => {
+                    if let Some(api_obj) = value.as_object() {
+                        if let Some(token) = api_obj.get("token").or_else(|| api_obj.get("anilist_token")).and_then(|v| v.as_str()) {
+                            config.api.anilist_token = Some(token.to_string());
+                            state.anilist_client.set_token(Some(token.to_string()));
+                        }
+                    }
+                }
                 _ => {}
             }
         }

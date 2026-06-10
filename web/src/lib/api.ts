@@ -10,6 +10,31 @@ import type {
 
 // ── Config ────────────────────────────────────────────────
 
+// Normalize API response: add snake_case aliases for old v4 components
+function snakify(item: Record<string, unknown>): Record<string, unknown> {
+  if (!item || typeof item !== "object") return item;
+  const camelToSnake: Record<string, string> = {
+    coverImage: "cover_image",
+    bannerImage: "banner_image",
+    averageScore: "average_score",
+    meanScore: "mean_score",
+    nextAiringEpisode: "next_airing",
+    startDate: "start_date",
+    endDate: "end_date",
+    mediaListEntry: "media_list_entry",
+  };
+  for (const [camel, snake] of Object.entries(camelToSnake)) {
+    if (camel in item && !(snake in item)) {
+      (item as Record<string, unknown>)[snake] = (item as Record<string, unknown>)[camel];
+    }
+  }
+  return item;
+}
+
+function snakifyMediaList(items: unknown[]): unknown[] {
+  return items.map((m) => snakify(m as Record<string, unknown>));
+}
+
 export async function getConfig(): Promise<{
   general: {
     provider: string;
@@ -289,23 +314,26 @@ export const mediaApi = {
   getConfig,
   setConfig,
   searchMedia: searchAnime,
-  getMediaDetail: getAnimeDetail,
+  getMediaDetail: async (id: number) => {
+    const result = await getAnimeDetail(id);
+    return result?.Media ? snakify(result.Media as unknown as Record<string, unknown>) : null;
+  },
   getTrending: async (_type?: string) => {
     const result = await getTrending();
-    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getSeasonal: async (_type?: string) => {
     const result = await getSeasonal();
-    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getUpcoming: async (_type?: string) => {
     const result = await getUpcoming();
-    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getCharacters,
   getSmartPlaylist: async () => {
     const result = await getSmartPlaylist();
-    return { media: result?.Page?.media || [] };
+    return { media: snakifyMediaList(result?.Page?.media || []) };
   },
   getEpisodes,
   resolveStream,
@@ -320,7 +348,7 @@ export const mediaApi = {
       const media = lists.flatMap((l: { entries?: { media: MediaItem }[] }) =>
         l.entries?.map(e => e.media) || []
       );
-      return { media };
+      return { media: snakifyMediaList(media) };
     } catch {
       return { media: [] };
     }
@@ -344,7 +372,9 @@ export const mediaApi = {
     return invoke("add_to_queue", { mediaId, episodes });
   },
   getDetails: async (mediaId: number) => {
-    return invoke("get_media_detail", { mediaId });
+    const result = await getAnimeDetail(mediaId);
+    if (result?.Media) snakify(result.Media as unknown as Record<string, unknown>);
+    return result;
   },
   // Stub methods for old component compatibility
   getReviews: async () => [],
@@ -358,15 +388,15 @@ export const mediaApi = {
   removeFromQueue: async () => {},
   search: async (query: string = '', _type?: string, page?: number) => {
     const result = await searchAnime(query || '', page);
-    return { media: result?.Page?.media || [], page_info: result?.Page?.pageInfo || null };
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getRecent: async (_type?: string) => {
     const result = await getTrending();
-    return { media: result?.Page?.media || [] };
+    return { media: snakifyMediaList(result?.Page?.media || []) };
   },
   getSchedule: async () => {
     const result = await getSeasonal();
-    return { media: result?.Page?.media || [] };
+    return { media: snakifyMediaList(result?.Page?.media || []) };
   },
   getPlaybackStatus: async () => null,
   getProfile: async () => ({}),

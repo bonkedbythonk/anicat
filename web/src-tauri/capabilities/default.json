@@ -1,45 +1,17 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "https://raw.githubusercontent.com/nickknapton88/tauri-docs/dev/crates/tauri-utils/schema/capability.json",
   "identifier": "default",
-  "description": "enables the default permissions",
-  "windows": [
-    "main"
-  ],
+  "description": "Default capabilities for Anicat",
+  "windows": ["main"],
   "permissions": [
     "core:default",
-    "notification:default",
-    "core:window:allow-set-fullscreen",
-    "core:window:allow-is-fullscreen",
-    "core:window:allow-start-dragging",
-    "shell:allow-open",
-    "shell:allow-execute",
     "shell:allow-spawn",
-    "shell:default",
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "name": "binaries/anicat-server",
-          "sidecar": true
-        }
-      ]
-    },
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "binaries/anicat-server",
-          "sidecar": true
-        },
-        {
-          "name": "bash",
-          "cmd": "bash",
-          "args": [
-            "-c",
-            "curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/main/scripts/install_macos.sh | bash"
-          ]
-        }
-      ]
-    }
+    "shell:allow-execute",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "notification:allow-is-permission-granted",
+    "log:default",
+    "global-shortcut:default"
   ]
 }

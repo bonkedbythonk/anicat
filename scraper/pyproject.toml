@@ -1,0 +1,11 @@
+[project]
+name = "anicat-scraper"
+version = "5.0.0"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "curl_cffi>=0.9",
+    "selectolax>=0.3",
+]

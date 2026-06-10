@@ -290,9 +290,9 @@ export const mediaApi = {
   setConfig,
   searchMedia: searchAnime,
   getMediaDetail: getAnimeDetail,
-  getTrending,
-  getSeasonal,
-  getUpcoming,
+  getTrending: async (_type?: string) => getTrending(),
+  getSeasonal: async (_type?: string) => getSeasonal(),
+  getUpcoming: async (_type?: string) => getUpcoming(),
   getCharacters,
   getSmartPlaylist,
   getEpisodes,
@@ -301,7 +301,18 @@ export const mediaApi = {
   mapProviderSlug,
   clearProviderCache,
   getUserProfile: getUser,
-  getUserList: getUserLists,
+  getUserList: async (status?: string, _type?: string) => {
+    try {
+      const result = await getUserLists(undefined, status);
+      const lists = result?.MediaListCollection?.lists || [];
+      const media = lists.flatMap((l: { entries?: { media: MediaItem }[] }) =>
+        l.entries?.map(e => e.media) || []
+      );
+      return { media };
+    } catch {
+      return { media: [] };
+    }
+  },
   saveMediaListEntry: updateMediaEntry,
   deleteMediaListEntry: removeMediaEntry,
   getNotifications,
@@ -333,9 +344,18 @@ export const mediaApi = {
   getQueue: async () => [],
   retryQueue: async () => {},
   removeFromQueue: async () => {},
-  search: async () => ({ data: [] }),
-  getRecent: async () => [],
-  getSchedule: async () => [],
+  search: async (query: string = '', _type?: string, page?: number) => {
+    const result = await getTrending(page);
+    return result;
+  },
+  getRecent: async (_type?: string) => {
+    const result = await getTrending();
+    return { media: result?.Page?.media || [] };
+  },
+  getSchedule: async () => {
+    const result = await getSeasonal();
+    return { media: result?.Page?.media || [] };
+  },
   getPlaybackStatus: async () => null,
   getProfile: async () => ({}),
   markNotificationsAsRead: async () => {},

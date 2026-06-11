@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::de::DeserializeOwned;
 use log::debug;
@@ -12,6 +13,7 @@ const ANILIST_URL: &str = "https://graphql.anilist.co";
 pub struct AniListClient {
     client: reqwest::Client,
     token: Mutex<Option<String>>,
+    rate_limited_until: Mutex<Option<Instant>>,
 }
 
 impl Clone for AniListClient {
@@ -19,6 +21,7 @@ impl Clone for AniListClient {
         Self {
             client: self.client.clone(),
             token: Mutex::new(self.token.lock().unwrap().clone()),
+            rate_limited_until: Mutex::new(*self.rate_limited_until.lock().unwrap()),
         }
     }
 }
@@ -28,6 +31,7 @@ impl AniListClient {
         Self {
             client,
             token: Mutex::new(token),
+            rate_limited_until: Mutex::new(None),
         }
     }
 
@@ -46,6 +50,16 @@ impl AniListClient {
         query: &str,
         variables: HashMap<String, serde_json::Value>,
     ) -> Result<T, String> {
+        // Check if we're in backoff from a previous 429
+        {
+            let rl = self.rate_limited_until.lock().unwrap();
+            if let Some(until) = *rl {
+                if Instant::now() < until {
+                    return Err("AniList rate limited — backoff active".to_string());
+                }
+            }
+        }
+
         let body = GraphQLRequest {
             query: query.to_string(),
             variables,
@@ -76,6 +90,11 @@ impl AniListClient {
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
         if !status.is_success() {
+            if status.as_u16() == 429 {
+                let mut rl = self.rate_limited_until.lock().unwrap();
+                *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
+                return Err("AniList HTTP 429: Too Many Requests — cooling down 60s".to_string());
+            }
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
 

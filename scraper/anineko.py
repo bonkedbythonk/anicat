@@ -19,6 +19,24 @@ from selectolax.parser import HTMLParser
 BASE_URL = "https://anineko.to"
 
 
+def clean_title_for_search(title: str) -> str:
+    """Remove season/part/cour suffixes that AniNeko slugs won't match."""
+    # Remove season syntax: "Season 4", "Season 4 2nd Year", "1st Semester", etc.
+    title = re.sub(
+        r'\s*([-–]\s*)?('
+        r'season\s*\d+|part\s*\d+|cour\s*\d+|\d+(st|nd|rd|th)\s*season'
+        r'|2nd year.*|1st semester.*|ichi gakki.*|ni gakki.*'
+        r'|[-–:]\s*\w+\s*arc|\(\d{4}\)'
+        r')\s*$',
+        '', title, flags=re.IGNORECASE,
+    ).strip()
+    # Remove trailing parenthetical content
+    title = re.sub(r'\s*[\(\[].*?[\)\]]\s*$', '', title).strip()
+    # Collapse multiple spaces
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title
+
+
 @dataclass
 class AnimeRef:
     id: str
@@ -66,20 +84,43 @@ class AniNekoProvider:
         )
 
     async def search(self, query: str) -> list[AnimeRef]:
-        for attempt in range(3):
-            try:
-                resp = self.session.get(
-                    f"{BASE_URL}/browser",
-                    params={"keyword": query},
-                    timeout=20,
-                )
-                resp.raise_for_status()
-                return self._parse_search(resp.text)
-            except Exception as e:
-                if attempt == 2:
-                    raise RuntimeError(f"Search failed after 3 attempts: {e}")
-                await self._sleep(1 + attempt)
+        attempts = self._build_search_attempts(query)
+        for attempt in attempts:
+            for tries in range(1):  # single try per fallback — fast retries handled by Rust
+                try:
+                    resp = self.session.get(
+                        f"{BASE_URL}/browser",
+                        params={"keyword": attempt},
+                        timeout=20,
+                    )
+                    resp.raise_for_status()
+                    results = self._parse_search(resp.text)
+                    if results:
+                        return results
+                    break  # No results for this attempt, try next
+                except Exception:
+                    if tries == 2:
+                        break
+                    await self._sleep(1 + tries)
         return []
+
+    def _build_search_attempts(self, title: str) -> list[str]:
+        attempts = []
+        cleaned = clean_title_for_search(title)
+        attempts.append(cleaned)
+        words = cleaned.split()
+        if len(words) > 5:
+            attempts.append(" ".join(words[:5]))
+        if len(words) > 3:
+            attempts.append(" ".join(words[:3]))
+        base = re.sub(
+            r"\s*(season\s*\d+|s\d+|\biv\b|\biii\b|\bii\b)\s*$",
+            "", cleaned, flags=re.IGNORECASE,
+        ).strip()
+        if base and base != cleaned:
+            attempts.append(base)
+        seen = set()
+        return [x for x in attempts if x and not (x in seen or seen.add(x))]
 
     async def get(self, slug: str) -> Optional[AnimeInfo]:
         for attempt in range(3):

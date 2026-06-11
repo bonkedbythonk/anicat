@@ -910,7 +910,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
 
                 <SettingField label="API Token" description="After authorizing, paste the full URL you were redirected to (or just the token).">
                   <input
-                    type="text"
+                    type="password"
                     value={String(config.api?.anilist_token || "")}
                     onChange={(e) => {
                       const val = e.target.value.trim();

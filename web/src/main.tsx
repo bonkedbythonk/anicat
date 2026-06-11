@@ -1,6 +1,8 @@
 import { StrictMode, Component, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { persistQueryClient } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { setQueryClient } from "@/lib/events";
 import App from "./App";
 import "./index.css";
@@ -43,6 +45,19 @@ const queryClient = new QueryClient({
 });
 
 setQueryClient(queryClient);
+
+const persister = createSyncStoragePersister({
+  storage: window.localStorage,
+  key: "anicat-query-cache",
+  throttleTime: 2000,
+});
+
+persistQueryClient({
+  queryClient,
+  persister,
+  maxAge: 30 * 60 * 1000,  // cache valid for 30 minutes after app close
+  buster: "v1",
+});
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");

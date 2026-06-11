@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -98,7 +98,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     isLoading: loadingEps,
   } = useQuery({
     queryKey: ["media-episodes", item.id, selectedProvider],
-    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? undefined : selectedProvider),
+    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? undefined : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || null),
     staleTime: 120_000,  // 2 min — episodes don't change mid-session
     enabled: !!selectedProvider || isManga,
   });
@@ -111,28 +111,36 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     queryKey: ["media-characters", item.id],
     queryFn: async () => {
       const res = await mediaApi.getCharacters(item.id);
-      return res.characters ?? [];
+      return (res as any)?.Media?.characters?.edges ?? [];
     },
     staleTime: 600_000,  // 10 min — cast doesn't change
     enabled: activeTab === "characters",
   });
 
-  const {
-    data: recommendations = [],
-  } = useQuery({
-    queryKey: ["media-recommendations", item.id],
-    queryFn: () => mediaApi.getRecommendations(item.id),
-    staleTime: 600_000,  // 10 min
-    enabled: activeTab === "more",
-  });
+  // Relations + Recommendations — from MEDIA_DETAIL_QUERY (item prop)
+  const relations = useMemo(() =>
+    (item as any).relations?.edges || [],
+  [item]);
+  const recommendations = useMemo(() =>
+    (item as any).recommendations?.nodes || [],
+  [item]);
 
   const {
-    data: relations = [],
+    data: characters = [],
   } = useQuery({
-    queryKey: ["media-relations", item.id],
-    queryFn: () => mediaApi.getRelations(item.id),
-    staleTime: 600_000,  // 10 min — relations are static
-    enabled: activeTab === "more",
+    queryKey: ["media-characters", item.id],
+    queryFn: async () => {
+      const res = await mediaApi.getCharacters(item.id);
+      const r = res as any;
+      return r?.Media?.characters?.edges
+          || r?.media?.characters?.edges
+          || r?.characters?.edges
+          || r?.edges
+          || r
+          || [];
+    },
+    staleTime: 600_000,  // 10 min — cast doesn't change
+    enabled: activeTab === "characters",
   });
 
   const [hasTriggeredInitial, setHasTriggeredInitial] = useState(false);
@@ -575,7 +583,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       activeTab === tab ? "text-white" : "text-gray-400 hover:text-white"
                     }`}
                   >
-                    {tab === "episodes" ? (isManga ? "Chapters" : "Episodes") : tab}
+                    {tab === "episodes" ? (isManga ? "Chapters" : "Episodes") : tab.charAt(0).toUpperCase() + tab.slice(1)}
                     {activeTab === tab && (
                       <motion.div layoutId="tab-indicator"
                         className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full" />
@@ -692,14 +700,21 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         <div className="space-y-4">
                           <p className="text-xs font-semibold text-foreground">Recommendations</p>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                            {recommendations.map(rec => (
-                              <button key={rec.id} onClick={() => selectItem(rec)} className="group space-y-2 text-left">
-                                <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
-                                  <img src={rec.cover_image.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                                </div>
-                                <div className="text-[11px] font-bold text-muted-foreground line-clamp-1 group-hover:text-foreground transition-colors">{rec.title.english || rec.title.romaji}</div>
-                              </button>
-                            ))}
+                            {recommendations.map((rec: any) => {
+                              const m = rec.mediaRecommendation;
+                              if (!m) return null;
+                              return (
+                                <button key={m.id} onClick={() => selectItem(m)} className="group space-y-2 text-left relative">
+                                  <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
+                                    <img src={(rec as any).cover_image?.large || m.coverImage?.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                  </div>
+                                  {rec.rating > 0 && (
+                                    <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-white text-[9px] font-bold">{rec.rating}%</span>
+                                  )}
+                                  <div className="text-[11px] font-bold text-muted-foreground line-clamp-1 group-hover:text-foreground transition-colors">{m.title?.english || m.title?.romaji}</div>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : (
@@ -709,17 +724,24 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         <div className="space-y-4 mt-6">
                           <p className="text-xs font-semibold text-foreground">Related</p>
                           <div className="grid grid-cols-2 gap-4">
-                            {relations.map(rel => (
-                              <button key={rel.id} onClick={() => selectItem(rel)} className="flex items-start gap-3 group text-left">
-                                {rel.cover_image?.large && (
-                                  <img src={rel.cover_image.large} className="w-12 h-16 rounded-lg object-cover shrink-0" />
-                                )}
-                                <div>
-                                  <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{rel.title.english || rel.title.romaji}</div>
-                                  {rel.format && <div className="text-[10px] text-muted-foreground">{rel.format}</div>}
-                                </div>
-                              </button>
-                            ))}
+                            {relations.map((rel: any) => {
+                              const m = rel.node;
+                              if (!m) return null;
+                              return (
+                                <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left relative">
+                                  {(m as any).cover_image?.large || m.coverImage?.large ? (
+                                    <img src={(m as any).cover_image?.large || m.coverImage?.large} className="w-12 h-16 rounded-lg object-cover shrink-0" />
+                                  ) : null}
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
+                                    {rel.relationType && (
+                                      <span className="text-[9px] text-accent/70">{rel.relationType.replace(/_/g, " ")}</span>
+                                    )}
+                                    {m.format && <div className="text-[10px] text-muted-foreground">{m.format}</div>}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

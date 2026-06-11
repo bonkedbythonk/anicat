@@ -126,3 +126,8 @@ web/src.old/
 web/src-tauri/target/release/bundle/dmg/
 .copilot/
 docs/
+
+# Compiled JS from .tsx/.ts (not build output)
+web/src/**/*.js
+web/src/*.js
+

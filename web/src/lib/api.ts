@@ -142,8 +142,9 @@ export async function getSmartPlaylist(): Promise<{
 export async function getEpisodes(
   mediaId: number,
   provider?: string,
+  title?: string,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider });
+  return invoke("get_episodes", { mediaId, provider: provider || "anineko", title: title || null });
 }
 
 export async function resolveStream(
@@ -343,11 +344,29 @@ export const mediaApi = {
   getUserProfile: getUser,
   getUserList: async (status?: string, _type?: string) => {
     try {
-      const result = await getUserLists(undefined, status);
-      const lists = result?.MediaListCollection?.lists || [];
-      const media = lists.flatMap((l: { entries?: { media: MediaItem }[] }) =>
-        l.entries?.map(e => e.media) || []
-      );
+      const anilistStatus = ({
+        watching: "CURRENT",
+        current: "CURRENT",
+        completed: "COMPLETED",
+        paused: "PAUSED",
+        dropped: "DROPPED",
+        planning: "PLANNING",
+        repeating: "REPEATING",
+      } as Record<string, string>)[status?.toLowerCase() ?? ""] ?? status?.toUpperCase() ?? "CURRENT";
+
+      const result = await getUserLists(undefined, anilistStatus);
+      const lists = (result as any)?.MediaListCollection?.lists ?? [];
+      const entries = lists.flatMap((l: any) => l.entries ?? []);
+      const media = entries.map((entry: any) => ({
+        ...entry.media,
+        user_status: {
+          id: entry.id,
+          status: entry.status,
+          score: entry.score,
+          progress: entry.progress,
+          updated_at: entry.updatedAt,
+        },
+      }));
       return { media: snakifyMediaList(media) };
     } catch {
       return { media: [] };
@@ -390,17 +409,43 @@ export const mediaApi = {
     const result = await searchAnime(query || '', page);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
-  getRecent: async (_type?: string) => {
-    const result = await getTrending();
-    return { media: snakifyMediaList(result?.Page?.media || []) };
+  getRecent: async () => {
+    try {
+      return await invoke("get_user_list", { status: "CURRENT", userName: null });
+    } catch {
+      return { media: [] };
+    }
   },
-  getSchedule: async () => {
-    const result = await getSeasonal();
-    return { media: snakifyMediaList(result?.Page?.media || []) };
+  getSchedule: async (daysBack = 1, daysAhead = 3, page = 1, perPage = 50, mediaIds?: number[]) => {
+    return invoke("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
   },
   getPlaybackStatus: async () => null,
-  getProfile: async () => ({}),
-  markNotificationsAsRead: async () => {},
+   getProfile: async () => {
+     try {
+       const raw = await invoke("get_user_profile");
+       const viewer = (raw as any)?.Viewer;
+       if (!viewer) return null;
+       return {
+         id: viewer.id,
+         name: viewer.name,
+         about: viewer.about || null,
+         avatar: viewer.avatar?.large || viewer.avatar?.medium || null,
+         avatar_url: viewer.avatar?.large || viewer.avatar?.medium || null,
+         banner_image: viewer.bannerImage || null,
+         banner_url: viewer.bannerImage || null,
+         site_url: viewer.siteUrl || null,
+         statistics: viewer.statistics?.anime || null,
+         genres: viewer.statistics?.anime?.genres || [],
+         favorite_anime: viewer.favourites?.anime?.nodes || [],
+         favorite_manga: viewer.favourites?.manga?.nodes || [],
+       };
+     } catch {
+       return null;
+     }
+   },
+  markNotificationsAsRead: async () => {
+    return invoke("mark_notifications_read");
+  },
   getLogs: async () => [],
   wipeRegistry: async () => {},
   checkUpdate: async () => ({}),

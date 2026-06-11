@@ -56,6 +56,8 @@ pub fn run() {
             commands::user::save_media_list_entry,
             commands::user::delete_media_list_entry,
             commands::user::get_notifications,
+            commands::user::mark_notifications_read,
+            commands::user::get_airing_schedule,
             commands::playback::start_playback,
             commands::playback::stop_playback,
             commands::playback::get_watched_episodes,

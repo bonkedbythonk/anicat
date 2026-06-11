@@ -148,6 +148,7 @@ pub async fn get_episodes(
     state: State<'_, AppState>,
     media_id: i64,
     provider: Option<String>,
+    title: Option<String>,
 ) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
 
@@ -163,26 +164,11 @@ pub async fn get_episodes(
             }
         }
     } else {
-        // No mapping yet — auto-search by media title from AniList
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("id".to_string(), serde_json::json!(media_id));
-        vars.insert("type".to_string(), serde_json::json!("ANIME"));
-
-        let detail: crate::anilist::responses::MediaResponse = state
-            .anilist_client
-            .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let title = detail.media
-            .and_then(|m| m.title)
-            .and_then(|t| t.romaji.or(t.english))
-            .unwrap_or_default();
-
-        if title.is_empty() {
+        // No mapping yet — auto-search by media title (frontend must pass this)
+        let Some(title) = title.filter(|t| !t.is_empty()) else {
             return serde_json::to_value(Vec::<crate::scraper::Episode>::new())
                 .map_err(|e| e.to_string());
-        }
+        };
 
         let results = state.scraper_manager.search(&title).await.unwrap_or_default();
 
@@ -260,13 +246,40 @@ pub async fn debug_provider_streams(
 ) -> Result<serde_json::Value, String> {
     let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
     let db = state.open_db()?;
-    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
-        .ok_or_else(|| {
-            format!(
-                r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"Go to Episodes tab and open this anime — the provider slug auto-searches on first load"}}"#,
-                media_id, provider_name
-            )
-        })?;
+    let slug = match registry::service::get_provider_slug(&db, media_id, &provider_name) {
+        Some(s) => s,
+        None => {
+            // Auto-search: get title from AniList, search AniNeko, save slug
+            let mut vars = std::collections::HashMap::new();
+            vars.insert("id".to_string(), serde_json::json!(media_id));
+            vars.insert("type".to_string(), serde_json::json!("ANIME"));
+            let detail: crate::anilist::responses::MediaResponse = state
+                .anilist_client
+                .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+                .await
+                .map_err(|e| format!("Failed to get anime title: {}", e))?;
+            let title = detail.media
+                .and_then(|m| m.title)
+                .and_then(|t| t.english.or(t.romaji))
+                .unwrap_or_default();
+            if title.is_empty() {
+                return Err(format!("No title found for media {}", media_id));
+            }
+            let results = state.scraper_manager.search(&title).await.unwrap_or_default();
+            match results.into_iter().next() {
+                Some(best) => {
+                    let _ = registry::service::set_provider_slug(&db, media_id, &provider_name, &best.id);
+                    best.id
+                }
+                None => {
+                    return Err(format!(
+                        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"AniNeko search for '{}' returned no results"}}"#,
+                        media_id, provider_name, title
+                    ));
+                }
+            }
+        }
+    };
     let mut result = state.scraper_manager.debug_streams(&slug, episode_number).await?;
     if let Some(obj) = result.as_object_mut() {
         obj.insert("resolved_slug".to_string(), serde_json::json!(slug));

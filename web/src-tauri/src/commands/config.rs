@@ -59,14 +59,25 @@ pub async fn update_config(
                 }
                 "api.anilist_token" => {
                     let token = value.as_str().map(|s| s.to_string());
-                    config.api.anilist_token = token.clone();
-                    state.anilist_client.set_token(token);
+                    let t = if token.as_deref() == Some("") { None } else { token };
+                    config.api.anilist_token = t.clone();
+                    state.anilist_client.set_token(t);
                 }
                 "api" => {
                     if let Some(api_obj) = value.as_object() {
                         if let Some(token) = api_obj.get("token").or_else(|| api_obj.get("anilist_token")).and_then(|v| v.as_str()) {
-                            config.api.anilist_token = Some(token.to_string());
-                            state.anilist_client.set_token(Some(token.to_string()));
+                            let t = if token.is_empty() { None } else { Some(token.to_string()) };
+                            config.api.anilist_token = t.clone();
+                            state.anilist_client.set_token(t);
+                        }
+                    }
+                }
+                "anilist" => {
+                    if let Some(obj) = value.as_object() {
+                        if let Some(token) = obj.get("token").and_then(|v| v.as_str()) {
+                            let t = if token.is_empty() { None } else { Some(token.to_string()) };
+                            config.api.anilist_token = t.clone();
+                            state.anilist_client.set_token(t);
                         }
                     }
                 }
@@ -75,5 +86,7 @@ pub async fn update_config(
         }
     }
 
+    // Drop write lock before saving (save_config acquires its own read lock)
+    drop(config);
     state.save_config().await.map_err(|e| e.to_string())
 }

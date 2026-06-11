@@ -114,7 +114,7 @@ impl AppState {
         );
 
         let scraper_python = std::env::var("ANICAT_SCRAPER_PYTHON")
-            .unwrap_or_else(|_| "python3".to_string());
+            .unwrap_or_else(|_| "uv".to_string());
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -145,10 +145,15 @@ impl AppState {
     }
 
     fn load_config(path: &std::path::Path) -> AppConfig {
-        match std::fs::read_to_string(path) {
+        let mut config: AppConfig = match std::fs::read_to_string(path) {
             Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
             Err(_) => AppConfig::default(),
+        };
+        // Normalize legacy provider names
+        if config.general.provider == "gogoanime" || config.general.provider == "anizone" || config.general.provider == "animepahe" {
+            config.general.provider = "anineko".into();
         }
+        config
     }
 
     pub async fn save_config(&self) -> Result<(), Box<dyn std::error::Error>> {

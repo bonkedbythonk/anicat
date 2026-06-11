@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { useMemo, useRef, useState, useCallback } from "react";
-import { Loader2, Settings2, Clock, Heart, Zap, Ghost, Coffee, Smile, Sparkles, Flame, Eye } from "lucide-react";
+import { Loader2, Settings2, Clock, Heart, Zap, Ghost, Coffee, Smile, Sparkles, Flame, Eye, User } from "lucide-react";
 import { Hero } from "@/components/media/Hero";
 import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -27,26 +27,10 @@ const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
 
 // Returns true if the user has watched all available episodes for a media item.
 function isCaughtUp(item: MediaItem): boolean {
-  const progress = item.user_status?.progress || 0;
-  if (progress === 0) return false;
-
-  // If airing, compare against the latest aired episode
-  if (item.next_airing?.episode) {
-    return progress >= item.next_airing.episode - 1;
-  }
-
-  // If episodes count is known, compare directly
-  if (item.episodes || item.chapters) {
-    return progress >= (item.episodes || item.chapters || 0);
-  }
-
-  // Unknown episode count and not airing — treat finished media as caught up
-  if (item.status === 'FINISHED') {
-    return progress > 0;
-  }
-
-  // Unknown total and still airing/releasing — can't determine, show it
-  return false;
+  const total = item.episodes;
+  const progress = item.user_status?.progress ?? 0;
+  if (!total || total <= 0) return false;  // unknown/ongoing = never caught up
+  return progress >= total;
 }
 
 function MediaRowSkeleton({ title }: { title: string }) {
@@ -83,58 +67,62 @@ const GENRE_MOODS = [
 ];
 
 export function HomeView({ onSelect }: HomeViewProps) {
+  const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
+
   // 1. Local watch history — sorted by most recently watched (from media_registry)
   const recentlyWatchedQuery = useQuery({
     queryKey: ["home-recently-watched"],
     queryFn: () => mediaApi.getRecent("ANIME", 20),
-    refetchInterval: 60_000,
-    staleTime: 48_000,
+    refetchInterval: 1_800_000,  // 30 min
+    staleTime: 900_000,          // 15 min
+    enabled: isAuthenticated,
   });
 
   // 2. Playback Status — shared query key with NowPlaying component (deduped)
   useQuery({
     queryKey: ["playback-status"],
     queryFn: () => mediaApi.getPlaybackStatus().catch(() => null),
-    refetchInterval: 120_000,
-    staleTime: 96_000,
+    refetchInterval: 1_800_000,  // 30 min
+    staleTime: 900_000,          // 15 min
   });
 
   // 3. AniList Watching List — used for hero fallback and "New for You"
   const watchingQuery = useQuery({
     queryKey: ["home-watching"],
     queryFn: () => mediaApi.getUserList("watching", "ANIME"),
-    refetchInterval: 60_000,
-    staleTime: 48_000,
+    refetchInterval: 1_800_000,  // 30 min
+    staleTime: 900_000,          // 15 min
+    enabled: isAuthenticated,
   });
 
-  // 4. Background/Non-blocking Discovery Queries
   const trendingQuery = useQuery({
     queryKey: ["home-trending"],
     queryFn: () => mediaApi.getTrending("ANIME"),
-    staleTime: 300_000,   // 5 min — trending doesn't change fast
-    refetchInterval: 600_000,
+    staleTime: 1_800_000,   // 30 min
+    refetchInterval: 3_600_000,  // 60 min
   });
 
   const seasonalQuery = useQuery({
     queryKey: ["home-seasonal"],
     queryFn: () => mediaApi.getSeasonal("ANIME"),
-    staleTime: 300_000,
-    refetchInterval: 600_000,
+    staleTime: 1_800_000,   // 30 min
+    refetchInterval: 3_600_000,  // 60 min
   });
 
   const newlyReleasingQuery = useQuery({
     queryKey: ["home-newly-releasing"],
     queryFn: () => mediaApi.search('', 'ANIME', 1, { status: 'RELEASING' }),
-    staleTime: 300_000,
-    refetchInterval: 600_000,
+    staleTime: 1_800_000,   // 30 min
+    refetchInterval: 3_600_000,  // 60 min
   });
 
   // 5. Smart Playlist — personalized recommendations (cached, non-blocking)
   const smartPlaylistQuery = useQuery({
     queryKey: ["home-smart-playlist"],
     queryFn: () => mediaApi.getSmartPlaylist(),
-    staleTime: 300_000,
-    refetchInterval: 600_000,
+    staleTime: 1_800_000,   // 30 min
+    refetchInterval: 3_600_000,  // 60 min
+    enabled: isAuthenticated,
   });
 
   // 6. "New for You" — based on AniList watching list + schedule
@@ -145,9 +133,9 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const airingTodayQuery = useQuery({
     queryKey: ["home-airing-today"],
     queryFn: () => mediaApi.getSchedule(0, 0, 1, 15, watchingIds),
-    staleTime: 240_000,
-    refetchInterval: 300_000,
-    enabled: true,
+    staleTime: 600_000,          // 10 min
+    refetchInterval: 1_200_000,  // 20 min
+    enabled: isAuthenticated && watchingIds.length > 0,
   });
 
   // UX-15: Genre mood filter state
@@ -196,8 +184,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
-    staleTime: 240_000,
-    refetchInterval: 300_000,
+    staleTime: 600_000,          // 10 min
+    refetchInterval: 1_200_000,  // 20 min
     queryFn: async () => {
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;
@@ -290,6 +278,25 @@ export function HomeView({ onSelect }: HomeViewProps) {
         fallbackList={trendingQuery.data?.media || []}
         onFocusChange={setActiveHeroItem}
       />
+      {!isAuthenticated && (
+        <div className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-accent/[0.07] border border-accent/[0.12] mt-6">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
+              <User size={15} className="text-accent" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Connect AniList to personalize your homepage</p>
+              <p className="text-xs text-muted-foreground mt-0.5">See your watch list, get recommendations, and track progress</p>
+            </div>
+          </div>
+          <button
+            onClick={() => useAppStore.getState().setCurrentView("settings")}
+            className="shrink-0 px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-bold hover:bg-accent/90 transition-all"
+          >
+            Connect
+          </button>
+        </div>
+      )}
 
       {/* UX-15: Genre mood chips */}
       <div className="flex items-center space-x-2 overflow-x-auto scrollbar-hide px-1 pt-6 lg:pt-8">
@@ -327,7 +334,9 @@ export function HomeView({ onSelect }: HomeViewProps) {
       {showCustomizer && (
         <div className="mx-1 p-4 glass-panel space-y-2">
           <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Visible Sections</h3>
-          {rowConfig.map(row => (
+          {rowConfig
+            .filter(row => isAuthenticated || !["continue", "airingToday", "newForYou", "smartPlaylist"].includes(row.id))
+            .map(row => (
             <label key={row.id} className="flex items-center space-x-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -342,7 +351,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
       )}
 
       {/* UX-13: Airing Today row with countdown badges */}
-      {isRowVisible("airingToday") && (
+      {isAuthenticated && isRowVisible("airingToday") && (
         airingTodayQuery.isLoading ? (
           <MediaRowSkeleton title="Airing Today" />
         ) : (
@@ -356,7 +365,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         )
       )}
 
-      {isRowVisible("continue") && continueWatchingList.length > 0 && (
+      {isAuthenticated && isRowVisible("continue") && continueWatchingList.length > 0 && (
         <MediaRow
           title="Continue Watching"
           items={continueWatchingList}
@@ -366,7 +375,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         />
       )}
 
-      {isRowVisible("newForYou") && (
+      {isAuthenticated && isRowVisible("newForYou") && (
         recentReleasesQuery.isLoading ? (
           <MediaRowSkeleton title="New for You" />
         ) : (
@@ -376,7 +385,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         )
       )}
 
-      {isRowVisible("smartPlaylist") && smartPlaylistQuery.data?.media && smartPlaylistQuery.data.media.length > 0 && (
+      {isAuthenticated && isRowVisible("smartPlaylist") && smartPlaylistQuery.data?.media && smartPlaylistQuery.data.media.length > 0 && (
         <MediaRow title="Smart Playlist" items={filterByGenre(smartPlaylistQuery.data.media)} onSelect={onSelect} />
       )}
 

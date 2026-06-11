@@ -89,7 +89,7 @@ impl ScraperManager {
         let resp = self
             .http_client
             .get(&url)
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(90))
             .send()
             .await
             .map_err(|e| format!("Scraper search failed: {}", e))?;
@@ -178,8 +178,11 @@ impl ScraperManager {
     async fn start_process(&self) -> Result<u16, String> {
         let port = find_free_port()?;
 
-        let mut child = Command::new(&self.python_path)
-            .arg(&self.scraper_script)
+        let mut cmd = Command::new(&self.python_path);
+        if self.python_path.contains("uv") {
+            cmd.arg("run").arg("python");
+        }
+        let mut child = cmd.arg(&self.scraper_script)
             .arg("--port")
             .arg(port.to_string())
             .stdout(std::process::Stdio::null())

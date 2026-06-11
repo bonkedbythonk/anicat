@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 pub const MEDIA_DETAIL_QUERY: &str = r#"
-query ($id: Int, $type: MediaType, $isAdult: Boolean) {
+query ($id: Int, $type: MediaType) {
   Media(id: $id, type: $type) {
     id
     type
@@ -31,6 +31,29 @@ query ($id: Int, $type: MediaType, $isAdult: Boolean) {
     mediaListEntry {
       id status score progress progressVolumes repeat private notes
       startedAt { year month day } completedAt { year month day }
+    }
+    relations {
+      edges {
+        relationType(version: 2)
+        node {
+          id type
+          title { romaji english }
+          coverImage { large medium }
+          format status averageScore
+          startDate { year }
+        }
+      }
+    }
+    recommendations(page: 1, perPage: 10, sort: [RATING_DESC]) {
+      nodes {
+        rating
+        mediaRecommendation {
+          id type
+          title { romaji english }
+          coverImage { large medium }
+          format status averageScore genres
+        }
+      }
     }
   }
 }
@@ -112,7 +135,7 @@ query ($userId: Int, $userName: String, $type: MediaType, $status: MediaListStat
       name status
       entries {
         id status score progress progressVolumes repeat private notes
-        startedAt { year month day } completedAt { year month day }
+        updatedAt startedAt { year month day } completedAt { year month day }
         media {
           id type
           title { romaji english native }
@@ -129,21 +152,28 @@ query ($userId: Int, $userName: String, $type: MediaType, $status: MediaListStat
 pub const USER_PROFILE_QUERY: &str = r#"
 query {
   Viewer {
-    id name about
+    id name about bannerImage siteUrl
     avatar { large medium }
-    bannerImage
     options { displayAdultContent }
     statistics {
-      anime { count meanScore minutesWatched episodesWatched }
+      anime { count episodesWatched minutesWatched meanScore genres(limit: 10, sort: COUNT_DESC) { genre count } }
+    }
+    favourites {
+      anime(perPage: 20) {
+        nodes { id type title { romaji english } coverImage { large medium } averageScore genres format }
+      }
+      manga(perPage: 20) {
+        nodes { id type title { romaji english } coverImage { large medium } averageScore genres format }
+      }
     }
   }
 }
 "#;
 
 pub const USER_NOTIFICATIONS_QUERY: &str = r#"
-query ($page: Int, $perPage: Int) {
+query ($page: Int, $perPage: Int, $reset: Boolean) {
   Page(page: $page, perPage: $perPage) {
-    notifications {
+    notifications(resetNotificationCount: $reset) {
       ... on AiringNotification {
         id type episode contexts createdAt
         media { id type title { romaji english native } coverImage { large medium } }
@@ -257,6 +287,29 @@ query ($genre: [String], $format: MediaFormat, $status: MediaStatus, $seasonYear
       mediaListEntry { id status }
       siteUrl
     }
+  }
+}
+"#;
+
+pub const AIRING_SCHEDULE_QUERY: &str = r#"
+query ($page: Int, $perPage: Int, $airingAt_greater: Int, $airingAt_lesser: Int, $mediaId_in: [Int]) {
+  Page(page: $page, perPage: $perPage) {
+    airingSchedules(
+      airingAt_greater: $airingAt_greater,
+      airingAt_lesser: $airingAt_lesser,
+      mediaId_in: $mediaId_in,
+      sort: TIME
+    ) {
+      id airingAt episode
+      media {
+        id type
+        title { romaji english }
+        coverImage { large medium }
+        bannerImage format status genres averageScore
+        mediaListEntry { id status progress }
+      }
+    }
+    pageInfo { total currentPage hasNextPage }
   }
 }
 "#;

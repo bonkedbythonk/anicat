@@ -84,6 +84,32 @@ pub struct MediaItem {
     pub media_list_entry: Option<MediaListEntry>,
     #[serde(rename = "siteUrl")]
     pub site_url: Option<String>,
+    pub relations: Option<MediaConnection>,
+    pub recommendations: Option<RecommendationConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaConnection {
+    pub edges: Option<Vec<MediaEdge>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaEdge {
+    #[serde(rename = "relationType")]
+    pub relation_type: Option<String>,
+    pub node: Option<Box<MediaItem>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationConnection {
+    pub nodes: Option<Vec<RecommendationNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationNode {
+    pub rating: Option<i32>,
+    #[serde(rename = "mediaRecommendation")]
+    pub media_recommendation: Option<Box<MediaItem>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

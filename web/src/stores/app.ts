@@ -37,6 +37,10 @@ interface AppState {
   // Metrics last loaded
   dataVersion: number;
   setDataVersion: (v: number) => void;
+
+  // Settings
+  settingsDefaultTab: string | null;
+  setSettingsDefaultTab: (tab: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -60,6 +64,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   dataVersion: 0,
   setDataVersion: (dataVersion) => set({ dataVersion }),
+
+  settingsDefaultTab: null,
+  setSettingsDefaultTab: (settingsDefaultTab) => set({ settingsDefaultTab }),
 }));
 
 // Separate store for playback to avoid re-rendering non-playback components

@@ -291,7 +291,10 @@ export function HomeView({ onSelect }: HomeViewProps) {
             </div>
           </div>
           <button
-            onClick={() => useAppStore.getState().setCurrentView("settings")}
+            onClick={() => {
+              useAppStore.getState().setSettingsDefaultTab("account");
+              useAppStore.getState().setCurrentView("settings");
+            }}
             className="shrink-0 px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-bold hover:bg-accent/90 transition-all"
           >
             Connect

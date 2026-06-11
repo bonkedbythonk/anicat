@@ -48,6 +48,15 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<"general" | "player" | "downloads" | "account" | "maintenance" | "scrapers">("general");
   const [registryStats, setRegistryStats] = useState<RegistryStats | null>(null);
+
+  // Read default tab from store (set by Connect button on HomeView)
+  useEffect(() => {
+    const tab = useAppStore.getState().settingsDefaultTab;
+    if (tab === "account" || tab === "maintenance" || tab === "scrapers") {
+      setActiveTab(tab as any);
+      useAppStore.getState().setSettingsDefaultTab(null);
+    }
+  }, []);
   const [backingUp, setBackingUp] = useState(false);
   const [backupUrl, setBackupUrl] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);

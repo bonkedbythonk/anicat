@@ -6,9 +6,16 @@ const VIEW_KEYS = [
   "notifications", "profile", "settings", "downloads",
 ] as const;
 
+const LETTER_SHORTCUTS: Record<string, string> = {
+  "h": "home",
+  "/": "search",
+  "l": "lists",
+  "d": "downloads",
+  "n": "notifications",
+};
+
 export function useKeyboardShortcuts() {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
-  const openDetail = useAppStore((s) => s.openDetail);
   const closeDetail = useAppStore((s) => s.closeDetail);
   const selectedItem = useAppStore((s) => s.selectedItem);
 
@@ -25,11 +32,26 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Prevent browser find for '/' key
+      if (e.key === "/") {
+        e.preventDefault();
+        setCurrentView("search" as any);
+        return;
+      }
+
       // Number keys for view switching
       const idx = parseInt(e.key);
       if (!isNaN(idx) && idx >= 1 && idx <= VIEW_KEYS.length && !e.metaKey && !e.ctrlKey) {
         const view = VIEW_KEYS[idx - 1];
         setCurrentView(view);
+        return;
+      }
+
+      // Letter shortcuts
+      const shortcut = e.key.toLowerCase();
+      if (LETTER_SHORTCUTS[shortcut] && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setCurrentView(LETTER_SHORTCUTS[shortcut] as any);
       }
     }
 

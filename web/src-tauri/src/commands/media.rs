@@ -20,7 +20,7 @@ pub async fn search_media(
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
-    vars.insert("search".to_string(), serde_json::json!(query));
+    vars.insert("search".to_string(), if query.is_empty() { serde_json::json!(null) } else { serde_json::json!(query) });
     vars.insert("type".to_string(), serde_json::json!("ANIME"));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));

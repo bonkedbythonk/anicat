@@ -133,7 +133,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   // UX-13: Airing Today — schedule for current day (must be after watchingIds)
   const airingTodayQuery = useQuery({
     queryKey: ["home-airing-today"],
-    queryFn: () => mediaApi.getSchedule(0, 0, 1, 15, watchingIds),
+      queryFn: () => mediaApi.getSchedule(0, 1, 1, 15, watchingIds),
     staleTime: 600_000,          // 10 min
     refetchInterval: 1_200_000,  // 20 min
     enabled: isAuthenticated && watchingIds.length > 0,

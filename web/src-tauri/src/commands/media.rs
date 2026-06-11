@@ -13,12 +13,16 @@ pub async fn search_media(
     state: State<'_, AppState>,
     query: String,
     page: Option<i64>,
+    status: Option<String>,
 ) -> Result<Value, String> {
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("search".to_string(), serde_json::json!(query));
     vars.insert("type".to_string(), serde_json::json!("ANIME"));
+    if let Some(s) = status {
+        vars.insert("status".to_string(), serde_json::json!(s));
+    }
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
         .anilist_client

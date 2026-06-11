@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, CheckCircle2, Bell } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
+import { useAppStore } from "@/stores/app";
 
 interface NotificationsViewProps {
   onSelect: (item: MediaItem) => void;
@@ -11,6 +12,7 @@ interface NotificationsViewProps {
 
 export function NotificationsView({ onSelect }: NotificationsViewProps) {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const { data, isLoading } = useQuery({
     queryKey: ["notifications", "config"],
@@ -22,6 +24,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
       return { notifications: notifs || [], config: cfg };
     },
     staleTime: 30_000,
+    enabled: isAuthenticated,
   });
 
   const notifications = data?.notifications ?? [];
@@ -97,7 +100,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img 
-                src={notif.media.cover_image?.large} 
+                src={notif.media.coverImage?.large} 
                 alt="cover" 
                 className="w-12 h-16 object-cover rounded-lg shrink-0 shadow-lg"
               />
@@ -106,7 +109,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
                   {notif.contexts?.[0] ?? ""}{notif.episode || ""}{notif.contexts?.[1] ?? ""}{notif.media?.title?.english || notif.media?.title?.romaji || ""}{notif.contexts?.[2] ?? ""}
                 </div>
                 <div className="text-xs text-accent font-bold mt-1">
-                  {new Date(notif.created_at + "Z").toLocaleString([], { 
+                   {new Date(notif.createdAt * 1000).toLocaleString([], { 
                     dateStyle: 'short', 
                     timeStyle: 'short',
                     hour12: config?.general?.time_format !== '24h'

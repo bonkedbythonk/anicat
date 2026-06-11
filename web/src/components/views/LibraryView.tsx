@@ -7,12 +7,14 @@ import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem } from "@/lib/api";
+import { useAppStore } from "@/stores/app";
 interface LibraryViewProps {
   onSelect: (item: MediaItem) => void;
 }
 
 export function LibraryView({ onSelect }: LibraryViewProps) {
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
+  const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const { items, loading, loadingMore, hasMore, loadMore } =
     usePaginatedList<MediaItem>({
@@ -24,6 +26,7 @@ export function LibraryView({ onSelect }: LibraryViewProps) {
         };
       },
       queryKey: ["library", type],
+      enabled: isAuthenticated,
     });
 
   return (

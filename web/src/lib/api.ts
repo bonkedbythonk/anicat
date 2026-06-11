@@ -103,8 +103,8 @@ interface MediaCharacters {
   } | null;
 }
 
-export async function searchAnime(query: string, page?: number): Promise<PagedMedia> {
-  return invoke("search_media", { query, page });
+export async function searchAnime(query: string, page?: number, filters?: Record<string, string>): Promise<PagedMedia> {
+  return invoke("search_media", { query, page, ...filters });
 }
 
 export async function getAnimeDetail(mediaId: number): Promise<MediaResponse> {
@@ -342,7 +342,7 @@ export const mediaApi = {
   mapProviderSlug,
   clearProviderCache,
   getUserProfile: getUser,
-  getUserList: async (status?: string, _type?: string) => {
+  getUserList: async (status?: string, _type?: string, page?: number) => {
     try {
       const anilistStatus = ({
         watching: "CURRENT",
@@ -367,7 +367,15 @@ export const mediaApi = {
           updated_at: entry.updatedAt,
         },
       }));
-      return { media: snakifyMediaList(media) };
+      const snakified = snakifyMediaList(media);
+      // Client-side pagination (AniList MediaListCollection returns all entries)
+      const PER_PAGE = 50;
+      const pageNum = page || 1;
+      const start = (pageNum - 1) * PER_PAGE;
+      return {
+        media: snakified.slice(start, start + PER_PAGE),
+        page_info: { has_next_page: start + PER_PAGE < snakified.length },
+      };
     } catch (err) {
       console.error("[getUserList] failed:", err);
       return { media: [] };
@@ -435,19 +443,24 @@ export const mediaApi = {
   getQueue: async () => [],
   retryQueue: async () => {},
   removeFromQueue: async () => {},
-  search: async (query: string = '', _type?: string, page?: number) => {
-    const result = await searchAnime(query || '', page);
+  search: async (query: string = '', _type?: string, page?: number, filters?: Record<string, string>) => {
+    const result = await searchAnime(query || '', page, filters);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getRecent: async () => {
-    try {
-      return await invoke("get_user_list", { status: "CURRENT", userName: null });
-    } catch {
-      return { media: [] };
-    }
+    // Delegate to getUserList wrapper which transforms MediaListCollection → { media: [...] }
+    return mediaApi.getUserList("watching", "ANIME");
   },
   getSchedule: async (daysBack = 1, daysAhead = 3, page = 1, perPage = 50, mediaIds?: number[]) => {
-    return invoke("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
+    const raw = await invoke<any>("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
+    // Extract media items from AniList airingSchedules response:
+    // raw = { Page: { airingSchedules: [{ media: {...} }], pageInfo: {...} } }
+    const schedules = raw?.Page?.airingSchedules ?? [];
+    const media = schedules.map((s: any) => ({
+      ...s.media,
+      next_airing: { episode: s.episode, airing_at: new Date(s.airingAt * 1000).toISOString() },
+    }));
+    return { media: snakifyMediaList(media), page_info: raw?.Page?.pageInfo || null };
   },
   getPlaybackStatus: async () => null,
    getProfile: async () => {

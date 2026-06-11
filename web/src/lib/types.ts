@@ -185,7 +185,7 @@ export interface Notification {
   id: number;
   type: string;
   episode?: number;
-  context?: string;
+  contexts?: string[];
   media?: MediaItem;
   createdAt: number;
 }

@@ -9,14 +9,12 @@ use crate::state::AppState;
 #[tauri::command]
 pub async fn get_user_list(
     state: State<'_, AppState>,
-    user_name: Option<String>,
+    user_name: Option<String>, // unused — AniList inferes from auth token
     status: Option<String>,
 ) -> Result<Value, String> {
     let has_token = state.anilist_client.has_token();
     log::info!("[get_user_list] has_token={} status={:?}", has_token, status);
     let mut vars = HashMap::new();
-    vars.insert("userName".to_string(), serde_json::json!(user_name));
-    vars.insert("userId".to_string(), serde_json::json!(None::<i64>));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
     }

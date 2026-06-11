@@ -129,8 +129,8 @@ query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
 "#;
 
 pub const USER_LIST_QUERY: &str = r#"
-query ($userId: Int, $userName: String, $type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
-  MediaListCollection(userId: $userId, userName: $userName, type: $type, status: $status, sort: $sort) {
+query ($type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
+  MediaListCollection(type: $type, status: $status, sort: $sort) {
     lists {
       name status
       entries {

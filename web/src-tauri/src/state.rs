@@ -117,6 +117,23 @@ impl AppState {
             .unwrap_or_else(|_| "uv".to_string());
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
+                // Check for bundled Tauri resources first (release builds)
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Some(resource_dir) = exe.parent()
+                        .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
+                        .or_else(|| {
+                            // Windows: resources are next to the exe
+                            let r = exe.parent().unwrap_or(&exe).to_path_buf();
+                            if r.join("scraper").exists() { Some(r) } else { None }
+                        })
+                    {
+                        let path = resource_dir.join("scraper").join("main.py");
+                        if path.exists() {
+                            return path.to_string_lossy().to_string();
+                        }
+                    }
+                }
+                // Fallback: dev mode (relative to CARGO_MANIFEST_DIR)
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
                 manifest_dir
                     .join("..")

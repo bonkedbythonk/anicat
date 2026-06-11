@@ -44,7 +44,9 @@
       "resources/mpv_config/*",
       "resources/mpv_config/**/*",
       "resources/lib/*",
-      "resources/lib/**/*"
+      "resources/lib/**/*",
+      "../../scraper/*.py",
+      "../../scraper/pyproject.toml"
     ]
   }
 }

@@ -12,9 +12,6 @@ on:
       triple:
         required: true
         type: string
-      sidecar_suffix:
-        required: true
-        type: string
       release-tag:
         type: string
         default: ''
@@ -70,18 +67,7 @@ jobs:
         shell: powershell
 
       - name: install python dependencies
-        run: uv sync --all-extras
-
-      - name: inject commit SHA into version
-        run: |
-          python -c "from pathlib import Path; p=Path('anicat_media/_version.py'); p.write_text(p.read_text().replace('__commit__ = \"\"', '__commit__ = \"${{ github.sha }}\"'))"
-          echo "Injected commit SHA: ${{ github.sha }}"
-
-      - name: build sidecar
-        run: |
-          uv run pyinstaller --noconfirm build_sidecar/sidecar.spec
-          mkdir -p web/src-tauri/binaries
-          mv dist/anicat-server${{ inputs.sidecar_suffix }} web/src-tauri/binaries/anicat-server-${{ inputs.triple }}${{ inputs.sidecar_suffix }}
+        run: uv sync
 
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable

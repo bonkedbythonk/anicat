@@ -43,6 +43,7 @@ pub fn run() {
             commands::media::get_media_characters,
             commands::media::get_smart_playlist,
             commands::media::get_episodes,
+            commands::media::get_chapter_pages,
             commands::media::resolve_stream,
             commands::media::search_provider,
             commands::media::map_provider_slug,
@@ -63,6 +64,7 @@ pub fn run() {
             commands::playback::get_watched_episodes,
             commands::health::check_health,
             commands::health::get_app_version,
+            commands::health::log_frontend,
             commands::auth::start_anilist_auth,
         ])
         .run(tauri::generate_context!())

@@ -9,32 +9,74 @@ use crate::state::AppState;
 #[tauri::command]
 pub async fn get_user_list(
     state: State<'_, AppState>,
-    user_name: Option<String>, // unused — AniList inferes from auth token
+    user_name: Option<String>,
     status: Option<String>,
+    media_type: Option<String>,
 ) -> Result<Value, String> {
     let has_token = state.anilist_client.has_token();
-    log::info!("[get_user_list] has_token={} status={:?}", has_token, status);
+    log::info!("[RUST:get_user_list] has_token={} status={:?} user_name={:?} media_type={:?}", has_token, status, user_name, media_type);
+    
+    let mut resolved_user_name = user_name;
+    if resolved_user_name.is_none() || resolved_user_name.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+        if let Some(cached_name) = state.anilist_client.get_username() {
+            resolved_user_name = Some(cached_name);
+            log::info!("[RUST:get_user_list] using cached Viewer username: {:?}", resolved_user_name);
+        } else {
+            log::info!("[RUST:get_user_list] username not provided and not cached, fetching Viewer profile...");
+            let profile_result: Value = state
+                .anilist_client
+                .execute(queries::USER_PROFILE_QUERY, HashMap::new())
+                .await?;
+            if let Some(name) = profile_result.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()) {
+                let name_str = name.to_string();
+                state.anilist_client.set_username(Some(name_str.clone()));
+                resolved_user_name = Some(name_str);
+                log::info!("[RUST:get_user_list] resolved and cached Viewer username: {}", name);
+            } else {
+                return Err("Failed to resolve authenticated Viewer username".to_string());
+            }
+        }
+    }
+
     let mut vars = HashMap::new();
+    if let Some(ref name) = resolved_user_name {
+        vars.insert("userName".to_string(), serde_json::json!(name));
+    }
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
     }
-    vars.insert("type".to_string(), serde_json::json!("ANIME"));
+    vars.insert("type".to_string(), serde_json::json!(media_type.unwrap_or_else(|| "ANIME".to_string())));
 
     let result: Value = state
         .anilist_client
         .execute(queries::USER_LIST_QUERY, vars)
         .await?;
 
+    log::info!("[RUST:get_user_list] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    if let Some(lists) = result.get("MediaListCollection").and_then(|m| m.get("lists")).and_then(|l| l.as_array()) {
+        log::info!("[RUST:get_user_list] returned lists count: {}", lists.len());
+        for (idx, list) in lists.iter().enumerate() {
+            let name = list.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let entries = list.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0);
+            log::info!("  List[{}]: name={}, entries={}", idx, name, entries);
+        }
+    } else {
+        log::info!("[RUST:get_user_list] MediaListCollection or lists not found/empty in response");
+    }
+
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn get_user_profile(state: State<'_, AppState>) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:get_user_profile] has_token={}", has_token);
     let vars = HashMap::new();
     let result: Value = state
         .anilist_client
         .execute(queries::USER_PROFILE_QUERY, vars)
         .await?;
+    log::info!("[RUST:get_user_profile] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     Ok(result)
 }
 
@@ -44,6 +86,8 @@ pub async fn save_media_list_entry(
     media_id: i64,
     updates: Value,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:save_media_list_entry] has_token={} media_id={} updates={:?}", has_token, media_id, updates);
     let mut vars = HashMap::new();
     vars.insert("mediaId".to_string(), serde_json::json!(media_id));
 
@@ -61,7 +105,7 @@ pub async fn save_media_list_entry(
         .anilist_client
         .execute(queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-
+    log::info!("[RUST:save_media_list_entry] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     Ok(result)
 }
 
@@ -70,6 +114,8 @@ pub async fn delete_media_list_entry(
     state: State<'_, AppState>,
     entry_id: i64,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:delete_media_list_entry] has_token={} entry_id={}", has_token, entry_id);
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(entry_id));
 
@@ -77,7 +123,7 @@ pub async fn delete_media_list_entry(
         .anilist_client
         .execute(queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-
+    log::info!("[RUST:delete_media_list_entry] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     Ok(result)
 }
 
@@ -86,6 +132,8 @@ pub async fn get_notifications(
     state: State<'_, AppState>,
     page: Option<i64>,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:get_notifications] has_token={} page={:?}", has_token, page);
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
@@ -95,7 +143,10 @@ pub async fn get_notifications(
         .anilist_client
         .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
         .await?;
-
+    log::info!("[RUST:get_notifications] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    if let Some(nots) = result.get("Page").and_then(|p| p.get("notifications")).and_then(|n| n.as_array()) {
+        log::info!("[RUST:get_notifications] returned notifications count: {}", nots.len());
+    }
     Ok(result)
 }
 
@@ -103,14 +154,18 @@ pub async fn get_notifications(
 pub async fn mark_notifications_read(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:mark_notifications_read] has_token={}", has_token);
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(1));
     vars.insert("perPage".to_string(), serde_json::json!(1));
     vars.insert("reset".to_string(), serde_json::json!(true));
 
-    state.anilist_client
+    let result: Value = state.anilist_client
         .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
-        .await
+        .await?;
+    log::info!("[RUST:mark_notifications_read] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    Ok(result)
 }
 
 #[tauri::command]
@@ -122,6 +177,8 @@ pub async fn get_airing_schedule(
     page: Option<i64>,
     per_page: Option<i64>,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:get_airing_schedule] has_token={} days_back={:?} days_ahead={:?} media_ids={:?}", has_token, days_back, days_ahead, media_ids);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -138,7 +195,12 @@ pub async fn get_airing_schedule(
         }
     }
 
-    state.anilist_client
+    let result: Value = state.anilist_client
         .execute(queries::AIRING_SCHEDULE_QUERY, vars)
-        .await
+        .await?;
+    log::info!("[RUST:get_airing_schedule] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    if let Some(scheds) = result.get("Page").and_then(|p| p.get("airingSchedules")).and_then(|s| s.as_array()) {
+        log::info!("[RUST:get_airing_schedule] returned airingSchedules count: {}", scheds.len());
+    }
+    Ok(result)
 }

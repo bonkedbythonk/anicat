@@ -133,6 +133,65 @@ impl ScraperManager {
         serde_json::from_str(&body).map_err(|e| format!("Parse streams: {}", e))
     }
 
+    pub async fn search_manga(&self, query: &str) -> Result<Vec<AnimeRef>, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/manga/search?query={}",
+            port,
+            percent_encode(query)
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(90))
+            .send()
+            .await
+            .map_err(|e| format!("Scraper search failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse search: {}", e))
+    }
+
+    pub async fn get_manga(&self, slug: &str) -> Result<AnimeInfo, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/manga/get?slug={}",
+            port,
+            percent_encode(slug)
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| format!("Scraper get_manga failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse manga: {}", e))
+    }
+
+    pub async fn get_chapter_pages(
+        &self,
+        slug: &str,
+        chapter: &str,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/manga/chapter?slug={}&chapter={}",
+            port,
+            percent_encode(slug),
+            percent_encode(chapter)
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(45))
+            .send()
+            .await
+            .map_err(|e| format!("Scraper get_chapter_pages failed: {}", e))?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| format!("Parse chapter pages: {}", e))
+    }
+
     pub async fn debug_streams(
         &self,
         slug: &str,

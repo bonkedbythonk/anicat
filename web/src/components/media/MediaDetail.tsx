@@ -11,8 +11,9 @@ import { dispatchRefresh } from "@/lib/events";
 import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useProgressEditor } from "@/lib/useProgressEditor";
-import { useAppStore } from "@/stores/app";
+import { useAppStore, setPlayback } from "@/stores/app";
 import { EpisodeList } from "./EpisodeList";
+import MangaReader from "./MangaReader";
 
 interface MediaDetailProps {
   item: MediaItem;
@@ -40,6 +41,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   // Two-step delete confirm (replaces window.confirm which is broken in Tauri WebView)
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const { data: config = null } = useQuery<DetailConfig | null>({
@@ -97,8 +99,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     data: episodesRaw,
     isLoading: loadingEps,
   } = useQuery({
-    queryKey: ["media-episodes", item.id, selectedProvider],
-    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? undefined : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || null),
+    queryKey: ["media-episodes", item.id, isManga ? "mangakatana" : selectedProvider],
+    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || null),
     staleTime: 120_000,  // 2 min — episodes don't change mid-session
     enabled: !!selectedProvider || isManga,
   });
@@ -159,7 +161,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       if (isManga) {
         // For manga, "Play Next" means read the next chapter
         const nextChapter = (fullItem.user_status?.progress || 0) + 1;
-        if (onRead) onRead(nextChapter.toString());
+        setActiveChapter(nextChapter.toString());
       } else {
         const playerType = config?.stream?.player_type;
         if (playerType === "embedded" && onPlayEpisode) {
@@ -167,7 +169,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
           onPlayEpisode(nextEpisode.toString(), selectedProvider);
           onClose();
         } else {
-          await mediaApi.playNext(item.id, selectedProvider);
+          const result = await mediaApi.playNext(item.id, selectedProvider);
+          if (result?.stream_url) {
+            const nextEp = (fullItem.user_status?.progress || 0) + 1;
+            setPlayback(item, { number: nextEp }, selectedProvider, result.stream_url);
+          }
           dispatchRefresh();
         }
       }
@@ -183,8 +189,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     }
   };
 
-  const handleUpdateProgress = (newProgress: number) => {
-    progressEditor.commitProgress(item.id, newProgress);
+  const handleUpdateProgress = async (newProgress: number) => {
+    try {
+      await mediaApi.saveMediaListEntry(item.id, { progress: newProgress });
+      queryClient.invalidateQueries({ queryKey: ["media-detail", item.id] });
+      queryClient.invalidateQueries({ queryKey: ["lists"] });
+      progressEditor.cancelEditing();
+    } catch (err) {
+      console.error("Failed to update progress:", err);
+    }
   };
 
   const handleRemoveFromList = async (bypassConfirm: boolean | React.MouseEvent = false) => {
@@ -206,7 +219,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       ["lists"],
       ["home-recently-watched"],
       ["home-watching"],
-      ["library"],
     ];
     // Snapshot each list cache for rollback
     interface ListPage { media?: MediaItem[]; page_info?: unknown; }
@@ -223,7 +235,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     // may still be mounted during exit animation and would crash on null data).
     qc.invalidateQueries({ queryKey: ["media-detail", item.id] });
 
-    mediaApi.deleteFromList(fullItem?.Media?.mediaListEntry?.id || 0)
+    mediaApi.deleteFromList(fullItem?.user_status?.id || fullItem?.media_list_entry?.id || 0)
       .then(() => {
         // Invalidate to ensure consistency with server
         for (const key of listQueryKeys) {
@@ -626,6 +638,18 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                           >
                             <option value="anineko">AniNeko</option>
                           </select>
+                           <button
+                             onClick={async () => {
+                               await mediaApi.clearProviderCache(item.id).catch(() => {});
+                               queryClient.invalidateQueries({
+                                 queryKey: ["media-episodes", item.id],
+                               });
+                             }}
+                             className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground transition-all active:scale-95"
+                             title="Re-match source"
+                           >
+                             <RotateCcw size={14} />
+                           </button>
                           </div>
                         </div>
                       )}
@@ -634,8 +658,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         episodes={episodes} 
                         loading={loadingEps} 
                         progress={fullItem.user_status?.progress} 
-                        isManga={isManga} 
-                        onRead={onRead} 
+                        isManga={isManga}
+                        item={item}
+                        onRead={(chNum) => setActiveChapter(chNum)} 
                         onPlayEpisode={(epNum, prov, serv) => {
                           if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv);
                           onClose();
@@ -764,6 +789,29 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
             </div>
             <pre className="flex-1 overflow-auto p-4 text-[11px] font-mono text-gray-300 leading-relaxed whitespace-pre-wrap break-all">{debugData}</pre>
           </div>
+        )}
+        {activeChapter && (
+          <MangaReader
+            mediaId={item.id}
+            chapterNumber={activeChapter}
+            onClose={() => setActiveChapter(null)}
+            onProgressUpdate={async (chapterNum) => {
+              const num = parseInt(chapterNum) || 0;
+              if (num > (fullItem.user_status?.progress || 0)) {
+                await handleUpdateProgress(num);
+              }
+            }}
+            onNavigateChapter={(direction) => {
+              const idx = episodes.findIndex((ep) => String(ep.number) === activeChapter);
+              if (direction === "prev" && idx > 0) {
+                setActiveChapter(String(episodes[idx - 1].number));
+              } else if (direction === "next" && idx < episodes.length - 1) {
+                setActiveChapter(String(episodes[idx + 1].number));
+              }
+            }}
+            hasPrevChapter={episodes.findIndex((ep) => String(ep.number) === activeChapter) > 0}
+            hasNextChapter={episodes.findIndex((ep) => String(ep.number) === activeChapter) < episodes.length - 1}
+          />
         )}
       </div>
     );

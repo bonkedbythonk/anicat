@@ -18,7 +18,6 @@ const navItems = [
   { icon: Search, label: "Search", view: "search" as const, shortcut: "/" },
   { icon: Monitor, label: "My Lists", view: "lists" as const, shortcut: "L" },
   { icon: Download, label: "Downloads", view: "downloads" as const, shortcut: "D" },
-  { icon: Library, label: "Library", view: "library" as const },
   { icon: Calendar, label: "Schedule", view: "schedule" as const },
 ];
 

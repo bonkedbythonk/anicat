@@ -24,6 +24,7 @@ pub async fn start_proxy(client: reqwest::Client) -> SocketAddr {
 
     let app = Router::new()
         .route("/proxy", get(proxy_handler))
+        .route("/api/media/manga/proxy", get(proxy_handler))
         .route("/health", get(health_handler))
         .with_state(state);
 
@@ -66,7 +67,9 @@ async fn proxy_handler(
         );
     }
 
-    if let Some(referer) = headers.get("referer") {
+    if url.contains("mangakatana.com") {
+        req_builder = req_builder.header("referer", "https://mangakatana.com/");
+    } else if let Some(referer) = headers.get("referer") {
         req_builder = req_builder.header("referer", referer);
     }
 

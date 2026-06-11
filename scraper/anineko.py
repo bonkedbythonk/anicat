@@ -11,6 +11,7 @@ import re
 import asyncio
 import json
 import time
+from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Tuple
 from curl_cffi import requests
@@ -191,9 +192,26 @@ class AniNekoProvider:
                         seen.add(s.url)
                         unique.append(s)
 
+                # Resolve embed URLs to direct stream URLs concurrently
+                loop = asyncio.get_running_loop()
+                
+                def resolve_server(s: StreamServer) -> StreamServer:
+                    direct = self._try_extract_direct_url(s.url)
+                    if direct:
+                        s.url = direct
+                        s.is_m3u8 = bool(
+                            ".m3u8" in direct
+                            or "master.txt" in direct
+                            or "master.m3u8" in direct
+                        )
+                    return s
+
+                tasks = [loop.run_in_executor(None, resolve_server, s) for s in unique]
+                resolved_servers = await asyncio.gather(*tasks)
+
                 if debug:
-                    return unique, debug_log
-                return unique, []
+                    return resolved_servers, debug_log
+                return resolved_servers, []
 
             except Exception as e:
                 if attempt == 2:
@@ -441,6 +459,75 @@ class AniNekoProvider:
             "found": len(found),
             "notes": [],
         }
+
+    def _try_extract_direct_url(self, embed_url: str) -> Optional[str]:
+        # 1. Direct construction for known hosts
+        vibe_match = re.search(r"vibeplayer\.site/(?:embed/)?([a-zA-Z0-9]+)", embed_url)
+        if vibe_match:
+            vid = vibe_match.group(1)
+            return f"https://vibeplayer.site/public/stream/{vid}/master.m3u8"
+
+        otaku_match = re.search(r"(?:otakuvid\.online|otakuvid\.com|otakuhg\.site)/(?:embed/|e/)?([a-zA-Z0-9]+)", embed_url)
+        if otaku_match:
+            vid = otaku_match.group(1)
+            domain = urlparse(embed_url).netloc
+            return f"https://{domain}/public/stream/{vid}/master.m3u8"
+
+        # 2. General network page extraction
+        try:
+            resp = self.session.get(embed_url, timeout=15)
+            if resp.status_code != 200:
+                return None
+            text = resp.text
+            
+            # Check for packed scripts and decode them
+            packed_matches = re.finditer(
+                r"eval\(function\(p,a,c,k,e,d\).*?\}\('(.*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*?)'\.split\('\|'\)\)\)",
+                text,
+                re.DOTALL
+            )
+            for match in packed_matches:
+                p, a, c, k_str = match.groups()
+                try:
+                    unpacked = self._unpack_packed(p, int(a), int(c), k_str.split('|'))
+                    text += "\n" + unpacked
+                except Exception:
+                    pass
+                    
+            for pattern in [
+                r'"hls\d*"\s*:\s*["\']([^"\']+(?:\.mp4|\.m3u8|master\.txt)[^"\']*)["\']',
+                r'source\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
+                r'src\s*:\s*["\']([^"\']+(?:\.mp4|\.m3u8)[^"\']*)["\']',
+                r'file\s*:\s*["\']([^"\']+(?:\.mp4|\.m3u8)[^"\']*)["\']',
+                r'"file"\s*:\s*"([^"]+(?:\.mp4|\.m3u8)[^"]*)"',
+                r'const\s+src\s*=\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
+            ]:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    raw_link = match.group(1)
+                    return urljoin(embed_url, raw_link)
+        except Exception:
+            pass
+        return None
+
+    def _decode_baseN(self, num: int, base: int) -> str:
+        chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if num == 0:
+            return "0"
+        res = []
+        while num > 0:
+            res.append(chars[num % base])
+            num //= base
+        return "".join(reversed(res))
+
+    def _unpack_packed(self, p: str, a: int, c: int, k: list[str]) -> str:
+        for i in range(c - 1, -1, -1):
+            if i < len(k) and k[i]:
+                val = k[i]
+                base_n_str = self._decode_baseN(i, a)
+                pattern = r"\b" + re.escape(base_n_str) + r"\b"
+                p = re.sub(pattern, val, p)
+        return p
 
     async def _sleep(self, seconds: float):
         await asyncio.sleep(seconds)

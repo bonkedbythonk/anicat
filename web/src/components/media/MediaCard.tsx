@@ -32,8 +32,12 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         staleTime: 60_000,
       });
       queryClient.prefetchQuery({
-        queryKey: ["media-episodes", item.id],
-        queryFn: () => mediaApi.getEpisodes(item.id),
+        queryKey: ["media-episodes", item.id, item.type === "MANGA" ? "mangakatana" : "anineko"],
+        queryFn: () => mediaApi.getEpisodes(
+          item.id,
+          item.type === "MANGA" ? "mangakatana" : "anineko",
+          item.title.english || item.title.romaji || item.title.native || undefined
+        ),
         staleTime: 60_000,
       });
     }, 300);

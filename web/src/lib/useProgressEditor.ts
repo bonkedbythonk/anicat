@@ -1,17 +1,24 @@
-export function useProgressEditor(
-  _entry: { score?: number; progress?: number; status?: string; notes?: string },
-  _onUpdate: (updates: Record<string, unknown>) => void,
-) {
+import { useState } from "react";
+
+export function useProgressEditor() {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+
+  const startEditing = (currentValue: number) => {
+    setEditValue(currentValue.toString());
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+    setEditValue("");
+  };
+
   return {
-    score: null,
-    progress: null,
-    status: null,
-    notes: null,
-    setScore: () => {},
-    setProgress: () => {},
-    setStatus: () => {},
-    setNotes: () => {},
-    save: () => {},
-    isDirty: false,
+    isEditing,
+    editValue,
+    setEditValue,
+    startEditing,
+    cancelEditing,
   };
 }

@@ -10,9 +10,11 @@ import uvicorn
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from anineko import AniNekoProvider
+from mangakatana import MangaKatanaProvider
 
 app = FastAPI(title="Anicat Scraper", docs_url=None, redoc_url=None)
 provider = AniNekoProvider()
+manga_provider = MangaKatanaProvider()
 _last_used = time.monotonic()
 
 def _touch():
@@ -149,6 +151,61 @@ async def debug_test():
     return await debug_streams(
         slug="classroom-of-the-elite-iv", episode=1
     )
+
+
+@app.get("/manga/search")
+async def manga_search(query: str = Query(...)):
+    _touch()
+    results = await manga_provider.search(query)
+    return [{"id": r["id"], "title": r["title"], "year": None} for r in results]
+
+
+@app.get("/manga/get")
+async def get_manga(slug: str = Query(...)):
+    _touch()
+    info = await manga_provider.get(slug)
+    if info is None:
+        return {"title": "", "episodes": []}
+    return {
+        "title": info["title"],
+        "episodes": [
+            {"number": ep["number"], "title": ep["title"], "image": ep.get("image")}
+            for ep in info["chapters"]
+        ],
+    }
+
+
+@app.get("/manga/chapter")
+async def get_chapter(slug: str = Query(...), chapter: str = Query(...)):
+    _touch()
+    info = await manga_provider.get(slug)
+    if not info or not info.get("chapters"):
+        return {"thumbnails": [], "title": ""}
+    
+    target_ch = None
+    for ep in info["chapters"]:
+        if str(ep["number"]) == chapter:
+            target_ch = ep
+            break
+            
+    if not target_ch:
+        try:
+            ch_float = float(chapter)
+            for ep in info["chapters"]:
+                if abs(float(ep["number"]) - ch_float) < 0.01:
+                    target_ch = ep
+                    break
+        except ValueError:
+            pass
+            
+    if not target_ch:
+        return {"thumbnails": [], "title": ""}
+        
+    pages_info = await manga_provider.get_pages(target_ch["url"])
+    if not pages_info:
+        return {"thumbnails": [], "title": ""}
+        
+    return pages_info
 
 
 if __name__ == "__main__":

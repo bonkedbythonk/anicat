@@ -13,6 +13,7 @@ const ANILIST_URL: &str = "https://graphql.anilist.co";
 pub struct AniListClient {
     client: reqwest::Client,
     token: Mutex<Option<String>>,
+    username: Mutex<Option<String>>,
     rate_limited_until: Mutex<Option<Instant>>,
 }
 
@@ -21,6 +22,7 @@ impl Clone for AniListClient {
         Self {
             client: self.client.clone(),
             token: Mutex::new(self.token.lock().unwrap().clone()),
+            username: Mutex::new(self.username.lock().unwrap().clone()),
             rate_limited_until: Mutex::new(*self.rate_limited_until.lock().unwrap()),
         }
     }
@@ -31,6 +33,7 @@ impl AniListClient {
         Self {
             client,
             token: Mutex::new(token),
+            username: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
         }
     }
@@ -39,10 +42,23 @@ impl AniListClient {
         if let Ok(mut t) = self.token.lock() {
             *t = token;
         }
+        if let Ok(mut u) = self.username.lock() {
+            *u = None;
+        }
     }
 
     pub fn has_token(&self) -> bool {
         self.token.lock().map(|t| t.is_some()).unwrap_or(false)
+    }
+
+    pub fn set_username(&self, username: Option<String>) {
+        if let Ok(mut u) = self.username.lock() {
+            *u = username;
+        }
+    }
+
+    pub fn get_username(&self) -> Option<String> {
+        self.username.lock().ok().and_then(|u| u.clone())
     }
 
     pub async fn execute<T: DeserializeOwned>(

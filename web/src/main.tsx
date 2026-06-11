@@ -4,8 +4,38 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { setQueryClient } from "@/lib/events";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./index.css";
+
+// Intercept frontend logs to forward to Rust stdout
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+function formatArgs(args: any[]): string {
+  return args
+    .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
+    .join(" ");
+}
+
+console.log = (...args: any[]) => {
+  originalLog(...args);
+  const msg = formatArgs(args);
+  invoke("log_frontend", { level: "info", message: msg }).catch(() => {});
+};
+
+console.warn = (...args: any[]) => {
+  originalWarn(...args);
+  const msg = formatArgs(args);
+  invoke("log_frontend", { level: "warn", message: msg }).catch(() => {});
+};
+
+console.error = (...args: any[]) => {
+  originalError(...args);
+  const msg = formatArgs(args);
+  invoke("log_frontend", { level: "error", message: msg }).catch(() => {});
+};
 
 document.documentElement.classList.add("dark");
 

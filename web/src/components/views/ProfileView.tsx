@@ -26,6 +26,8 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
     enabled: isAuthenticated,
   });
 
+  console.log("[VIEW:ProfileView] render: isAuthenticated:", isAuthenticated, "loading:", loading, "profile:", profile);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">

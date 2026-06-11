@@ -147,6 +147,13 @@ export async function getEpisodes(
   return invoke("get_episodes", { mediaId, provider: provider || "anineko", title: title || null });
 }
 
+export async function getChapterPages(
+  mediaId: number,
+  chapterNumber: string,
+): Promise<{ thumbnails: string[]; title: string }> {
+  return invoke("get_chapter_pages", { mediaId, chapterNumber });
+}
+
 export async function resolveStream(
   mediaId: number,
   episodeNumber: number,
@@ -223,8 +230,9 @@ export async function getUser(): Promise<{ Viewer: ViewerData | null }> {
 export async function getUserLists(
   userName?: string,
   status?: string,
+  mediaType?: string,
 ): Promise<MediaListCollection> {
-  return invoke("get_user_list", { userName, status });
+  return invoke("get_user_list", { userName, status, mediaType });
 }
 
 export async function updateProgress(
@@ -264,7 +272,11 @@ export async function removeMediaEntry(
 export async function getNotifications(page?: number): Promise<{
   Page: { notifications: Notification[]; pageInfo: PageInfo | null };
 }> {
-  return invoke("get_notifications", { page });
+  const raw = await invoke<any>("get_notifications", { page });
+  const rawKeys = raw ? Object.keys(raw) : [];
+  const notifications = raw?.Page?.notifications ?? [];
+  console.log("[API:getNotifications] raw response keys:", rawKeys, "notification count:", notifications.length);
+  return raw;
 }
 
 // ── Playback ──────────────────────────────────────────────
@@ -334,15 +346,19 @@ export const mediaApi = {
   getCharacters,
   getSmartPlaylist: async () => {
     const result = await getSmartPlaylist();
+    const rawKeys = result ? Object.keys(result) : [];
+    const mediaCount = result?.Page?.media?.length ?? 0;
+    console.log("[API:getSmartPlaylist] raw response keys:", rawKeys, "final media count:", mediaCount);
     return { media: snakifyMediaList(result?.Page?.media || []) };
   },
   getEpisodes,
+  getChapterPages,
   resolveStream,
   searchProvider,
   mapProviderSlug,
   clearProviderCache,
   getUserProfile: getUser,
-  getUserList: async (status?: string, _type?: string, page?: number) => {
+  getUserList: async (status?: string, type?: string, page?: number) => {
     try {
       const anilistStatus = ({
         watching: "CURRENT",
@@ -354,7 +370,9 @@ export const mediaApi = {
         repeating: "REPEATING",
       } as Record<string, string>)[status?.toLowerCase() ?? ""] ?? status?.toUpperCase() ?? "CURRENT";
 
-      const result = await getUserLists(undefined, anilistStatus);
+      console.log("[API:getUserList] input status:", status, "page:", page, "anilistStatus:", anilistStatus, "type:", type);
+      const result = await getUserLists(undefined, anilistStatus, type);
+      const rawKeys = result ? Object.keys(result) : [];
       const lists = (result as any)?.MediaListCollection?.lists ?? [];
       const entries = lists.flatMap((l: any) => l.entries ?? []);
       const media = entries.map((entry: any) => ({
@@ -372,8 +390,10 @@ export const mediaApi = {
       const PER_PAGE = 50;
       const pageNum = page || 1;
       const start = (pageNum - 1) * PER_PAGE;
+      const finalMedia = snakified.slice(start, start + PER_PAGE);
+      console.log("[API:getUserList] raw response keys:", rawKeys, "list count:", lists.length, "entry count:", entries.length, "final media count:", finalMedia.length);
       return {
-        media: snakified.slice(start, start + PER_PAGE),
+        media: finalMedia,
         page_info: { has_next_page: start + PER_PAGE < snakified.length },
       };
     } catch (err) {
@@ -383,7 +403,6 @@ export const mediaApi = {
   },
   saveMediaListEntry: updateMediaEntry,
   deleteMediaListEntry: removeMediaEntry,
-  getNotifications,
   startPlayback,
   stopPlayback,
   trackPlayback: stopPlayback,
@@ -437,36 +456,57 @@ export const mediaApi = {
   },
   getDetails: async (mediaId: number) => {
     const result = await getAnimeDetail(mediaId);
-    if (result?.Media) snakify(result.Media as unknown as Record<string, unknown>);
-    return result;
+    if (!result?.Media) return null;
+    const media = result.Media;
+    snakify(media as unknown as Record<string, unknown>);
+    if (media.media_list_entry) {
+      media.user_status = {
+        id: media.media_list_entry.id,
+        status: media.media_list_entry.status,
+        score: media.media_list_entry.score,
+        progress: media.media_list_entry.progress,
+        updated_at: media.media_list_entry.updated_at || null,
+      };
+    }
+    return media;
   },
   getQueue: async () => [],
   retryQueue: async () => {},
   removeFromQueue: async () => {},
   search: async (query: string = '', _type?: string, page?: number, filters?: Record<string, string>) => {
+    console.log("[API:search] query:", query, "filters:", filters);
     const result = await searchAnime(query || '', page, filters);
+    const rawKeys = result ? Object.keys(result) : [];
+    const mediaCount = result?.Page?.media?.length ?? 0;
+    console.log("[API:search] raw Page keys:", rawKeys, "final media count:", mediaCount);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getRecent: async () => {
-    // Delegate to getUserList wrapper which transforms MediaListCollection → { media: [...] }
-    return mediaApi.getUserList("watching", "ANIME");
+    console.log("[API:getRecent] delegating to getUserList('watching')");
+    const result = await mediaApi.getUserList("watching", "ANIME");
+    console.log("[API:getRecent] delegated result media count:", result?.media?.length);
+    return result;
   },
   getSchedule: async (daysBack = 1, daysAhead = 3, page = 1, perPage = 50, mediaIds?: number[]) => {
+    console.log("[API:getSchedule] input daysBack:", daysBack, "daysAhead:", daysAhead, "mediaIds length:", mediaIds?.length);
     const raw = await invoke<any>("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
-    // Extract media items from AniList airingSchedules response:
-    // raw = { Page: { airingSchedules: [{ media: {...} }], pageInfo: {...} } }
+    const rawKeys = raw ? Object.keys(raw) : [];
     const schedules = raw?.Page?.airingSchedules ?? [];
     const media = schedules.map((s: any) => ({
       ...s.media,
       next_airing: { episode: s.episode, airing_at: new Date(s.airingAt * 1000).toISOString() },
     }));
-    return { media: snakifyMediaList(media), page_info: raw?.Page?.pageInfo || null };
+    const finalResult = { media: snakifyMediaList(media), page_info: raw?.Page?.pageInfo || null };
+    console.log("[API:getSchedule] raw Page keys:", rawKeys, "schedules count:", schedules.length, "final media count:", finalResult.media.length);
+    return finalResult;
   },
   getPlaybackStatus: async () => null,
    getProfile: async () => {
      try {
        const raw = await invoke("get_user_profile");
+       const rawKeys = raw ? Object.keys(raw) : [];
        const viewer = (raw as any)?.Viewer;
+       console.log("[API:getProfile] raw Viewer keys:", rawKeys, "isViewerNull:", !viewer);
        if (!viewer) return null;
        const animeStats = viewer.statistics?.anime;
        const mangaStats = viewer.statistics?.manga;
@@ -491,10 +531,20 @@ export const mediaApi = {
          favorite_anime: viewer.favourites?.anime?.nodes || [],
          favorite_manga: viewer.favourites?.manga?.nodes || [],
        };
-     } catch {
+     } catch (err) {
+       console.error("[API:getProfile] failed:", err);
        return null;
      }
    },
+  getNotifications: async (page?: number) => {
+    try {
+      const raw = await getNotifications(page);
+      return raw?.Page?.notifications ?? [];
+    } catch (err) {
+      console.error("[API:getNotifications] failed:", err);
+      return [];
+    }
+  },
   markNotificationsAsRead: async () => {
     return invoke("mark_notifications_read");
   },

@@ -9,7 +9,6 @@ import { AmbientBackground } from "@/components/layout/AmbientBackground";
 import { NowPlaying } from "@/components/layout/NowPlaying";
 import { HomeView } from "@/components/views/HomeView";
 import { SearchView } from "@/components/views/SearchView";
-import { LibraryView } from "@/components/views/LibraryView";
 import { ListsView } from "@/components/views/ListsView";
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { NotificationsView } from "@/components/views/NotificationsView";
@@ -79,7 +78,6 @@ export default function App() {
     switch (currentView) {
       case "home": return <HomeView onSelect={onSelect} />;
       case "search": return <SearchView onSelect={onSelect} />;
-      case "library": return <LibraryView onSelect={onSelect} />;
       case "lists": return <ListsView onSelect={onSelect} />;
       case "schedule": return <ScheduleView onSelect={onSelect} />;
       case "notifications": return <NotificationsView onSelect={onSelect} />;

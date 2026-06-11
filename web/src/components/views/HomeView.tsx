@@ -70,14 +70,6 @@ const GENRE_MOODS = [
 export function HomeView({ onSelect }: HomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
-  // 1. Local watch history — sorted by most recently watched (from media_registry)
-  const recentlyWatchedQuery = useQuery({
-    queryKey: ["home-recently-watched"],
-    queryFn: () => mediaApi.getRecent("ANIME", 20),
-    refetchInterval: 1_800_000,  // 30 min
-    staleTime: 900_000,          // 15 min
-    enabled: isAuthenticated,
-  });
 
   // 2. Playback Status — shared query key with NowPlaying component (deduped)
   useQuery({
@@ -169,17 +161,9 @@ export function HomeView({ onSelect }: HomeViewProps) {
   //    items the user has caught up on. Also includes any other items in
   //    the user's watching list that haven't been started yet (are not in local history).
   const continueWatchingList = useMemo(() => {
-    const recent = recentlyWatchedQuery.data?.media || [];
     const watching = watchingQuery.data?.media || [];
-    const watchingIdSet = new Set(watching.map((m) => m.id));
-
-    const recentlyActive = recent.filter((m) => watchingIdSet.has(m.id) && !isCaughtUp(m));
-    const activeIds = new Set(recentlyActive.map((m) => m.id));
-
-    const notYetStarted = watching.filter((m) => !activeIds.has(m.id) && !isCaughtUp(m));
-
-    return [...recentlyActive, ...notYetStarted];
-  }, [recentlyWatchedQuery.data, watchingQuery.data]);
+    return watching.filter((m) => !isCaughtUp(m));
+  }, [watchingQuery.data]);
 
 
 
@@ -252,6 +236,15 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const [activeHeroItem, setActiveHeroItem] = useState<MediaItem | null>(null);
   const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
+
+  console.log("[VIEW:HomeView] render: isAuthenticated:", isAuthenticated);
+
+  console.log("  watchingQuery status:", watchingQuery.status, "isLoading:", watchingQuery.isLoading, "media count:", watchingQuery.data?.media?.length);
+  console.log("  trendingQuery status:", trendingQuery.status, "isLoading:", trendingQuery.isLoading, "media count:", trendingQuery.data?.media?.length);
+  console.log("  seasonalQuery status:", seasonalQuery.status, "isLoading:", seasonalQuery.isLoading, "media count:", seasonalQuery.data?.media?.length);
+  console.log("  newlyReleasingQuery status:", newlyReleasingQuery.status, "isLoading:", newlyReleasingQuery.isLoading, "media count:", newlyReleasingQuery.data?.media?.length);
+  console.log("  smartPlaylistQuery status:", smartPlaylistQuery.status, "isLoading:", smartPlaylistQuery.isLoading, "media count:", smartPlaylistQuery.data?.media?.length);
+  console.log("  airingTodayQuery status:", airingTodayQuery.status, "isLoading:", airingTodayQuery.isLoading, "media count:", airingTodayQuery.data?.media?.length);
 
   // Global loading only until critical data is loaded
   if (trendingQuery.isLoading && seasonalQuery.isLoading) {

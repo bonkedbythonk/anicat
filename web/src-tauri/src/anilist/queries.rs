@@ -129,8 +129,8 @@ query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
 "#;
 
 pub const USER_LIST_QUERY: &str = r#"
-query ($type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
-  MediaListCollection(type: $type, status: $status, sort: $sort) {
+query ($userName: String, $type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
+  MediaListCollection(userName: $userName, type: $type, status: $status, sort: $sort) {
     lists {
       name status
       entries {
@@ -182,57 +182,9 @@ query {
 pub const USER_NOTIFICATIONS_QUERY: &str = r#"
 query ($page: Int, $perPage: Int, $reset: Boolean) {
   Page(page: $page, perPage: $perPage) {
-    notifications(resetNotificationCount: $reset) {
+    notifications(resetNotificationCount: $reset, type_in: [AIRING, RELATED_MEDIA_ADDITION, MEDIA_DATA_CHANGE, MEDIA_MERGE]) {
       ... on AiringNotification {
         id type episode contexts createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on FollowingNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityMessageNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityMentionNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityReplyNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityReplySubscribedNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityLikeNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ActivityReplyLikeNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ThreadCommentMentionNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ThreadCommentReplyNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ThreadCommentSubscribedNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ThreadCommentLikeNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on ThreadLikeNotification {
-        id type context createdAt
         media { id type title { romaji english native } coverImage { large medium } }
       }
       ... on RelatedMediaAdditionNotification {
@@ -246,9 +198,6 @@ query ($page: Int, $perPage: Int, $reset: Boolean) {
       ... on MediaMergeNotification {
         id type context createdAt
         media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on MediaDeletionNotification {
-        id type context createdAt deletedMediaTitle
       }
     }
     pageInfo { total currentPage lastPage hasNextPage }

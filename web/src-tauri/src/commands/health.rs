@@ -18,6 +18,7 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let token_present = state.anilist_client.has_token();
+    log::info!("[RUST:check_health] token_present={}", token_present);
     let (authenticated, viewer_name, auth_error) = if token_present {
         match state
             .anilist_client
@@ -30,12 +31,17 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
                     .and_then(|v| v.get("name"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                log::info!("[RUST:check_health] successful response keys: {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
                 log::info!("AniList health check successful: viewer={:?}", name);
+                state.anilist_client.set_username(name.clone());
                 (true, name, None)
             }
             Err(e) => {
+                log::warn!("[RUST:check_health] failed error: {}", e);
                 log::warn!("AniList health check failed: {}", e);
-                state.anilist_client.set_token(None);
+                if e.contains("authentication invalid") || e.contains("Invalid token") {
+                    state.anilist_client.set_token(None);
+                }
                 (false, None, Some(e))
             }
         }
@@ -57,4 +63,13 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
 #[tauri::command]
 pub async fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+pub fn log_frontend(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!("[FRONTEND] {}", message),
+        "warn" => log::warn!("[FRONTEND] {}", message),
+        _ => log::info!("[FRONTEND] {}", message),
+    }
 }

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useAppStore } from "@/stores/app";
 
 const VIEW_KEYS = [
-  "home", "search", "library", "lists", "schedule",
+  "home", "search", "lists", "schedule",
   "notifications", "profile", "settings", "downloads",
 ] as const;
 

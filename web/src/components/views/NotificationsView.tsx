@@ -27,8 +27,10 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
     enabled: isAuthenticated,
   });
 
-  const notifications = data?.notifications ?? [];
+  const notifications = (data?.notifications ?? []).filter((n) => n && n.media);
   const config = data?.config ?? null;
+
+  console.log("[VIEW:NotificationsView] render: isAuthenticated:", isAuthenticated, "isLoading:", isLoading, "notifications count:", notifications?.length);
 
   const handleMarkAllRead = useCallback(async () => {
     const oldNotifications = queryClient.getQueryData(["notifications", "config"]);

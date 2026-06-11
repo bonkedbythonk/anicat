@@ -15,6 +15,8 @@ pub async fn search_media(
     page: Option<i64>,
     status: Option<String>,
 ) -> Result<Value, String> {
+    let has_token = state.anilist_client.has_token();
+    log::info!("[RUST:search_media] has_token={} query={:?} page={:?} status={:?}", has_token, query, page, status);
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
@@ -29,7 +31,12 @@ pub async fn search_media(
         .execute(queries::MEDIA_SEARCH_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    log::info!("[RUST:search_media] response keys: {:?}", val.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    if let Some(m) = val.get("Page").and_then(|p| p.get("media")).and_then(|m| m.as_array()) {
+        log::info!("[RUST:search_media] returned media items: {}", m.len());
+    }
+    Ok(val)
 }
 
 #[tauri::command]
@@ -155,13 +162,19 @@ pub async fn get_episodes(
     title: Option<String>,
 ) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
+    let is_manga = provider_name == "mangakatana";
 
     let db = state.open_db().map_err(|e| e.to_string())?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name);
 
     let episodes = if let Some(slug) = slug {
-        match state.scraper_manager.get_anime(&slug).await {
-            Ok(anime_info) => anime_info.episodes,
+        let res = if is_manga {
+            state.scraper_manager.get_manga(&slug).await.map(|info| info.episodes)
+        } else {
+            state.scraper_manager.get_anime(&slug).await.map(|info| info.episodes)
+        };
+        match res {
+            Ok(eps) => eps,
             Err(_e) => {
                 let _ = registry::service::clear_provider_cache(&db, media_id);
                 vec![]
@@ -174,16 +187,22 @@ pub async fn get_episodes(
                 .map_err(|e| e.to_string());
         };
 
-        let results = state.scraper_manager.search(&title).await.unwrap_or_default();
+        let results = if is_manga {
+            state.scraper_manager.search_manga(&title).await.unwrap_or_default()
+        } else {
+            state.scraper_manager.search(&title).await.unwrap_or_default()
+        };
 
-        if let Some(best) = results.into_iter().next() {
+        if let Some(best) = find_best_match(&title, results, |r| &r.title) {
             let _ = registry::service::set_provider_slug(
                 &db, media_id, &provider_name, &best.id,
             );
-            match state.scraper_manager.get_anime(&best.id).await {
-                Ok(anime_info) => anime_info.episodes,
-                Err(_) => vec![],
-            }
+            let res = if is_manga {
+                state.scraper_manager.get_manga(&best.id).await.map(|info| info.episodes)
+            } else {
+                state.scraper_manager.get_anime(&best.id).await.map(|info| info.episodes)
+            };
+            res.unwrap_or_default()
         } else {
             vec![]
         }
@@ -270,7 +289,7 @@ pub async fn debug_provider_streams(
                 return Err(format!("No title found for media {}", media_id));
             }
             let results = state.scraper_manager.search(&title).await.unwrap_or_default();
-            match results.into_iter().next() {
+            match find_best_match(&title, results, |r| &r.title) {
                 Some(best) => {
                     let _ = registry::service::set_provider_slug(&db, media_id, &provider_name, &best.id);
                     best.id
@@ -290,6 +309,26 @@ pub async fn debug_provider_streams(
         obj.insert("provider".to_string(), serde_json::json!(provider_name));
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_chapter_pages(
+    state: State<'_, AppState>,
+    media_id: i64,
+    chapter_number: String,
+) -> Result<Value, String> {
+    let provider_name = "mangakatana".to_string();
+
+    let db = state.open_db().map_err(|e| e.to_string())?;
+    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
+        .ok_or_else(|| format!("No provider mapping for media {}", media_id))?;
+
+    let pages = state
+        .scraper_manager
+        .get_chapter_pages(&slug, &chapter_number)
+        .await?;
+
+    Ok(pages)
 }
 
 // ── Local library commands ────────────────────────────────
@@ -331,4 +370,91 @@ pub async fn remove_from_library(
 ) -> Result<(), String> {
     let db = state.open_db()?;
     registry::service::delete_library_entry(&db, media_id)
+}
+
+// ── Smart Similarity Matcher for Anime/Manga Searches ──────
+
+fn normalize_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let v1: Vec<char> = s1.chars().collect();
+    let v2: Vec<char> = s2.chars().collect();
+    let len1 = v1.len();
+    let len2 = v2.len();
+
+    if len1 == 0 { return len2; }
+    if len2 == 0 { return len1; }
+
+    let mut dp = vec![vec![0; len2 + 1]; len1 + 1];
+
+    for i in 0..=len1 {
+        dp[i][0] = i;
+    }
+    for j in 0..=len2 {
+        dp[0][j] = j;
+    }
+
+    for i in 1..=len1 {
+        for j in 1..=len2 {
+            let cost = if v1[i - 1] == v2[j - 1] { 0 } else { 1 };
+            dp[i][j] = std::cmp::min(
+                std::cmp::min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
+                dp[i - 1][j - 1] + cost,
+            );
+        }
+    }
+
+    dp[len1][len2]
+}
+
+fn calculate_similarity(target: &str, candidate: &str) -> f64 {
+    let target_norm = normalize_title(target);
+    let candidate_norm = normalize_title(candidate);
+
+    if target_norm.is_empty() || candidate_norm.is_empty() {
+        return 0.0;
+    }
+
+    if target_norm == candidate_norm {
+        return 1.0;
+    }
+
+    // Check if one is a substring of another
+    if candidate_norm.contains(&target_norm) {
+        let ratio = target_norm.len() as f64 / candidate_norm.len() as f64;
+        return ratio * 0.9;
+    }
+
+    if target_norm.contains(&candidate_norm) {
+        let ratio = candidate_norm.len() as f64 / target_norm.len() as f64;
+        return ratio * 0.8;
+    }
+
+    let lev = levenshtein_distance(&target_norm, &candidate_norm);
+    let max_len = std::cmp::max(target_norm.len(), candidate_norm.len()) as f64;
+    1.0 - (lev as f64 / max_len)
+}
+
+fn find_best_match<T, F>(target: &str, candidates: Vec<T>, get_title: F) -> Option<T>
+where
+    F: Fn(&T) -> &str,
+{
+    let mut best_candidate = None;
+    let mut best_score = -1.0;
+
+    for candidate in candidates {
+        let score = calculate_similarity(target, get_title(&candidate));
+        if score > best_score {
+            best_score = score;
+            best_candidate = Some(candidate);
+        }
+    }
+
+    best_candidate
 }

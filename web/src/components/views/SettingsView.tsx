@@ -946,7 +946,10 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                               btn.className = "mt-2 text-xs font-bold text-red-400/40 flex items-center space-x-1 w-full justify-center";
                             }
                             mediaApi.updateConfig({ anilist: { token: "" } })
-                              .then(() => window.location.reload())
+                              .then(() => {
+                                localStorage.removeItem("anicat-query-cache");
+                                window.location.reload();
+                              })
                               .catch(() => {
                                 if (btn) {
                                   btn.removeAttribute('disabled');

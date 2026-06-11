@@ -72,7 +72,14 @@ export const useAppStore = create<AppState>((set) => ({
   tokenPresent: false,
   setConnectionState: (apiConnected, apiAuthenticated, isOffline) =>
     set({ apiConnected, apiAuthenticated, isOffline }),
-  setHealthState: (state) => set(state),
+  setHealthState: (state) =>
+    set({
+      apiConnected: state.connected,
+      apiAuthenticated: state.authenticated,
+      isOffline: state.offline,
+      authError: state.authError,
+      tokenPresent: state.tokenPresent,
+    }),
 
   dataVersion: 0,
   setDataVersion: (dataVersion) => set({ dataVersion }),

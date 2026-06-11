@@ -1,7 +1,6 @@
 export type ViewType =
   | "home"
   | "search"
-  | "library"
   | "lists"
   | "schedule"
   | "notifications"

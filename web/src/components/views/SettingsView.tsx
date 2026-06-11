@@ -232,40 +232,21 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       {state.streams.map((stream: any, idx: number) => (
                         <div key={idx} className="p-2.5 rounded-xl bg-white/[0.01] border border-white/[0.04] space-y-2 text-[10px] text-gray-300">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-white text-xs">{stream.server}</span>
-                            {stream.subtitles && stream.subtitles.length > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 text-[9px] font-black">
-                                {stream.subtitles.length} Subs
-                              </span>
-                            )}
+                            <span className="font-bold text-white text-xs">{(stream.name || "").trim()}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 text-[9px] font-black">
+                              {stream.is_m3u8 ? "HLS" : "Direct"}
+                            </span>
                           </div>
                           
                           <div className="space-y-2">
-                            {stream.links.map((link: any, linkIdx: number) => (
-                              <div key={linkIdx} className="space-y-1">
-                                <div className="flex items-center justify-between text-[9px] text-gray-500">
-                                  <span>Link {linkIdx + 1} ({link.hls ? "HLS" : "Direct"}) - {link.translation_type || "sub"}</span>
-                                  <span className="font-mono bg-white/[0.02] px-1 rounded border border-white/[0.04]">{link.quality}</span>
-                                </div>
-                                <div className="font-mono text-[9px] text-accent truncate bg-black/20 p-2 rounded select-all cursor-pointer hover:bg-accent/5 transition-colors">
-                                  {link.link}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          {stream.subtitles && stream.subtitles.length > 0 && (
-                            <div className="space-y-1 mt-1.5 pt-1.5 border-t border-white/[0.02]">
-                              <div className="text-[8px] text-gray-500 uppercase font-black tracking-wider">Subtitles:</div>
-                              <div className="space-y-1">
-                                {stream.subtitles.map((sub: any, subIdx: number) => (
-                                  <div key={subIdx} className="font-mono text-[8px] text-gray-400 truncate bg-black/10 p-1.5 rounded">
-                                    [{sub.language || "Unknown"}]: {sub.url}
-                                  </div>
-                                ))}
-                              </div>
+                            <div className="flex items-center justify-between text-[9px] text-gray-500">
+                              <span>{stream.group?.replace(/_/g, " ") || "unknown"} &bull; {stream.quality || "HD"}</span>
+                              <span className="font-mono bg-white/[0.02] px-1 rounded border border-white/[0.04]">{stream.source_type}</span>
                             </div>
-                          )}
+                            <div className="font-mono text-[9px] text-accent truncate bg-black/20 p-2 rounded select-all cursor-pointer hover:bg-accent/5 transition-colors">
+                              {stream.url}
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>

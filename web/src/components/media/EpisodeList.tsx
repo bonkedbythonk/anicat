@@ -65,38 +65,18 @@ export function EpisodeList({
     if (!streams) return [];
     
     const sorted = [...streams];
-    if (streamSortOrder === "default") {
-      return sorted;
-    }
+    if (streamSortOrder === "default") return sorted;
     
     return sorted.sort((a, b) => {
-      const aServer = (a.server || "").toLowerCase();
-      const bServer = (b.server || "").toLowerCase();
+      const aGroup = (a.group || "").toLowerCase();
+      const bGroup = (b.group || "").toLowerCase();
       
-      const aHasSubtitles = Array.isArray(a.subtitles) && a.subtitles.length > 0;
-      const bHasSubtitles = Array.isArray(b.subtitles) && b.subtitles.length > 0;
+      const aMatch = aGroup.includes(streamSortOrder as string);
+      const bMatch = bGroup.includes(streamSortOrder as string);
 
-      const aIsHard = aServer.includes("hard sub") || (!aHasSubtitles && !aServer.includes("dub"));
-      const bIsHard = bServer.includes("hard sub") || (!bHasSubtitles && !bServer.includes("dub"));
-      
-      const aIsSoft = aServer.includes("sort sub") || aHasSubtitles;
-      const bIsSoft = bServer.includes("sort sub") || bHasSubtitles;
-      
-      const aIsDub = aServer.includes("dub");
-      const bIsDub = bServer.includes("dub");
-
-      if (streamSortOrder === "hard_sub") {
-        if (aIsHard && !bIsHard) return -1;
-        if (!aIsHard && bIsHard) return 1;
-      } else if (streamSortOrder === "soft_sub") {
-        if (aIsSoft && !bIsSoft) return -1;
-        if (!aIsSoft && bIsSoft) return 1;
-      } else if (streamSortOrder === "dub") {
-        if (aIsDub && !bIsDub) return -1;
-        if (!aIsDub && bIsDub) return 1;
-      }
-      
-      return aServer.localeCompare(bServer);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+      return 0;
     });
   };
 
@@ -413,14 +393,14 @@ export function EpisodeList({
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {getSortedStreams(resolvedStreams).map((s, idx) => {
-                        const isCurrentLoading = loadingServer === `${epNum}-${s.server}`;
+                        const isCurrentLoading = loadingServer === `${epNum}-${s.name}`;
                         const isAnyLoading = loadingServer !== null || playingEp !== null;
                         
                         return (
                           <button
                             key={idx}
                             disabled={isAnyLoading}
-                            onClick={() => handlePlaySpecificStream(epNum, s.server)}
+                            onClick={() => handlePlaySpecificStream(epNum, s.name)}
                             className={`flex items-center justify-between p-3 rounded-xl text-left transition-all active:scale-95 group/btn ${
                               isCurrentLoading
                                 ? "bg-accent/15 border-accent text-accent"
@@ -433,10 +413,10 @@ export function EpisodeList({
                               <div className={`font-bold text-[11px] truncate ${
                                 isCurrentLoading ? "text-accent" : "text-gray-200 group-hover/btn:text-white"
                               }`}>
-                                {s.server}
+                                {(s.name || "").trim()}
                               </div>
                               <div className="text-[9px] text-gray-500 mt-0.5">
-                                {s.links.length} link{s.links.length > 1 ? 's' : ''} • {s.subtitles && s.subtitles.length > 0 ? `${s.subtitles.length} Subtitles` : 'Hard Sub'}
+                                {s.group?.replace(/_/g, " ") || "unknown"} &bull; {s.quality || "HD"}
                               </div>
                             </div>
                             {isCurrentLoading ? (

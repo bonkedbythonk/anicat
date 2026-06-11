@@ -398,7 +398,7 @@ export const mediaApi = {
       };
     } catch (err) {
       console.error("[getUserList] failed:", err);
-      return { media: [] };
+      throw err;
     }
   },
   saveMediaListEntry: updateMediaEntry,

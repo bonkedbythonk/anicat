@@ -162,10 +162,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   //    the user's watching list that haven't been started yet (are not in local history).
   const continueWatchingList = useMemo(() => {
     const watching = watchingQuery.data?.media || [];
-    console.log("[HomeView] continueWatchingList: watchingQuery.data?.media?.length:", watching.length, "isAuthenticated:", isAuthenticated, "watchingQuery.status:", watchingQuery.status);
-    const filtered = watching.filter((m) => !isCaughtUp(m));
-    console.log("[HomeView] continueWatchingList: after isCaughtUp filter:", filtered.length);
-    return filtered;
+    return watching.filter((m) => !isCaughtUp(m));
   }, [watchingQuery.data]);
 
 
@@ -365,11 +362,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
         )
       )}
 
-      {(() => {
-        const show = isAuthenticated && isRowVisible("continue") && continueWatchingList.length > 0;
-        if (!show) console.log("[HomeView] Continue Watching NOT rendering: isAuthenticated:", isAuthenticated, "isRowVisible:", isRowVisible("continue"), "continueWatchingList.length:", continueWatchingList.length);
-        return null;
-      })()}
       {isAuthenticated && isRowVisible("continue") && continueWatchingList.length > 0 && (
         <MediaRow
           title="Continue Watching"

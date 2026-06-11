@@ -25,13 +25,11 @@ export function AnimePlayer() {
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
 
-  if (!item || !episode || !server) return null;
-
-  const title = item.title.romaji || item.title.english || "";
+  const title = item?.title?.romaji || item?.title?.english || "";
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !item || !episode || !server) return;
 
     const detached = new AbortController();
 
@@ -121,6 +119,8 @@ export function AnimePlayer() {
   useEffect(() => {
     showControlsTemp();
   }, []);
+
+  if (!item || !episode || !server) return null;
 
   return (
     <div

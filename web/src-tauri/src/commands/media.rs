@@ -229,7 +229,8 @@ pub async fn resolve_stream(
         .get_streams(&slug, episode_number)
         .await?;
 
-    serde_json::to_value(servers).map_err(|e| e.to_string())
+    let result = serde_json::json!({ "streams": servers });
+    Ok(result)
 }
 
 #[tauri::command]

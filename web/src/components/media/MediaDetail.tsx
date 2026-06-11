@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check, Copy, ClipboardCheck } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { dispatchRefresh } from "@/lib/events";
@@ -57,6 +57,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   // Debug overlay state (DEV only)
   const [debugData, setDebugData] = useState<string | null>(null);
+  const [debugCopied, setDebugCopied] = useState(false);
 
   useEffect(() => {
     if (config?.general?.provider) {
@@ -780,12 +781,27 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
           >
             <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 shrink-0">
               <span className="text-xs font-mono text-yellow-400 font-bold">Provider Debug</span>
-              <button
-                onClick={() => setDebugData(null)}
-                className="text-gray-400 hover:text-white text-xs font-mono"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(debugData);
+                      setDebugCopied(true);
+                      setTimeout(() => setDebugCopied(false), 2000);
+                    } catch {}
+                  }}
+                  className="text-gray-400 hover:text-white text-xs font-mono flex items-center gap-1"
+                >
+                  {debugCopied ? <ClipboardCheck size={13} /> : <Copy size={13} />}
+                  {debugCopied ? "Copied" : "Copy"}
+                </button>
+                <button
+                  onClick={() => setDebugData(null)}
+                  className="text-gray-400 hover:text-white text-xs font-mono"
+                >
+                  Close
+                </button>
+              </div>
             </div>
             <pre className="flex-1 overflow-auto p-4 text-[11px] font-mono text-gray-300 leading-relaxed whitespace-pre-wrap break-all">{debugData}</pre>
           </div>

@@ -64,7 +64,7 @@ export default function App() {
   useEffect(() => {
     loadConfig();
     checkConnection();
-    const interval = setInterval(checkConnection, 30_000);
+    const interval = setInterval(checkConnection, 300_000);
     window.addEventListener("anicat_health_recheck", checkConnection);
     return () => {
       clearInterval(interval);

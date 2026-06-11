@@ -94,8 +94,11 @@ pub async fn start_playback(
     log::info!("mpv lib dir: {}", lib_dir);
 
     let mut cmd = StdCommand::new(&mpv_bin);
+    cmd.arg(format!("--config-dir={}", config_dir));
+    cmd.arg("--no-terminal");
     cmd.arg("--ontop");
     cmd.arg("--force-window=yes");
+    cmd.arg("--border");
     cmd.arg(&stream_url);
 
     // Set library path for macOS .dylibs

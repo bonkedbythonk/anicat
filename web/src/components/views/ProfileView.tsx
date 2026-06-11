@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, User, Clock, Tv, BookOpen, Bookmark, Heart, Sparkles } from "lucide-react";
 import { mediaApi, type UserProfile, type MediaItem } from "@/lib/api";
+import { useAppStore } from "@/stores/app";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { LazyCard } from "@/components/media/LazyCard";
 
@@ -13,6 +14,7 @@ interface ProfileViewProps {
 
 export function ProfileView({ onSelect }: ProfileViewProps) {
   const [favType, setFavType] = useState<"ANIME" | "MANGA">("ANIME");
+  const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const {
     data: profile,
@@ -21,6 +23,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
     queryKey: ["profile"],
     queryFn: () => mediaApi.getProfile(),
     staleTime: 60_000,
+    enabled: isAuthenticated,
   });
 
   if (loading) {

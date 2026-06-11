@@ -56,7 +56,6 @@ export function ListsView({ onSelect }: ListsViewProps) {
       enabled: isAuthenticated,
     });
 
-  console.log("[VIEW:ListsView] render: isAuthenticated:", isAuthenticated, "activeTab:", activeTab, "type:", type, "loading:", loading, "items count:", items?.length);
 
   return (
     <div className="space-y-6 animate-fade-in">

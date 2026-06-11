@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check, Copy, ClipboardCheck } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh } from "@/lib/events";
 import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -718,7 +719,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                               return (
                                 <button key={m.id} onClick={() => selectItem(m)} className="group space-y-2 text-left relative">
                                   <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
-                                    <img src={(rec as any).cover_image?.large || m.coverImage?.large} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                    <img src={proxyImage((rec as any).cover_image?.large || m.coverImage?.large)} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                                   </div>
                                   {rec.rating > 0 && (
                                     <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-white text-[9px] font-bold">{rec.rating}%</span>
@@ -742,7 +743,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                               return (
                                 <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left relative">
                                   {(m as any).cover_image?.large || m.coverImage?.large ? (
-                                    <img src={(m as any).cover_image?.large || m.coverImage?.large} className="w-12 h-16 rounded-lg object-cover shrink-0" />
+                                    <img src={proxyImage((m as any).cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />
                                   ) : null}
                                   <div className="min-w-0">
                                     <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>

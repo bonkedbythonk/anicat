@@ -221,14 +221,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const [activeHeroItem, setActiveHeroItem] = useState<MediaItem | null>(null);
   const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
 
-  console.log("[VIEW:HomeView] render: isAuthenticated:", isAuthenticated);
-
-  console.log("  watchingQuery status:", watchingQuery.status, "isLoading:", watchingQuery.isLoading, "media count:", watchingQuery.data?.media?.length);
-  console.log("  trendingQuery status:", trendingQuery.status, "isLoading:", trendingQuery.isLoading, "media count:", trendingQuery.data?.media?.length);
-  console.log("  seasonalQuery status:", seasonalQuery.status, "isLoading:", seasonalQuery.isLoading, "media count:", seasonalQuery.data?.media?.length);
-  console.log("  newlyReleasingQuery status:", newlyReleasingQuery.status, "isLoading:", newlyReleasingQuery.isLoading, "media count:", newlyReleasingQuery.data?.media?.length);
-  console.log("  smartPlaylistQuery status:", smartPlaylistQuery.status, "isLoading:", smartPlaylistQuery.isLoading, "media count:", smartPlaylistQuery.data?.media?.length);
-  console.log("  airingTodayQuery status:", airingTodayQuery.status, "isLoading:", airingTodayQuery.isLoading, "media count:", airingTodayQuery.data?.media?.length);
 
   // Global loading only until critical data is loaded
   if (trendingQuery.isLoading && seasonalQuery.isLoading) {

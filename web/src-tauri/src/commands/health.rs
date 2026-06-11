@@ -18,7 +18,6 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let token_present = state.anilist_client.has_token();
-    log::info!("[RUST:check_health] token_present={}", token_present);
     let (authenticated, viewer_name, auth_error) = if token_present {
         match state
             .anilist_client
@@ -31,7 +30,6 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
                     .and_then(|v| v.get("name"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                log::info!("[RUST:check_health] successful response keys: {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
                 log::info!("AniList health check successful: viewer={:?}", name);
                 state.anilist_client.set_username(name.clone());
                 (true, name, None)

@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, CheckCircle2, Bell, RefreshCw } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
+import { proxyImage } from "@/lib/proxy";
 
 interface NotificationsViewProps {
   onSelect: (item: MediaItem) => void;
@@ -28,8 +29,6 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
 
   const notifications = (data?.notifications ?? []).filter((n) => n && n.media);
   const config = data?.config ?? null;
-
-  console.log("[VIEW:NotificationsView] render: isAuthenticated:", isAuthenticated, "isLoading:", isLoading, "notifications count:", notifications?.length);
 
   const handleMarkAllRead = useCallback(async () => {
     const oldNotifications = queryClient.getQueryData(["notifications", "config"]);
@@ -111,7 +110,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img 
-                src={notif.media.coverImage?.large} 
+                src={proxyImage(notif.media.coverImage?.large)} 
                 alt="cover" 
                 className="w-12 h-16 object-cover rounded-lg shrink-0 shadow-lg"
               />

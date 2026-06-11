@@ -16,8 +16,7 @@ pub async fn search_media(
     page: Option<i64>,
     status: Option<String>,
 ) -> Result<Value, String> {
-    let has_token = state.anilist_client.has_token();
-    log::info!("[RUST:search_media] has_token={} query={:?} page={:?} status={:?}", has_token, query, page, status);
+    let _has_token = state.anilist_client.has_token();
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
@@ -33,9 +32,7 @@ pub async fn search_media(
         .await?;
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
-    log::info!("[RUST:search_media] response keys: {:?}", val.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-    if let Some(m) = val.get("Page").and_then(|p| p.get("media")).and_then(|m| m.as_array()) {
-        log::info!("[RUST:search_media] returned media items: {}", m.len());
+    if let Some(_m) = val.get("Page").and_then(|p| p.get("media")).and_then(|m| m.as_array()) {
     }
     Ok(val)
 }

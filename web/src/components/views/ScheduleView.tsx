@@ -30,18 +30,15 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
     return new Date(airingAt.endsWith("Z") ? airingAt : `${airingAt}Z`).getTime();
   };
 
-  console.log("[VIEW:ScheduleView] render: watchingOnly:", watchingOnly, "loading:", loading, "items count:", items?.length);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
         let mediaIds: number[] | undefined = undefined;
-        console.log("[VIEW:ScheduleView] useEffect loading schedule: watchingOnly:", watchingOnly);
         if (watchingOnly) {
           const watching = await mediaApi.getUserList("watching", "ANIME");
           mediaIds = (watching.media || []).map(m => m.id);
-          console.log("[VIEW:ScheduleView] useEffect fetched watching media count:", watching.media?.length, "mapped mediaIds:", mediaIds);
           if (mediaIds.length === 0) {
             setItems([]);
             setLoading(false);
@@ -50,7 +47,6 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
         }
         
         const data = await mediaApi.getSchedule(1, 3, 1, 50, mediaIds);
-        console.log("[VIEW:ScheduleView] useEffect fetched schedule final media count:", data?.media?.length);
         setItems(data.media || []);
       } catch (err) {
         console.error("Failed to load schedule:", err);

@@ -99,9 +99,7 @@ pub async fn start_playback(
         cmd.env("LD_LIBRARY_PATH", &lib_dir);
     }
 
-    cmd.stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+    cmd.spawn()
         .map_err(|e| format!("Failed to launch mpv: {}", e))?;
 
     log::info!("Launched mpv with stream: {}", stream_url);

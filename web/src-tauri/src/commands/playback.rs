@@ -16,6 +16,20 @@ pub struct PlaybackStart {
 }
 
 fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
+    // Prefer system-installed mpv (Homebrew) which has proper macOS GPU support
+    if let Ok(path) = std::process::Command::new("which")
+        .arg("mpv")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    {
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            let config_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("mpv_config");
+            return Ok((path, config_dir.to_string_lossy().to_string(), String::new()));
+        }
+    }
+
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
     let mpv_name = if cfg!(target_os = "windows") {
@@ -25,7 +39,6 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     };
     let mpv_bin = resource_dir.join(mpv_name);
     if !mpv_bin.exists() {
-        // Dev mode fallback: look relative to CARGO_MANIFEST_DIR
         let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join(mpv_name);

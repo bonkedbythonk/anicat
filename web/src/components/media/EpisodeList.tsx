@@ -125,7 +125,7 @@ export function EpisodeList({
     
     setPlayingEp(epNum);
     try {
-      const result = await mediaApi.play(mediaId, epNum, selectedProvider);
+      const result = await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider);
       if (result?.stream_url && item) {
         const episode = episodes.find((e) => String(e.number) === epNum);
         if (episode) {
@@ -152,7 +152,7 @@ export function EpisodeList({
     setResolvedStreams([]);
 
     try {
-      const data = await mediaApi.getStreams(mediaId, epNum, selectedProvider);
+      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider);
       setResolvedStreams(data.streams || []);
     } catch (err: any) {
       console.error("Failed to load stream servers:", err);
@@ -179,7 +179,7 @@ export function EpisodeList({
 
     setPlayingEp(epNum);
     try {
-      const result = await mediaApi.play(mediaId, epNum, selectedProvider, serverName);
+      const result = await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName);
       if (result?.stream_url && item) {
         const episode = episodes.find((e) => String(e.number) === epNum);
         if (episode) {
@@ -198,7 +198,7 @@ export function EpisodeList({
   const handleQueue = async (epNum: string) => {
     setQueueingEp(epNum);
     try {
-      await mediaApi.addToQueue(mediaId, [epNum]);
+      await mediaApi.addToQueue(mediaId, [parseInt(epNum, 10)]);
       // Update local status immediately so the icon changes to "queued"
       setLocalDownloadStatus(prev => ({ ...prev, [epNum]: "queued" }));
       dispatchRefresh();
@@ -223,7 +223,7 @@ export function EpisodeList({
     setBatchQueuing(true);
     const eps = [];
     for (let i = start; i <= end; i++) {
-      eps.push(String(i));
+      eps.push(i);
     }
     try {
       await mediaApi.addToQueue(mediaId, eps);

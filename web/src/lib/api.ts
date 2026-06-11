@@ -368,7 +368,8 @@ export const mediaApi = {
         },
       }));
       return { media: snakifyMediaList(media) };
-    } catch {
+    } catch (err) {
+      console.error("[getUserList] failed:", err);
       return { media: [] };
     }
   },

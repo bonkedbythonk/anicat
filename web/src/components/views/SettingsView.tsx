@@ -900,11 +900,11 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                           const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
                           updateField("api", "anilist_token", token);
                           if (token.length > 20) {
-                            useAppStore.getState().setConnectionState(true, true, false);
-                            setTimeout(() => {
+                            mediaApi.updateConfig({ api: { anilist_token: token } }).then(() => {
+                              useAppStore.getState().setConnectionState(true, true, false);
                               dispatchRefresh();
                               window.dispatchEvent(new Event("anicat_health_recheck"));
-                            }, 2000);
+                            });
                           }
                         }}
                         placeholder="Paste redirect URL or token..."
@@ -984,11 +984,11 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                           const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
                           updateField("api", "anilist_token", token);
                           if (token.length > 20) {
-                            useAppStore.getState().setConnectionState(true, true, false);
-                            setTimeout(() => {
+                            mediaApi.updateConfig({ api: { anilist_token: token } }).then(() => {
+                              useAppStore.getState().setConnectionState(true, true, false);
                               dispatchRefresh();
                               window.dispatchEvent(new Event("anicat_health_recheck"));
-                            }, 2000);
+                            });
                           }
                         }}
                         placeholder="Paste redirect URL or token..."

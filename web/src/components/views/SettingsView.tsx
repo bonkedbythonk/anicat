@@ -818,19 +818,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
               </CardSection>
 
               <CardSection title="Video Player">
-                <SettingField label="Player" description="In-app player or external MPV.">
-                  <select
-                    value={String(config.stream?.player_type || "embedded")}
-                    onChange={(e) => updateField("stream", "player_type", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    {(options?.stream?.player_type ?? ["embedded", "external"]).map((p: string) => (
-                      <option key={p} value={p}>{p === 'embedded' ? 'In-App Player' : 'External (MPV)'}</option>
-                    ))}
-                  </select>
-                </SettingField>
-
-                <SettingField label="GPU Upscaling (MPV only)" description="Anime4K upscaling for the external player.">
+                <SettingField label="GPU Upscaling" description="Anime4K upscaling for the external player.">
                   <select
                     value={String(config.stream?.shader_profile || "balanced")}
                     onChange={(e) => updateField("stream", "shader_profile", e.target.value)}

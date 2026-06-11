@@ -1,20 +1,63 @@
 use std::collections::HashMap;
+use std::process::Command as StdCommand;
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
-use crate::scraper::StreamServer;
 use crate::state::AppState;
 
 #[derive(Serialize)]
 pub struct PlaybackStart {
     pub stream_url: String,
-    pub servers: Vec<StreamServer>,
+}
+
+fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+
+    let mpv_name = if cfg!(target_os = "windows") {
+        "mpv.exe"
+    } else {
+        "mpv"
+    };
+    let mpv_bin = resource_dir.join(mpv_name);
+    if !mpv_bin.exists() {
+        // Dev mode fallback: look relative to CARGO_MANIFEST_DIR
+        let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(mpv_name);
+        if dev_path.exists() {
+            let config_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("mpv_config");
+            let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("lib");
+            return Ok((
+                dev_path.to_string_lossy().to_string(),
+                config_dir.to_string_lossy().to_string(),
+                lib_dir.to_string_lossy().to_string(),
+            ));
+        }
+        return Err(format!(
+            "mpv binary not found at {} or in dev resources",
+            mpv_bin.display()
+        ));
+    }
+
+    let config_dir = resource_dir.join("mpv_config");
+    let lib_dir = resource_dir.join("lib");
+
+    Ok((
+        mpv_bin.to_string_lossy().to_string(),
+        config_dir.to_string_lossy().to_string(),
+        lib_dir.to_string_lossy().to_string(),
+    ))
 }
 
 #[tauri::command]
 pub async fn start_playback(
+    app: AppHandle,
     state: State<'_, AppState>,
     media_id: i64,
     episode_number: i64,
@@ -32,13 +75,38 @@ pub async fn start_playback(
         .get_streams(&slug, episode_number as i32)
         .await?;
 
-    // Pick the first server as the initial stream
     let stream_url = servers
         .first()
         .map(|s| s.url.clone())
         .unwrap_or_default();
 
-    Ok(PlaybackStart { stream_url, servers })
+    if stream_url.is_empty() {
+        return Err("No stream URL found".to_string());
+    }
+
+    let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
+
+    let mut cmd = StdCommand::new(&mpv_bin);
+    cmd.arg(format!("--config-dir={}", config_dir));
+    cmd.arg("--no-terminal");
+    cmd.arg(&stream_url);
+
+    // Set library path for macOS .dylibs
+    if cfg!(target_os = "macos") {
+        cmd.env("DYLD_LIBRARY_PATH", &lib_dir);
+    }
+    if cfg!(target_os = "linux") {
+        cmd.env("LD_LIBRARY_PATH", &lib_dir);
+    }
+
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to launch mpv: {}", e))?;
+
+    log::info!("Launched mpv with stream: {}", stream_url);
+
+    Ok(PlaybackStart { stream_url })
 }
 
 #[tauri::command]

@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video } from "lucide-react";
 import { mediaApi, type Episode } from "@/lib/api";
-import type { MediaItem } from "@/lib/types";
-import { setPlayback } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
 
 interface EpisodeListProps {
@@ -13,7 +11,6 @@ interface EpisodeListProps {
   loading: boolean;
   progress?: number;
   isManga?: boolean;
-  item?: MediaItem;
   onRead?: (chapterNum: string) => void;
   onPlayEpisode?: (epNum: string, provider?: string, server?: string) => void;
   playerType?: "embedded" | "external";
@@ -29,7 +26,6 @@ export function EpisodeList({
   loading,
   progress = 0,
   isManga = false,
-  item,
   onRead,
   onPlayEpisode,
   playerType = "external",
@@ -105,13 +101,7 @@ export function EpisodeList({
     
     setPlayingEp(epNum);
     try {
-      const result = await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider);
-      if (result?.stream_url && item) {
-        const episode = episodes.find((e) => String(e.number) === epNum);
-        if (episode) {
-          setPlayback(item, episode, selectedProvider || "anineko", result.stream_url);
-        }
-      }
+      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
@@ -159,13 +149,7 @@ export function EpisodeList({
 
     setPlayingEp(epNum);
     try {
-      const result = await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName);
-      if (result?.stream_url && item) {
-        const episode = episodes.find((e) => String(e.number) === epNum);
-        if (episode) {
-          setPlayback(item, episode, selectedProvider || "anineko", result.stream_url);
-        }
-      }
+      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play stream:", error);

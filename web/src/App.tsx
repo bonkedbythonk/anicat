@@ -16,7 +16,6 @@ import { ProfileView } from "@/components/views/ProfileView";
 import { SettingsView } from "@/components/views/SettingsView";
 import { DownloadsView } from "@/components/views/DownloadsView";
 import { MediaDetail } from "@/components/media/MediaDetail";
-import { AnimePlayer } from "@/components/media/AnimePlayer";
 import { Toast } from "@/components/shared/Toast";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
@@ -110,7 +109,6 @@ export default function App() {
         <AnimatePresence>
           {selectedItem && <MediaDetail item={selectedItem} onClose={closeDetail} />}
         </AnimatePresence>
-        <AnimePlayer />
       </main>
       <NowPlaying />
       <Toast />

@@ -57,7 +57,7 @@ fn default_title_language() -> String {
     "romaji".into()
 }
 fn default_player_type() -> String {
-    "embedded".into()
+    "external".into()
 }
 fn default_quality() -> String {
     "1080p".into()

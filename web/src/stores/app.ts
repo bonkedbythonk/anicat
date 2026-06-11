@@ -140,7 +140,7 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  playerType: "embedded",
+  playerType: "external",
   defaultProvider: "anineko",
   autoplay: true,
   autoskip: true,

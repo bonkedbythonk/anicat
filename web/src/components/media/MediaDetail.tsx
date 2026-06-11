@@ -11,7 +11,7 @@ import { dispatchRefresh } from "@/lib/events";
 import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useProgressEditor } from "@/lib/useProgressEditor";
-import { useAppStore, setPlayback } from "@/stores/app";
+import { useAppStore } from "@/stores/app";
 import { EpisodeList } from "./EpisodeList";
 import MangaReader from "./MangaReader";
 
@@ -166,11 +166,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
           onPlayEpisode(nextEpisode.toString(), selectedProvider);
           onClose();
         } else {
-          const result = await mediaApi.playNext(item.id, selectedProvider);
-          if (result?.stream_url) {
-            const nextEp = (fullItem.user_status?.progress || 0) + 1;
-            setPlayback(item, { number: nextEp }, selectedProvider, result.stream_url);
-          }
+          await mediaApi.playNext(item.id, selectedProvider);
           dispatchRefresh();
         }
       }
@@ -655,8 +651,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         episodes={episodes} 
                         loading={loadingEps} 
                         progress={fullItem.user_status?.progress} 
-                        isManga={isManga}
-                        item={item}
+                        isManga={isManga} 
                         onRead={(chNum) => setActiveChapter(chNum)} 
                         onPlayEpisode={(epNum, prov, serv) => {
                           if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv);

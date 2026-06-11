@@ -473,6 +473,8 @@ export interface HealthStatus {
   offline: boolean;
   data_version: number;
   update_available?: boolean;
+  token_present?: boolean;
+  viewer_name?: string | null;
 }
 
 export interface PlaybackStatus {

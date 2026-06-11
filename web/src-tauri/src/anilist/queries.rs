@@ -170,6 +170,14 @@ query {
 }
 "#;
 
+pub const HEALTH_CHECK_QUERY: &str = r#"
+query ($name: Boolean!) {
+  Viewer {
+    name
+  }
+}
+"#;
+
 pub const USER_NOTIFICATIONS_QUERY: &str = r#"
 query ($page: Int, $perPage: Int, $reset: Boolean) {
   Page(page: $page, perPage: $perPage) {

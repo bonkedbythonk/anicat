@@ -997,6 +997,14 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     </SettingField>
                   </>
                 )}
+                <div className="mt-4 p-3 bg-white/[0.02] border border-white/[0.05] rounded-lg space-y-1 text-xs font-mono">
+                  <div className="flex justify-between"><span className="text-gray-500">Token saved</span><span className={config.api?.anilist_token ? "text-green-400" : "text-gray-600"}>{config.api?.anilist_token ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Backend connected</span><span className={health?.connected ? "text-green-400" : "text-gray-600"}>{health?.connected ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">AniList validated</span><span className={health?.authenticated ? "text-green-400" : "text-red-400"}>{health?.authenticated ? "yes" : "no"}</span></div>
+                  {health?.viewer_name && (
+                    <div className="flex justify-between"><span className="text-gray-500">Signed in as</span><span className="text-accent">{health.viewer_name}</span></div>
+                  )}
+                </div>
               </CardSection>
             </div>
           )}

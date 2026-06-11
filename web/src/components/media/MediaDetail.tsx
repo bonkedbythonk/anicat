@@ -106,11 +106,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   // Relations + Recommendations — from MEDIA_DETAIL_QUERY (item prop)
   const relations = useMemo(() =>
-    (detail as any)?.Media?.relations?.edges || (item as any).relations?.edges || [],
-  [detail, item]);
+    (fullItem as any)?.relations?.edges || (item as any).relations?.edges || [],
+  [fullItem, item]);
   const recommendations = useMemo(() =>
-    (detail as any)?.Media?.recommendations?.nodes || (item as any).recommendations?.nodes || [],
-  [detail, item]);
+    (fullItem as any)?.recommendations?.nodes || (item as any).recommendations?.nodes || [],
+  [fullItem, item]);
 
   const {
     data: characters = [],

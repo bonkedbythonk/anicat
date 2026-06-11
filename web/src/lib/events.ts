@@ -8,8 +8,10 @@ export function setQueryClient(client: QueryClient) {
 
 export function dispatchRefresh() {
   if (!queryClient) return;
-  // Invalidate all queries — they'll refetch with the current auth state
-  queryClient.invalidateQueries();
+  queryClient.invalidateQueries({ queryKey: ["home-watching"] });
+  queryClient.invalidateQueries({ queryKey: ["home-airing-today"] });
+  queryClient.invalidateQueries({ queryKey: ["home-recent-releases"] });
+  queryClient.invalidateQueries({ queryKey: ["home-smart-playlist"] });
 }
 
 export function invalidateEpisodes(mediaId: number) {

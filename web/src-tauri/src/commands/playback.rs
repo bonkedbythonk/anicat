@@ -1,11 +1,15 @@
 use std::collections::HashMap;
-use std::process::Command as StdCommand;
+use std::process::{Child, Command as StdCommand};
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
 use crate::state::AppState;
+
+/// Holds a reference to the currently running mpv child so we can
+/// check its status and kill it from stop_playback.
+static CURRENT_MPV: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
 
 #[derive(Serialize)]
 pub struct PlaybackStart {
@@ -104,10 +108,40 @@ pub async fn start_playback(
         cmd.env("LD_LIBRARY_PATH", &lib_dir);
     }
 
-    cmd.spawn()
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("Failed to launch mpv: {}", e))?;
 
-    log::info!("Launched mpv with stream: {}", stream_url);
+    let pid = child.id();
+    log::info!("Launched mpv pid={} with stream: {}", pid, stream_url);
+
+    // Check if mpv exits immediately (crashes)
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let mut stderr = String::new();
+            if let Some(ref mut s) = child.stderr {
+                use std::io::Read;
+                let _ = s.read_to_string(&mut stderr);
+            }
+            log::error!("mpv exited immediately with status {:?} stderr: {}", status, stderr);
+            return Err(format!("mpv exited immediately: {:?}\nstderr: {}", status, stderr));
+        }
+        Ok(None) => {
+            // Still running — good
+            log::info!("mpv pid={} is running", pid);
+        }
+        Err(e) => {
+            log::warn!("Failed to check mpv status: {}", e);
+        }
+    }
+
+    // Store child handle
+    if let Ok(mut guard) = CURRENT_MPV.lock() {
+        *guard = Some(child);
+    }
 
     Ok(PlaybackStart { stream_url })
 }

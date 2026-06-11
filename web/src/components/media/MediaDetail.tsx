@@ -106,11 +106,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   // Relations + Recommendations — from MEDIA_DETAIL_QUERY (item prop)
   const relations = useMemo(() =>
-    (item as any).relations?.edges || [],
-  [item]);
+    (detail as any)?.Media?.relations?.edges || (item as any).relations?.edges || [],
+  [detail, item]);
   const recommendations = useMemo(() =>
-    (item as any).recommendations?.nodes || [],
-  [item]);
+    (detail as any)?.Media?.recommendations?.nodes || (item as any).recommendations?.nodes || [],
+  [detail, item]);
 
   const {
     data: characters = [],
@@ -120,12 +120,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     queryFn: async () => {
       const res = await mediaApi.getCharacters(item.id);
       const r = res as any;
-      return r?.Media?.characters?.edges
+      const edges = r?.Media?.characters?.edges
           || r?.media?.characters?.edges
           || r?.characters?.edges
           || r?.edges
-          || r
           || [];
+      // Flatten: each edge {role, node: {id, name, image}, voiceActors} -> {id, name, image, role, voiceActors}
+      return edges.map((edge: any) => ({
+        id: edge.node?.id ?? edge.id,
+        name: edge.node?.name ?? edge.name,
+        image: edge.node?.image ?? edge.image,
+        role: edge.role ?? "",
+        voiceActors: edge.voiceActors ?? [],
+      }));
     },
     staleTime: 600_000,  // 10 min — cast doesn't change
     enabled: activeTab === "characters",

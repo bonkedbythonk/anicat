@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use log::debug;
@@ -15,6 +15,7 @@ pub struct AniListClient {
     token: Mutex<Option<String>>,
     username: Mutex<Option<String>>,
     rate_limited_until: Mutex<Option<Instant>>,
+    request_lock: Arc<tokio::sync::Semaphore>,
 }
 
 impl Clone for AniListClient {
@@ -24,6 +25,7 @@ impl Clone for AniListClient {
             token: Mutex::new(self.token.lock().unwrap().clone()),
             username: Mutex::new(self.username.lock().unwrap().clone()),
             rate_limited_until: Mutex::new(*self.rate_limited_until.lock().unwrap()),
+            request_lock: self.request_lock.clone(),
         }
     }
 }
@@ -35,6 +37,7 @@ impl AniListClient {
             token: Mutex::new(token),
             username: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
+            request_lock: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -66,15 +69,24 @@ impl AniListClient {
         query: &str,
         variables: HashMap<String, serde_json::Value>,
     ) -> Result<T, String> {
-        // Check if we're in backoff from a previous 429
         {
-            let rl = self.rate_limited_until.lock().unwrap();
-            if let Some(until) = *rl {
-                if Instant::now() < until {
-                    return Err("AniList rate limited — backoff active".to_string());
-                }
+            let wait_duration = {
+                let rl = self.rate_limited_until.lock().unwrap();
+                rl.and_then(|until| {
+                    if Instant::now() < until {
+                        Some(until.duration_since(Instant::now()))
+                    } else {
+                        None
+                    }
+                })
+            };
+            if let Some(wait) = wait_duration {
+                log::warn!("AniList rate limited, waiting {:?} before proceeding", wait);
+                tokio::time::sleep(wait).await;
             }
         }
+
+        let _permit = self.request_lock.acquire().await.map_err(|e| format!("Semaphore error: {}", e))?;
 
         let body = GraphQLRequest {
             query: query.to_string(),
@@ -108,11 +120,13 @@ impl AniListClient {
         if !status.is_success() {
             if status.as_u16() == 429 {
                 let mut rl = self.rate_limited_until.lock().unwrap();
-                *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
+                *rl = Some(Instant::now() + Duration::from_secs(60));
                 return Err("AniList HTTP 429: Too Many Requests — cooling down 60s".to_string());
             }
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse response: {}\nBody: {}", e, text))?;

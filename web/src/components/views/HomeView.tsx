@@ -7,7 +7,6 @@ import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
-import { proxyImage } from "@/lib/proxy";
 import { useAppStore } from "@/stores/app";
 
 interface HomeViewProps {
@@ -220,7 +219,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }, [continueWatchingList, watchingMedia, trendingQuery.data]);
 
   const [activeHeroItem, setActiveHeroItem] = useState<MediaItem | null>(null);
-  const ambientColor = useAmbientColor(proxyImage(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large));
+  const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
 
 
   // Global loading only until critical data is loaded

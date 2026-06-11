@@ -88,7 +88,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const trailer = item.trailer || fullItem?.trailer;
 
   // Extracted hooks
-  const ambientColor = useAmbientColor(proxyImage(banner));
+  const ambientColor = useAmbientColor(banner);
   const progressEditor = useProgressEditor();
 
   // Tab data loaded via React Query — cached, deduped, refetched on tab switch.

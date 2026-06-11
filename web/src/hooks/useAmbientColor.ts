@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { proxyImage } from "@/lib/proxy";
 
 /**
  * Extracts a vibrant ambient color from a banner image URL using
@@ -21,7 +22,8 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
     setAmbientColor("rgba(236, 72, 153, 0.18)");
 
     const img = new Image();
-    img.src = bannerUrl;
+    img.crossOrigin = "anonymous";
+    img.src = proxyImage(bannerUrl);
 
     img.onload = () => {
       try {

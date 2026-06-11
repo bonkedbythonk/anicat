@@ -1,1 +1,0 @@
-# Provider anime utilities

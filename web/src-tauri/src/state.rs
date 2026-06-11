@@ -76,6 +76,7 @@ pub struct AppStateInner {
     pub anilist_client: crate::anilist::AniListClient,
     pub http_client: reqwest::Client,
     pub scraper_manager: Arc<crate::scraper::ScraperManager>,
+    pub cache: crate::cache::AniListCache,
 }
 
 impl AppState {
@@ -157,6 +158,7 @@ impl AppState {
                 anilist_client,
                 http_client,
                 scraper_manager: Arc::new(scraper_manager),
+                cache: crate::cache::AniListCache::new(),
             }),
         }
     }

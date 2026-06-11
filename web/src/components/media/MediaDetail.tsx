@@ -50,7 +50,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       const userConfig = await mediaApi.getConfig();
       return userConfig;
     },
-    staleTime: 60_000,
   });
 
   const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
@@ -80,7 +79,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       const details = await mediaApi.getDetails(item.id);
       return details;
     },
-    staleTime: 60_000,
   });
 
   // Derived values (computed from state/props, must precede hooks that consume them)
@@ -102,7 +100,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   } = useQuery({
     queryKey: ["media-episodes", item.id, isManga ? "mangakatana" : selectedProvider],
     queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || null),
-    staleTime: 120_000,  // 2 min — episodes don't change mid-session
     enabled: !!selectedProvider || isManga,
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
@@ -137,7 +134,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
         voiceActors: edge.voiceActors ?? [],
       }));
     },
-    staleTime: 600_000,  // 10 min — cast doesn't change
     enabled: activeTab === "characters",
   });
 

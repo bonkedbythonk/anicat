@@ -4,38 +4,37 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { setQueryClient } from "@/lib/events";
-import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./index.css";
 
-// Intercept frontend logs to forward to Rust stdout
-const originalLog = console.log;
-const originalWarn = console.warn;
-const originalError = console.error;
+if (import.meta.env.DEV) {
+  import("@tauri-apps/api/core").then(({ invoke }) => {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
 
-function formatArgs(args: any[]): string {
-  return args
-    .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
-    .join(" ");
+    function formatArgs(args: any[]): string {
+      return args
+        .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
+        .join(" ");
+    }
+
+    console.log = (...args: any[]) => {
+      originalLog(...args);
+      invoke("log_frontend", { level: "info", message: formatArgs(args) }).catch(() => {});
+    };
+
+    console.warn = (...args: any[]) => {
+      originalWarn(...args);
+      invoke("log_frontend", { level: "warn", message: formatArgs(args) }).catch(() => {});
+    };
+
+    console.error = (...args: any[]) => {
+      originalError(...args);
+      invoke("log_frontend", { level: "error", message: formatArgs(args) }).catch(() => {});
+    };
+  });
 }
-
-console.log = (...args: any[]) => {
-  originalLog(...args);
-  const msg = formatArgs(args);
-  invoke("log_frontend", { level: "info", message: msg }).catch(() => {});
-};
-
-console.warn = (...args: any[]) => {
-  originalWarn(...args);
-  const msg = formatArgs(args);
-  invoke("log_frontend", { level: "warn", message: msg }).catch(() => {});
-};
-
-console.error = (...args: any[]) => {
-  originalError(...args);
-  const msg = formatArgs(args);
-  invoke("log_frontend", { level: "error", message: msg }).catch(() => {});
-};
 
 document.documentElement.classList.add("dark");
 
@@ -66,8 +65,8 @@ class ErrorBoundary extends Component<{ children: ReactNode }> {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60_000,
-      gcTime: 600_000,
+      staleTime: Infinity,
+      gcTime: 24 * 60 * 60 * 1000,
       refetchOnWindowFocus: false,
       retry: 1,
     },
@@ -85,8 +84,8 @@ const persister = createSyncStoragePersister({
 persistQueryClient({
   queryClient,
   persister,
-  maxAge: 30 * 60 * 1000,  // cache valid for 30 minutes after app close
-  buster: "v1",
+  maxAge: 24 * 60 * 60 * 1000,
+  buster: "v2",
 });
 
 const root = document.getElementById("root");

@@ -1,4 +1,5 @@
 mod anilist;
+mod cache;
 mod commands;
 mod proxy;
 mod registry;

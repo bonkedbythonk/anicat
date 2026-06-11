@@ -81,7 +81,6 @@ export function SearchView({ onSelect }: SearchViewProps) {
       ]);
       return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
     },
-    staleTime: 300_000, // 5 minutes
   });
 
   // Random picks — cached per type, re-fetched with "New Random" button
@@ -96,7 +95,6 @@ export function SearchView({ onSelect }: SearchViewProps) {
       const data = await mediaApi.search("", type, randomPage);
       return data.media || [];
     },
-    staleTime: 300_000,
   });
 
   // Client-side shuffle of discovery pool

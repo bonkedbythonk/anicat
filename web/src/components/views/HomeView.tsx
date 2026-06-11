@@ -75,46 +75,34 @@ export function HomeView({ onSelect }: HomeViewProps) {
   useQuery({
     queryKey: ["playback-status"],
     queryFn: () => mediaApi.getPlaybackStatus().catch(() => null),
-    refetchInterval: 1_800_000,  // 30 min
-    staleTime: 900_000,          // 15 min
   });
 
   // 3. AniList Watching List — used for hero fallback and "New for You"
   const watchingQuery = useQuery({
     queryKey: ["home-watching"],
     queryFn: () => mediaApi.getUserList("watching", "ANIME"),
-    refetchInterval: 1_800_000,  // 30 min
-    staleTime: 900_000,          // 15 min
     enabled: isAuthenticated,
   });
 
   const trendingQuery = useQuery({
     queryKey: ["home-trending"],
     queryFn: () => mediaApi.getTrending("ANIME"),
-    staleTime: 1_800_000,   // 30 min
-    refetchInterval: 3_600_000,  // 60 min
   });
 
   const seasonalQuery = useQuery({
     queryKey: ["home-seasonal"],
     queryFn: () => mediaApi.getSeasonal("ANIME"),
-    staleTime: 1_800_000,   // 30 min
-    refetchInterval: 3_600_000,  // 60 min
   });
 
   const newlyReleasingQuery = useQuery({
     queryKey: ["home-newly-releasing"],
     queryFn: () => mediaApi.search('', 'ANIME', 1, { status: 'RELEASING' }),
-    staleTime: 1_800_000,   // 30 min
-    refetchInterval: 3_600_000,  // 60 min
   });
 
   // 5. Smart Playlist — personalized recommendations (cached, non-blocking)
   const smartPlaylistQuery = useQuery({
     queryKey: ["home-smart-playlist"],
     queryFn: () => mediaApi.getSmartPlaylist(),
-    staleTime: 1_800_000,   // 30 min
-    refetchInterval: 3_600_000,  // 60 min
     enabled: isAuthenticated,
   });
 
@@ -125,9 +113,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   // UX-13: Airing Today — schedule for current day (must be after watchingIds)
   const airingTodayQuery = useQuery({
     queryKey: ["home-airing-today"],
-      queryFn: () => mediaApi.getSchedule(0, 1, 1, 15, watchingIds),
-    staleTime: 600_000,          // 10 min
-    refetchInterval: 1_200_000,  // 20 min
+    queryFn: () => mediaApi.getSchedule(0, 1, 1, 15, watchingIds),
     enabled: isAuthenticated && watchingIds.length > 0,
   });
 
@@ -169,8 +155,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
-    staleTime: 600_000,          // 10 min
-    refetchInterval: 1_200_000,  // 20 min
     queryFn: async () => {
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;

@@ -1,7 +1,0 @@
-query ($showId: String!) {
-  show(_id: $showId) {
-    _id
-    name
-    availableEpisodesDetail
-  }
-}

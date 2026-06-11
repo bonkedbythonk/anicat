@@ -22,7 +22,6 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
   } = useQuery<UserProfile | null>({
     queryKey: ["profile"],
     queryFn: () => mediaApi.getProfile(),
-    staleTime: 60_000,
     enabled: isAuthenticated,
   });
 

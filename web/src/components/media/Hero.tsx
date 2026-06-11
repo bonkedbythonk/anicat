@@ -204,7 +204,6 @@ const Hero = memo(function Hero({
   const { data: config = null } = useQuery({
     queryKey: ["media-config", item?.id],
     queryFn: () => (item ? mediaApi.getConfig() : Promise.resolve(null)),
-    staleTime: 60_000,
     enabled: !!item,
   });
 

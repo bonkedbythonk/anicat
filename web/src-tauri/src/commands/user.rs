@@ -4,6 +4,7 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::anilist::queries;
+use crate::cache::AniListCache;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -42,10 +43,16 @@ pub async fn get_user_list(
     if let Some(ref name) = resolved_user_name {
         vars.insert("userName".to_string(), serde_json::json!(name));
     }
-    if let Some(s) = status {
+    if let Some(ref s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
     }
-    vars.insert("type".to_string(), serde_json::json!(media_type.unwrap_or_else(|| "ANIME".to_string())));
+    vars.insert("type".to_string(), serde_json::json!(media_type.clone().unwrap_or_else(|| "ANIME".to_string())));
+
+    let cache_key = AniListCache::key("get_user_list", &[
+        ("status", &status.as_deref().unwrap_or("all")),
+        ("type", &media_type.as_deref().unwrap_or("ANIME")),
+    ]);
+    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
 
     let result: Value = state
         .anilist_client
@@ -64,11 +71,15 @@ pub async fn get_user_list(
         log::info!("[RUST:get_user_list] MediaListCollection or lists not found/empty in response");
     }
 
+    state.cache.set(cache_key, result.clone(), "get_user_list");
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn get_user_profile(state: State<'_, AppState>) -> Result<Value, String> {
+    let cache_key = "get_user_profile|default".to_string();
+    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
+
     let has_token = state.anilist_client.has_token();
     log::info!("[RUST:get_user_profile] has_token={}", has_token);
     let vars = HashMap::new();
@@ -77,6 +88,7 @@ pub async fn get_user_profile(state: State<'_, AppState>) -> Result<Value, Strin
         .execute(queries::USER_PROFILE_QUERY, vars)
         .await?;
     log::info!("[RUST:get_user_profile] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    state.cache.set(cache_key, result.clone(), "get_user_profile");
     Ok(result)
 }
 
@@ -106,6 +118,8 @@ pub async fn save_media_list_entry(
         .execute(queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
     log::info!("[RUST:save_media_list_entry] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    state.cache.invalidate("get_user_list");
+    state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }
 
@@ -114,8 +128,6 @@ pub async fn delete_media_list_entry(
     state: State<'_, AppState>,
     entry_id: i64,
 ) -> Result<Value, String> {
-    let has_token = state.anilist_client.has_token();
-    log::info!("[RUST:delete_media_list_entry] has_token={} entry_id={}", has_token, entry_id);
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(entry_id));
 
@@ -123,7 +135,8 @@ pub async fn delete_media_list_entry(
         .anilist_client
         .execute(queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-    log::info!("[RUST:delete_media_list_entry] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    state.cache.invalidate("get_user_list");
+    state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }
 
@@ -132,6 +145,9 @@ pub async fn get_notifications(
     state: State<'_, AppState>,
     page: Option<i64>,
 ) -> Result<Value, String> {
+    let cache_key = AniListCache::key("get_notifications", &[("page", &page.unwrap_or(1).to_string())]);
+    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
+
     let has_token = state.anilist_client.has_token();
     log::info!("[RUST:get_notifications] has_token={} page={:?}", has_token, page);
     let mut vars = HashMap::new();
@@ -143,10 +159,7 @@ pub async fn get_notifications(
         .anilist_client
         .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
         .await?;
-    log::info!("[RUST:get_notifications] raw response keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-    if let Some(nots) = result.get("Page").and_then(|p| p.get("notifications")).and_then(|n| n.as_array()) {
-        log::info!("[RUST:get_notifications] returned notifications count: {}", nots.len());
-    }
+    state.cache.set(cache_key, result.clone(), "get_notifications");
     Ok(result)
 }
 
@@ -161,10 +174,11 @@ pub async fn mark_notifications_read(
     vars.insert("perPage".to_string(), serde_json::json!(1));
     vars.insert("reset".to_string(), serde_json::json!(true));
 
-    let result: Value = state.anilist_client
+    let result: Value = state
+        .anilist_client
         .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
         .await?;
-    log::info!("[RUST:mark_notifications_read] result keys: {:?}", result.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    state.cache.invalidate("get_notifications");
     Ok(result)
 }
 
@@ -184,11 +198,19 @@ pub async fn get_airing_schedule(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let db = days_back.unwrap_or(1);
+    let da = days_ahead.unwrap_or(3);
+    let cache_key = AniListCache::key("get_airing_schedule", &[
+        ("db", &db.to_string()),
+        ("da", &da.to_string()),
+    ]);
+    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(per_page.unwrap_or(50)));
-    vars.insert("airingAt_greater".to_string(), serde_json::json!(now - (days_back.unwrap_or(1) * 86400)));
-    vars.insert("airingAt_lesser".to_string(), serde_json::json!(now + (days_ahead.unwrap_or(3) * 86400)));
+    vars.insert("airingAt_greater".to_string(), serde_json::json!(now - (db * 86400)));
+    vars.insert("airingAt_lesser".to_string(), serde_json::json!(now + (da * 86400)));
     if let Some(ids) = media_ids {
         if !ids.is_empty() {
             vars.insert("mediaId_in".to_string(), serde_json::json!(ids));
@@ -202,5 +224,6 @@ pub async fn get_airing_schedule(
     if let Some(scheds) = result.get("Page").and_then(|p| p.get("airingSchedules")).and_then(|s| s.as_array()) {
         log::info!("[RUST:get_airing_schedule] returned airingSchedules count: {}", scheds.len());
     }
+    state.cache.set(cache_key, result.clone(), "get_airing_schedule");
     Ok(result)
 }

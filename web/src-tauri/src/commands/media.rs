@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::anilist::queries;
 use crate::anilist::responses::{MediaResponse, PageResponse};
+use crate::cache::AniListCache;
 use crate::registry;
 use crate::state::AppState;
 
@@ -61,6 +62,9 @@ pub async fn get_trending(
     state: State<'_, AppState>,
     page: Option<i64>,
 ) -> Result<Value, String> {
+    let key = AniListCache::key("get_trending", &[("page", &page.unwrap_or(1).to_string())]);
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
@@ -71,7 +75,9 @@ pub async fn get_trending(
         .execute(queries::MEDIA_TRENDING_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    state.cache.set(key, val.clone(), "get_trending");
+    Ok(val)
 }
 
 #[tauri::command]
@@ -81,17 +87,16 @@ pub async fn get_seasonal(
     season_year: Option<i32>,
     page: Option<i64>,
 ) -> Result<Value, String> {
+    let s = season.clone().unwrap_or_else(|| "SPRING".to_string());
+    let y = season_year.unwrap_or(2026);
+    let key = AniListCache::key("get_seasonal", &[("season", &s), ("year", &y.to_string()), ("page", &page.unwrap_or(1).to_string())]);
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
-    vars.insert(
-        "season".to_string(),
-        serde_json::json!(season.unwrap_or_else(|| "SPRING".to_string())),
-    );
-    vars.insert(
-        "seasonYear".to_string(),
-        serde_json::json!(season_year.unwrap_or(2026)),
-    );
+    vars.insert("season".to_string(), serde_json::json!(s));
+    vars.insert("seasonYear".to_string(), serde_json::json!(y));
     vars.insert("type".to_string(), serde_json::json!("ANIME"));
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
@@ -99,7 +104,9 @@ pub async fn get_seasonal(
         .execute(queries::MEDIA_SEASONAL_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    state.cache.set(key, val.clone(), "get_seasonal");
+    Ok(val)
 }
 
 #[tauri::command]
@@ -107,6 +114,9 @@ pub async fn get_upcoming(
     state: State<'_, AppState>,
     page: Option<i64>,
 ) -> Result<Value, String> {
+    let key = AniListCache::key("get_upcoming", &[("page", &page.unwrap_or(1).to_string())]);
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
@@ -117,7 +127,9 @@ pub async fn get_upcoming(
         .execute(queries::MEDIA_UPCOMING_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    state.cache.set(key, val.clone(), "get_upcoming");
+    Ok(val)
 }
 
 #[tauri::command]
@@ -142,6 +154,9 @@ pub async fn get_media_characters(
 pub async fn get_smart_playlist(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    let key = "get_smart_playlist|action".to_string();
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("genre".to_string(), serde_json::json!(["Action"]));
     vars.insert("sort".to_string(), serde_json::json!(["SCORE_DESC"]));
@@ -151,7 +166,9 @@ pub async fn get_smart_playlist(
         .execute(queries::SMART_PLAYLIST_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    state.cache.set(key, val.clone(), "get_smart_playlist");
+    Ok(val)
 }
 
 #[tauri::command]

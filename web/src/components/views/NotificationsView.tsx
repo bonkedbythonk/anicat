@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, CheckCircle2, Bell } from "lucide-react";
+import { Loader2, CheckCircle2, Bell, RefreshCw } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 
@@ -14,7 +14,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
   const queryClient = useQueryClient();
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["notifications", "config"],
     queryFn: async () => {
       const [notifs, cfg] = await Promise.all([
@@ -23,7 +23,6 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
       ]);
       return { notifications: notifs || [], config: cfg };
     },
-    staleTime: 30_000,
     enabled: isAuthenticated,
   });
 
@@ -76,15 +75,25 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
     <div className="space-y-8 animate-fade-in max-w-3xl">
       <div className="flex items-center justify-between">
         <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-white">Notifications</h1>
-        {notifications.length > 0 && (
-          <button 
-            onClick={handleMarkAllRead}
-            className="flex items-center space-x-2 px-4 py-2 bg-white/[0.04] hover:bg-accent hover:text-white border border-white/[0.06] rounded-xl text-sm font-bold transition-all"
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["notifications", "config"] })}
+            disabled={isFetching}
+            className="p-2 rounded-xl hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
+            title="Refresh"
           >
-            <CheckCircle2 size={16} />
-            <span>Mark all as read</span>
+            <RefreshCw size={18} className={isFetching ? "animate-spin" : ""} />
           </button>
-        )}
+          {notifications.length > 0 && (
+            <button 
+              onClick={handleMarkAllRead}
+              className="flex items-center space-x-2 px-4 py-2 bg-white/[0.04] hover:bg-accent hover:text-white border border-white/[0.06] rounded-xl text-sm font-bold transition-all"
+            >
+              <CheckCircle2 size={16} />
+              <span>Mark all as read</span>
+            </button>
+          )}
+        </div>
       </div>
       
       {notifications.length === 0 ? (

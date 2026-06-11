@@ -7,6 +7,7 @@ import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useAppStore } from "@/stores/app";
 
 interface HomeViewProps {
   onSelect: (item: MediaItem) => void;

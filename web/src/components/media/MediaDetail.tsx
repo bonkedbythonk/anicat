@@ -104,19 +104,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
 
-  const {
-    data: characters = [],
-    isLoading: loadingChars,
-  } = useQuery({
-    queryKey: ["media-characters", item.id],
-    queryFn: async () => {
-      const res = await mediaApi.getCharacters(item.id);
-      return (res as any)?.Media?.characters?.edges ?? [];
-    },
-    staleTime: 600_000,  // 10 min — cast doesn't change
-    enabled: activeTab === "characters",
-  });
-
   // Relations + Recommendations — from MEDIA_DETAIL_QUERY (item prop)
   const relations = useMemo(() =>
     (item as any).relations?.edges || [],
@@ -127,6 +114,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   const {
     data: characters = [],
+    isLoading: loadingChars,
   } = useQuery({
     queryKey: ["media-characters", item.id],
     queryFn: async () => {

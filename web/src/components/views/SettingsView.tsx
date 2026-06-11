@@ -104,7 +104,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const handleTestAll = () => {
     const list = [
       { name: "anineko", isManga: false },
-      { name: "mangadex", isManga: true },
       { name: "mangakatana", isManga: true },
     ];
     list.forEach(item => {
@@ -882,88 +881,119 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
           {activeTab === "account" && (
             <div className="space-y-6 animate-fade-in">
               <CardSection title="AniList">
-                <SettingField label="Login" description="Authorize Anicat to access your AniList account.">
-                  <button
-                    onClick={() => {
-                      setAuthPending(true);
-                      invoke("start_anilist_auth").then(() => {
-                        setAuthPending(false);
-                      }).catch(() => {
-                        setAuthPending(false);
-                      });
-                    }}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl bg-accent/10 border border-accent/20 hover:bg-accent/20 text-accent font-semibold text-sm transition-all"
-                  >
-                    {authPending ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin" />
-                        <span>Waiting for authorization...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Globe size={16} />
-                        <span>Connect AniList</span>
-                      </>
-                    )}
-                  </button>
-                </SettingField>
-
-                <SettingField label="API Token" description="After authorizing, paste the full URL you were redirected to (or just the token).">
-                  <input
-                    type="password"
-                    value={String(config.api?.anilist_token || "")}
-                    onChange={(e) => {
-                      const val = e.target.value.trim();
-                      const hashMatch = val.match(/#.*access_token=([^&]+)/);
-                      const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
-                      updateField("api", "anilist_token", token);
-                      if (token.length > 20) {
-                        setTimeout(() => {
-                          dispatchRefresh();
-                          window.dispatchEvent(new Event("anicat_health_recheck"));
-                        }, 2000);
-                      }
-                    }}
-                    placeholder="Paste redirect URL or token..."
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
-                  />
-                  <button
-                    id="logout-btn"
-                    data-confirmed="false"
-                    onClick={async () => {
-                      const btn = document.getElementById('logout-btn');
-                      if (btn?.getAttribute('data-confirmed') === 'true') {
-                        if (btn) {
-                          btn.innerHTML = '<span>Logging out...</span>';
-                          btn.setAttribute('disabled', 'true');
-                          btn.className = "mt-2 text-xs font-bold text-red-400/40 transition-colors flex items-center space-x-1 cursor-not-allowed pointer-events-none";
-                        }
-                        mediaApi.updateConfig({ anilist: { token: "" } })
-                          .then(() => window.location.reload())
-                          .catch(err => {
-                            console.error("Logout failed:", err);
-                            alert("Logout failed. Please try again.");
+                {config.api?.anilist_token ? (
+                  <>
+                    <SettingField label="Status" description="Your AniList account is connected.">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <span className="text-sm text-green-400 font-medium">Connected</span>
+                      </div>
+                    </SettingField>
+                    <SettingField label="API Token" description="Your authorization token. Keep this private.">
+                      <input
+                        type="password"
+                        value={String(config.api?.anilist_token || "")}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          const hashMatch = val.match(/#.*access_token=([^&]+)/);
+                          const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
+                          updateField("api", "anilist_token", token);
+                          if (token.length > 20) {
+                            setTimeout(() => {
+                              dispatchRefresh();
+                              window.dispatchEvent(new Event("anicat_health_recheck"));
+                            }, 2000);
+                          }
+                        }}
+                        placeholder="Paste redirect URL or token..."
+                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                      />
+                    </SettingField>
+                    <div className="pt-2">
+                      <button
+                        id="logout-btn"
+                        data-confirmed="false"
+                        onClick={async () => {
+                          const btn = document.getElementById('logout-btn');
+                          if (btn?.getAttribute('data-confirmed') === 'true') {
                             if (btn) {
-                              btn.removeAttribute('disabled');
-                              btn.setAttribute('data-confirmed', 'false');
-                              btn.innerHTML = '<span>Logout</span>';
-                              btn.className = "mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 transition-colors flex items-center space-x-1";
+                              btn.innerHTML = '<span>Logging out...</span>';
+                              btn.setAttribute('disabled', 'true');
+                              btn.className = "mt-2 text-xs font-bold text-red-400/40 flex items-center space-x-1 w-full justify-center";
                             }
+                            mediaApi.updateConfig({ anilist: { token: "" } })
+                              .then(() => window.location.reload())
+                              .catch(() => {
+                                if (btn) {
+                                  btn.removeAttribute('disabled');
+                                  btn.setAttribute('data-confirmed', 'false');
+                                  btn.innerHTML = '<span>Logout</span>';
+                                  btn.className = "mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 flex items-center space-x-1 w-full justify-center";
+                                }
+                              });
+                          } else {
+                            if (btn) {
+                              btn.setAttribute('data-confirmed', 'true');
+                              btn.innerHTML = '<span>Are you sure? Click again</span>';
+                              btn.className = "mt-2 text-xs font-bold text-red-400 hover:text-red-300 flex items-center space-x-1 w-full justify-center";
+                            }
+                          }
+                        }}
+                        className="mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 flex items-center space-x-1 w-full justify-center"
+                      >
+                        <span>Logout</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <SettingField label="Login" description="Authorize Anicat to access your AniList account.">
+                      <button
+                        onClick={() => {
+                          setAuthPending(true);
+                          invoke("start_anilist_auth").then(() => {
+                            setAuthPending(false);
+                          }).catch(() => {
+                            setAuthPending(false);
                           });
-                      } else {
-                        if (btn) {
-                          btn.setAttribute('data-confirmed', 'true');
-                          btn.innerHTML = '<span>Are you sure? Click again to Logout</span>';
-                          btn.className = "mt-2 text-xs font-bold text-red-400 transition-colors flex items-center space-x-1";
-                        }
-                      }
-                    }}
-                    className="mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 transition-colors flex items-center space-x-1"
-                  >
-                    <XCircle size={12} />
-                    <span>Logout</span>
-                  </button>
-                </SettingField>
+                        }}
+                        className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl bg-accent/10 border border-accent/20 hover:bg-accent/20 text-accent font-semibold text-sm transition-all"
+                      >
+                        {authPending ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            <span>Waiting for authorization...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Globe size={16} />
+                            <span>Connect AniList</span>
+                          </>
+                        )}
+                      </button>
+                    </SettingField>
+                    <SettingField label="API Token" description="After authorizing, paste the full URL you were redirected to (or just the token).">
+                      <input
+                        type="password"
+                        value={String(config.api?.anilist_token || "")}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          const hashMatch = val.match(/#.*access_token=([^&]+)/);
+                          const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
+                          updateField("api", "anilist_token", token);
+                          if (token.length > 20) {
+                            setTimeout(() => {
+                              dispatchRefresh();
+                              window.dispatchEvent(new Event("anicat_health_recheck"));
+                            }, 2000);
+                          }
+                        }}
+                        placeholder="Paste redirect URL or token..."
+                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                      />
+                    </SettingField>
+                  </>
+                )}
               </CardSection>
             </div>
           )}

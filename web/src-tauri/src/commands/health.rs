@@ -12,12 +12,13 @@ pub struct HealthResponse {
     pub data_version: i64,
     pub token_present: bool,
     pub viewer_name: Option<String>,
+    pub auth_error: Option<String>,
 }
 
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let token_present = state.anilist_client.has_token();
-    let (authenticated, viewer_name) = if token_present {
+    let (authenticated, viewer_name, auth_error) = if token_present {
         match state
             .anilist_client
             .execute::<serde_json::Value>(crate::anilist::queries::HEALTH_CHECK_QUERY, HashMap::new())
@@ -29,17 +30,17 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
                     .and_then(|v| v.get("name"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                (true, name)
+                log::info!("AniList health check successful: viewer={:?}", name);
+                (true, name, None)
             }
             Err(e) => {
                 log::warn!("AniList health check failed: {}", e);
-                // Clear invalid token
                 state.anilist_client.set_token(None);
-                (false, None)
+                (false, None, Some(e))
             }
         }
     } else {
-        (false, None)
+        (false, None, None)
     };
 
     Ok(HealthResponse {
@@ -49,6 +50,7 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
         data_version: 1,
         token_present,
         viewer_name,
+        auth_error,
     })
 }
 

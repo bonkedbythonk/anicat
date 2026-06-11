@@ -48,12 +48,16 @@ export default function App() {
         authenticated: boolean;
         offline: boolean;
         data_version: number;
+        auth_error: string | null;
+        token_present: boolean;
       }>("check_health");
-      setConnectionState(
-        health.connected,
-        health.authenticated,
-        health.offline,
-      );
+      useAppStore.getState().setHealthState({
+        connected: health.connected,
+        authenticated: health.authenticated,
+        offline: health.offline,
+        authError: health.auth_error,
+        tokenPresent: health.token_present,
+      });
     } catch {
       setConnectionState(false, false, true);
     }

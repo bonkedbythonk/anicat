@@ -475,6 +475,7 @@ export interface HealthStatus {
   update_available?: boolean;
   token_present?: boolean;
   viewer_name?: string | null;
+  auth_error?: string | null;
 }
 
 export interface PlaybackStatus {

@@ -44,6 +44,8 @@ interface ScraperTestState {
 export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const apiConnected = useAppStore((s) => s.apiConnected);
   const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const authError = useAppStore((s) => s.authError);
+  const tokenPresent = useAppStore((s) => s.tokenPresent);
   const [config, setConfig] = useState<Record<string, Record<string, unknown>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1018,9 +1020,12 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </>
                 )}
                 <div className="mt-4 p-3 bg-white/[0.02] border border-white/[0.05] rounded-lg space-y-1 text-xs font-mono">
-                  <div className="flex justify-between"><span className="text-gray-500">Token saved</span><span className={config.api?.anilist_token ? "text-green-400" : "text-gray-600"}>{config.api?.anilist_token ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Token saved</span><span className={tokenPresent ? "text-green-400" : "text-gray-600"}>{tokenPresent ? "yes" : "no"}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Backend connected</span><span className={apiConnected ? "text-green-400" : "text-red-400"}>{apiConnected ? "yes" : "no"}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">AniList validated</span><span className={apiAuthenticated ? "text-green-400" : "text-red-400"}>{apiAuthenticated ? "yes" : "no"}</span></div>
+                  {authError && (
+                    <div className="flex justify-between"><span className="text-gray-500">Error</span><span className="text-red-400 truncate ml-2 text-[10px]">{authError}</span></div>
+                  )}
                   {health?.viewer_name && (
                     <div className="flex justify-between"><span className="text-gray-500">Signed in as</span><span className="text-accent">{health.viewer_name}</span></div>
                   )}

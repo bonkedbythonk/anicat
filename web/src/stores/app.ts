@@ -28,11 +28,20 @@ interface AppState {
   apiConnected: boolean;
   apiAuthenticated: boolean;
   isOffline: boolean;
+  authError: string | null;
+  tokenPresent: boolean;
   setConnectionState: (
     connected: boolean,
     authenticated: boolean,
     offline: boolean,
   ) => void;
+  setHealthState: (state: {
+    connected: boolean;
+    authenticated: boolean;
+    offline: boolean;
+    authError: string | null;
+    tokenPresent: boolean;
+  }) => void;
 
   // Metrics last loaded
   dataVersion: number;
@@ -59,8 +68,11 @@ export const useAppStore = create<AppState>((set) => ({
   apiConnected: false,
   apiAuthenticated: false,
   isOffline: false,
+  authError: null,
+  tokenPresent: false,
   setConnectionState: (apiConnected, apiAuthenticated, isOffline) =>
     set({ apiConnected, apiAuthenticated, isOffline }),
+  setHealthState: (state) => set(state),
 
   dataVersion: 0,
   setDataVersion: (dataVersion) => set({ dataVersion }),

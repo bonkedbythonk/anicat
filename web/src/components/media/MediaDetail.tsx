@@ -88,7 +88,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const trailer = item.trailer || fullItem?.trailer;
 
   // Extracted hooks
-  const ambientColor = useAmbientColor(banner);
+  const ambientColor = useAmbientColor(proxyImage(banner));
   const progressEditor = useProgressEditor();
 
   // Tab data loaded via React Query — cached, deduped, refetched on tab switch.
@@ -323,7 +323,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
              <div className="absolute inset-0 z-[1] detail-banner-gradient" />
              {/* Banner image — fades out when trailer starts */}
              <img
-               src={banner}
+                src={proxyImage(banner)}
                alt={title}
                className={`w-full h-full object-cover transition-opacity duration-1000 ${isTrailerVisible && (trailer?.id && trailer.site?.toLowerCase() === "youtube") ? "opacity-0" : "opacity-100"}`}
              />

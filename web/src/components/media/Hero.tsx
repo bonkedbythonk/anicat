@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { Play, Maximize, BookOpen, Loader2, Clock, Tv } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { proxyImage } from "@/lib/proxy";
 import { mediaApi, type MediaItem, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 
@@ -282,7 +283,7 @@ const Hero = memo(function Hero({
         <div className="absolute inset-0 bg-background">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={item.banner_image || item.cover_image.large}
+            src={proxyImage(item.banner_image || item.cover_image.large)}
             alt={title}
             className={`absolute inset-0 w-full h-full object-cover transition-[transform,filter,opacity] duration-[2s] ${
               hasBanner

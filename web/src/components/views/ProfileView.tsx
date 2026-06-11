@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, User, Clock, Tv, BookOpen, Bookmark, Heart, Sparkles } from "lucide-react";
 import { mediaApi, type UserProfile, type MediaItem } from "@/lib/api";
+import { proxyImage } from "@/lib/proxy";
 import { useAppStore } from "@/stores/app";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { LazyCard } from "@/components/media/LazyCard";
@@ -86,7 +87,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
       <div className="relative rounded-3xl overflow-hidden bg-surface border border-white/[0.06] shadow-2xl">
         {profile.banner_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={profile.banner_url} alt="Banner" className="w-full h-48 lg:h-72 object-cover brightness-[0.6]" />
+          <img src={proxyImage(profile.banner_url)} alt="Banner" className="w-full h-48 lg:h-72 object-cover brightness-[0.6]" />
         ) : (
           <div className="w-full h-48 lg:h-72 bg-gradient-to-r from-accent to-secondary opacity-30" />
         )}

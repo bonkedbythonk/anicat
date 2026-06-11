@@ -21,7 +21,6 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
     setAmbientColor("rgba(236, 72, 153, 0.18)");
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.src = bannerUrl;
 
     img.onload = () => {

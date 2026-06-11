@@ -18,12 +18,9 @@ pub struct HealthResponse {
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let token_present = state.anilist_client.has_token();
     let (authenticated, viewer_name) = if token_present {
-        let mut vars = HashMap::new();
-        vars.insert("name".to_string(), serde_json::json!(true));
-
         match state
             .anilist_client
-            .execute::<serde_json::Value>(crate::anilist::queries::HEALTH_CHECK_QUERY, vars)
+            .execute::<serde_json::Value>(crate::anilist::queries::HEALTH_CHECK_QUERY, HashMap::new())
             .await
         {
             Ok(data) => {

@@ -893,10 +893,19 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
               <CardSection title="AniList">
                 {config.api?.anilist_token ? (
                   <>
-                    <SettingField label="Status" description="Your AniList account is connected.">
+                    <SettingField label="Status" description="AniList account connection status.">
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-sm text-green-400 font-medium">Connected</span>
+                        {health?.authenticated ? (
+                          <>
+                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                            <span className="text-sm text-green-400 font-medium">Connected {health?.viewer_name ? `as ${health.viewer_name}` : ""}</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                            <span className="text-sm text-yellow-400 font-medium">Pending validation...</span>
+                          </>
+                        )}
                       </div>
                     </SettingField>
                     <SettingField label="API Token" description="Your authorization token. Keep this private.">

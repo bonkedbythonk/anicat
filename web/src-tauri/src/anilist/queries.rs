@@ -171,7 +171,7 @@ query {
 "#;
 
 pub const HEALTH_CHECK_QUERY: &str = r#"
-query ($name: Boolean!) {
+query {
   Viewer {
     name
   }

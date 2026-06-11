@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Search, Activity } from "lucide-react";
-import { mediaApi, type HealthStatus, API_BASE_ORIGIN } from "@/lib/api";
+import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
 import type { UiStyle } from "@/hooks/useTheme";
 import { ErrorBanner } from "@/components/ErrorBanner";
 
@@ -918,7 +918,10 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val;
                       updateField("api", "anilist_token", token);
                       if (token.length > 20) {
-                        window.dispatchEvent(new Event("anicat_health_recheck"));
+                        setTimeout(() => {
+                          dispatchRefresh();
+                          window.dispatchEvent(new Event("anicat_health_recheck"));
+                        }, 2000);
                       }
                     }}
                     placeholder="Paste redirect URL or token..."

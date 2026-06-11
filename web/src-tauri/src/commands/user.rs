@@ -15,9 +15,8 @@ pub async fn get_user_list(
     let has_token = state.anilist_client.has_token();
     log::info!("[get_user_list] has_token={} status={:?}", has_token, status);
     let mut vars = HashMap::new();
-    if let Some(name) = user_name {
-        vars.insert("userName".to_string(), serde_json::json!(name));
-    }
+    vars.insert("userName".to_string(), serde_json::json!(user_name));
+    vars.insert("userId".to_string(), serde_json::json!(None::<i64>));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
     }

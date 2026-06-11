@@ -223,7 +223,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     // may still be mounted during exit animation and would crash on null data).
     qc.invalidateQueries({ queryKey: ["media-detail", item.id] });
 
-    mediaApi.deleteFromList(item.id)
+    mediaApi.deleteFromList(fullItem?.Media?.mediaListEntry?.id || 0)
       .then(() => {
         // Invalidate to ensure consistency with server
         for (const key of listQueryKeys) {

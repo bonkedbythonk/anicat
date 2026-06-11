@@ -157,6 +157,7 @@ query {
     options { displayAdultContent }
     statistics {
       anime { count episodesWatched minutesWatched meanScore genres(limit: 10, sort: COUNT_DESC) { genre count } }
+      manga { count chaptersRead volumesRead meanScore genres(limit: 10, sort: COUNT_DESC) { genre count } }
     }
     favourites {
       anime(perPage: 20) {

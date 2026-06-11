@@ -382,27 +382,56 @@ export const mediaApi = {
   getWatchHistory,
   checkHealth: getHealth,
   getAppVersion,
+  // Stub methods for old component compatibility — delegate to real commands where possible
+  getReviews: async () => [],
+  getRecommendations: async () => [],
+  getRelations: async () => [],
+  addToQueue: async (mediaId: number, episodes: number[]) => {
+    try {
+      return await invoke("add_to_queue", { mediaId, episodes });
+    } catch (err) {
+      console.warn("[addToQueue] not implemented, ignoring:", err);
+    }
+  },
+  playNext: async (mediaId: number, provider: string) => {
+    try {
+      const history = await invoke<{ episode_number: number }[]>("get_watched_episodes", { mediaId });
+      const nextEp = history.length > 0 ? Math.max(...history.map((h) => h.episode_number)) + 1 : 1;
+      return await invoke("start_playback", { mediaId, episodeNumber: nextEp, provider });
+    } catch (err) {
+      console.warn("[playNext] failed:", err);
+    }
+  },
+  deleteFromList: async (entryId: number) => {
+    try {
+      return await invoke("delete_media_list_entry", { entryId });
+    } catch (err) {
+      console.warn("[deleteFromList] failed:", err);
+    }
+  },
+  updateStatus: async (mediaId: number, status: string) => {
+    const mapped = ({
+      watching: "CURRENT", reading: "CURRENT", current: "CURRENT",
+      planning: "PLANNING", completed: "COMPLETED", paused: "PAUSED",
+      dropped: "DROPPED", repeating: "REPEATING",
+    } as Record<string, string>)[status] || status.toUpperCase();
+    try {
+      return await invoke("save_media_list_entry", { mediaId, updates: { status: mapped } });
+    } catch (err) {
+      console.warn("[updateStatus] failed:", err);
+    }
+  },
   play: async (mediaId: number, epNum: number, provider?: string, server?: string) => {
     return invoke("start_playback", { mediaId, episodeNumber: epNum, provider });
   },
   getStreams: async (mediaId: number, epNum: number, provider?: string) => {
     return invoke("resolve_stream", { mediaId, episodeNumber: epNum, provider });
   },
-  addToQueue: async (mediaId: number, episodes: number[]) => {
-    return invoke("add_to_queue", { mediaId, episodes });
-  },
   getDetails: async (mediaId: number) => {
     const result = await getAnimeDetail(mediaId);
     if (result?.Media) snakify(result.Media as unknown as Record<string, unknown>);
     return result;
   },
-  // Stub methods for old component compatibility
-  getReviews: async () => [],
-  getRecommendations: async () => [],
-  getRelations: async () => [],
-  playNext: async () => {},
-  deleteFromList: async () => {},
-  updateStatus: async () => {},
   getQueue: async () => [],
   retryQueue: async () => {},
   removeFromQueue: async () => {},
@@ -426,6 +455,8 @@ export const mediaApi = {
        const raw = await invoke("get_user_profile");
        const viewer = (raw as any)?.Viewer;
        if (!viewer) return null;
+       const animeStats = viewer.statistics?.anime;
+       const mangaStats = viewer.statistics?.manga;
        return {
          id: viewer.id,
          name: viewer.name,
@@ -435,8 +466,15 @@ export const mediaApi = {
          banner_image: viewer.bannerImage || null,
          banner_url: viewer.bannerImage || null,
          site_url: viewer.siteUrl || null,
-         statistics: viewer.statistics?.anime || null,
-         genres: viewer.statistics?.anime?.genres || [],
+         minutes_watched: animeStats?.minutesWatched || 0,
+         episodes_watched: animeStats?.episodesWatched || 0,
+         anime_count: animeStats?.count || 0,
+         mean_score: animeStats?.meanScore || 0,
+         chapters_read: mangaStats?.chaptersRead || 0,
+         manga_count: mangaStats?.count || 0,
+         volumes_read: mangaStats?.volumesRead || 0,
+         statistics: animeStats || null,
+         genres: animeStats?.genres || [],
          favorite_anime: viewer.favourites?.anime?.nodes || [],
          favorite_manga: viewer.favourites?.manga?.nodes || [],
        };

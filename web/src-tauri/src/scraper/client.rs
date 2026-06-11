@@ -25,6 +25,7 @@ pub struct StreamServer {
     pub name: String,
     pub url: String,
     pub quality: Option<String>,
+    #[serde(rename = "isM3U8", alias = "is_m3u8")]
     pub is_m3u8: Option<bool>,
     pub headers: Option<std::collections::HashMap<String, String>>,
 }

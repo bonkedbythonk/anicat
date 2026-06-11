@@ -157,17 +157,27 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAnilistToken: (anilistToken) => set({ anilistToken }),
   loadFromConfig: (config) =>
     set({
-      playerType: (config.player_type as "embedded" | "external") || "embedded",
-      defaultProvider: (config.provider as string) || "anineko",
-      autoplay: (config.autoplay as boolean) ?? true,
-      autoskip: (config.autoskip as boolean) ?? true,
-      animePreview: (config.anime_preview as boolean) ?? true,
-      preferredQuality: (config.preferred_quality as string) || "1080p",
+      playerType:
+        ((config as any)?.stream?.player_type as "embedded" | "external") ||
+        "embedded",
+      defaultProvider:
+        ((config as any)?.general?.provider as string) ||
+        "anineko",
+      autoplay: ((config as any)?.general?.autoplay as boolean) ?? true,
+      autoskip: ((config as any)?.general?.autoskip as boolean) ?? true,
+      animePreview:
+        ((config as any)?.general?.anime_preview as boolean) ?? true,
+      preferredQuality:
+        ((config as any)?.stream?.preferred_quality as string) || "1080p",
       preferredTitleLanguage:
-        (config.preferred_title_language as string) || "romaji",
-      downloadsPath: (config.downloads_path as string) || "",
-      dataSaver: (config.data_saver as boolean) ?? false,
-      notifications: (config.notifications as boolean) ?? true,
-      anilistToken: (config.anilist_token as string) || null,
+        ((config as any)?.general?.preferred_title_language as string) ||
+        "romaji",
+      downloadsPath:
+        ((config as any)?.general?.downloads_path as string) || "",
+      dataSaver: ((config as any)?.stream?.data_saver as boolean) ?? false,
+      notifications:
+        ((config as any)?.general?.notifications as boolean) ?? true,
+      anilistToken:
+        ((config as any)?.api?.anilist_token as string) || null,
     }),
 }));

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::process::{Child, Command as StdCommand};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -9,7 +8,7 @@ use crate::state::AppState;
 
 /// Holds a reference to the currently running mpv child so we can
 /// check its status and kill it from stop_playback.
-static CURRENT_MPV: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync::Mutex::new(None);
 
 #[derive(Serialize)]
 pub struct PlaybackStart {
@@ -93,12 +92,10 @@ pub async fn start_playback(
     log::info!("mpv config: {}", config_dir);
     log::info!("mpv lib dir: {}", lib_dir);
 
-    let mut cmd = StdCommand::new(&mpv_bin);
+    let mut cmd = tokio::process::Command::new(&mpv_bin);
     cmd.arg(format!("--config-dir={}", config_dir));
-    cmd.arg("--no-terminal");
-    cmd.arg("--ontop");
     cmd.arg("--force-window=yes");
-    cmd.arg("--border");
+    cmd.arg("--ontop");
     cmd.arg(&stream_url);
 
     // Set library path for macOS .dylibs
@@ -109,29 +106,21 @@ pub async fn start_playback(
         cmd.env("LD_LIBRARY_PATH", &lib_dir);
     }
 
-    cmd.stderr(std::process::Stdio::piped());
-
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to launch mpv: {}", e))?;
 
-    let pid = child.id();
+    let pid = child.id().unwrap_or(0);
     log::info!("Launched mpv pid={} with stream: {}", pid, stream_url);
 
     // Check if mpv exits immediately (crashes)
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     match child.try_wait() {
         Ok(Some(status)) => {
-            let mut stderr = String::new();
-            if let Some(ref mut s) = child.stderr {
-                use std::io::Read;
-                let _ = s.read_to_string(&mut stderr);
-            }
-            log::error!("mpv exited immediately with status {:?} stderr: {}", status, stderr);
-            return Err(format!("mpv exited immediately: {:?}\nstderr: {}", status, stderr));
+            log::error!("mpv exited immediately with status {:?}", status);
+            return Err(format!("mpv exited immediately: {:?}", status));
         }
         Ok(None) => {
-            // Still running — good
             log::info!("mpv pid={} is running", pid);
         }
         Err(e) => {

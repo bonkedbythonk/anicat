@@ -1,5 +1,6 @@
 # Anicat
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Anicat Desktop](assets/branding/dashboard.png)
 
 **A simple way to watch and track anime on your Mac or Windows PC.** Search, stream, download, and track everything in one place — with a beautiful GUI app.

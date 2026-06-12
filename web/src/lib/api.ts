@@ -645,19 +645,7 @@ export const mediaApi = {
     try {
       const config = await getConfig();
       const branch = config?.general?.update_branch || "stable";
-      
       const currentVersion = await invoke<string>("get_app_version");
-      
-      if (branch === "nightly") {
-        latestDownloadUrl = "https://github.com/bonkedbythonk/anicat/releases";
-        return {
-          status: "success",
-          update_available: true,
-          message: "A new Nightly version v5.0.1-nightly is available!",
-          release_notes: "- Fixed: Airing schedule caching issue (Global vs Watching Only)\n- Fixed: Notifications clearing behavior via localStorage filter\n- Fixed: Settings view displaying 'unknown' for current version\n- Fixed: Missing onboarding flow for first-time users\n- Fixed: Enabled opening log files and directories from within settings",
-          release_url: "https://github.com/bonkedbythonk/anicat/releases",
-        };
-      }
 
       const res = await fetch("https://api.github.com/repos/bonkedbythonk/anicat/releases/latest");
       if (!res.ok) {
@@ -689,7 +677,7 @@ export const mediaApi = {
         return {
           status: "success",
           update_available: true,
-          message: `A new version ${data.tag_name} is available!`,
+          message: `A new ${branch === "nightly" ? "nightly" : "version"} ${data.tag_name} is available!`,
           release_notes: data.body,
           release_url: data.html_url,
         };

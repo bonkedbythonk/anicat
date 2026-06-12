@@ -137,3 +137,19 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
     open::that(&url).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[derive(Serialize)]
+pub struct UpdateCheckResponse {
+    pub current_version: String,
+}
+
+#[tauri::command]
+pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateCheckResponse, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    Ok(UpdateCheckResponse { current_version })
+}
+
+#[tauri::command]
+pub async fn trigger_update(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| e.to_string())
+}

@@ -1,6 +1,7 @@
 [package]
 name = "anicat"
 version = "5.0.0"
+license = "GPL-3.0-only"
 edition = "2021"
 
 [build-dependencies]

@@ -129,6 +129,8 @@ pub fn run() {
             commands::health::get_logs,
             commands::health::open_logs_folder,
             commands::health::open_in_browser,
+            commands::health::check_update,
+            commands::health::trigger_update,
             commands::auth::start_anilist_auth,
         ])
         .run(tauri::generate_context!())

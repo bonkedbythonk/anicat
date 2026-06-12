@@ -1,88 +1,66 @@
-# Anicat
+<div align="center">
+  <h1>Anicat</h1>
+  <p><strong>Watch, track, and organize your anime — all in one native desktop app.</strong></p>
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-![Anicat Desktop](assets/branding/dashboard.png)
+  <!-- Badges -->
+  <p>
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=stable" alt="Latest stable release">
+    <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/last-commit/bonkedbythonk/anicat/nightly?style=flat-square&label=nightly" alt="Last nightly commit">
+  </p>
 
-**A simple way to watch and track anime on your Mac or Windows PC.** Search, stream, download, and track everything in one place — with a beautiful GUI app.
+  <img src="assets/branding/dashboard.png" alt="Anicat Desktop" width="720">
+</div>
 
 ---
 
-## How to Install
+## Features
 
-### macOS
+| | |
+|---|---|
+| **Stream & Search** | Find any anime and stream instantly. Multiple providers with automatic fallback. |
+| **AniList Sync** | Progress, scores, and lists sync automatically to your AniList account. |
+| **Continue Watching** | Pick up where you left off — the app remembers your episode and timestamp. |
+| **Schedule** | See what's airing today and the next 7 days with live countdowns. |
+| **Manga Support** | Read chapters, track progress, and sync to AniList. |
+| **MPV Player** | Bundled MPV with Anime4K upscaling shaders and custom ModernZ skin. |
+| **Download Queue** | Download episodes for offline watching. |
+| **Notifications** | Get notified when a new episode of your tracked show airs. |
+| **Nightly Builds** | Early-access features from the `nightly` branch. |
 
-#### 1. Open Terminal
+## Quick Install
 
-Terminal is an app that lets you install things with a text command.
-
-- Press **Command + Space** on your keyboard
-- Type **Terminal**
-- Press **Enter**
-
-The Terminal app will open — it's a black or white window where you can type commands.
-
-#### 2. Copy and paste this one command
-
-Click inside the Terminal window, then paste (Command + V) this line:
-
+**macOS** — paste in Terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
-Then press **Enter**. The installer will download and set up everything automatically.
+**Windows** — download the latest `_x64-setup.exe` from [Releases](https://github.com/bonkedbythonk/anicat/releases).
 
-> **What this does:** It downloads the latest version of Anicat from GitHub, moves it to your Applications folder, and sets it up so it works properly on your Mac.
+## Branches
 
-#### 3. Open Anicat
+| Branch | Use |
+|--------|-----|
+| `master` | Stable releases. Tested, reviewed, ready for daily use. |
+| `nightly` | Latest features and fixes. May be less stable. Switch via Settings → Update Branch. |
 
-After the install finishes:
+## Building from Source
 
-1. Open your **Applications** folder (Finder > Applications)
-2. Double-click **Anicat**
-3. If Mac shows a warning, click **Open** (it's safe — the app is just not from the App Store)
+```bash
+git clone https://github.com/bonkedbythonk/anicat.git
+cd anicat
+cd web
+npm install
+npm run tauri dev
+```
 
----
-
-### Windows
-
-#### 1. Download the Installer
-Go to the [GitHub Releases](https://github.com/bonkedbythonk/anicat/releases) page.
-
-#### 2. Install Anicat
-- Download the latest installer file ending with `_x64-setup.exe` (e.g. `Anicat_4.36.4_x64-setup.exe`).
-- Run the installer and follow the prompt.
-
-#### 3. Open Anicat
-Once installed, launch **Anicat** from your desktop shortcut or Start Menu.
-
-That's it! Anicat will start and you can search for anime right away.
-
----
-
-## What You Can Do
-
-| Feature | What It Does |
-|---------|-------------|
-| **Search & Stream** | Find any anime and start watching in one command. Multiple providers with automatic fallback. |
-| **AniList Sync** | Your progress, scores, and lists sync automatically to your AniList account. |
-| **Continue Watching** | Pick up where you left off. The app remembers which episode and timestamp you were on. |
-| **Smart Playlist** | Personalized recommendations from your watching list, top-rated shows, and plan-to-watch. |
-| **Airing Schedule** | See what's airing today and the next 7 days, with live countdowns. |
-| **Skip Intro** | Automatically detect and skip openings and endings using crowdsourced AniSkip timings. |
-| **Batch Download** | Download entire seasons for offline watching, with yt-dlp engine and subtitle merging. |
-| **Manga Support** | Read manga chapters from MangaKatana, with progress tracking and chapter navigation. |
-| **Notifications** | Get notified when a new episode of your watched show airs, directly from AniList. |
-| **One-Click Updates** | Update to the latest version from Settings > Maintenance. No terminal needed after install. |
-| **Built-in Player** | Watch right inside the app. HLS.js streaming with auto-quality, picture-in-picture, and keyboard shortcuts. |
-| **MPV Integration** | **Highly recommended** — bundled MPV player with built-in Anime4K upscaling shaders for superior visual quality, custom ModernZ skin, and robust subtitle support. |
-| **Alternative Streams** | Choose alternative servers inline with client-side sorting (Hard Sub, Soft Sub, Dub) and ultra-fast lazy resolution. |
-| **macOS Native Integration** | Premium window management via application menu bar (Show Dashboard, Toggle Quick Pane) and smooth Dock reopen behavior. |
-
----
+Requires Rust, Node.js, and system dependencies for [Tauri v2](https://v2.tauri.app/start/prerequisites/).
 
 ## Legal
+
 Anicat is for educational and personal use only. See [DISCLAIMER.md](DISCLAIMER.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE)
+[GNU General Public License v3.0](LICENSE)

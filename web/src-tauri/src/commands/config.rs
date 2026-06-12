@@ -17,44 +17,65 @@ pub async fn update_config(
     if let Some(obj) = updates.as_object() {
         for (key, value) in obj {
             match key.as_str() {
-                "general.provider" => {
-                    if let Some(v) = value.as_str() {
-                        config.general.provider = v.to_string();
+                "general" => {
+                    if let Some(gen) = value.as_object() {
+                        if let Some(v) = gen.get("provider").and_then(|v| v.as_str()) {
+                            config.general.provider = v.to_string();
+                        }
+                        if let Some(v) = gen.get("autoplay").and_then(|v| v.as_bool()) {
+                            config.general.autoplay = v;
+                        }
+                        if let Some(v) = gen.get("autoskip").and_then(|v| v.as_bool()) {
+                            config.general.autoskip = v;
+                        }
+                        if let Some(v) = gen.get("anime_preview").and_then(|v| v.as_bool()) {
+                            config.general.anime_preview = v;
+                        }
+                        if let Some(v) = gen.get("preferred_title_language").and_then(|v| v.as_str()) {
+                            config.general.preferred_title_language = v.to_string();
+                        }
+                        if let Some(v) = gen.get("time_format").and_then(|v| v.as_str()) {
+                            config.general.time_format = v.to_string();
+                        }
+                        if let Some(v) = gen.get("discord").and_then(|v| v.as_bool()) {
+                            config.general.discord = v;
+                            if v {
+                                state.discord.connect();
+                            } else {
+                                state.discord.disconnect();
+                            }
+                        }
+                        if let Some(v) = gen.get("media_api").and_then(|v| v.as_str()) {
+                            config.general.media_api = v.to_string();
+                        }
+                        if let Some(v) = gen.get("manga_provider").and_then(|v| v.as_str()) {
+                            config.general.manga_provider = v.to_string();
+                        }
+                        if let Some(v) = gen.get("update_branch").and_then(|v| v.as_str()) {
+                            config.general.update_branch = v.to_string();
+                        }
+                        if let Some(v) = gen.get("downloads_path").and_then(|v| v.as_str()) {
+                            config.general.downloads_path = v.to_string();
+                        }
                     }
                 }
-                "general.autoplay" => {
-                    if let Some(v) = value.as_bool() {
-                        config.general.autoplay = v;
-                    }
-                }
-                "general.autoskip" => {
-                    if let Some(v) = value.as_bool() {
-                        config.general.autoskip = v;
-                    }
-                }
-                "general.anime_preview" => {
-                    if let Some(v) = value.as_bool() {
-                        config.general.anime_preview = v;
-                    }
-                }
-                "general.preferred_title_language" => {
-                    if let Some(v) = value.as_str() {
-                        config.general.preferred_title_language = v.to_string();
-                    }
-                }
-                "stream.player_type" => {
-                    if let Some(v) = value.as_str() {
-                        config.stream.player_type = v.to_string();
-                    }
-                }
-                "stream.preferred_quality" => {
-                    if let Some(v) = value.as_str() {
-                        config.stream.preferred_quality = v.to_string();
-                    }
-                }
-                "stream.data_saver" => {
-                    if let Some(v) = value.as_bool() {
-                        config.stream.data_saver = v;
+                "stream" => {
+                    if let Some(stream) = value.as_object() {
+                        if let Some(v) = stream.get("player_type").and_then(|v| v.as_str()) {
+                            config.stream.player_type = v.to_string();
+                        }
+                        if let Some(v) = stream.get("preferred_quality").and_then(|v| v.as_str()) {
+                            config.stream.preferred_quality = v.to_string();
+                        }
+                        if let Some(v) = stream.get("data_saver").and_then(|v| v.as_bool()) {
+                            config.stream.data_saver = v;
+                        }
+                        if let Some(v) = stream.get("shader_profile").and_then(|v| v.as_str()) {
+                            config.stream.shader_profile = v.to_string();
+                        }
+                        if let Some(v) = stream.get("translation_type").and_then(|v| v.as_str()) {
+                            config.stream.translation_type = v.to_string();
+                        }
                     }
                 }
                 "api.anilist_token" => {

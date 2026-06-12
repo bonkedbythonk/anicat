@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::de::DeserializeOwned;
 use log::debug;
@@ -120,13 +120,11 @@ impl AniListClient {
         if !status.is_success() {
             if status.as_u16() == 429 {
                 let mut rl = self.rate_limited_until.lock().unwrap();
-                *rl = Some(Instant::now() + Duration::from_secs(60));
+                *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
                 return Err("AniList HTTP 429: Too Many Requests — cooling down 60s".to_string());
             }
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
-
-        tokio::time::sleep(Duration::from_millis(150)).await;
 
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse response: {}\nBody: {}", e, text))?;

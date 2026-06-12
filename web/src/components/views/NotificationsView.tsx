@@ -27,10 +27,15 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
     enabled: isAuthenticated,
   });
 
-  const notifications = (data?.notifications ?? []).filter((n) => n && n.media);
+  const lastCleared = typeof window !== "undefined" ? Number(localStorage.getItem("anicat_last_notifications_cleared") || 0) : 0;
+  const notifications = (data?.notifications ?? [])
+    .filter((n) => n && n.media)
+    .filter((n) => (n.createdAt || 0) > lastCleared);
   const config = data?.config ?? null;
 
   const handleMarkAllRead = useCallback(async () => {
+    const rawNotifs = data?.notifications ?? [];
+    const maxCreatedAt = rawNotifs.reduce((max, n) => Math.max(max, n.createdAt || 0), 0);
     const oldNotifications = queryClient.getQueryData(["notifications", "config"]);
     const oldHealth = queryClient.getQueryData(["health"]);
 
@@ -48,6 +53,9 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
 
     try {
       await mediaApi.markNotificationsAsRead();
+      if (typeof window !== "undefined" && maxCreatedAt > 0) {
+        localStorage.setItem("anicat_last_notifications_cleared", String(maxCreatedAt));
+      }
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
       queryClient.invalidateQueries({ queryKey: ["health"] });
     } catch (err) {
@@ -60,7 +68,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
         queryClient.setQueryData(["health"], oldHealth);
       }
     }
-  }, [queryClient]);
+  }, [queryClient, data]);
 
   if (isLoading) {
     return (
@@ -116,7 +124,7 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
               />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-gray-300 group-hover:text-white transition-colors truncate">
-                  {notif.contexts?.[0] ?? ""}{notif.episode || ""}{notif.contexts?.[1] ?? ""}{notif.media?.title?.english || notif.media?.title?.romaji || ""}{notif.contexts?.[2] ?? ""}
+                  {notif.contexts?.[0] ?? ""}{notif.episode ?? ""}{notif.contexts?.[1] ?? ""}{notif.media?.title?.english || notif.media?.title?.romaji || ""}{notif.contexts?.[2] ?? ""}
                 </div>
                 <div className="text-xs text-accent font-bold mt-1">
                    {new Date(notif.createdAt * 1000).toLocaleString([], { 

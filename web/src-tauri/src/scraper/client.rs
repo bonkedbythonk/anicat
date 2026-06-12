@@ -18,6 +18,8 @@ pub struct Episode {
     pub number: i32,
     pub title: Option<String>,
     pub image: Option<String>,
+    #[serde(default)]
+    pub download_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,7 @@ pub struct StreamServer {
     #[serde(rename = "isM3U8", alias = "is_m3u8")]
     pub is_m3u8: Option<bool>,
     pub headers: Option<std::collections::HashMap<String, String>>,
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +81,10 @@ impl ScraperManager {
             python_path,
             scraper_script,
         }
+    }
+
+    pub fn python_path(&self) -> &str {
+        &self.python_path
     }
 
     pub async fn search(&self, query: &str) -> Result<Vec<AnimeRef>, String> {

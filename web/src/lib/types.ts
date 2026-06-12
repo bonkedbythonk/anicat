@@ -1,5 +1,6 @@
 export type ViewType =
   | "home"
+  | "manga"
   | "search"
   | "lists"
   | "schedule"
@@ -46,9 +47,25 @@ export interface MediaItem {
   favourites?: number;
   trending?: number;
   user_status?: {
+    id?: number;
     status?: string;
     progress?: number;
+    progress_volumes?: number | null;
     score?: number;
+    updated_at?: string | null;
+  };
+  media_list_entry?: {
+    id: number;
+    status: string;
+    score: number;
+    progress: number;
+    progress_volumes?: number;
+    repeat: number;
+    private: boolean;
+    notes?: string;
+    started_at?: { year?: number; month?: number; day?: number };
+    completed_at?: { year?: number; month?: number; day?: number };
+    updated_at?: string | null;
   };
   studios?: {
     nodes?: { name: string; isAnimationStudio?: boolean }[];
@@ -129,6 +146,7 @@ export interface StreamServer {
   quality?: string;
   isM3U8?: boolean;
   headers?: Record<string, string>;
+  group?: string;
 }
 
 export interface Character {

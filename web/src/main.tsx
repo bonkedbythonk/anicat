@@ -65,7 +65,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }> {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: Infinity,
+      staleTime: 5 * 60 * 1000,
       gcTime: 24 * 60 * 60 * 1000,
       refetchOnWindowFocus: false,
       retry: 1,
@@ -85,7 +85,7 @@ persistQueryClient({
   queryClient,
   persister,
   maxAge: 24 * 60 * 60 * 1000,
-  buster: "v2",
+  buster: "v3",
 });
 
 const root = document.getElementById("root");

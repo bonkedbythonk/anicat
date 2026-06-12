@@ -15,7 +15,9 @@ interface AppState {
 
   // Detail drawer
   selectedItem: MediaItem | null;
-  openDetail: (item: MediaItem) => void;
+  initialAction: "play" | null;
+  initialPlayEpisode: string | null;
+  openDetail: (item: MediaItem, action?: "play" | null, episode?: string | null) => void;
   closeDetail: () => void;
 
   // Overlays
@@ -50,6 +52,10 @@ interface AppState {
   // Settings
   settingsDefaultTab: string | null;
   setSettingsDefaultTab: (tab: string | null) => void;
+
+  // Notifications
+  notification: { message: string; type: "info" | "error" } | null;
+  setNotification: (n: { message: string; type: "info" | "error" } | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -57,8 +63,10 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentView: (currentView) => set({ currentView }),
 
   selectedItem: null,
-  openDetail: (selectedItem) => set({ selectedItem }),
-  closeDetail: () => set({ selectedItem: null }),
+  initialAction: null,
+  initialPlayEpisode: null,
+  openDetail: (selectedItem, initialAction, initialPlayEpisode) => set({ selectedItem, initialAction: initialAction || null, initialPlayEpisode: initialPlayEpisode || null }),
+  closeDetail: () => set({ selectedItem: null, initialAction: null, initialPlayEpisode: null }),
 
   helpOpen: false,
   updatesOpen: false,
@@ -86,6 +94,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   settingsDefaultTab: null,
   setSettingsDefaultTab: (settingsDefaultTab) => set({ settingsDefaultTab }),
+
+  notification: null,
+  setNotification: (notification) => set({ notification }),
 }));
 
 // Separate store for playback to avoid re-rendering non-playback components
@@ -126,6 +137,8 @@ interface SettingsState {
   anilistToken: string | null;
   dataSaver: boolean;
   notifications: boolean;
+  translationType: "sub" | "dub";
+  shaderProfile: string;
   setPlayerType: (t: "embedded" | "external") => void;
   setDefaultProvider: (p: string) => void;
   setAutoplay: (v: boolean) => void;
@@ -136,6 +149,8 @@ interface SettingsState {
   setDataSaver: (v: boolean) => void;
   setNotifications: (v: boolean) => void;
   setAnilistToken: (t: string | null) => void;
+  setTranslationType: (v: "sub" | "dub") => void;
+  setShaderProfile: (v: string) => void;
   loadFromConfig: (config: Record<string, unknown>) => void;
 }
 
@@ -151,6 +166,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   anilistToken: null,
   dataSaver: false,
   notifications: true,
+  translationType: "sub",
+  shaderProfile: "balanced",
   setPlayerType: (playerType) => set({ playerType }),
   setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
   setAutoplay: (autoplay) => set({ autoplay }),
@@ -162,6 +179,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setDataSaver: (dataSaver) => set({ dataSaver }),
   setNotifications: (notifications) => set({ notifications }),
   setAnilistToken: (anilistToken) => set({ anilistToken }),
+  setTranslationType: (translationType) => set({ translationType }),
+  setShaderProfile: (shaderProfile) => set({ shaderProfile }),
   loadFromConfig: (config) =>
     set({
       playerType:
@@ -186,5 +205,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         ((config as any)?.general?.notifications as boolean) ?? true,
       anilistToken:
         ((config as any)?.api?.anilist_token as string) || null,
+      translationType:
+        ((config as any)?.stream?.translation_type as "sub" | "dub") || "sub",
+      shaderProfile:
+        ((config as any)?.stream?.shader_profile as string) || "balanced",
     }),
 }));

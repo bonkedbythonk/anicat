@@ -7,7 +7,7 @@ import { type MediaItem, mediaApi } from "@/lib/api";
 
 interface MediaCardProps {
   item: MediaItem;
-  onSelect?: (item: MediaItem, action?: "play") => void;
+  onSelect?: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
 const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
@@ -50,7 +50,10 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
 
   const title = item.title.english || item.title.romaji || "Media";
   const isManga = item.type === 'MANGA';
-  const progress = item.user_status?.progress || 0;
+  const entry = item.user_status || item.media_list_entry || item.mediaListEntry;
+  const progress = entry?.progress || 0;
+  const rawStatus = entry?.status;
+  const status = rawStatus?.toLowerCase();
   const totalCount = item.episodes || item.chapters || 0;
   const nextEp = item.next_airing?.episode;
   
@@ -64,7 +67,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
   const isFinished = item.status === 'FINISHED' || (item.end_date && new Date(item.end_date + "T00:00:00Z") < new Date());
   
   const hasNewEpisodes = 
-    item.user_status?.status === 'watching' && 
+    (status === 'watching' || status === 'current') && 
     item.status === 'RELEASING' && 
     !isFinished &&
     progress < currentReleased &&
@@ -79,7 +82,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-surface card-glow border border-white/[0.04] group-hover:border-accent/25 group-hover:shadow-[0_12px_36px_rgba(0,0,0,0.7)]">
         <img 
-          src={item.cover_image.large} 
+          src={item.cover_image?.large || item.cover_image?.medium} 
           alt={title} 
           loading="lazy"
           decoding="async"
@@ -115,7 +118,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         )}
         
         {/* Progress bar */}
-        {item.user_status && totalCount > 0 && (
+        {entry && totalCount > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-10">
             <div 
               className="h-full bg-accent transition-[width] duration-300"
@@ -139,7 +142,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
               {item.average_score}%
             </span>
           )}
-          {item.user_status && (
+          {entry && (
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
               isFinished
                 ? "bg-blue-500/10 border border-blue-500/20 text-blue-400"

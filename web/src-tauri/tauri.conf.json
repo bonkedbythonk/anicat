@@ -20,13 +20,19 @@
         "resizable": true,
         "fullscreen": false,
         "backgroundColor": "#050505",
+        "decorations": true,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "additionalBrowserArgs": "--disable-features=InputModeDefault"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://graphql.anilist.co https://s4.anilist.co https://aniskip.com http://127.0.0.1:13370 http://127.0.0.1:* https://*; img-src 'self' https://s4.anilist.co https://* data:; media-src 'self' http://127.0.0.1:13370 https://* blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' https://graphql.anilist.co https://s4.anilist.co https://aniskip.com http://127.0.0.1:13370 http://127.0.0.1:* https://*; img-src 'self' asset: http://asset.localhost https://asset.localhost https://s4.anilist.co https://* data:; media-src 'self' asset: http://asset.localhost https://asset.localhost http://127.0.0.1:13370 https://* blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**/*"
+        ]
+      }
     }
   },
   "bundle": {

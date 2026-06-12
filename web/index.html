@@ -1,18 +1,34 @@
 <!doctype html>
-<html lang="en" style="background:#050505;color-scheme:dark;">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anicat</title>
+    <script>
+      (function() {
+        const theme = localStorage.getItem("anicat_theme") || "system";
+        const style = localStorage.getItem("anicat_ui_style") || "neon-abyss";
+        const isDarkSystem = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const isLight = theme === "light" || (theme === "system" && !isDarkSystem);
+        document.documentElement.classList.add(isLight ? "light" : "dark");
+        document.documentElement.setAttribute("data-style", style);
+      })();
+    </script>
     <style>
       html, body, #root {
-        background: #050505;
         margin: 0;
         padding: 0;
+        height: 100%;
+      }
+      html.dark, html.dark body {
+        background: #050505;
+      }
+      html.light, html.light body {
+        background: #f6f3ef;
       }
     </style>
   </head>
-  <body style="background:#050505;">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

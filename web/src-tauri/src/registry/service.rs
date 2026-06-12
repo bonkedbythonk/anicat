@@ -1,54 +1,81 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-// ── Schema initialization ─────────────────────────────────
-
 pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS media_records (
-            media_id INTEGER PRIMARY KEY,
-            provider_mapping TEXT NOT NULL DEFAULT '{}',
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
+
+    if version < 1 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media_records (
+                media_id INTEGER PRIMARY KEY,
+                provider_mapping TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS watch_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                stop_time INTEGER NOT NULL DEFAULT 0,
+                duration INTEGER NOT NULL DEFAULT 0,
+                watched_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(media_id, episode_number)
+            );
+
+            CREATE TABLE IF NOT EXISTS local_library (
+                media_id INTEGER PRIMARY KEY,
+                media_type TEXT NOT NULL DEFAULT 'ANIME',
+                status TEXT,
+                score REAL,
+                progress INTEGER DEFAULT 0,
+                notes TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS download_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+                media_title TEXT NOT NULL DEFAULT '',
+                cover_image TEXT NOT NULL DEFAULT '',
+                error_message TEXT,
+                progress REAL NOT NULL DEFAULT 0.0,
+                UNIQUE(media_id, episode_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_watch_history_media
+                ON watch_history(media_id);
+            CREATE INDEX IF NOT EXISTS idx_watch_history_watched
+                ON watch_history(watched_at);",
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Migration: rename provider key gogoanime → anineko
+        let _ = conn.execute(
+            "UPDATE media_records SET provider_mapping = REPLACE(provider_mapping, ?1, ?2)
+             WHERE provider_mapping LIKE ?3",
+            params!["\"gogoanime\"", "\"anineko\"", "%\"gogoanime\"%"],
         );
 
-        CREATE TABLE IF NOT EXISTS watch_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL,
-            episode_number INTEGER NOT NULL,
-            stop_time INTEGER NOT NULL DEFAULT 0,
-            duration INTEGER NOT NULL DEFAULT 0,
-            watched_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(media_id, episode_number)
-        );
+        conn.pragma_update(None, "user_version", 2)
+            .map_err(|e| e.to_string())?;
+    } else if version < 2 {
+        // Migrations for download_queue columns
+        let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN media_title TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN cover_image TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN error_message TEXT", []);
+        let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN progress REAL NOT NULL DEFAULT 0.0", []);
 
-        CREATE TABLE IF NOT EXISTS local_library (
-            media_id INTEGER PRIMARY KEY,
-            media_type TEXT NOT NULL DEFAULT 'ANIME',
-            status TEXT,
-            score REAL,
-            progress INTEGER DEFAULT 0,
-            notes TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_watch_history_media
-            ON watch_history(media_id);
-        CREATE INDEX IF NOT EXISTS idx_watch_history_watched
-            ON watch_history(watched_at);",
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Migration: rename provider key gogoanime → anineko
-    let _ = conn.execute(
-        "UPDATE media_records SET provider_mapping = REPLACE(provider_mapping, ?1, ?2)
-         WHERE provider_mapping LIKE ?3",
-        params!["\"gogoanime\"", "\"anineko\"", "%\"gogoanime\"%"],
-    );
+        conn.pragma_update(None, "user_version", 2)
+            .map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
-
-// ── Provider mapping ──────────────────────────────────────
 
 use std::collections::HashMap;
 
@@ -108,8 +135,6 @@ fn get_full_mapping(
     serde_json::from_str(&mapping_json).ok()
 }
 
-// ── Watch history ─────────────────────────────────────────
-
 pub fn record_watched_episode(
     conn: &rusqlite::Connection,
     media_id: i64,
@@ -167,8 +192,6 @@ pub fn get_watched_episodes(
     }
     Ok(entries)
 }
-
-// ── Local library ─────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -276,5 +299,139 @@ pub fn delete_library_entry(
     conn.execute("DELETE FROM local_library WHERE media_id = ?1", [media_id])
         .map_err(|_| ())
         .map_err(|_| "Delete failed".to_string())?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueItem {
+    pub media_id: i64,
+    pub episode_number: i64,
+    pub status: String,
+    pub media_title: String,
+    pub cover_image: String,
+    pub error_message: Option<String>,
+    pub progress: f64,
+}
+
+pub fn add_to_queue(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    episode_number: i64,
+    media_title: &str,
+    cover_image: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO download_queue (media_id, episode_number, status, media_title, cover_image, error_message, progress) VALUES (?1, ?2, 'queued', ?3, ?4, NULL, 0.0)",
+        params![media_id, episode_number, media_title, cover_image],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn get_queue_status(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    episode_number: i64,
+) -> Result<Option<String>, String> {
+    let result: Result<String, rusqlite::Error> = conn.query_row(
+        "SELECT status FROM download_queue WHERE media_id = ?1 AND episode_number = ?2",
+        params![media_id, episode_number],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(status) => Ok(Some(status)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn update_queue_status(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    episode_number: i64,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE download_queue SET status = ?3, error_message = ?4 WHERE media_id = ?1 AND episode_number = ?2",
+        params![media_id, episode_number, status, error_message],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn update_queue_progress(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    episode_number: i64,
+    progress: f64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE download_queue SET progress = ?3 WHERE media_id = ?1 AND episode_number = ?2",
+        params![media_id, episode_number, progress],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn get_queue_pending(_conn: &rusqlite::Connection) -> Result<Vec<(i64, i64)>, String> {
+    let mut stmt = _conn
+        .prepare("SELECT media_id, episode_number FROM download_queue WHERE status = 'queued' ORDER BY id ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+pub fn get_all_queue(conn: &rusqlite::Connection) -> Result<Vec<QueueItem>, String> {
+    let mut stmt = conn
+        .prepare("SELECT media_id, episode_number, status, media_title, cover_image, error_message, progress FROM download_queue ORDER BY id DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(QueueItem {
+                media_id: row.get(0)?,
+                episode_number: row.get(1)?,
+                status: row.get(2)?,
+                media_title: row.get(3)?,
+                cover_image: row.get(4)?,
+                error_message: row.get(5)?,
+                progress: row.get(6).unwrap_or(0.0),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+pub fn remove_from_queue(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    episode_number: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM download_queue WHERE media_id = ?1 AND episode_number = ?2",
+        params![media_id, episode_number],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn retry_queue(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE download_queue SET status = 'queued', error_message = NULL WHERE status = 'failed'",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -5,6 +5,7 @@ pub const MEDIA_DETAIL_QUERY: &str = r#"
 query ($id: Int, $type: MediaType) {
   Media(id: $id, type: $type) {
     id
+    idMal
     type
     title { romaji english native }
     coverImage { large medium }
@@ -15,6 +16,7 @@ query ($id: Int, $type: MediaType) {
     season
     seasonYear
     episodes
+    chapters
     duration
     genres
     averageScore
@@ -26,6 +28,7 @@ query ($id: Int, $type: MediaType) {
     startDate { year month day }
     endDate { year month day }
     nextAiringEpisode { airingAt episode timeUntilAiring }
+    streamingEpisodes { title thumbnail }
     trailer { id site thumbnail }
     siteUrl
     mediaListEntry {
@@ -60,9 +63,9 @@ query ($id: Int, $type: MediaType) {
 "#;
 
 pub const MEDIA_SEARCH_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [String], $seasonYear: Int, $season: MediaSeason, $format: [MediaFormat], $status: MediaStatus, $sort: [MediaSort], $isAdult: Boolean) {
+query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [String], $seasonYear: Int, $season: MediaSeason, $format: [MediaFormat], $status: MediaStatus, $sort: [MediaSort], $isAdult: Boolean, $averageScoreGreater: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: $type, genre_in: $genre, seasonYear: $seasonYear, season: $season, format_in: $format, status: $status, sort: $sort, isAdult: $isAdult) {
+    media(search: $search, type: $type, genre_in: $genre, seasonYear: $seasonYear, season: $season, format_in: $format, status: $status, sort: $sort, isAdult: $isAdult, averageScore_greater: $averageScoreGreater) {
       id type
       title { romaji english native }
       coverImage { large medium }

@@ -5,6 +5,7 @@ local options = require 'mp.options'
 local opts = {
   skip_times = '',
   auto_next = 'no',
+  autoskip = 'yes',
 }
 
 options.read_options(opts, 'anicat_ui')
@@ -70,6 +71,11 @@ local function check_active_skip()
   local active = get_active_skip(pos)
   if active ~= state.active_skip then
     state.active_skip = active
+    if active and opts.autoskip == 'yes' then
+      local skip_label = active.type == 'op' and 'Opening' or (active.type == 'ed' and 'Ending' or active.type)
+      jump_to(active.endt)
+      mp.osd_message('Auto-skipped ' .. skip_label, 2.0)
+    end
     return true
   end
   return false
@@ -95,8 +101,8 @@ end
 local function enable_shaders()
   local shader_paths = {
     "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-    "~~/shaders/Anime4K_Restore_CNN_L.glsl",
-    "~~/shaders/Anime4K_Upscale_CNN_x2_L.glsl",
+    "~~/shaders/Anime4K_Restore_CNN_M.glsl",
+    "~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl",
     "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
     "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl"
   }
@@ -137,6 +143,11 @@ local function render(force)
   if w <= 0 or h <= 0 then
     return
   end
+
+  if state.active_skip and opts.autoskip ~= 'yes' then
+    local skip_label = state.active_skip.type == 'op' and 'Opening' or (state.active_skip.type == 'ed' and 'Ending' or state.active_skip.type)
+    mp.osd_message('Press Ctrl+S to skip ' .. skip_label, 3.0)
+  end
 end
 
 local function render_forced()
@@ -154,6 +165,44 @@ local function set_auto_next(val)
   render(true)
 end
 
+local function toggle_auto_next()
+  if opts.auto_next == 'yes' then
+    opts.auto_next = 'no'
+    mp.osd_message('Auto-play next: Off', 1.5)
+  else
+    opts.auto_next = 'yes'
+    mp.osd_message('Auto-play next: On', 1.5)
+  end
+end
+
+local function notify_backend(action)
+  local pos = mp.get_property_number('time-pos') or 0
+  local duration = mp.get_property_number('duration') or 0
+  local url = "http://127.0.0.1:13370/player/" .. action .. "?pos=" .. math.floor(pos) .. "&duration=" .. math.floor(duration)
+  mp.command_native_async({
+    name = "subprocess",
+    args = { "curl", "-s", url },
+    capture_stdout = true,
+    capture_stderr = true
+  }, function(success, result, error)
+    if not success then
+      msg.error("Failed to notify backend: " .. (error or "unknown error"))
+    end
+  end)
+end
+
+local function play_next()
+  notify_backend("next")
+end
+
+local function play_prev()
+  notify_backend("prev")
+end
+
+local function toggle_translation()
+  notify_backend("toggle-translation")
+end
+
 local function register_script_messages()
   if not mp.register_script_message then
     return
@@ -162,6 +211,10 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
+  mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
+  mp.register_script_message('anicat-next-episode', play_next)
+  mp.register_script_message('anicat-previous-episode', play_prev)
+  mp.register_script_message('anicat-toggle-translation', toggle_translation)
 end
 
 mp.observe_property('time-pos', 'number', render_unforced)
@@ -183,6 +236,18 @@ mp.register_event('end-file', function()
   state.file_loaded = false
   state.overlay:remove()
   mp.osd_message('Playback finished. Press Q or close the window to return to Anicat.', 5)
+end)
+
+mp.register_event('shutdown', function()
+  local pos = mp.get_property_number('time-pos') or 0
+  local duration = mp.get_property_number('duration') or 0
+  local url = "http://127.0.0.1:13370/player/stop?pos=" .. math.floor(pos) .. "&duration=" .. math.floor(duration)
+  mp.command_native({
+    name = "subprocess",
+    args = { "curl", "-s", url },
+    capture_stdout = false,
+    capture_stderr = false
+  })
 end)
 
 register_script_messages()

@@ -1,6 +1,7 @@
 mod anilist;
 mod cache;
 mod commands;
+mod discord;
 mod proxy;
 mod registry;
 mod scraper;
@@ -11,6 +12,44 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Truncate log files on startup so they are fresh
+    if let Some(home) = dirs::home_dir() {
+        #[cfg(target_os = "macos")]
+        {
+            let log_dir = home.join("Library/Logs/com.anicat.app");
+            for name in &["Anicat.log", "anicat.log"] {
+                let log_file = log_dir.join(name);
+                if log_file.exists() {
+                    let _ = std::fs::write(&log_file, "");
+                }
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(appdata) = dirs::data_dir() {
+                let log_dir = appdata.join("com.anicat.app").join("logs");
+                for name in &["Anicat.log", "anicat.log"] {
+                    let log_file = log_dir.join(name);
+                    if log_file.exists() {
+                        let _ = std::fs::write(&log_file, "");
+                    }
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(cache) = dirs::cache_dir() {
+                let log_dir = cache.join("com.anicat.app").join("logs");
+                for name in &["Anicat.log", "anicat.log"] {
+                    let log_file = log_dir.join(name);
+                    if log_file.exists() {
+                        let _ = std::fs::write(&log_file, "");
+                    }
+                }
+            }
+        }
+    }
+
     let app_state = AppState::new();
 
     tauri::Builder::default()
@@ -25,10 +64,27 @@ pub fn run() {
         .setup(move |app| {
             let state = app.state::<AppState>();
             let client = state.http_client.clone();
+            let app_handle = app.handle().clone();
+            let app_state_clone = app_state.clone();
+
+            let handle1 = tauri::async_runtime::spawn(async move {
+                let bound = proxy::server::start_proxy(client, app_handle, app_state_clone).await;
+                log::info!("HLS proxy started on {}", bound);
+            });
+
+            let app_handle_clone = app.handle().clone();
+            let app_state_clone2 = app_state.clone();
+            let handle2 = tauri::async_runtime::spawn(async move {
+                commands::media::start_download_worker(app_handle_clone, app_state_clone2).await;
+            });
 
             tauri::async_runtime::spawn(async move {
-                let bound = proxy::server::start_proxy(client).await;
-                log::info!("HLS proxy started on {}", bound);
+                if let Err(e) = handle1.await {
+                    log::error!("HLS proxy task panicked: {:?}", e);
+                }
+                if let Err(e) = handle2.await {
+                    log::error!("Download worker task panicked: {:?}", e);
+                }
             });
 
             Ok(())
@@ -53,6 +109,10 @@ pub fn run() {
             commands::media::get_library,
             commands::media::add_to_library,
             commands::media::remove_from_library,
+            commands::media::add_to_queue,
+            commands::media::get_queue,
+            commands::media::remove_from_queue,
+            commands::media::retry_queue,
             commands::user::get_user_list,
             commands::user::get_user_profile,
             commands::user::save_media_list_entry,
@@ -66,6 +126,9 @@ pub fn run() {
             commands::health::check_health,
             commands::health::get_app_version,
             commands::health::log_frontend,
+            commands::health::get_logs,
+            commands::health::open_logs_folder,
+            commands::health::open_in_browser,
             commands::auth::start_anilist_auth,
         ])
         .run(tauri::generate_context!())

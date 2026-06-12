@@ -4,6 +4,12 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Book, FileText, ScrollText } from "lucide-react";
 import { API_BASE_ORIGIN, mediaApi } from "@/lib/api";
 
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: Record<string, unknown>;
+  }
+}
+
 interface MangaReaderProps {
   mediaId: number;
   chapterNumber: string;
@@ -42,6 +48,14 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   }, []);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastActionRef = useRef<number>(0);
+
+  // Load saved reading mode on mount
+  useEffect(() => {
+    const savedMode = localStorage.getItem("anicat_manga_reading_mode") as ReadingMode | null;
+    if (savedMode === "single" || savedMode === "double" || savedMode === "vertical") {
+      setReadingMode(savedMode);
+    }
+  }, []);
 
   // Sync fullscreen state with browser
   useEffect(() => {
@@ -88,10 +102,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           if (savedPage) {
             setCurrentPage(parseInt(savedPage));
           }
-        }
-
-        if (window.innerWidth > 1024) {
-          setReadingMode("double");
         }
       })
       .catch(err => {
@@ -181,22 +191,24 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
 
   const toggleFullscreen = async () => {
     try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const appWindow = getCurrentWindow();
-      const current = await appWindow.isFullscreen();
-      await appWindow.setFullscreen(!current);
-      setIsFullscreen(!current);
+      if (window.__TAURI_INTERNALS__) {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const appWindow = getCurrentWindow();
+        const current = await appWindow.isFullscreen();
+        await appWindow.setFullscreen(!current);
+        setIsFullscreen(!current);
+        return;
+      }
     } catch (err) {
       console.error("Native fullscreen toggle failed, falling back to browser API:", err);
-      // Fallback for web/development
-      const element = containerRef.current as any;
-      if (!element) return;
-      
-      if (!document.fullscreenElement) {
-        element.requestFullscreen?.() || element.webkitRequestFullscreen?.();
-      } else {
-        document.exitFullscreen?.() || (document as any).webkitExitFullscreen?.();
-      }
+    }
+    // Fallback for web/development
+    const element = containerRef.current as any;
+    if (!element) return;
+    if (!document.fullscreenElement) {
+      element.requestFullscreen?.() || element.webkitRequestFullscreen?.();
+    } else {
+      document.exitFullscreen?.() || (document as any).webkitExitFullscreen?.();
     }
   };
 
@@ -308,9 +320,9 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
             )}
             {readingMode !== "vertical" && <div className="w-px h-6 bg-white/10" />}
 
-            <button onClick={() => setReadingMode("single")} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><FileText size={18} /></button>
-            <button onClick={() => setReadingMode("double")} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><Book size={18} /></button>
-            <button onClick={() => setReadingMode("vertical")} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><ScrollText size={18} /></button>
+            <button onClick={() => { setReadingMode("single"); localStorage.setItem("anicat_manga_reading_mode", "single"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><FileText size={18} /></button>
+            <button onClick={() => { setReadingMode("double"); localStorage.setItem("anicat_manga_reading_mode", "double"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><Book size={18} /></button>
+            <button onClick={() => { setReadingMode("vertical"); localStorage.setItem("anicat_manga_reading_mode", "vertical"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><ScrollText size={18} /></button>
             <div className="w-px h-6 bg-white/10 mx-1" />
             <button 
               onClick={() => {
@@ -327,14 +339,15 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       {/* Content Area */}
       <div className={`flex-1 w-full overflow-y-auto scroll-smooth scrollbar-hide ${readingMode === "vertical" ? "" : "flex items-center justify-center"}`}>
         {readingMode === "vertical" ? (
-          <div className="max-w-3xl w-full mx-auto py-32 space-y-4">
+          <div className="max-w-3xl w-full mx-auto" style={{ padding: "0 0 8rem 0" }}>
             {pages.map((page, idx) => (
-              <div key={idx} className="relative min-h-[400px] flex items-center justify-center bg-white/[0.02] rounded-lg overflow-hidden">
+              <div key={idx} className="relative flex items-center justify-center bg-black">
                 {!loadedImages.has(idx) && <Loader2 className="animate-spin text-white/10" size={32} />}
                 <img 
                   src={getProxyUrl(page)} 
                   alt={`Page ${idx + 1}`} 
-                  className={`w-full h-auto transition-opacity duration-300 ${loadedImages.has(idx) ? "opacity-100" : "opacity-0"}`} 
+                  className={`w-full h-auto block transition-opacity duration-300 ${loadedImages.has(idx) ? "opacity-100" : "opacity-0"}`}
+                  style={{ display: "block" }}
                   onLoad={() => setLoadedImages(prev => new Set(prev).add(idx))}
                 />
               </div>

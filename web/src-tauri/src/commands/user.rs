@@ -107,7 +107,13 @@ pub async fn save_media_list_entry(
         .anilist_client
         .execute(queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-    state.cache.invalidate("get_user_list");
+    
+    // In-place cache mutation to avoid CDN cache lag on subsequent requests
+    let progress = updates.get("progress").and_then(|v| v.as_i64());
+    let status = updates.get("status").and_then(|v| v.as_str());
+    let score = updates.get("score").and_then(|v| v.as_f64());
+    state.cache.update_user_list_progress(media_id, progress, status, score);
+
     state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }
@@ -124,7 +130,9 @@ pub async fn delete_media_list_entry(
         .anilist_client
         .execute(queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-    state.cache.invalidate("get_user_list");
+    
+    // In-place cache removal to avoid CDN cache lag on subsequent requests
+    state.cache.remove_from_user_list_by_entry_id(entry_id);
     state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }
@@ -186,9 +194,16 @@ pub async fn get_airing_schedule(
 
     let db = days_back.unwrap_or(1);
     let da = days_ahead.unwrap_or(3);
+    let media_ids_str = match &media_ids {
+        Some(ids) if !ids.is_empty() => {
+            ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")
+        }
+        _ => "all".to_string(),
+    };
     let cache_key = AniListCache::key("get_airing_schedule", &[
         ("db", &db.to_string()),
         ("da", &da.to_string()),
+        ("ids", &media_ids_str),
     ]);
     if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
 

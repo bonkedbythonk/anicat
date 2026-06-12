@@ -40,6 +40,12 @@ pub struct NextAiringEpisode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingEpisode {
+    pub title: Option<String>,
+    pub thumbnail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaTrailer {
     pub id: Option<String>,
     pub site: Option<String>,
@@ -49,6 +55,8 @@ pub struct MediaTrailer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaItem {
     pub id: i64,
+    #[serde(alias = "idMal")]
+    pub id_mal: Option<i64>,
     #[serde(rename = "type")]
     pub media_type: Option<String>,
     pub title: Option<MediaTitle>,
@@ -63,6 +71,7 @@ pub struct MediaItem {
     #[serde(rename = "seasonYear")]
     pub season_year: Option<i32>,
     pub episodes: Option<i32>,
+    pub chapters: Option<i32>,
     pub duration: Option<i32>,
     pub genres: Option<Vec<String>>,
     #[serde(rename = "averageScore")]
@@ -79,6 +88,8 @@ pub struct MediaItem {
     pub end_date: Option<FuzzyDate>,
     #[serde(rename = "nextAiringEpisode")]
     pub next_airing_episode: Option<NextAiringEpisode>,
+    #[serde(alias = "streamingEpisodes")]
+    pub streaming_episodes: Option<Vec<StreamingEpisode>>,
     pub trailer: Option<MediaTrailer>,
     #[serde(rename = "mediaListEntry")]
     pub media_list_entry: Option<MediaListEntry>,

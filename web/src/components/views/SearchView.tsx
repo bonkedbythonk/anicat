@@ -19,13 +19,12 @@ export function SearchView({ onSelect }: SearchViewProps) {
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [suggestions, setSuggestions] = useState<MediaItem[]>([]);
   const [shuffleKey, setShuffleKey] = useState(0); // triggers client-side re-shuffle
-  const [loading, setLoading] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
   const queryClient = useQueryClient();
 
-  // Paginated search results — only active when there's a query
+  // Paginated search results — active when query or filters are present
   const {
     items: results,
     loading: loadingResults,
@@ -41,7 +40,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
       };
     },
     queryKey: ["search", debouncedQuery, type, filters],
-    enabled: Boolean(debouncedQuery),
+    enabled: Boolean(debouncedQuery) || Object.values(filters).some(Boolean),
   });
 
   // Debounce the search query (400ms) so usePaginatedList only fires after settling
@@ -57,14 +56,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Track loading state for the spinner in the search input
-  useEffect(() => {
-    if (!debouncedQuery) {
-      setLoading(false);
-      return;
-    }
-    setLoading(loadingResults);
-  }, [loadingResults, debouncedQuery]);
+  const loading = Boolean(debouncedQuery) && loadingResults;
 
   // Cached discovery feed — refetches silently every 5 min, not on every mount
   const {
@@ -238,8 +230,8 @@ export function SearchView({ onSelect }: SearchViewProps) {
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Min Score</label>
               <select
-                value={filters.min_score || ""}
-                onChange={(e) => setFilters(f => ({ ...f, min_score: e.target.value ? Number(e.target.value) : undefined }))}
+                value={filters.minScore || ""}
+                onChange={(e) => setFilters(f => ({ ...f, minScore: e.target.value ? Number(e.target.value) : undefined }))}
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
               >
                 <option value="">Any Score</option>

@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import { mediaApi, type Episode } from "@/lib/api";
+import { useSettingsStore } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
 
 interface EpisodeListProps {
@@ -16,8 +18,13 @@ interface EpisodeListProps {
   playerType?: "embedded" | "external";
   onUnwatch?: (epNum: string) => void;
   nextAiringEpisode?: number;
+  nextAiringTime?: number;
   onRetry?: () => void;
   selectedProvider?: string;
+  mediaTitle?: string;
+  coverImage?: string;
+  episodeTitleMap?: Record<number, string>;
+  fillerEpisodes?: number[] | Set<number>;
 }
 
 export function EpisodeList({
@@ -31,25 +38,32 @@ export function EpisodeList({
   playerType = "external",
   onUnwatch,
   nextAiringEpisode,
+  nextAiringTime,
   onRetry,
   selectedProvider,
+  mediaTitle,
+  coverImage,
+  episodeTitleMap,
+  fillerEpisodes,
 }: EpisodeListProps) {
+  const translationType = useSettingsStore((s) => s.translationType);
   const [playingEp, setPlayingEp] = useState<string | null>(null);
   const [queueingEp, setQueueingEp] = useState<string | null>(null);
-  const [batchStart, setBatchStart] = useState("");
-  const [batchEnd, setBatchEnd] = useState("");
-  const [batchQueuing, setBatchQueuing] = useState(false);
-  const [retrying, setRetrying] = useState(false);
-  // Local overrides for download status so the icon updates immediately
-  // after queuing, without waiting for a full episode-list refetch.
   const [localDownloadStatus, setLocalDownloadStatus] = useState<Record<string, string>>({});
+  const [retrying, setRetrying] = useState(false);
 
   const [expandedEpStreams, setExpandedEpStreams] = useState<string | null>(null);
   const [loadingStreamsEp, setLoadingStreamsEp] = useState<string | null>(null);
   const [resolvedStreams, setResolvedStreams] = useState<any[]>([]);
   const [streamsError, setStreamsError] = useState<string | null>(null);
-  const [streamSortOrder, setStreamSortOrder] = useState<"default" | "hard_sub" | "soft_sub" | "dub">("default");
+  const [streamFilter, setStreamFilter] = useState<"hard_sub" | "soft_sub" | "dub" | null>(
+    translationType === "dub" ? "dub" : null
+  );
   const [loadingServer, setLoadingServer] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStreamFilter(translationType === "dub" ? "dub" : null);
+  }, [translationType]);
 
   // Removed automatic scrolling entirely to ensure UI stability.
   // The list will always start at the top (Episode 1).
@@ -57,22 +71,110 @@ export function EpisodeList({
     // Manual scroll only
   }, [mediaId]);
 
+  useEffect(() => {
+    // Sync initial episodes statuses with localDownloadStatus when episodes change
+    const initialStatus: Record<string, string> = {};
+    episodes.forEach(ep => {
+      if (ep.download_status) {
+        initialStatus[String(ep.number)] = ep.download_status;
+      }
+    });
+    setLocalDownloadStatus(initialStatus);
+  }, [episodes]);
+
+  useEffect(() => {
+    const unlistenStatus = listen<{ media_id: number; episode_number: number; status: string }>(
+      "download_status_change",
+      (event) => {
+        const { media_id, episode_number, status } = event.payload;
+        if (media_id === mediaId) {
+          setLocalDownloadStatus((prev) => {
+            const next = { ...prev };
+            if (status === "removed") {
+              delete next[String(episode_number)];
+            } else {
+              next[String(episode_number)] = status;
+            }
+            return next;
+          });
+        }
+      }
+    );
+
+    const unlistenProgress = listen<{ media_id: number; episode_number: number; progress: number }>(
+      "download_progress",
+      (event) => {
+        const { media_id, episode_number, progress } = event.payload;
+        if (media_id === mediaId) {
+          setLocalDownloadStatus((prev) => ({
+            ...prev,
+            [String(episode_number)]: progress >= 100 ? "completed" : "downloading",
+          }));
+        }
+      }
+    );
+
+    return () => {
+      unlistenStatus.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
+    };
+  }, [mediaId]);
+
+  const getStreamGroup = (name: string) => {
+    const lower = (name || "").toLowerCase();
+    if (lower.includes("dub")) return "dub";
+    if (lower.includes("soft")) return "soft_sub";
+    if (lower.includes("hard")) return "hard_sub";
+    if (lower.includes("sub")) return "soft_sub";
+    return "default";
+  };
+
+  const getStreamGroupFromServer = (s: any) => {
+    if (s.group) return s.group;
+    const n = (s.name || "").toLowerCase();
+    if (n.includes("hard") || n.includes("sub")) return "hard_sub";
+    if (n.includes("dub")) return "dub";
+    if (n.includes("soft")) return "soft_sub";
+    return "default";
+  };
+
+  const statusIcon = (status: string | null | undefined) => {
+    if (status === "completed") return <CheckCircle2 size={16} className="text-green-400 shrink-0" />;
+    if (status === "downloading") return <Loader2 size={16} className="animate-spin text-accent shrink-0" />;
+    if (status === "queued") return <Clock size={16} className="text-yellow-400 shrink-0" />;
+    if (status === "failed") return <AlertCircle size={16} className="text-red-400 shrink-0" />;
+    return null;
+  };
+
   const getSortedStreams = (streams: any[]) => {
     if (!streams) return [];
     
-    const sorted = [...streams];
-    if (streamSortOrder === "default") return sorted;
+    let filtered = [...streams];
     
-    return sorted.sort((a, b) => {
-      const aGroup = (a.group || "").toLowerCase();
-      const bGroup = (b.group || "").toLowerCase();
-      
-      const aMatch = aGroup.includes(streamSortOrder as string);
-      const bMatch = bGroup.includes(streamSortOrder as string);
+    if (streamFilter) {
+      filtered = filtered.filter(s => getStreamGroupFromServer(s) === streamFilter);
+    }
+    
+    const getGroupWeight = (group: string) => {
+      switch (group) {
+        case "hard_sub": return 1;
+        case "dub": return 2;
+        case "soft_sub": return 3;
+        default: return 4;
+      }
+    };
 
-      if (aMatch && !bMatch) return -1;
-      if (!aMatch && bMatch) return 1;
-      return 0;
+    return filtered.sort((a, b) => {
+      const aGroup = getStreamGroupFromServer(a);
+      const bGroup = getStreamGroupFromServer(b);
+      
+      const aWeight = getGroupWeight(aGroup);
+      const bWeight = getGroupWeight(bGroup);
+      if (aWeight !== bWeight) {
+        return aWeight - bWeight;
+      }
+      
+      return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base", numeric: true });
     });
   };
 
@@ -101,7 +203,9 @@ export function EpisodeList({
     
     setPlayingEp(epNum);
     try {
-      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider);
+      const ep = episodes.find((e) => String(e.number) === epNum);
+      const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, undefined, mediaTitle, epTitle, coverImage, episodes.length);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
@@ -149,7 +253,9 @@ export function EpisodeList({
 
     setPlayingEp(epNum);
     try {
-      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName);
+      const ep = episodes.find((e) => String(e.number) === epNum);
+      const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+      await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName, mediaTitle, epTitle, coverImage, episodes.length);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play stream:", error);
@@ -162,7 +268,7 @@ export function EpisodeList({
   const handleQueue = async (epNum: string) => {
     setQueueingEp(epNum);
     try {
-      await mediaApi.addToQueue(mediaId, [parseInt(epNum, 10)]);
+      await mediaApi.addToQueue(mediaId, [parseInt(epNum, 10)], mediaTitle, coverImage);
       // Update local status immediately so the icon changes to "queued"
       setLocalDownloadStatus(prev => ({ ...prev, [epNum]: "queued" }));
       dispatchRefresh();
@@ -179,40 +285,8 @@ export function EpisodeList({
     }
   };
 
-  const handleBatchQueue = async () => {
-    const start = parseInt(batchStart);
-    const end = parseInt(batchEnd);
-    if (isNaN(start) || isNaN(end) || start > end) return;
-    
-    setBatchQueuing(true);
-    const eps = [];
-    for (let i = start; i <= end; i++) {
-      eps.push(i);
-    }
-    try {
-      await mediaApi.addToQueue(mediaId, eps);
-      setBatchStart("");
-      setBatchEnd("");
-      dispatchRefresh();
-    } catch (error) {
-      console.error("Failed to batch queue:", error);
-    } finally {
-      setBatchQueuing(false);
-    }
-  };
-
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case "completed": return <CheckCircle2 size={14} className="text-green-400" />;
-      case "downloading": return <Loader2 size={14} className="text-accent animate-spin" />;
-      case "queued": return <Clock size={14} className="text-yellow-400" />;
-      case "failed": return <AlertCircle size={14} className="text-red-400" />;
-      default: return null;
-    }
-  };
-
   if (loading) {
-    return (
+  return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="animate-spin text-accent" size={28} />
         <span className="ml-3 text-gray-500 text-sm font-medium">Fetching {isManga ? "chapters" : "episodes"} from provider...</span>
@@ -239,14 +313,18 @@ export function EpisodeList({
         </div>
       ) : (
         <div className="space-y-1 max-h-[50vh] overflow-y-auto scrollbar-hide pr-1">
-          {episodes.map((ep) => {
+          {episodes.map((ep, idx) => {
             const epNum = String(ep.number);
             const isWatched = Number(ep.number) <= progress;
             const isNext = Number(ep.number) === progress + 1;
-            const isUnaired = !isManga && nextAiringEpisode !== undefined && Number(ep.number) >= nextAiringEpisode;
+            const nextAiringSecs = typeof nextAiringTime === "string" 
+              ? new Date(nextAiringTime).getTime() / 1000 
+              : Number(nextAiringTime);
+            const hasAired = !isNaN(nextAiringSecs) && (Date.now() / 1000) > nextAiringSecs;
+            const isUnaired = !isManga && nextAiringEpisode !== undefined && Number(ep.number) >= nextAiringEpisode && !hasAired;
             
             return (
-              <div key={epNum} className="space-y-1.5">
+              <div key={`${epNum}-${idx}`} className="space-y-1.5">
                 <div
                   onClick={() => !isUnaired && handlePlay(epNum)}
                   className={`flex items-center justify-between px-4 py-2.5 rounded-lg transition-all group episode-row-item ${!isUnaired ? 'cursor-pointer' : ''} ${
@@ -279,7 +357,16 @@ export function EpisodeList({
                       isUnaired ? "text-gray-600" : 
                       "text-gray-200 group-hover:text-white"
                     }`}>
-                      {ep.title.toLowerCase() === `episode ${epNum}` ? `Episode ${epNum}` : ep.title || `Episode ${epNum}`}
+                      {ep.title && !/^(episode|watch episode|chapter)\s+\d+$/i.test(ep.title) ? ep.title : episodeTitleMap?.[Number(ep.number)] || (isManga ? `Chapter ${epNum}` : `Episode ${epNum}`)}
+                      {((fillerEpisodes && (
+                        Array.isArray(fillerEpisodes)
+                          ? fillerEpisodes.includes(Number(ep.number))
+                          : typeof fillerEpisodes.has === "function"
+                          ? fillerEpisodes.has(Number(ep.number))
+                          : false
+                      ))) && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">Filler</span>
+                      )}
                     </span>
                   </div>
                   {statusIcon(localDownloadStatus[epNum] || ep.download_status)}
@@ -347,15 +434,15 @@ export function EpisodeList({
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/10 pb-2 mb-2 gap-2">
                     <div className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Available Stream Servers</div>
                     <div className="flex items-center space-x-1 bg-foreground/[0.03] p-0.5 rounded-lg border border-border/40 text-[9px] font-bold self-start sm:self-auto">
-                      {(["default", "hard_sub", "soft_sub", "dub"] as const).map((mode) => (
+                      {(["hard_sub", "soft_sub", "dub"] as const).map((mode) => (
                         <button
                           key={mode}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setStreamSortOrder(mode);
+                            setStreamFilter(streamFilter === mode ? null : mode);
                           }}
                           className={`px-2 py-1 rounded transition-all capitalize ${
-                            streamSortOrder === mode
+                            streamFilter === mode
                               ? "bg-accent text-white shadow-sm"
                               : "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
                           }`}
@@ -372,8 +459,10 @@ export function EpisodeList({
                     </div>
                   ) : streamsError ? (
                     <div className="text-red-400 py-1 text-[11px] font-medium">{streamsError}</div>
-                  ) : resolvedStreams.length === 0 ? (
-                    <div className="text-muted-foreground py-1 text-[11px]">No alternative streams found.</div>
+                  ) : getSortedStreams(resolvedStreams).length === 0 ? (
+                    <div className="text-muted-foreground py-1 text-[11px]">
+                      No {streamFilter ? streamFilter.replace("_", " ") + " " : ""}streams found.
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {getSortedStreams(resolvedStreams).map((s, idx) => {
@@ -382,7 +471,7 @@ export function EpisodeList({
                         
                         return (
                           <button
-                            key={idx}
+                            key={s.name || idx}
                             disabled={isAnyLoading}
                             onClick={() => handlePlaySpecificStream(epNum, s.name)}
                             className={`flex items-center justify-between p-3 rounded-xl text-left transition-all active:scale-95 group/btn ${
@@ -400,7 +489,7 @@ export function EpisodeList({
                                 {(s.name || "").trim()}
                               </div>
                               <div className="text-[9px] text-gray-500 mt-0.5">
-                                {s.group?.replace(/_/g, " ") || "unknown"} &bull; {s.quality || "HD"}
+                                {getStreamGroupFromServer(s).replace(/_/g, " ")} &bull; {s.quality || "HD"}
                               </div>
                             </div>
                             {isCurrentLoading ? (

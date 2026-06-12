@@ -7,7 +7,7 @@ import type { MediaItem } from "@/lib/api";
 interface MediaRowProps {
   title: string;
   items: MediaItem[];
-  onSelect?: (item: MediaItem) => void;
+  onSelect?: (item: MediaItem, action?: "play", episode?: string | null) => void;
   /** Optional secondary group rendered after a visual divider in the same scroll row */
   secondaryItems?: MediaItem[];
   /** Label shown on the divider pill */
@@ -98,13 +98,13 @@ const MediaRow = memo(function MediaRow({
 
         <div
           ref={rowRef}
-          className="flex space-x-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2"
+          className="flex space-x-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2 snap-x snap-mandatory"
         >
           {/* Primary items */}
           {items.map((item, idx) => (
             <div
               key={`primary-${item.id}-${idx}`}
-              className="w-[150px] md:w-[180px] flex-none"
+              className="w-[150px] md:w-[180px] flex-none snap-start"
             >
               {idx < visibleEnd ? (
                 <MediaCard item={item} onSelect={onSelect} />

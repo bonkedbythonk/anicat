@@ -9,7 +9,7 @@ import { sanitizeHtml } from "@/lib/sanitize";
 
 interface HeroProps {
   item?: MediaItem; // Backwards compatibility for single-item featured mode (e.g. MangaView)
-  onSelect?: (item: MediaItem, action?: "play") => void;
+  onSelect?: (item: MediaItem, action?: "play", episode?: string | null) => void;
   continueList?: MediaItem[];
   recentReleases?: MediaItem[];
   airingToday?: MediaItem[];
@@ -71,20 +71,20 @@ const Hero = memo(function Hero({
   fallbackList = [],
   onFocusChange,
 }: HeroProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const [isIntersecting, setIsIntersecting] = useState(true);
   const [clicked, setClicked] = useState(false);
-  const [showVideo, setShowVideo] = useState(false);
-  const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const clickedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
-
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 1. Build the priority queue
   const queue = useMemo(() => {
     // If a single item is passed directly, use a single-item featured queue (backwards compatibility)
     if (singleItem) {
       const isManga = singleItem.type === "MANGA";
+      const progress = singleItem.user_status?.progress || 0;
+      const total = singleItem.episodes || 0;
+      const hasMoreEpisodes = total <= 0 || progress < total;
       return [{
         item: singleItem,
         type: "fallback" as const,
@@ -92,7 +92,7 @@ const Hero = memo(function Hero({
         badgeColor: singleItem.user_status
           ? "bg-gradient-to-r from-accent to-accent-light shadow-md shadow-accent/20 text-white border-t border-white/10"
           : "bg-white/10 border border-white/10 text-white/70",
-        playEpisode: String((singleItem.user_status?.progress || 0) + 1),
+        playEpisode: hasMoreEpisodes ? String(progress + 1) : null,
       }];
     }
 
@@ -162,12 +162,14 @@ const Hero = memo(function Hero({
       if (seen.has(item.id)) return;
       seen.add(item.id);
       const progress = item.user_status?.progress || 0;
+      const total = item.episodes || 0;
+      const hasMoreEpisodes = total <= 0 || progress < total;
       items.push({
         item,
         type: "continue",
-        reasonText: "Resume watching",
+        reasonText: hasMoreEpisodes ? "Resume watching" : "Completed",
         badgeColor: "bg-gradient-to-r from-accent to-accent-light shadow-md shadow-accent/20 text-white border-t border-white/10",
-        playEpisode: String(progress + 1),
+        playEpisode: hasMoreEpisodes ? String(progress + 1) : null,
       });
     });
 
@@ -226,21 +228,7 @@ const Hero = memo(function Hero({
     };
   }, []);
 
-  // 4. Handle trailer autoplay timer
-  useEffect(() => {
-    setShowVideo(false);
-    setIsVideoVisible(false);
-    if (!item?.trailer?.id || item.trailer.site !== "youtube") return;
-
-    const enabled = !!config?.stream?.autoplay_trailers;
-    if (!enabled || !isIntersecting) return;
-
-    const timer = setTimeout(() => {
-      setShowVideo(true);
-    }, 2500);
-
-    return () => clearTimeout(timer);
-  }, [item?.id, item?.trailer?.id, item?.trailer?.site, config?.stream?.autoplay_trailers, isIntersecting]);
+  // 4. Trailer autoplay removed
 
   if (!item) {
     return (
@@ -265,11 +253,17 @@ const Hero = memo(function Hero({
   const handlePlay = () => {
     if (onSelect && item) {
       setClicked(true);
-      // Play the prioritized episode resolved by the command center
-      onSelect(item, "play");
-      setTimeout(() => setClicked(false), 3000);
+      onSelect(item, "play", nextEpisodeToWatch);
+      if (clickedTimerRef.current) clearTimeout(clickedTimerRef.current);
+      clickedTimerRef.current = setTimeout(() => setClicked(false), 3000);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (clickedTimerRef.current) clearTimeout(clickedTimerRef.current);
+    };
+  }, []);
 
   // Determine button state and label
   const isAiringFuture = activeCcItem?.type === "airing_today" && !activeCcItem.playEpisode;
@@ -283,36 +277,16 @@ const Hero = memo(function Hero({
         <div className="absolute inset-0 bg-background">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={proxyImage(item.banner_image || item.cover_image.large)}
+            src={proxyImage(item.banner_image || item.cover_image?.large || item.cover_image?.medium)}
             alt={title}
-            className={`absolute inset-0 w-full h-full object-cover transition-[transform,filter,opacity] duration-[2s] ${
-              hasBanner
-                ? "brightness-[0.45] group-hover:brightness-[0.55] scale-[1.03] group-hover:scale-100"
-                : "brightness-[0.28] blur-xl scale-110"
-            } ${isVideoVisible && item.trailer?.id ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+              className={`absolute inset-0 w-full h-full object-cover transition-[transform,filter,opacity] duration-[3s] ease-in-out ${
+                hasBanner
+                  ? "brightness-[0.45] group-hover:brightness-[0.55] scale-[1.03] group-hover:scale-100"
+                  : "brightness-[0.28] blur-xl scale-110"
+              } opacity-100`}
           />
 
-          {/* Muted auto-play trailer */}
-          {showVideo && item.trailer?.id && item.trailer.site?.toLowerCase() === "youtube" && (
-            <>
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <iframe
-                  ref={iframeRef}
-                  onLoad={() => {
-                    setTimeout(() => {
-                      setIsVideoVisible(true);
-                    }, 600);
-                  }}
-                  src={`${API_BASE_ORIGIN}/api/actions/trailer/${item.trailer.id}`}
-                  className={`absolute inset-[-15%] w-[130%] h-[130%] brightness-[0.45] pointer-events-none transition-opacity duration-1000 ${isVideoVisible ? "opacity-100" : "opacity-0"}`}
-                  allow="autoplay; encrypted-media"
-                  title="Airing Trailer"
-                />
-              </div>
-              {/* Transparent overlay */}
-              <div className="absolute inset-0 z-10 pointer-events-auto bg-transparent" />
-            </>
-          )}
+
 
           {/* Cinematic gradients */}
           <div className="absolute inset-0 bg-gradient-to-t from-background via-background/55 to-background/5" />
@@ -441,7 +415,7 @@ const Hero = memo(function Hero({
 
                   return (
                     <button
-                      key={ccItem.item.id}
+                      key={`${ccItem.item.id}-${index}`}
                       onClick={() => setFocusedIndex(index)}
                       className={`w-full flex items-center gap-3 p-2 rounded-xl text-left border transition-[background-color,border-color] duration-200 group cursor-pointer ${
                         isFocused
@@ -451,7 +425,7 @@ const Hero = memo(function Hero({
                     >
                       <div className="relative shrink-0 w-9 h-12 rounded-lg overflow-hidden border border-white/5 bg-neutral-900">
                         <img
-                          src={ccItem.item.cover_image.large}
+                          src={ccItem.item.cover_image?.large || ccItem.item.cover_image?.medium}
                           alt={ccTitle}
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                         />
@@ -482,7 +456,7 @@ const Hero = memo(function Hero({
           {queue.length === 1 && !hasBanner && (
             <div className="hidden md:block w-[160px] lg:w-[200px] aspect-[2/3] shrink-0 ml-8 rounded-xl overflow-hidden border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.9)] transition-transform duration-500 hover:scale-105">
               <img
-                src={item.cover_image.large}
+                src={item.cover_image?.large || item.cover_image?.medium}
                 alt={title}
                 className="w-full h-full object-cover"
               />
@@ -499,16 +473,16 @@ const Hero = memo(function Hero({
             const ccTitle = ccItem.item.title.english || ccItem.item.title.romaji || "Unknown";
             return (
               <button
-                key={ccItem.item.id}
+                key={`${ccItem.item.id}-m${index}`}
                 onClick={() => setFocusedIndex(index)}
                 className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-[background-color,border-color] duration-150 ${
-                  isFocused
-                    ? "bg-accent/15 border-accent/30 text-accent font-bold"
-                    : "bg-white/[0.03] border-white/[0.05] text-gray-400 hover:text-white"
+                    isFocused
+                      ? "bg-accent border-accent text-white"
+                      : "bg-white/[0.03] border-white/[0.05] text-gray-400 hover:text-white"
                 }`}
               >
                 <img
-                  src={ccItem.item.cover_image.large}
+                  src={ccItem.item.cover_image?.large || ccItem.item.cover_image?.medium}
                   alt={ccTitle}
                   className="w-5 h-7 rounded object-cover"
                 />

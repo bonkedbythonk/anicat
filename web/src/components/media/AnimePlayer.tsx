@@ -73,7 +73,7 @@ export function AnimePlayer() {
         hlsRef.current = null;
       }
     };
-  }, [server]);
+  }, [server, episode]);
 
   const togglePlay = () => {
     const video = videoRef.current;

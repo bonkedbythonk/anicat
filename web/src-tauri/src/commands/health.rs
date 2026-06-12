@@ -13,6 +13,7 @@ pub struct HealthResponse {
     pub token_present: bool,
     pub viewer_name: Option<String>,
     pub auth_error: Option<String>,
+    pub current_version: String,
 }
 
 #[tauri::command]
@@ -55,6 +56,7 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
         token_present,
         viewer_name,
         auth_error,
+        current_version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
 
@@ -70,4 +72,68 @@ pub fn log_frontend(level: String, message: String) {
         "warn" => log::warn!("[FRONTEND] {}", message),
         _ => log::info!("[FRONTEND] {}", message),
     }
+}
+
+#[tauri::command]
+pub async fn get_logs(app: tauri::AppHandle, limit: Option<usize>) -> Result<String, String> {
+    use tauri::Manager;
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let log_file = log_dir.join("Anicat.log");
+    
+    let content = if log_file.exists() {
+        std::fs::read_to_string(&log_file).map_err(|e| e.to_string())?
+    } else {
+        let log_file_lower = log_dir.join("anicat.log");
+        if log_file_lower.exists() {
+            std::fs::read_to_string(&log_file_lower).map_err(|e| e.to_string())?
+        } else {
+            let mut found_content = None;
+            if let Ok(entries) = std::fs::read_dir(&log_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().map_or(false, |ext| ext == "log") {
+                        if let Ok(c) = std::fs::read_to_string(entry.path()) {
+                            found_content = Some(c);
+                            break;
+                        }
+                    }
+                }
+            }
+            found_content.ok_or_else(|| "No log files found".to_string())?
+        }
+    };
+
+    if let Some(lim) = limit {
+        let lines: Vec<&str> = content.lines().collect();
+        let start = lines.len().saturating_sub(lim);
+        Ok(lines[start..].join("\n"))
+    } else {
+        Ok(content)
+    }
+}
+
+#[tauri::command]
+pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&log_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        open::that(&log_dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_in_browser(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| e.to_string())?;
+    Ok(())
 }

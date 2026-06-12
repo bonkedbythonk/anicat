@@ -1,4 +1,3 @@
-import { memo } from "react";
 import { motion } from "framer-motion";
 import { useAppStore } from "@/stores/app";
 import {
@@ -11,10 +10,12 @@ import {
   Bell,
   User,
   Calendar,
+  BookOpen,
 } from "lucide-react";
 
 const navItems = [
   { icon: Home, label: "Home", view: "home" as const, shortcut: "H" },
+  { icon: BookOpen, label: "Manga", view: "manga" as const, shortcut: "M" },
   { icon: Search, label: "Search", view: "search" as const, shortcut: "/" },
   { icon: Monitor, label: "My Lists", view: "lists" as const, shortcut: "L" },
   { icon: Download, label: "Downloads", view: "downloads" as const, shortcut: "D" },
@@ -27,7 +28,7 @@ const secondaryItems = [
   { icon: Settings, label: "Settings", view: "settings" as const },
 ];
 
-export const Sidebar = memo(function Sidebar() {
+export function Sidebar() {
   const currentView = useAppStore((s) => s.currentView);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const selectedItem = useAppStore((s) => s.selectedItem);
@@ -42,7 +43,7 @@ export const Sidebar = memo(function Sidebar() {
     <aside className="fixed left-0 top-0 bottom-0 w-[72px] lg:w-[248px] z-50 flex flex-col py-6 transition-all duration-300 glass-fixed">
       <div
         data-tauri-drag-region
-        className="flex flex-col items-center justify-center px-4 lg:px-6 mb-10 pt-14 cursor-default select-none w-full"
+        className="flex flex-col items-center justify-center px-4 lg:px-6 mb-10 pt-14 cursor-default select-none w-full bg-black/[0.001]"
       >
         <img
           src="/anicat_logo.png"
@@ -63,11 +64,11 @@ export const Sidebar = memo(function Sidebar() {
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
+              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 pl-3 pr-3 lg:pr-6 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
             >
               {isActive && (
                 <motion.div
-                  layoutId="nav-active-pill"
+                  layoutId="nav-active-pill-primary"
                   className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
@@ -85,7 +86,10 @@ export const Sidebar = memo(function Sidebar() {
                   {item.label}
                 </span>
                 {item.shortcut && (
-                  <kbd className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <kbd
+                    aria-hidden="true"
+                    className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 hidden group-hover:inline-block"
+                  >
                     {item.shortcut}
                   </kbd>
                 )}
@@ -102,11 +106,11 @@ export const Sidebar = memo(function Sidebar() {
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 px-3 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
+              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 pl-3 pr-3 lg:pr-6 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
             >
               {isActive && (
                 <motion.div
-                  layoutId="nav-active-pill"
+                  layoutId="nav-active-pill-secondary"
                   className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
@@ -126,7 +130,10 @@ export const Sidebar = memo(function Sidebar() {
                   {item.label}
                 </span>
                 {item.shortcut && (
-                  <kbd className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <kbd
+                    aria-hidden="true"
+                    className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 hidden group-hover:inline-block"
+                  >
                     {item.shortcut}
                   </kbd>
                 )}
@@ -137,4 +144,4 @@ export const Sidebar = memo(function Sidebar() {
       </nav>
     </aside>
   );
-});
+}

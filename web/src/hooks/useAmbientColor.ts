@@ -25,7 +25,10 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
     img.crossOrigin = "anonymous";
     img.src = proxyImage(bannerUrl);
 
+    let cancelled = false;
+
     img.onload = () => {
+      if (cancelled) return;
       try {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
@@ -41,7 +44,6 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
           b = 0,
           count = 0;
 
-        // 1. Extract non-dark vibrant pixels
         for (let i = 0; i < imgData.length; i += 4) {
           const pr = imgData[i];
           const pg = imgData[i + 1];
@@ -60,7 +62,6 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
           g = Math.round(g / count);
           b = Math.round(b / count);
         } else {
-          // Fallback to absolute average
           for (let i = 0; i < imgData.length; i += 4) {
             r += imgData[i];
             g += imgData[i + 1];
@@ -72,7 +73,6 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
           b = Math.round(b / pixelCount);
         }
 
-        // 2. Brightness boosting if the artwork is too dark to glow
         const brightness = (r * 299 + g * 587 + b * 114) / 1000;
         if (brightness < 60) {
           const scale = 60 / (brightness || 1);
@@ -81,20 +81,26 @@ export function useAmbientColor(bannerUrl: string | undefined | null): string {
           b = Math.min(255, Math.round(b * scale));
         }
 
-        // Minimum color threshold (fall back to accent pink)
         if (r < 30 && g < 30 && b < 30) {
           r = 236;
           g = 72;
           b = 153;
         }
 
-        setAmbientColor(`rgba(${r}, ${g}, ${b}, 0.18)`);
+        if (!cancelled) {
+          setAmbientColor(`rgba(${r}, ${g}, ${b}, 0.18)`);
+        }
       } catch (err) {
         console.warn(
           "[MediaDetail] Artwork color extraction blocked by CORS:",
           err
         );
       }
+    };
+
+    return () => {
+      cancelled = true;
+      img.onload = null;
     };
   }, [bannerUrl]);
 

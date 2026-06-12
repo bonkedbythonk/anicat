@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Search, Activity } from "lucide-react";
+import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 import type { UiStyle } from "@/hooks/useTheme";
@@ -11,34 +11,6 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 interface SettingsViewProps {
   health: HealthStatus | null;
   onUpdateStarted?: (message?: string) => void;
-}
-
-interface RegistryStats {
-  registry?: {
-    total_media_breakdown?: {
-      total?: number;
-    };
-  };
-  downloads?: {
-    downloaded?: number;
-  };
-}
-
-interface ConfigOptions {
-  stream?: {
-    quality?: string[];
-    player_type?: string[];
-  };
-}
-
-interface ScraperTestState {
-  status: "idle" | "testing" | "success" | "failed";
-  duration_ms?: number;
-  result_count?: number;
-  error?: string;
-  results?: { id: string; title: string }[];
-  streams?: any[];
-  expanded?: boolean;
 }
 
 export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
@@ -50,13 +22,12 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<"general" | "player" | "downloads" | "account" | "maintenance" | "scrapers">("general");
-  const [registryStats, setRegistryStats] = useState<RegistryStats | null>(null);
+  const [activeTab, setActiveTab] = useState<"general" | "player" | "downloads" | "account" | "maintenance">("general");
 
   // Read default tab from store (set by Connect button on HomeView)
   useEffect(() => {
     const tab = useAppStore.getState().settingsDefaultTab;
-    if (tab === "account" || tab === "maintenance" || tab === "scrapers") {
+    if (tab === "account" || tab === "maintenance") {
       setActiveTab(tab as any);
       useAppStore.getState().setSettingsDefaultTab(null);
     }
@@ -68,221 +39,49 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const [updateMessage, setUpdateMessage] = useState<{ text: string; type: "success" | "error" | null }>({ text: "", type: null });
   const [releaseNotes, setReleaseNotes] = useState<string>("");
   const [releaseUrl, setReleaseUrl] = useState<string>("");
-  const [options, setOptions] = useState<ConfigOptions | null>(null);
   const [authPending, setAuthPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [homeRows, setHomeRows] = useState<any[] | null>(() => {
+    try {
+      const saved = typeof window !== "undefined" ? localStorage.getItem("anicat_home_rows") : null;
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const toggleHomeRow = (id: string) => {
+    const rowDefs = ["airingToday", "continue", "newForYou", "smartPlaylist", "trending", "newlyReleasing", "seasonal"];
+    const current = homeRows || rowDefs.map(id => ({ id, visible: true }));
+    const next = current.map((r: any) => r.id === id ? { ...r, visible: !r.visible } : r);
+    setHomeRows(next);
+    localStorage.setItem("anicat_home_rows", JSON.stringify(next));
+    window.dispatchEvent(new Event("anicat_home_rows_changed"));
+  };
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [autoSkip, setAutoSkip] = useState(false);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
   const [uiStyle, setUiStyle] = useState<UiStyle>("neon-abyss");
-  const [fallingParticles, setFallingParticles] = useState(true);
+  const [logoutState, setLogoutState] = useState<"idle" | "confirming" | "loggingOut">("idle");
+  const [registryState, setRegistryState] = useState<"idle" | "confirming" | "wiping" | "done">("idle");
+  const [resetOnboardingState, setResetOnboardingState] = useState<"idle" | "confirming">("idle");
+  const [debugOutput, setDebugOutput] = useState("Press Test to run.");
+  const [debugName, setDebugName] = useState("");
+  const debugSearchRef = useRef<HTMLInputElement>(null);
+  const debugMediaIdRef = useRef<HTMLInputElement>(null);
+  const debugEpisodeRef = useRef<HTMLInputElement>(null);
+  const debugProviderRef = useRef<HTMLSelectElement>(null);
+
   const hasUpdate = Boolean(health?.update_available || stagedHasUpdate);
-
-  const [testQuery, setTestQuery] = useState("Naruto");
-  const [scraperStates, setScraperStates] = useState<Record<string, ScraperTestState>>({
-    anineko: { status: "idle" },
-    mangakatana: { status: "idle" },
-  });
-
-  const handleTestScraper = async (name: string, isManga: boolean) => {
-    setScraperStates(prev => ({
-      ...prev,
-      [name]: { ...prev[name], status: "testing", error: undefined, results: undefined }
-    }));
-
-    try {
-      const res = await mediaApi.testProvider(name, isManga, testQuery);
-      setScraperStates(prev => ({
-        ...prev,
-        [name]: {
-          status: res.status === "success" ? "success" : "failed",
-          duration_ms: res.duration_ms,
-          result_count: res.result_count,
-          error: res.error,
-          results: res.results,
-          streams: res.streams,
-          expanded: prev[name]?.expanded ?? false
-        }
-      }));
-    } catch (err: any) {
-      setScraperStates(prev => ({
-        ...prev,
-        [name]: {
-          status: "failed",
-          error: err?.message || String(err)
-        }
-      }));
-    }
-  };
-
-  const handleTestAll = () => {
-    const list = [
-      { name: "anineko", isManga: false },
-      { name: "mangakatana", isManga: true },
-    ];
-    list.forEach(item => {
-      handleTestScraper(item.name, item.isManga);
-    });
-  };
-
-  const renderScraperCard = (name: string, displayName: string, isManga: boolean) => {
-    const state = scraperStates[name] || { status: "idle" };
-    
-    return (
-      <div 
-        key={name}
-        className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.1] transition-all flex flex-col justify-between space-y-4"
-      >
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <div className="font-bold text-white text-sm lg:text-base">{displayName}</div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider">{isManga ? "Manga Scraper" : "Anime Scraper"}</div>
-            
-            {state.status === "success" && (
-              <div className="flex items-center space-x-2 mt-1.5 text-xs text-green-400 font-semibold animate-fade-in">
-                <CheckCircle2 size={13} />
-                <span>{state.duration_ms ? `${state.duration_ms}ms` : "Success"}</span>
-                <span className="text-gray-600">•</span>
-                <span>{state.result_count ?? 0} results</span>
-              </div>
-            )}
-            
-            {state.status === "failed" && (
-              <div className="flex items-center space-x-2 mt-1.5 text-xs text-red-400 font-semibold animate-fade-in">
-                <AlertCircle size={13} />
-                <span>{state.duration_ms ? `${state.duration_ms}ms` : "Error"}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center space-x-2">
-            {state.status === "idle" && (
-              <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-white/[0.04] text-gray-500 border border-white/[0.02]">
-                Idle
-              </span>
-            )}
-            {state.status === "testing" && (
-              <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 animate-pulse flex items-center space-x-1">
-                <Loader2 size={10} className="animate-spin" />
-                <span>Testing</span>
-              </span>
-            )}
-            {state.status === "success" && (
-              <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">
-                Success
-              </span>
-            )}
-            {state.status === "failed" && (
-              <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
-                Failed
-              </span>
-            )}
-            
-            <button
-              onClick={() => handleTestScraper(name, isManga)}
-              disabled={state.status === "testing"}
-              className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-white text-xs font-bold transition-all disabled:opacity-50"
-            >
-              Test
-            </button>
-          </div>
-        </div>
-
-        {state.status === "failed" && state.error && (
-          <div className="p-3.5 rounded-xl bg-red-500/5 border border-red-500/10 text-[11px] text-red-400/90 font-mono whitespace-pre-wrap break-words leading-relaxed animate-fade-in">
-            <div className="font-bold text-red-400 mb-1 text-[9px] uppercase tracking-wider">Error Details</div>
-            {state.error}
-          </div>
-        )}
-
-        {state.status === "success" && state.results && state.results.length > 0 && (
-          <div className="space-y-2">
-            <button
-              onClick={() => {
-                setScraperStates(prev => ({
-                  ...prev,
-                  [name]: { ...prev[name], expanded: !prev[name]?.expanded }
-                }));
-              }}
-              className="text-[10px] font-bold text-accent hover:underline flex items-center space-x-1"
-            >
-              <span>{state.expanded ? "Hide Results" : `Inspect Results (${state.results.length})`}</span>
-            </button>
-            
-            {state.expanded && (
-              <div className="p-3.5 rounded-xl bg-black/30 border border-white/[0.04] space-y-3.5 animate-fade-in max-w-full">
-                <div>
-                  <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wider pb-1.5 border-b border-white/[0.04] mb-1.5">Top Matches</div>
-                  <div className="space-y-2">
-                    {state.results.map((res, i) => (
-                      <div key={i} className="flex items-start justify-between text-xs text-gray-300 gap-2">
-                        <span className="font-medium truncate flex-1">{res.title || "Unknown Title"}</span>
-                        <span className="text-[10px] text-gray-600 font-mono shrink-0 bg-white/[0.02] px-1.5 py-0.5 rounded border border-white/[0.04]">{res.id}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {state.streams && state.streams.length > 0 && (
-                  <div className="pt-3 border-t border-white/[0.04] space-y-2.5">
-                    <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">
-                      Streams for EP {state.streams[0].episode} of first match
-                    </div>
-                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                      {state.streams.map((stream: any, idx: number) => (
-                        <div key={idx} className="p-2.5 rounded-xl bg-white/[0.01] border border-white/[0.04] space-y-2 text-[10px] text-gray-300">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-white text-xs">{(stream.name || "").trim()}</span>
-                            <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 text-[9px] font-black">
-                              {stream.is_m3u8 ? "HLS" : "Direct"}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[9px] text-gray-500">
-                              <span>{stream.group?.replace(/_/g, " ") || "unknown"} &bull; {stream.quality || "HD"}</span>
-                              <span className="font-mono bg-white/[0.02] px-1 rounded border border-white/[0.04]">{stream.source_type}</span>
-                            </div>
-                            <div className="font-mono text-[9px] text-accent truncate bg-black/20 p-2 rounded select-all cursor-pointer hover:bg-accent/5 transition-colors">
-                              {stream.url}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {state.status === "success" && state.results && state.results.length === 0 && (
-          <div className="p-3 rounded-xl bg-yellow-500/5 border border-yellow-500/10 text-[11px] text-yellow-500/80 font-medium animate-fade-in">
-            Search query succeeded but returned 0 results.
-          </div>
-        )}
-      </div>
-    );
-  };
-
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedAutoSkip = localStorage.getItem("anicat_auto_skip");
       const savedTheme = localStorage.getItem("anicat_theme") as "system" | "dark" | "light" | null;
       const savedStyle = localStorage.getItem("anicat_ui_style") as UiStyle | null;
-      const savedFalling = localStorage.getItem("anicat_falling_particles");
 
       setTimeout(() => {
-        setAutoSkip(savedAutoSkip === "true");
         if (savedTheme) {
           setTheme(savedTheme);
         }
         if (savedStyle) {
           setUiStyle(savedStyle);
         }
-        setFallingParticles(savedFalling !== "false");
       }, 0);
     }
   }, []);
@@ -341,13 +140,27 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
     }, 300);
   };
 
+  const [logsText, setLogsText] = useState<string>("Loading logs...");
+
+  useEffect(() => {
+    if (activeTab === "maintenance") {
+      setLogsText("Loading logs...");
+      mediaApi.getLogs(100)
+        .then((res) => {
+          setLogsText(res.logs || "No logs available.");
+        })
+        .catch((err) => {
+          setLogsText(`Failed to load logs: ${err}`);
+        });
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     mediaApi.getConfig()
       .then(setConfig)
       .catch(console.error)
       .finally(() => setLoading(false));
-    // Fetch server-supported option lists for UI selects
-    mediaApi.getConfigOptions().then(setOptions).catch(() => {/* ignore */ });
+
   }, []);
 
   const handleOpenLogs = async () => {
@@ -457,12 +270,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
     });
   };
 
-  useEffect(() => {
-    if (activeTab === "maintenance" && !registryStats) {
-      mediaApi.getRegistryStats().then(setRegistryStats).catch(console.error);
-    }
-  }, [activeTab, registryStats]);
-
   const handleBackup = async () => {
     setBackingUp(true);
     setBackupUrl(null);
@@ -488,7 +295,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
     { id: "downloads", label: "Downloads", icon: HardDrive },
     { id: "account", label: "Account", icon: Globe },
     { id: "maintenance", label: "Maintenance", icon: RotateCcw },
-    { id: "scrapers", label: "Scrapers", icon: Search },
   ] as const;
 
   return (
@@ -576,11 +382,11 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       {/* Preview swatch */}
                       <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #050505 0%, #0d0d1a 60%, #1a1025 100%)" }}>
                         <div className="flex gap-1 p-2 h-full items-end">
-                          <div className="flex-1 h-8 rounded-lg" style={{ background: "rgba(28,28,30,0.6)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                          <div className="flex-1 h-5 rounded-lg" style={{ background: "rgba(10,132,255,0.3)", border: "1px solid rgba(10,132,255,0.4)" }} />
+                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(28,28,30,0.6)", border: "1px solid rgba(255,255,255,0.08)" }} />
+                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(10,132,255,0.3)", border: "1px solid rgba(10,132,255,0.4)" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2 bg-white/[0.02]">
+                      <div className="px-3 py-2 bg-white/[0.02] h-14 flex flex-col justify-center">
                         <div className="text-xs font-bold text-white">Neon Abyss</div>
                         <div className="text-[10px] text-gray-500 mt-0.5">Deep black / Apple glass</div>
                       </div>
@@ -604,10 +410,10 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #0f0b10 0%, #1a1018 60%, #1f1222 100%)" }}>
                         <div className="flex gap-1 p-2 h-full items-end">
                           <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(244,180,196,0.08)", border: "1px solid rgba(232,160,180,0.2)" }} />
-                          <div className="flex-1 h-5 rounded-xl" style={{ background: "rgba(232,160,180,0.25)", border: "1px solid rgba(232,160,180,0.4)" }} />
+                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(232,160,180,0.25)", border: "1px solid rgba(232,160,180,0.4)" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2" style={{ background: "rgba(244,180,196,0.04)" }}>
+                      <div className="px-3 py-2 h-14 flex flex-col justify-center" style={{ background: "rgba(244,180,196,0.04)" }}>
                         <div className="text-xs font-bold" style={{ color: "#f2bfce" }}>Sakura Zen</div>
                         <div className="text-[10px] mt-0.5" style={{ color: "#9ab89a" }}>Soft pastel / Japanese editorial</div>
                       </div>
@@ -631,10 +437,10 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #1a1510 0%, #231e18 100%)" }}>
                         <div className="flex gap-1 p-2 h-full items-end">
                           <div className="flex-1 h-8 rounded" style={{ background: "#ede8e0", border: "3px solid #1a1a1a" }} />
-                          <div className="flex-1 h-5 rounded" style={{ background: "#e8272c", border: "2px solid #1a1a1a" }} />
+                          <div className="flex-1 h-8 rounded" style={{ background: "#e8272c", border: "2px solid #1a1a1a" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2" style={{ background: "rgba(232, 39, 44, 0.04)" }}>
+                      <div className="px-3 py-2 h-14 flex flex-col justify-center" style={{ background: "rgba(232, 39, 44, 0.04)" }}>
                         <div className="text-xs font-bold" style={{ color: "#e8272c" }}>Retro Manga</div>
                         <div className="text-[10px] mt-0.5 text-gray-500">Halftone dot / Manga panel style</div>
                       </div>
@@ -645,53 +451,11 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                       )}
                     </button>
 
-                    {/* Forest Moss */}
-                    <button
-                      onClick={() => handleStyleChange("forest-moss")}
-                      className={`relative rounded-2xl overflow-hidden border-2 transition-all text-left ${
-                        uiStyle === "forest-moss"
-                          ? "border-[#10b981] shadow-lg shadow-[#10b981]/20"
-                          : "border-white/[0.06] hover:border-white/[0.15]"
-                      }`}
-                    >
-                      {/* Preview swatch */}
-                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #050f0b 0%, #0a1a12 60%, #123021 100%)" }}>
-                        <div className="flex gap-1 p-2 h-full items-end">
-                          <div className="flex-1 h-8 rounded-lg" style={{ background: "rgba(18,48,33,0.6)", border: "1px solid rgba(52,211,153,0.15)" }} />
-                          <div className="flex-1 h-5 rounded-lg" style={{ background: "rgba(16,185,129,0.3)", border: "1px solid rgba(16,185,129,0.4)" }} />
-                        </div>
-                      </div>
-                      <div className="px-3 py-2" style={{ background: "rgba(16, 185, 129, 0.04)" }}>
-                        <div className="text-xs font-bold" style={{ color: "#10b981" }}>Forest Moss</div>
-                        <div className="text-[10px] mt-0.5 text-gray-500">Organic green / Fresh woodland</div>
-                      </div>
-                      {uiStyle === "forest-moss" && (
-                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: "#10b981" }}>
-                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                        </div>
-                      )}
-                    </button>
+
                   </div>
                 </SettingField>
 
-                <SettingField
-                  label="Falling Leaves/Petals"
-                  description="Toggle the background falling leaves/petals animation for Sakura Zen and Forest Moss themes."
-                >
-                  <select
-                    value={fallingParticles ? "true" : "false"}
-                    onChange={(e) => {
-                      const val = e.target.value === "true";
-                      setFallingParticles(val);
-                      localStorage.setItem("anicat_falling_particles", String(val));
-                      window.dispatchEvent(new Event("anicat_settings_changed"));
-                    }}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </select>
-                </SettingField>
+
 
                 <SettingField
                   label="Time Format"
@@ -706,6 +470,37 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     <option value="24h">24-hour</option>
                   </select>
                 </SettingField>
+              </CardSection>
+
+              <CardSection title="Homepage Layout" description="Show or hide sections on the homepage.">
+                {(() => {
+                  const rowDefs = [
+                    { id: "airingToday", label: "Airing Today" },
+                    { id: "continue", label: "Continue Watching" },
+                    { id: "newForYou", label: "New for You" },
+                    { id: "smartPlaylist", label: "Smart Playlist" },
+                    { id: "trending", label: "Trending Now" },
+                    { id: "newlyReleasing", label: "Newly Releasing" },
+                    { id: "seasonal", label: "Seasonal Highlights" },
+                  ];
+                  return rowDefs.map(r => {
+                    const row = (homeRows || rowDefs.map(x => ({ id: x.id, visible: true }))).find((x: any) => x.id === r.id);
+                    const visible = row ? row.visible : true;
+                    return (
+                      <label key={r.id} className="flex items-center justify-between py-2 cursor-pointer group">
+                        <div>
+                          <div className="text-sm font-medium text-foreground group-hover:text-accent transition-colors">{r.label}</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={visible}
+                          onChange={() => toggleHomeRow(r.id)}
+                          className="accent-accent rounded cursor-pointer"
+                        />
+                      </label>
+                    );
+                  });
+                })()}
               </CardSection>
 
               <CardSection title="Integrations">
@@ -778,19 +573,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
           {activeTab === "player" && (
             <div className="space-y-6 animate-fade-in">
               <CardSection title="Playback">
-                <SettingField label="Quality" description="Preferred resolution.">
-                  <select
-                    value={String(config.stream?.quality || "1080")}
-                    onChange={(e) => updateField("stream", "quality", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    {(options?.stream?.quality ?? ["1080", "720", "480", "360"]).map((q: string) => (
-                      <option key={q} value={q}>{q.endsWith('p') ? q : `${q}p`}</option>
-                    ))}
-                  </select>
-                </SettingField>
 
-                <SettingField label="Audio" description="Sub or dub.">
+                <SettingField label="Sub/Dub" description="Preferred audio language for streaming.">
                   <select
                     value={String(config.stream?.translation_type || "sub")}
                     onChange={(e) => updateField("stream", "translation_type", e.target.value)}
@@ -801,24 +585,11 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField label="Skip Intro" description="Automatically skip opening and ending credits using AniSkip times.">
-                  <select
-                    value={autoSkip ? "true" : "false"}
-                    onChange={(e) => {
-                      const val = e.target.value === "true";
-                      setAutoSkip(val);
-                      localStorage.setItem("anicat_auto_skip", String(val));
-                    }}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="false">Manual (Show Skip Intro button)</option>
-                    <option value="true">Automatic (skip without prompt)</option>
-                  </select>
-                </SettingField>
+
               </CardSection>
 
               <CardSection title="Video Player">
-                <SettingField label="GPU Upscaling" description="Anime4K upscaling for the external player.">
+                <SettingField label="GPU Upscaling" description="Anime4K CNN upscaling for mpv (On uses balanced profile, Off disables GPU shaders).">
                   <select
                     value={String(config.stream?.shader_profile || "balanced")}
                     onChange={(e) => updateField("stream", "shader_profile", e.target.value)}
@@ -829,16 +600,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField label="Auto-Play Trailers" description="Play muted background trailer videos on featured and detail pages (may cause configuration errors in Tauri).">
-                  <select
-                    value={config.stream?.autoplay_trailers ? "true" : "false"}
-                    onChange={(e) => updateField("stream", "autoplay_trailers", e.target.value === "true")}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="false">Disabled</option>
-                    <option value="true">Enabled</option>
-                  </select>
-                </SettingField>
+
               </CardSection>
             </div>
           )}
@@ -851,8 +613,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
                     <input
                       type="text"
-                      value={String(config.downloads?.downloads_dir || "")}
-                      onChange={(e) => updateField("downloads", "downloads_dir", e.target.value)}
+                      value={String(config.general?.downloads_path || "")}
+                      onChange={(e) => updateField("general", "downloads_path", e.target.value)}
                       className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent/40 outline-none transition-all"
                     />
                   </div>
@@ -904,40 +666,33 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     </SettingField>
                     <div className="pt-2">
                       <button
-                        id="logout-btn"
-                        data-confirmed="false"
                         onClick={async () => {
-                          const btn = document.getElementById('logout-btn');
-                          if (btn?.getAttribute('data-confirmed') === 'true') {
-                            if (btn) {
-                              btn.innerHTML = '<span>Logging out...</span>';
-                              btn.setAttribute('disabled', 'true');
-                              btn.className = "mt-2 text-xs font-bold text-red-400/40 flex items-center space-x-1 w-full justify-center";
-                            }
+                          if (logoutState === "confirming") {
+                            setLogoutState("loggingOut");
                             mediaApi.updateConfig({ anilist: { token: "" } })
                               .then(() => {
                                 localStorage.removeItem("anicat-query-cache");
                                 window.location.reload();
                               })
                               .catch(() => {
-                                if (btn) {
-                                  btn.removeAttribute('disabled');
-                                  btn.setAttribute('data-confirmed', 'false');
-                                  btn.innerHTML = '<span>Logout</span>';
-                                  btn.className = "mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 flex items-center space-x-1 w-full justify-center";
-                                }
+                                setLogoutState("idle");
                               });
                           } else {
-                            if (btn) {
-                              btn.setAttribute('data-confirmed', 'true');
-                              btn.innerHTML = '<span>Are you sure? Click again</span>';
-                              btn.className = "mt-2 text-xs font-bold text-red-400 hover:text-red-300 flex items-center space-x-1 w-full justify-center";
-                            }
+                            setLogoutState("confirming");
                           }
                         }}
-                        className="mt-2 text-xs font-bold text-red-400/60 hover:text-red-400 flex items-center space-x-1 w-full justify-center"
+                        disabled={logoutState === "loggingOut"}
+                        className={`mt-2 text-xs font-bold flex items-center space-x-1 w-full justify-center ${
+                          logoutState === "loggingOut"
+                            ? "text-red-400/40"
+                            : logoutState === "confirming"
+                              ? "text-red-400 hover:text-red-300"
+                              : "text-red-400/60 hover:text-red-400"
+                        }`}
                       >
-                        <span>Logout</span>
+                        <span>
+                          {logoutState === "loggingOut" ? "Logging out..." : logoutState === "confirming" ? "Are you sure? Click again" : "Logout"}
+                        </span>
                       </button>
                     </div>
                   </>
@@ -1085,55 +840,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                 </div>
               </CardSection>
 
-              {/* Registry */}
-              <CardSection title="Registry" description="Offline metadata, progress, and download tracking.">
-                {registryStats && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Total Media</div>
-                      <div className="text-2xl font-extrabold text-white">
-                        {registryStats.registry?.total_media_breakdown?.total || 0}
-                      </div>
-                    </div>
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Downloaded</div>
-                      <div className="text-2xl font-extrabold text-white">
-                        {registryStats.downloads?.downloaded || 0}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div className="flex space-x-3 pt-2">
-                  <button
-                    onClick={handleBackup}
-                    disabled={backingUp}
-                    className="flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.07] text-gray-300 transition-all font-bold text-sm disabled:opacity-50 border border-white/[0.06]"
-                  >
-                    {backingUp ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                    <span>{backingUp ? "Creating..." : "Backup"}</span>
-                  </button>
-                  {backupUrl && (
-                    <a
-                      href={backupUrl}
-                      download
-                      className="flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-all font-bold text-sm"
-                    >
-                      <Download size={15} />
-                      <span>Download Backup</span>
-                    </a>
-                  )}
-                </div>
-              </CardSection>
-
-              {/* Logs */}
+              {/* Logs & Debugging */}
               <CardSection title="Logs & Debugging">
-                <button
-                  onClick={handleOpenLogs}
-                  className="w-full py-2.5 bg-white/[0.04] hover:bg-white/[0.07] text-white/70 rounded-xl text-xs font-bold transition-all border border-white/5 flex items-center justify-center space-x-2"
-                >
-                  <HardDrive size={14} />
-                  <span>Open Log Directory</span>
-                </button>
                 <button
                   onClick={async () => {
                     try {
@@ -1163,146 +871,155 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   <Save size={14} />
                   <span>Copy Debug Report</span>
                 </button>
-                <pre className="w-full h-40 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-500 overflow-y-auto scrollbar-hide border border-white/5">
-                  <LogViewer />
-                </pre>
+                <div className="w-full h-40 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-400 overflow-y-auto border border-white/5 whitespace-pre-wrap text-left font-sans leading-normal">
+                  {logsText}
+                </div>
               </CardSection>
 
-              {/* Danger Zone */}
-              <CardSection title="Danger Zone" description="Irreversible actions.">
-                <button
-                  id="clear-registry-btn"
-                  data-confirmed="false"
-                  onClick={() => {
-                    const btn = document.getElementById('clear-registry-btn');
-                    if (btn?.getAttribute('data-confirmed') === 'true') {
-                      if (btn) {
-                        btn.innerHTML = 'Wiping Registry...';
-                        btn.setAttribute('disabled', 'true');
-                        btn.className = "w-full py-3 bg-red-500/10 text-red-400/40 rounded-xl text-sm font-bold transition-all border border-red-500/10 cursor-not-allowed pointer-events-none";
-                      }
-                      mediaApi.wipeRegistry().then(() => {
-                        if (btn) {
-                          btn.innerHTML = 'Registry Wiped! Restarting...';
-                          btn.className = "w-full py-3 bg-green-500/20 text-green-400 rounded-xl text-sm font-bold transition-all border border-green-500/30";
-                          setTimeout(() => window.location.reload(), 1500);
+              {/* Provider Debug */}
+              <CardSection title="Provider Debug" description="Test stream provider responses for a given anime and episode.">
+                <div className="space-y-3">
+                  <input ref={debugSearchRef} type="text" placeholder="Search anime (e.g. Code Geass)..." className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
+                    onKeyDown={async (e: any) => {
+                      if (e.key !== 'Enter') return;
+                      const q = debugSearchRef.current?.value;
+                      if (!q) return;
+                      try {
+                        const res = await mediaApi.search(q, "ANIME", 1);
+                        const first = res?.media?.[0];
+                        if (first?.id && debugMediaIdRef.current) {
+                          debugMediaIdRef.current.value = String(first.id);
+                          setDebugName(first.title?.english || first.title?.romaji || '');
                         }
+                      } catch {}
+                    }}
+                  />
+                  {debugName && (
+                    <div className="text-xs text-gray-500 px-1 font-medium">{debugName}</div>
+                  )}
+                  <div className="flex items-center space-x-2">
+                    <input ref={debugMediaIdRef} type="number" placeholder="Anime ID" className="w-[92px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
+                    <input ref={debugEpisodeRef} type="number" placeholder="Episode #" defaultValue="1" className="w-[100px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
+                    <select ref={debugProviderRef} defaultValue="anineko" className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
+                      <option value="anineko" className="bg-[#121212]">AniNeko</option>
+                    </select>
+                    <button
+                      onClick={() => {
+                        const mediaId = debugMediaIdRef.current?.value;
+                        const ep = debugEpisodeRef.current?.value;
+                        const provider = debugProviderRef.current?.value;
+                        if (!mediaId || !ep) return;
+                        setDebugOutput("Loading...");
+                        invoke<Record<string, unknown>>("debug_provider_streams", {
+                          mediaId: parseInt(mediaId, 10),
+                          episodeNumber: parseInt(ep, 10),
+                          provider,
+                        })
+                          .then((data) => {
+                            const raw = JSON.stringify(data, null, 2);
+                            const finalStreams = (data?.final_streams as any[]) || [];
+                            const debugPasses = (data?.debug_passes as any[]) || [];
+                            const errors = (data?.errors as string[]) || [];
+                            const pageTitle = data?.page_title || "";
+                            const epNum = data?.episode ?? 0;
+                            const lines: string[] = [];
+                            if (finalStreams.length > 0) {
+                              lines.push(`✅ ${finalStreams.length} stream(s) found`);
+                            } else {
+                              lines.push("❌ No streams found");
+                            }
+                            if (errors.length > 0) {
+                              lines.push(`⚠️ ${errors.length} error(s): ${errors[0]}`);
+                            }
+                            if (debugPasses.length > 0) {
+                              const fails = debugPasses.filter((p: any) => p.pass === "error" || p.pass !== "pass");
+                              if (fails.length > 0) {
+                                lines.push(`⚠️ ${fails.length} scraper pass(es) failed: ${fails[0]?.error || "unknown"}`);
+                              }
+                            }
+                            if (pageTitle) lines.push(`📄 Page: ${pageTitle}`);
+                            lines.push(`🔢 Episode: ${epNum}`);
+                            if (data?.slug) lines.push(`🔗 Slug: ${data.slug}`);
+                            const summary = lines.join("\n");
+                            setDebugOutput(summary + "\n\n── Raw JSON ──\n" + raw);
+                          })
+                          .catch((err: unknown) => { setDebugOutput("Error: " + String(err)); });
+                      }}
+                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent-light text-white font-bold text-sm shadow-lg shadow-accent/20 transition-all active:scale-[0.98]"
+                    >
+                      Test
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <pre className="w-full h-48 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-300 overflow-y-auto border border-white/5 whitespace-pre-wrap break-all">{debugOutput}</pre>
+                    {debugOutput && (
+                      <button
+                        onClick={() => navigator.clipboard.writeText(debugOutput)}
+                        className="absolute top-2 right-2 p-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-gray-400 hover:text-white transition-all"
+                        title="Copy output"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </CardSection>
+
+              {/* System Maintenance */}
+              <CardSection title="System Maintenance" description="Irreversible system actions.">
+                <button
+                  onClick={() => {
+                    if (registryState === "confirming") {
+                      setRegistryState("wiping");
+                      mediaApi.wipeRegistry().then(() => {
+                        setRegistryState("done");
+                        setTimeout(() => window.location.reload(), 1500);
                       }).catch((err) => {
                         console.error("Wipe failed:", err);
-                        if (btn) {
-                          btn.removeAttribute('disabled');
-                          btn.setAttribute('data-confirmed', 'false');
-                          btn.innerHTML = 'Clear Local Registry';
-                          btn.className = "w-full py-3 border border-red-500/20 text-red-400/60 rounded-xl text-sm font-bold hover:bg-red-500/10 transition-all";
-                        }
+                        setRegistryState("idle");
                       });
-                    } else {
-                      if (btn) {
-                        btn.setAttribute('data-confirmed', 'true');
-                        btn.innerHTML = 'Are you sure? This will wipe your history!';
-                        btn.className = "w-full py-3 bg-red-500/20 text-red-400 rounded-xl text-sm font-bold transition-all border border-red-500/30";
-                      }
+                    } else if (registryState === "idle") {
+                      setRegistryState("confirming");
                     }
                   }}
-                  className="w-full py-3 border border-red-500/20 text-red-400/60 rounded-xl text-sm font-bold hover:bg-red-500/10 transition-all"
+                  disabled={registryState === "wiping" || registryState === "done"}
+                  className={`w-full py-3 rounded-xl text-sm font-bold transition-all ${
+                    registryState === "wiping"
+                      ? "bg-red-500/10 text-red-400/40 border border-red-500/10 cursor-not-allowed"
+                      : registryState === "done"
+                        ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                        : registryState === "confirming"
+                          ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                          : "border border-red-500/20 text-red-400/60 hover:bg-red-500/10"
+                  }`}
                 >
-                  Clear Local Registry
+                  {registryState === "wiping" ? "Wiping Registry..." : registryState === "done" ? "Registry Wiped! Restarting..." : registryState === "confirming" ? "Are you sure? This will wipe your history!" : "Clear Local Registry"}
                 </button>
                 <button
                   onClick={() => {
-                    const btn = document.getElementById('reset-onboarding-btn');
-                    if (btn?.getAttribute('data-confirmed') === 'true') {
+                    if (resetOnboardingState === "confirming") {
                       localStorage.removeItem("anicat_onboarding_seen");
                       window.location.reload();
                     } else {
-                      if (btn) {
-                        btn.setAttribute('data-confirmed', 'true');
-                        btn.innerHTML = '<span>Are you sure? Click again to Reset</span>';
-                        btn.className = "w-full py-3 px-4 rounded-xl bg-red-500/20 text-red-400 text-[10px] font-bold transition-all border border-red-500/30 flex items-center justify-center space-x-2";
-                      }
+                      setResetOnboardingState("confirming");
                     }
                   }}
-                  id="reset-onboarding-btn"
-                  data-confirmed="false"
-                  className="w-full py-3 px-4 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 text-[10px] font-bold transition-all border border-white/[0.08] flex items-center justify-center space-x-2"
+                  className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center space-x-2 ${
+                    resetOnboardingState === "confirming"
+                      ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                      : "bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 border border-white/[0.08]"
+                  }`}
                 >
                   <RotateCcw size={12} />
-                  <span>Reset Onboarding Setup</span>
+                  <span>{resetOnboardingState === "confirming" ? "Are you sure? Click again to Reset" : "Reset Onboarding Setup"}</span>
                 </button>
               </CardSection>
             </div>
           )}
 
-          {activeTab === "scrapers" && (
-            <div className="space-y-6 animate-fade-in">
-              <CardSection 
-                title="Scraper Tester" 
-                description="Test the connection and search accuracy of configured anime and manga search scrapers in real-time."
-              >
-                <div className="flex flex-col sm:flex-row gap-3 items-end p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                  <div className="flex-1 space-y-2">
-                    <label className="text-xs font-bold text-accent uppercase tracking-wider">Test Search Query</label>
-                    <div className="relative">
-                      <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
-                      <input
-                        type="text"
-                        value={testQuery}
-                        onChange={(e) => setTestQuery(e.target.value)}
-                        placeholder="Search query to test..."
-                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleTestAll}
-                    className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-accent hover:bg-accent-light text-white font-bold text-sm shadow-lg shadow-accent/20 transition-all whitespace-nowrap active:scale-[0.98]"
-                  >
-                    Test All Scrapers
-                  </button>
-                </div>
-              </CardSection>
-
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold text-white mb-3">Anime Scrapers</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {renderScraperCard("anineko", "AniNeko", false)}
-                  </div>
-                </div>
-
-                <div>
-                  <h2 className="text-lg font-bold text-white mb-3">Manga Scrapers</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {renderScraperCard("mangakatana", "MangaKatana", true)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
     </div>
   );
-}
-
-function LogViewer() {
-  const [logs, setLogs] = useState<string>("");
-
-  useEffect(() => {
-    const fetchLogs = async () => {
-      try {
-        const res = await mediaApi.getLogs(50);
-        setLogs(res.logs);
-      } catch {
-        setLogs("Could not fetch logs.");
-      }
-    };
-
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return <div className="mt-2 text-gray-400 whitespace-pre-wrap">{logs}</div>;
 }
 
 function CardSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {

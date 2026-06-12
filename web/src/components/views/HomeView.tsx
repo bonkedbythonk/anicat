@@ -1,7 +1,7 @@
 // @ts-nocheck
 
-import { useMemo, useRef, useState, useCallback } from "react";
-import { Loader2, Settings2, Clock, Heart, Zap, Ghost, Coffee, Smile, Sparkles, Flame, Eye, User } from "lucide-react";
+import { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { Loader2, Clock, User } from "lucide-react";
 import { Hero } from "@/components/media/Hero";
 import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -10,7 +10,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAppStore } from "@/stores/app";
 
 interface HomeViewProps {
-  onSelect: (item: MediaItem) => void;
+  onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
 // UX-22: Default row configuration
@@ -28,10 +28,22 @@ const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
 
 // Returns true if the user has watched all available episodes for a media item.
 function isCaughtUp(item: MediaItem): boolean {
-  const total = item.episodes;
   const progress = item.user_status?.progress ?? 0;
-  if (!total || total <= 0) return false;  // unknown/ongoing = never caught up
-  return progress >= total;
+  const total = item.episodes;
+  // Check both snake_case (snakify'd) and raw camelCase from API
+  const nextAiringEp = (item as any).nextAiringEpisode?.episode ?? item.next_airing?.episode;
+  if (total && total > 0) {
+    if (progress >= total) return true;
+    // Total known and progress < total — but check if the next episode has aired yet
+    if (nextAiringEp && nextAiringEp > 0 && progress >= nextAiringEp - 1) return true;
+    return false;
+  }
+  // For airing anime with a confirmed next_airing schedule, check against aired count
+  if (nextAiringEp && nextAiringEp > 0) {
+    return progress >= nextAiringEp - 1;
+  }
+  // No total and no confirmed next episode — can't confirm there's more to watch
+  return true;
 }
 
 function MediaRowSkeleton({ title }: { title: string }) {
@@ -54,18 +66,6 @@ function MediaRowSkeleton({ title }: { title: string }) {
     </div>
   );
 }
-
-// UX-15: Genre mood chips
-const GENRE_MOODS = [
-  { label: "Action", genre: "Action", icon: Zap },
-  { label: "Romance", genre: "Romance", icon: Heart },
-  { label: "Thriller", genre: "Thriller", icon: Eye },
-  { label: "Comedy", genre: "Comedy", icon: Smile },
-  { label: "Slice of Life", genre: "Slice of Life", icon: Coffee },
-  { label: "Sci-Fi", genre: "Sci-Fi", icon: Sparkles },
-  { label: "Fantasy", genre: "Fantasy", icon: Flame },
-  { label: "Horror", genre: "Horror", icon: Ghost },
-];
 
 export function HomeView({ onSelect }: HomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
@@ -96,7 +96,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const newlyReleasingQuery = useQuery({
     queryKey: ["home-newly-releasing"],
-    queryFn: () => mediaApi.search('', 'ANIME', 1, { status: 'RELEASING' }),
+    queryFn: () => mediaApi.search('', 'MANGA', 1, { status: 'RELEASING' }),
   });
 
   // 5. Smart Playlist — personalized recommendations (cached, non-blocking)
@@ -117,9 +117,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
     enabled: isAuthenticated && watchingIds.length > 0,
   });
 
-  // UX-15: Genre mood filter state
-  const [activeGenre, setActiveGenre] = useState<string | null>(null);
-
   // UX-22: Customizable row visibility
   const [rowConfig, setRowConfig] = useState(() => {
     if (typeof window !== "undefined") {
@@ -130,25 +127,33 @@ export function HomeView({ onSelect }: HomeViewProps) {
     }
     return DEFAULT_ROWS;
   });
-  const [showCustomizer, setShowCustomizer] = useState(false);
   const isRowVisible = (id: RowId) => rowConfig.find(r => r.id === id)?.visible ?? true;
   const toggleRow = (id: RowId) => {
     const next = rowConfig.map(r => r.id === id ? { ...r, visible: !r.visible } : r);
     setRowConfig(next);
     localStorage.setItem("anicat_home_rows", JSON.stringify(next));
   };
-  const filterByGenre = useCallback((items: MediaItem[]) => {
-    if (!activeGenre) return items;
-    return items.filter(m => m.genres?.includes(activeGenre));
-  }, [activeGenre]);
 
-  // 6. Continue Watching = local watch history filtered to only shows
-  //    currently on the user's AniList watching/repeating list, EXCLUDING
-  //    items the user has caught up on. Also includes any other items in
-  //    the user's watching list that haven't been started yet (are not in local history).
+  useEffect(() => {
+    const handler = () => {
+      const saved = localStorage.getItem("anicat_home_rows");
+      if (saved) {
+        try { setRowConfig(JSON.parse(saved)); } catch {}
+      }
+    };
+    window.addEventListener("anicat_home_rows_changed", handler);
+    return () => window.removeEventListener("anicat_home_rows_changed", handler);
+  }, []);
+
+  // 6. Continue Watching = items from the user's AniList watching list
+  //    that have unwatched episodes, sorted by most recently updated first.
   const continueWatchingList = useMemo(() => {
     const watching = watchingQuery.data?.media || [];
-    return watching.filter((m) => !isCaughtUp(m));
+    return watching.filter((m) => !isCaughtUp(m)).sort((a, b) => {
+      const aTime = Number(a.user_status?.updated_at) || Number(a.media_list_entry?.updated_at) || 0;
+      const bTime = Number(b.user_status?.updated_at) || Number(b.media_list_entry?.updated_at) || 0;
+      return bTime - aTime;
+    });
   }, [watchingQuery.data]);
 
 
@@ -194,7 +199,26 @@ export function HomeView({ onSelect }: HomeViewProps) {
           }
         }
       }
-      return releases;
+
+      // Filter out any releases where the user is already caught up or completed
+      return releases.filter((item) => {
+        const progress = item.user_status?.progress || 0;
+        const total = item.episodes || 0;
+
+        // 1. Exclude if completely finished/completed
+        if (total > 0 && progress >= total) {
+          return false;
+        }
+
+        // 2. Exclude if caught up to the latest released episode
+        const nextEp = item.next_airing?.episode;
+        const latestReleased = nextEp ? nextEp - 1 : total;
+        if (latestReleased > 0 && progress >= latestReleased) {
+          return false;
+        }
+
+        return true;
+      });
     },
   });
 
@@ -232,10 +256,10 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }
 
   return (
-    <div className="relative h-full space-y-12 pb-12">
+    <div className="relative h-full space-y-12 pb-12 overflow-x-hidden">
       {/* Ambient background glow */}
       <div 
-        className="absolute top-[-100px] right-[-60px] w-[500px] h-[500px] rounded-full opacity-[0.14] pointer-events-none -z-10"
+        className="absolute top-[-100px] right-0 w-[500px] h-[500px] rounded-full opacity-[0.14] pointer-events-none -z-10"
         style={{ 
           background: `radial-gradient(circle, ${ambientColor} 0%, transparent 70%)`
         }}
@@ -271,58 +295,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
         </div>
       )}
 
-      {/* UX-15: Genre mood chips */}
-      <div className="flex items-center space-x-2 overflow-x-auto scrollbar-hide px-1 pt-6 lg:pt-8">
-        {GENRE_MOODS.map(mood => {
-          const Icon = mood.icon;
-          const isActive = activeGenre === mood.genre;
-          return (
-            <button
-              key={mood.genre}
-              onClick={() => setActiveGenre(isActive ? null : mood.genre)}
-              className={`shrink-0 flex items-center space-x-1.5 px-4 py-2 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                isActive
-                  ? "bg-gradient-to-r from-accent to-accent-light text-white border-t border-white/10 shadow-lg shadow-accent/25"
-                  : "bg-white/[0.03] border border-white/[0.04] text-gray-300 hover:text-white hover:bg-white/[0.07] hover:border-white/[0.08]"
-              }`}
-            >
-              <Icon size={12} className={isActive ? "text-white animate-pulse" : "text-gray-400"} />
-              <span>{mood.label}</span>
-            </button>
-          );
-        })}
-        {/* UX-22: Customize button */}
-        <button
-          onClick={() => setShowCustomizer(!showCustomizer)}
-          className={`shrink-0 p-2 rounded-full transition-all ${
-            showCustomizer ? "glass-button text-white" : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
-          }`}
-          title="Customize home layout"
-        >
-          <Settings2 size={14} />
-        </button>
-      </div>
-
-      {/* UX-22: Row customizer panel */}
-      {showCustomizer && (
-        <div className="mx-1 p-4 glass-panel space-y-2">
-          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Visible Sections</h3>
-          {rowConfig
-            .filter(row => isAuthenticated || !["continue", "airingToday", "newForYou", "smartPlaylist"].includes(row.id))
-            .map(row => (
-            <label key={row.id} className="flex items-center space-x-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={row.visible}
-                onChange={() => toggleRow(row.id)}
-                className="accent-accent rounded"
-              />
-              <span className="text-sm font-medium text-gray-300">{row.title}</span>
-            </label>
-          ))}
-        </div>
-      )}
-
       {/* UX-13: Airing Today row with countdown badges */}
       {isAuthenticated && isRowVisible("airingToday") && (
         airingTodayQuery.isLoading ? (
@@ -331,7 +303,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
           airingTodayQuery.data?.media && airingTodayQuery.data.media.length > 0 && (
             <MediaRow
               title="Airing Today"
-              items={filterByGenre(airingTodayQuery.data.media)}
+              items={airingTodayQuery.data.media}
               onSelect={onSelect}
             />
           )
@@ -342,7 +314,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         <MediaRow
           title="Continue Watching"
           items={continueWatchingList}
-          secondaryItems={smartPlaylistQuery.data?.media ? filterByGenre(smartPlaylistQuery.data.media) : undefined}
+          secondaryItems={smartPlaylistQuery.data?.media ? smartPlaylistQuery.data.media : undefined}
           secondaryLabel="Smart Picks"
           onSelect={onSelect}
         />
@@ -353,13 +325,13 @@ export function HomeView({ onSelect }: HomeViewProps) {
           <MediaRowSkeleton title="New for You" />
         ) : (
           recentReleasesQuery.data && recentReleasesQuery.data.length > 0 && (
-            <MediaRow title="New for You" items={filterByGenre(recentReleasesQuery.data)} onSelect={onSelect} />
+            <MediaRow title="New for You" items={recentReleasesQuery.data} onSelect={onSelect} />
           )
         )
       )}
 
       {isAuthenticated && isRowVisible("smartPlaylist") && smartPlaylistQuery.data?.media && smartPlaylistQuery.data.media.length > 0 && (
-        <MediaRow title="Smart Playlist" items={filterByGenre(smartPlaylistQuery.data.media)} onSelect={onSelect} />
+        <MediaRow title="Smart Playlist" items={smartPlaylistQuery.data.media} onSelect={onSelect} />
       )}
 
       {isRowVisible("trending") && (
@@ -367,7 +339,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
           <MediaRowSkeleton title="Trending Now" />
         ) : (
           trendingQuery.data?.media && trendingQuery.data.media.length > 0 && (
-            <MediaRow title="Trending Now" items={filterByGenre(trendingQuery.data.media)} onSelect={onSelect} />
+            <MediaRow title="Trending Now" items={trendingQuery.data.media} onSelect={onSelect} />
           )
         )
       )}
@@ -387,7 +359,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
           <MediaRowSkeleton title="Seasonal Highlights" />
         ) : (
           seasonalQuery.data?.media && seasonalQuery.data.media.length > 0 && (
-            <MediaRow title="Seasonal Highlights" items={filterByGenre(seasonalQuery.data.media)} onSelect={onSelect} />
+            <MediaRow title="Seasonal Highlights" items={seasonalQuery.data.media} onSelect={onSelect} />
           )
         )
       )}

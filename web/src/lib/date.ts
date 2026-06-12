@@ -11,6 +11,7 @@ export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
+  if (diff < 0) return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
@@ -27,9 +28,21 @@ export function formatRelativeTime(dateStr: string): string {
   });
 }
 
-export function formatRelativeTimeFromUnix(unixSeconds: number): string {
+export function formatRelativeTimeFromUnix(unixSeconds: number | string): string {
   if (!unixSeconds) return "Unknown";
-  const date = new Date(unixSeconds * 1000);
+  let date: Date;
+  if (typeof unixSeconds === "string") {
+    date = new Date(unixSeconds);
+  } else {
+    const val = Number(unixSeconds);
+    if (val > 10000000000) {
+      date = new Date(val);
+    } else {
+      date = new Date(val * 1000);
+    }
+  }
+
+  if (isNaN(date.getTime())) return "Unknown";
   const now = new Date();
   const diff = date.getTime() - now.getTime();
   const minutes = Math.floor(diff / 60000);

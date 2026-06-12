@@ -26,6 +26,16 @@ pub struct GeneralConfig {
     pub preferred_title_language: String,
     #[serde(default)]
     pub downloads_path: String,
+    #[serde(default = "default_time_format")]
+    pub time_format: String,
+    #[serde(default = "default_false")]
+    pub discord: bool,
+    #[serde(default = "default_media_api")]
+    pub media_api: String,
+    #[serde(default = "default_manga_provider")]
+    pub manga_provider: String,
+    #[serde(default = "default_update_branch")]
+    pub update_branch: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -36,12 +46,20 @@ pub struct StreamConfig {
     pub preferred_quality: String,
     #[serde(default = "default_false")]
     pub data_saver: bool,
+    #[serde(default = "default_shader_profile")]
+    pub shader_profile: String,
+    #[serde(default = "default_translation_type")]
+    pub translation_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiConfig {
     #[serde(default)]
     pub anilist_token: Option<String>,
+}
+
+fn default_translation_type() -> String {
+    "sub".into()
 }
 
 fn default_provider() -> String {
@@ -62,10 +80,35 @@ fn default_player_type() -> String {
 fn default_quality() -> String {
     "1080p".into()
 }
+fn default_time_format() -> String {
+    "12h".into()
+}
+fn default_media_api() -> String {
+    "anilist".into()
+}
+fn default_manga_provider() -> String {
+    "mangakatana".into()
+}
+fn default_update_branch() -> String {
+    "stable".into()
+}
+fn default_shader_profile() -> String {
+    "balanced".into()
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub inner: Arc<AppStateInner>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CurrentPlayback {
+    pub media_id: i64,
+    pub episode_number: i64,
+    pub provider: String,
+    pub title: String,
+    pub episode_title: String,
+    pub cover_image: String,
 }
 
 #[derive(Clone)]
@@ -77,6 +120,8 @@ pub struct AppStateInner {
     pub http_client: reqwest::Client,
     pub scraper_manager: Arc<crate::scraper::ScraperManager>,
     pub cache: crate::cache::AniListCache,
+    pub current_playback: Arc<tokio::sync::Mutex<Option<CurrentPlayback>>>,
+    pub discord: crate::discord::DiscordClient,
 }
 
 impl AppState {
@@ -85,14 +130,32 @@ impl AppState {
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("anicat");
         let config_path = config_dir.join("config.toml");
-        let config = Self::load_config(&config_path);
+        let mut config = Self::load_config(&config_path);
+
+        let mut config_was_empty = false;
+        if config.general.downloads_path.is_empty() {
+            config_was_empty = true;
+            if let Some(download_dir) = dirs::download_dir() {
+                config.general.downloads_path = download_dir.to_string_lossy().to_string();
+            } else if let Some(home_dir) = dirs::home_dir() {
+                config.general.downloads_path = home_dir.join("Downloads").to_string_lossy().to_string();
+            }
+        }
+
+        if config_was_empty {
+            if let Ok(toml_str) = toml::to_string_pretty(&config) {
+                if let Some(parent) = config_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&config_path, toml_str);
+            }
+        }
 
         let db_path = config_dir
             .join("registry.db")
             .to_string_lossy()
             .to_string();
 
-        // Initialize database
         {
             let db_path = db_path.clone();
             std::thread::spawn(move || {
@@ -118,12 +181,10 @@ impl AppState {
             .unwrap_or_else(|_| "uv".to_string());
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
-                // Check for bundled Tauri resources first (release builds)
                 if let Ok(exe) = std::env::current_exe() {
                     if let Some(resource_dir) = exe.parent()
                         .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
                         .or_else(|| {
-                            // Windows: resources are next to the exe
                             let r = exe.parent().unwrap_or(&exe).to_path_buf();
                             if r.join("scraper").exists() { Some(r) } else { None }
                         })
@@ -134,7 +195,6 @@ impl AppState {
                         }
                     }
                 }
-                // Fallback: dev mode (relative to CARGO_MANIFEST_DIR)
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
                 manifest_dir
                     .join("..")
@@ -150,7 +210,12 @@ impl AppState {
             scraper_script,
         );
 
-        Self {
+        let discord = crate::discord::DiscordClient::new();
+        if config.general.discord {
+            discord.connect();
+        }
+
+        let app_state = Self {
             inner: Arc::new(AppStateInner {
                 config: Arc::new(RwLock::new(config)),
                 config_path: config_path.to_string_lossy().to_string(),
@@ -159,8 +224,12 @@ impl AppState {
                 http_client,
                 scraper_manager: Arc::new(scraper_manager),
                 cache: crate::cache::AniListCache::new(),
+                current_playback: Arc::new(tokio::sync::Mutex::new(None)),
+                discord,
             }),
-        }
+        };
+
+        app_state
     }
 
     fn load_config(path: &std::path::Path) -> AppConfig {
@@ -168,7 +237,6 @@ impl AppState {
             Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
             Err(_) => AppConfig::default(),
         };
-        // Normalize legacy provider names
         if config.general.provider == "gogoanime" || config.general.provider == "anizone" || config.general.provider == "animepahe" {
             config.general.provider = "anineko".into();
         }
@@ -190,7 +258,6 @@ impl AppState {
     }
 }
 
-// Implement Deref for convenience in command handlers
 impl std::ops::Deref for AppState {
     type Target = AppStateInner;
     fn deref(&self) -> &Self::Target {

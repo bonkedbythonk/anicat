@@ -17,6 +17,8 @@ import {
   FolderOpen,
   ArrowRight
 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { mediaApi, type QueueItem } from "@/lib/api";
 
 export function DownloadsView() {
@@ -39,9 +41,36 @@ export function DownloadsView() {
 
   useEffect(() => {
     fetchQueue();
-    const interval = setInterval(fetchQueue, 5000);
-    return () => clearInterval(interval);
-  }, [fetchQueue]);
+
+    const unlistenPromise = listen<{ media_id: number; episode_number: number; progress: number }>(
+      "download_progress",
+      (event) => {
+        const { media_id, episode_number, progress } = event.payload;
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.media_id === media_id && item.episode_number === episode_number
+              ? { ...item, progress }
+              : item
+          )
+        );
+      }
+    );
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const hasActive = queue.some(
+      (item) => item.status === "downloading" || item.status === "queued"
+    );
+
+    if (hasActive) {
+      interval = setInterval(fetchQueue, 5000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+      unlistenPromise.then((fn) => fn());
+    };
+  }, [fetchQueue, queue]);
 
   const handleRetry = async () => {
     // Optimistically set all failed items to queued state in local UI
@@ -231,79 +260,153 @@ export function DownloadsView() {
         ) : (
           <AnimatePresence mode="wait">
             {activeTab === "library" ? (
-              <motion.div
-                key="library-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.25 }}
-              >
-                {Object.keys(completedGroups).length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-                    {Object.entries(completedGroups).map(([mediaIdStr, group]) => {
-                      const mediaId = parseInt(mediaIdStr);
+              selectedMedia ? (
+                <motion.div
+                  key="folder-explorer"
+                  initial={{ opacity: 0, x: 15 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -15 }}
+                  transition={{ duration: 0.25 }}
+                  className="space-y-6"
+                >
+                  {/* Folder Explorer Header */}
+                  <div className="flex items-center justify-between border-b border-border pb-4">
+                    <button
+                      onClick={() => setSelectedMediaId(null)}
+                      className="flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      <ChevronRight className="rotate-180" size={16} />
+                      <span>Back to Library</span>
+                    </button>
+                  </div>
+
+                  {/* Details Banner */}
+                  <div className="relative rounded-3xl overflow-hidden bg-foreground/[0.02] border border-border p-6 sm:p-8 flex flex-col md:flex-row gap-6 items-start md:items-center">
+                    <div className="space-y-3">
+                      <span className="text-accent text-[10px] font-black uppercase tracking-widest bg-accent/15 border border-accent/25 px-2.5 py-1 rounded-md inline-block leading-none">
+                        {selectedMedia.episodes.length} {selectedMedia.episodes.length === 1 ? "Episode Cached" : "Episodes Cached"}
+                      </span>
+                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                        {selectedMedia.title}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Episodes Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {selectedMedia.episodes.map((ep) => {
+                      const isCurrentPlaying = playingItem?.mediaId === ep.media_id && playingItem?.ep === ep.episode_number;
                       return (
-                        <motion.div
-                          key={mediaId}
-                          onClick={() => setSelectedMediaId(mediaId)}
-                          whileHover={{ y: -6 }}
-                          className="group cursor-pointer space-y-3"
+                        <div
+                          key={ep.episode_number}
+                          className="flex flex-col justify-between p-4.5 rounded-2xl bg-card border border-border hover:border-accent/30 transition-all duration-300 group relative"
                         >
-                          <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-card border border-border group-hover:border-accent/40 shadow-xl group-hover:shadow-accent/5 transition-all duration-300">
-                            {group.cover ? (
-                              <img
-                                src={group.cover}
-                                alt={group.title}
-                                className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center bg-foreground/5 text-muted-foreground">
-                                <Download size={32} />
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent font-black text-xs">
+                                EP {ep.episode_number}
                               </div>
-                            )}
-                            
-                            {/* Frosted / dark gradient overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent opacity-80 group-hover:opacity-90 transition-opacity duration-300" />
-                            
-                            {/* Glowing background blur on hover */}
-                            <div className="absolute inset-0 bg-accent/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-md pointer-events-none" />
-
-                            {/* Floating EP Badge */}
-                            <div className="absolute top-3 right-3 bg-accent text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg shadow-lg leading-none tracking-wider uppercase">
-                              {group.episodes.length} {group.episodes.length === 1 ? "EP" : "EPS"}
+                              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-md leading-none uppercase">
+                                Offline
+                              </span>
                             </div>
-
-                            {/* Quick play overlay button on hover */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/45">
-                              <div className="w-13 h-13 rounded-full bg-accent text-white flex items-center justify-center shadow-lg transform translate-y-3 group-hover:translate-y-0 transition-all duration-350 ease-out hover:scale-105 active:scale-95">
-                                <Play size={20} fill="currentColor" className="ml-0.5 text-white" />
-                              </div>
+                            <div>
+                              <h4 className="font-extrabold text-sm text-foreground line-clamp-1">
+                                Episode {ep.episode_number}
+                              </h4>
+                              <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">
+                                Ready to play offline
+                              </p>
                             </div>
                           </div>
-                          
-                          <div className="px-1.5 space-y-1">
-                            <h3 className="font-extrabold text-sm text-foreground/90 group-hover:text-foreground line-clamp-2 leading-snug transition-colors duration-200">
-                              {group.title}
-                            </h3>
+
+                          <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border/60">
+                            <button
+                              onClick={() => handlePlay(ep.media_id, ep.episode_number)}
+                              disabled={playingItem !== null}
+                              className="flex-1 flex items-center justify-center space-x-1.5 bg-accent hover:bg-accent-light text-white py-2 rounded-xl font-extrabold text-[11px] shadow-lg shadow-accent/10 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                            >
+                              {isCurrentPlaying ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Play size={11} fill="currentColor" />
+                              )}
+                              <span>PLAY</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                handleRemove(ep.media_id, ep.episode_number);
+                                if (selectedMedia.episodes.length <= 1) {
+                                  setSelectedMediaId(null);
+                                }
+                              }}
+                              className="p-2 rounded-xl bg-foreground/5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 border border-border hover:border-rose-500/20 transition-colors cursor-pointer active:scale-95"
+                              title="Delete Cache"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-20 px-4 border border-dashed border-border bg-foreground/[0.01] rounded-3xl text-center space-y-4 max-w-xl mx-auto mt-6">
-                    <div className="p-4 bg-foreground/5 border border-border text-muted-foreground rounded-2xl">
-                      <Download size={32} />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="library-tab"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  {Object.keys(completedGroups).length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 pt-2">
+                      {Object.entries(completedGroups).map(([mediaIdStr, group]) => {
+                        const mediaId = parseInt(mediaIdStr);
+                        return (
+                          <motion.div
+                            key={mediaId}
+                            onClick={() => setSelectedMediaId(mediaId)}
+                            whileHover={{ y: -4 }}
+                            className="group cursor-pointer"
+                          >
+                            <div className="relative p-6 rounded-2xl bg-card border border-border group-hover:border-accent/40 shadow-xl group-hover:shadow-accent/5 transition-all duration-300 flex flex-col justify-between min-h-[140px]">
+                              {/* Glowing background blur on hover */}
+                              <div className="absolute inset-0 bg-accent/[0.02] opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl" />
+
+                              <div className="flex justify-between items-start gap-4">
+                                <div className="p-3 bg-foreground/[0.04] text-gray-400 group-hover:text-accent rounded-xl transition-colors shrink-0">
+                                  <Download size={20} />
+                                </div>
+                                <div className="bg-accent/15 text-accent font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg leading-none tracking-wider uppercase flex items-center gap-1.5 shrink-0">
+                                  <Play size={8} fill="currentColor" />
+                                  <span>{group.episodes.length} {group.episodes.length === 1 ? "EP" : "EPS"}</span>
+                                </div>
+                              </div>
+                              
+                              <h3 className="font-extrabold text-sm text-foreground/90 group-hover:text-foreground line-clamp-2 leading-snug transition-colors duration-200 mt-4">
+                                {group.title}
+                              </h3>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-foreground font-extrabold text-base">Offline Library is Empty</p>
-                      <p className="text-muted-foreground text-sm max-w-sm">
-                        Episodes you download in AniCat will automatically download to your local drive and populate here.
-                      </p>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-20 px-4 border border-dashed border-border bg-foreground/[0.01] rounded-3xl text-center space-y-4 max-w-xl mx-auto mt-6">
+                      <div className="p-4 bg-foreground/5 border border-border text-muted-foreground rounded-2xl">
+                        <Download size={32} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-foreground font-extrabold text-base">Offline Library is Empty</p>
+                        <p className="text-muted-foreground text-sm max-w-sm">
+                          Episodes you download in AniCat will automatically download to your local drive and populate here.
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </motion.div>
+                  )}
+                </motion.div>
+              )
             ) : (
               <motion.div
                 key="queue-tab"
@@ -319,7 +422,7 @@ export function DownloadsView() {
                       return (
                         <div
                           key={`${item.media_id}-${item.episode_number}-${idx}`}
-                          className="flex items-center justify-between p-4.5 rounded-2xl bg-foreground/[0.02] border border-border hover:bg-foreground/[0.04] transition-all duration-300 group relative overflow-hidden"
+                          className="flex items-center justify-between p-4.5 rounded-2xl bg-card border border-border hover:border-accent/20 transition-all duration-300 group relative overflow-hidden"
                         >
                           <div className="flex items-center space-x-5 min-w-0 z-10">
                             {/* Status Icon Wrapper */}
@@ -338,7 +441,9 @@ export function DownloadsView() {
                                   EP {item.episode_number}
                                 </span>
                                 <span className={`text-[10px] font-black uppercase tracking-wider ${statusInfo.text}`}>
-                                  {statusInfo.label}
+                                  {item.status === "downloading" 
+                                    ? `Downloading (${Math.round(item.progress || 0)}%)` 
+                                    : statusInfo.label}
                                 </span>
                               </div>
                             </div>
@@ -360,10 +465,13 @@ export function DownloadsView() {
                             </button>
                           </div>
 
-                          {/* Downloading bar shimmer */}
+                          {/* Downloading bar progress */}
                           {item.status === "downloading" && (
-                            <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-foreground/5">
-                              <div className="h-full bg-accent/70 animate-shimmer w-[70%]" />
+                            <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-foreground/5">
+                              <div 
+                                className="h-full bg-accent transition-all duration-300 ease-out" 
+                                style={{ width: `${item.progress || 0}%` }}
+                              />
                             </div>
                           )}
                         </div>
@@ -388,127 +496,6 @@ export function DownloadsView() {
           </AnimatePresence>
         )}
       </div>
-
-      {/* Frosted Glass Detail Drawer Modal for Selected Media */}
-      <AnimatePresence>
-        {selectedMedia && (
-          <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedMediaId(null)}
-              className="absolute inset-0 bg-background/80"
-            />
-
-            {/* Modal Body */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: "spring", duration: 0.4 }}
-              className="bg-card border border-border rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl relative z-10 flex flex-col max-h-[80vh]"
-            >
-              {/* Close Button */}
-              <button
-                onClick={() => setSelectedMediaId(null)}
-                className="absolute top-5 right-5 p-2.5 rounded-full bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground border border-border transition-all z-10 cursor-pointer active:scale-95"
-              >
-                <X size={16} />
-              </button>
-
-              {/* Banner Area */}
-              <div className="relative h-56 sm:h-64 bg-[#050505] overflow-hidden shrink-0 forced-dark-container">
-                {/* Blurred background cover */}
-                {selectedMedia.cover && (
-                  <img
-                    src={selectedMedia.cover}
-                    alt=""
-                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-25 scale-110"
-                  />
-                )}
-                
-                <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent" />
-                
-                {/* Content on Banner */}
-                <div className="absolute bottom-6 left-6 right-6 flex items-end space-x-6">
-                  {selectedMedia.cover && (
-                    <img
-                      src={selectedMedia.cover}
-                      alt={selectedMedia.title}
-                      className="w-20 sm:w-26 aspect-[2/3] rounded-2xl object-cover shadow-2xl border border-white/10 shrink-0"
-                    />
-                  )}
-                  <div className="min-w-0 space-y-2 pb-1">
-                    <span className="text-accent text-[9px] font-black uppercase tracking-widest bg-accent/15 border border-accent/25 px-2.5 py-1 rounded-md inline-block leading-none">
-                      {selectedMedia.episodes.length} {selectedMedia.episodes.length === 1 ? "Episode Cached" : "Episodes Cached"}
-                    </span>
-                    <h2 className="text-xl sm:text-2xl font-black text-white truncate leading-tight">
-                      {selectedMedia.title}
-                    </h2>
-                  </div>
-                </div>
-              </div>
-
-              {/* Episode List Scroll Container */}
-              <div className="p-6 overflow-y-auto space-y-3 flex-1 scrollbar-thin bg-foreground/[0.02]">
-                {selectedMedia.episodes.map((ep) => {
-                  const isCurrentPlaying = playingItem?.mediaId === ep.media_id && playingItem?.ep === ep.episode_number;
-                  return (
-                    <div
-                      key={ep.episode_number}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-foreground/[0.02] border border-border hover:bg-foreground/[0.04] transition-all group"
-                    >
-                      <div className="flex items-center space-x-4 min-w-0">
-                        <div className="w-11 h-11 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent font-black text-sm shrink-0">
-                          EP {ep.episode_number}
-                        </div>
-                        <div className="min-w-0">
-                          <span className="font-extrabold text-sm text-foreground block truncate">
-                            Episode {ep.episode_number}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground font-extrabold tracking-wider uppercase block mt-0.5">
-                            Ready Offline
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-3 shrink-0">
-                        <button
-                          onClick={() => handlePlay(ep.media_id, ep.episode_number)}
-                          disabled={playingItem !== null}
-                          className="flex items-center space-x-2 bg-accent hover:bg-accent-light text-white px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-lg shadow-accent/10 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-                        >
-                          {isCurrentPlaying ? (
-                            <Loader2 size={13} className="animate-spin" />
-                          ) : (
-                            <Play size={13} fill="currentColor" />
-                          )}
-                          <span>PLAY</span>
-                        </button>
-                        
-                        <button
-                          onClick={() => {
-                            handleRemove(ep.media_id, ep.episode_number);
-                            if (selectedMedia.episodes.length <= 1) {
-                              setSelectedMediaId(null);
-                            }
-                          }}
-                          className="p-2.5 rounded-xl bg-foreground/5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 border border-border transition-colors cursor-pointer active:scale-95"
-                          title="Delete Cache"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

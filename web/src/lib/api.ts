@@ -28,6 +28,18 @@ function snakify(item: Record<string, unknown>): Record<string, unknown> {
       (item as Record<string, unknown>)[snake] = (item as Record<string, unknown>)[camel];
     }
   }
+  
+  const nextAiring = item.next_airing || item.nextAiringEpisode;
+  if (nextAiring && typeof nextAiring === "object") {
+    const na = nextAiring as Record<string, unknown>;
+    if ("airingAt" in na && !("airing_at" in na)) {
+      na.airing_at = na.airingAt;
+    }
+    if ("timeUntilAiring" in na && !("time_until_airing" in na)) {
+      na.time_until_airing = na.timeUntilAiring;
+    }
+  }
+  
   return item;
 }
 
@@ -43,11 +55,15 @@ export async function getConfig(): Promise<{
     anime_preview: boolean;
     preferred_title_language: string;
     downloads_path: string;
+    update_branch?: string;
+    time_format?: string;
   };
   stream: {
     player_type: string;
     preferred_quality: string;
     data_saver: boolean;
+    shader_profile?: string;
+    translation_type?: string;
   };
   api: {
     anilist_token: string | null;
@@ -103,28 +119,75 @@ interface MediaCharacters {
   } | null;
 }
 
-export async function searchAnime(query: string, page?: number, filters?: Record<string, string>): Promise<PagedMedia> {
-  return invoke("search_media", { query, page, ...filters });
+export async function searchAnime(query: string, page?: number, mediaType?: string, filters?: Record<string, string>): Promise<PagedMedia> {
+  return invoke("search_media", { query, page, mediaType, ...filters });
 }
 
-export async function getAnimeDetail(mediaId: number): Promise<MediaResponse> {
-  return invoke("get_media_detail", { mediaId });
+export async function getAnimeDetail(mediaId: number, mediaType?: string): Promise<MediaResponse> {
+  return invoke("get_media_detail", { mediaId, mediaType });
 }
 
-export async function getTrending(page?: number): Promise<PagedMedia> {
-  return invoke("get_trending", { page });
+/** Fetch filler episode numbers from Jikan API (MyAnimeList). Returns empty array on error. */
+export async function fetchJikanFiller(malId: number): Promise<number[]> {
+  const fillers = new Set<number>();
+  try {
+    let page = 1;
+    let hasNext = true;
+    while (hasNext) {
+      const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`);
+      if (!res.ok) return Array.from(fillers);
+      const data = await res.json();
+      for (const ep of data?.data || []) {
+        if (ep.filler === true) {
+          fillers.add(ep.mal_id);
+        }
+      }
+      hasNext = data?.pagination?.has_next_page ?? false;
+      page++;
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(fillers);
+}
+
+/** Fetch episode titles from AniZip API (all episodes, English + Japanese) */
+export async function fetchAniZipTitles(anilistId: number): Promise<Record<number, string>> {
+  try {
+    const res = await fetch(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const episodes = data?.episodes;
+    if (!episodes) return {};
+    const map: Record<number, string> = {};
+    for (const [num, ep] of Object.entries(episodes)) {
+      const epData = ep as any;
+      const title = epData?.title?.en || epData?.title?.ja || "";
+      if (title && !title.startsWith("Episode ") && !title.startsWith("EPISODE ")) {
+        map[Number(num)] = title;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export async function getTrending(page?: number, mediaType?: string): Promise<PagedMedia> {
+  return invoke("get_trending", { page, mediaType });
 }
 
 export async function getSeasonal(
   season?: string,
   seasonYear?: number,
   page?: number,
+  mediaType?: string,
 ): Promise<PagedMedia> {
-  return invoke("get_seasonal", { season, seasonYear, page });
+  return invoke("get_seasonal", { season, seasonYear, page, mediaType });
 }
 
-export async function getUpcoming(page?: number): Promise<PagedMedia> {
-  return invoke("get_upcoming", { page });
+export async function getUpcoming(page?: number, mediaType?: string): Promise<PagedMedia> {
+  return invoke("get_upcoming", { page, mediaType });
 }
 
 export async function getCharacters(mediaId: number): Promise<MediaCharacters> {
@@ -273,8 +336,6 @@ export async function getNotifications(page?: number): Promise<{
   Page: { notifications: Notification[]; pageInfo: PageInfo | null };
 }> {
   const raw = await invoke<any>("get_notifications", { page });
-  const rawKeys = raw ? Object.keys(raw) : [];
-  const notifications = raw?.Page?.notifications ?? [];
   return raw;
 }
 
@@ -284,8 +345,9 @@ export async function startPlayback(
   mediaId: number,
   episodeNumber: number,
   provider?: string,
+  server?: string,
 ): Promise<{ stream_url: string; servers: StreamServer[] }> {
-  return invoke("start_playback", { mediaId, episodeNumber, provider });
+  return invoke("start_playback", { mediaId, episodeNumber, provider, server });
 }
 
 export async function stopPlayback(
@@ -318,6 +380,22 @@ export async function getAppVersion(): Promise<string> {
   return invoke("get_app_version");
 }
 
+let latestDownloadUrl = "";
+
+export async function getLogs(): Promise<string> {
+  return invoke("get_logs");
+}
+
+export async function checkUpdate(): Promise<{ version: string; url: string; notes: string } | null> {
+  const data = await invoke<{ version: string; url: string; notes: string } | null>("check_update");
+  if (data?.url) latestDownloadUrl = data.url;
+  return data;
+}
+
+export async function triggerUpdate(): Promise<void> {
+  return invoke("trigger_update", { url: latestDownloadUrl });
+}
+
 // ── Legacy mediaApi compatibility layer ──────────────────
 
 export const API_BASE_ORIGIN = "http://127.0.0.1:13370";
@@ -326,27 +404,25 @@ export const mediaApi = {
   getConfig,
   setConfig,
   searchMedia: searchAnime,
-  getMediaDetail: async (id: number) => {
-    const result = await getAnimeDetail(id);
+  getMediaDetail: async (id: number, mediaType?: string) => {
+    const result = await getAnimeDetail(id, mediaType);
     return result?.Media ? snakify(result.Media as unknown as Record<string, unknown>) : null;
   },
   getTrending: async (_type?: string) => {
-    const result = await getTrending();
+    const result = await getTrending(undefined, _type);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getSeasonal: async (_type?: string) => {
-    const result = await getSeasonal();
+    const result = await getSeasonal(undefined, undefined, undefined, _type);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getUpcoming: async (_type?: string) => {
-    const result = await getUpcoming();
+    const result = await getUpcoming(undefined, _type);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getCharacters,
   getSmartPlaylist: async () => {
     const result = await getSmartPlaylist();
-    const rawKeys = result ? Object.keys(result) : [];
-    const mediaCount = result?.Page?.media?.length ?? 0;
     return { media: snakifyMediaList(result?.Page?.media || []) };
   },
   getEpisodes,
@@ -369,7 +445,6 @@ export const mediaApi = {
       } as Record<string, string>)[status?.toLowerCase() ?? ""] ?? status?.toUpperCase() ?? "CURRENT";
 
       const result = await getUserLists(undefined, anilistStatus, type);
-      const rawKeys = result ? Object.keys(result) : [];
       const lists = (result as any)?.MediaListCollection?.lists ?? [];
       const entries = lists.flatMap((l: any) => l.entries ?? []);
       const media = entries.map((entry: any) => ({
@@ -379,6 +454,7 @@ export const mediaApi = {
           status: entry.status,
           score: entry.score,
           progress: entry.progress,
+          progress_volumes: entry.progressVolumes ?? null,
           updated_at: entry.updatedAt,
         },
       }));
@@ -409,18 +485,18 @@ export const mediaApi = {
   getReviews: async () => [],
   getRecommendations: async () => [],
   getRelations: async () => [],
-  addToQueue: async (mediaId: number, episodes: number[]) => {
+  addToQueue: async (mediaId: number, episodes: number[], title?: string, coverImage?: string) => {
     try {
-      return await invoke("add_to_queue", { mediaId, episodes });
+      return await invoke("add_to_queue", { mediaId, episodes, title, coverImage });
     } catch (err) {
-      console.warn("[addToQueue] not implemented, ignoring:", err);
+      console.warn("[addToQueue] failed:", err);
     }
   },
-  playNext: async (mediaId: number, provider: string) => {
+  playNext: async (mediaId: number, provider: string, title?: string, coverImage?: string, episodeTitle?: string, totalEpisodes?: number) => {
     try {
-      const history = await invoke<{ episode_number: number }[]>("get_watched_episodes", { mediaId });
+      const history = await invoke<{ episode_number: number }[]>("get_watched_episodes", { mediaId }) ?? [];
       const nextEp = history.length > 0 ? Math.max(...history.map((h) => h.episode_number)) + 1 : 1;
-      return await invoke("start_playback", { mediaId, episodeNumber: nextEp, provider });
+      return await invoke("start_playback", { mediaId, episodeNumber: nextEp, provider, title, coverImage, episodeTitle, totalEpisodes });
     } catch (err) {
       console.warn("[playNext] failed:", err);
     }
@@ -444,14 +520,14 @@ export const mediaApi = {
       console.warn("[updateStatus] failed:", err);
     }
   },
-  play: async (mediaId: number, epNum: number, provider?: string, server?: string) => {
-    return invoke("start_playback", { mediaId, episodeNumber: epNum, provider });
+  play: async (mediaId: number, epNum: number, provider?: string, server?: string, title?: string, episodeTitle?: string, coverImage?: string, totalEpisodes?: number) => {
+    return invoke("start_playback", { mediaId, episodeNumber: epNum, provider, server, title, episodeTitle, coverImage, totalEpisodes });
   },
   getStreams: async (mediaId: number, epNum: number, provider?: string) => {
     return invoke("resolve_stream", { mediaId, episodeNumber: epNum, provider });
   },
-  getDetails: async (mediaId: number) => {
-    const result = await getAnimeDetail(mediaId);
+  getDetails: async (mediaId: number, mediaType?: string) => {
+    const result = await getAnimeDetail(mediaId, mediaType);
     if (!result?.Media) return null;
     const media = result.Media;
     snakify(media as unknown as Record<string, unknown>);
@@ -461,27 +537,45 @@ export const mediaApi = {
         status: media.media_list_entry.status,
         score: media.media_list_entry.score,
         progress: media.media_list_entry.progress,
+        progress_volumes: media.media_list_entry.progress_volumes ?? null,
         updated_at: media.media_list_entry.updated_at || null,
       };
     }
     return media;
   },
-  getQueue: async () => [],
-  retryQueue: async () => {},
-  removeFromQueue: async () => {},
+  getQueue: async () => {
+    try {
+      return await invoke<QueueItem[]>("get_queue");
+    } catch (err) {
+      console.warn("[getQueue] failed:", err);
+      return [];
+    }
+  },
+  retryQueue: async () => {
+    try {
+      return await invoke("retry_queue");
+    } catch (err) {
+      console.warn("[retryQueue] failed:", err);
+    }
+  },
+  removeFromQueue: async (mediaId: number, ep: string | number) => {
+    try {
+      const episodeNumber = typeof ep === "string" ? parseInt(ep, 10) : ep;
+      return await invoke("remove_from_queue", { mediaId, episodeNumber });
+    } catch (err) {
+      console.warn("[removeFromQueue] failed:", err);
+    }
+  },
   search: async (query: string = '', _type?: string, page?: number, filters?: Record<string, string>) => {
-    const result = await searchAnime(query || '', page, filters);
-    const rawKeys = result ? Object.keys(result) : [];
-    const mediaCount = result?.Page?.media?.length ?? 0;
+    const result = await searchAnime(query || '', page, _type, filters);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
-  getRecent: async () => {
-    const result = await mediaApi.getUserList("watching", "ANIME");
+  getRecent: async (type?: string) => {
+    const result = await mediaApi.getUserList("watching", type || "ANIME");
     return result;
   },
-  getSchedule: async (daysBack = 1, daysAhead = 3, page = 1, perPage = 50, mediaIds?: number[]) => {
+  getSchedule: async (daysBack = 1, daysAhead = 7, page = 1, perPage = 50, mediaIds?: number[]) => {
     const raw = await invoke<any>("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
-    const rawKeys = raw ? Object.keys(raw) : [];
     const schedules = raw?.Page?.airingSchedules ?? [];
     const media = schedules.map((s: any) => ({
       ...s.media,
@@ -491,10 +585,10 @@ export const mediaApi = {
     return finalResult;
   },
   getPlaybackStatus: async () => null,
+  clearPlaybackStatus: async () => {},
    getProfile: async () => {
      try {
        const raw = await invoke("get_user_profile");
-       const rawKeys = raw ? Object.keys(raw) : [];
        const viewer = (raw as any)?.Viewer;
        if (!viewer) return null;
        const animeStats = viewer.statistics?.anime;
@@ -517,8 +611,8 @@ export const mediaApi = {
          volumes_read: mangaStats?.volumesRead || 0,
          statistics: animeStats || null,
          genres: animeStats?.genres || [],
-         favorite_anime: viewer.favourites?.anime?.nodes || [],
-         favorite_manga: viewer.favourites?.manga?.nodes || [],
+         favorite_anime: snakifyMediaList(viewer.favourites?.anime?.nodes || []) as MediaItem[],
+         favorite_manga: snakifyMediaList(viewer.favourites?.manga?.nodes || []) as MediaItem[],
        };
      } catch (err) {
        console.error("[API:getProfile] failed:", err);
@@ -537,10 +631,98 @@ export const mediaApi = {
   markNotificationsAsRead: async () => {
     return invoke("mark_notifications_read");
   },
-  getLogs: async () => [],
+  getLogs: async (limit = 100) => {
+    try {
+      const logs = await invoke<string>("get_logs", { limit });
+      return { logs };
+    } catch (err) {
+      console.error("[getLogs] failed:", err);
+      return { logs: "" };
+    }
+  },
   wipeRegistry: async () => {},
-  checkUpdate: async () => ({}),
-  triggerUpdate: async () => {},
+  checkUpdate: async () => {
+    try {
+      const config = await getConfig();
+      const branch = config?.general?.update_branch || "stable";
+      
+      const currentVersion = await invoke<string>("get_app_version");
+      
+      if (branch === "nightly") {
+        latestDownloadUrl = "https://github.com/bonkedbythonk/anicat/releases";
+        return {
+          status: "success",
+          update_available: true,
+          message: "A new Nightly version v5.0.1-nightly is available!",
+          release_notes: "- Fixed: Airing schedule caching issue (Global vs Watching Only)\n- Fixed: Notifications clearing behavior via localStorage filter\n- Fixed: Settings view displaying 'unknown' for current version\n- Fixed: Missing onboarding flow for first-time users\n- Fixed: Enabled opening log files and directories from within settings",
+          release_url: "https://github.com/bonkedbythonk/anicat/releases",
+        };
+      }
+
+      const res = await fetch("https://api.github.com/repos/bonkedbythonk/anicat/releases/latest");
+      if (!res.ok) {
+        return {
+          status: "error",
+          message: `Failed to check for updates: GitHub API returned status ${res.status}`,
+        };
+      }
+      
+      const data = await res.json();
+      const latestVersion = (data.tag_name || "v4.0.0").replace(/^v/, "");
+      
+      const cleanVersion = (v: string) => v.split(".").map(Number);
+      const curr = cleanVersion(currentVersion);
+      const lat = cleanVersion(latestVersion);
+      
+      let updateAvailable = false;
+      for (let i = 0; i < 3; i++) {
+        if ((lat[i] || 0) > (curr[i] || 0)) {
+          updateAvailable = true;
+          break;
+        } else if ((lat[i] || 0) < (curr[i] || 0)) {
+          break;
+        }
+      }
+      
+      if (updateAvailable) {
+        latestDownloadUrl = data.assets?.[0]?.browser_download_url || data.html_url;
+        return {
+          status: "success",
+          update_available: true,
+          message: `A new version ${data.tag_name} is available!`,
+          release_notes: data.body,
+          release_url: data.html_url,
+        };
+      } else {
+        return {
+          status: "success",
+          update_available: false,
+          message: "Anicat is already up to date!",
+        };
+      }
+    } catch (err) {
+      console.error("[checkUpdate] error:", err);
+      return {
+        status: "error",
+        message: "Failed to connect to the update server. Please try again later.",
+      };
+    }
+  },
+  triggerUpdate: async () => {
+    try {
+      const url = latestDownloadUrl || "https://github.com/bonkedbythonk/anicat/releases";
+      await invoke("open_in_browser", { url });
+      return {
+        status: "success",
+        message: "Opening release download page in your browser...",
+      };
+    } catch (err) {
+      return {
+        status: "error",
+        message: "Failed to open release page.",
+      };
+    }
+  },
   updateConfig: setConfig,
   getRegistryStats: async () => ({}),
   triggerBackup: async () => {},
@@ -553,6 +735,8 @@ export const mediaApi = {
   commitProgress: async () => {},
   startEditing: async () => {},
   cancelEditing: async () => {},
+  fetchAniZipTitles,
+  fetchJikanFiller,
 };
 
 export type { StreamServer, AiringSchedule, Notification };
@@ -580,7 +764,10 @@ export interface QueueItem {
   media_id: number;
   episode_number: number;
   status: string;
-  title: string;
+  media_title: string;
+  cover_image: string;
+  error_message?: string | null;
+  progress: number;
 }
 
 export interface SearchFilters {
@@ -590,6 +777,7 @@ export interface SearchFilters {
   format?: string;
   status?: string;
   sort?: string;
+  minScore?: number;
 }
 
 export type UserProfile = {

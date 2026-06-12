@@ -46,7 +46,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
           }
         }
         
-        const data = await mediaApi.getSchedule(1, 3, 1, 50, mediaIds);
+        const data = await mediaApi.getSchedule(1, 7, 1, 50, mediaIds);
         setItems(data.media || []);
       } catch (err) {
         console.error("Failed to load schedule:", err);
@@ -89,6 +89,9 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
     if (!groups.has(dateStr)) groups.set(dateStr, []);
     groups.get(dateStr)!.push(item);
   });
+
+  const timeFormat = typeof window !== "undefined" ? localStorage.getItem("anicat_time_format") : "12h";
+  const use24h = timeFormat === "24h";
 
   return (
     <div className="space-y-12 animate-fade-in pb-12">
@@ -142,7 +145,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
                         item.next_airing!.airing_at!.endsWith("Z")
                           ? item.next_airing!.airing_at!
                           : `${item.next_airing!.airing_at!}Z`
-                      ).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}
+                      ).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: !use24h })}
                     </span>
                   </div>
                 </div>

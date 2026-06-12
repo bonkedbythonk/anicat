@@ -24,6 +24,9 @@ on:
       prerelease:
         type: boolean
         default: false
+      nightly:
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -43,14 +46,6 @@ jobs:
           node-version: 20
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-
-      - name: Restore Next.js build cache
-        uses: actions/cache@v4
-        with:
-          path: web/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/src/**/*.js', 'web/src/**/*.jsx', 'web/src/**/*.ts', 'web/src/**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
 
       - name: install python
         uses: actions/setup-python@v5
@@ -101,19 +96,15 @@ jobs:
 
       - name: build frontend
         working-directory: web
-        env:
-          NEXT_TELEMETRY_DISABLED: 1
         run: npm run build
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEXT_TELEMETRY_DISABLED: 1
         with:
           projectPath: web
           tagName: ${{ inputs.release-tag }}
           releaseName: ${{ inputs.release-name }}
           releaseBody: ${{ inputs.release-body }}
-          releaseDraft: false
-          prerelease: ${{ inputs.prerelease }}
-          args: ${{ inputs.args }}
+          releaseDraft: true
+          prerelease: ${{ inputs.prerelease || inputs.nightly }}

@@ -1,8 +1,10 @@
 name: Build Nightly
-
 on:
+  push:
+    branches:
+      - nightly
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -11,6 +13,8 @@ concurrency:
 
 jobs:
   build:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -26,3 +30,8 @@ jobs:
       platform: ${{ matrix.target.platform }}
       args: ${{ matrix.target.args }}
       triple: ${{ matrix.target.triple }}
+      release-tag: nightly
+      release-name: Anicat Nightly
+      release-body: Nightly build from the latest commit on the nightly branch.
+      prerelease: true
+      nightly: true

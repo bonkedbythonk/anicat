@@ -24,6 +24,7 @@ pub struct ProxyState {
     pub client: reqwest::Client,
     pub app_handle: tauri::AppHandle,
     pub app_state: crate::state::AppState,
+    pub proxy_port: u16,
 }
 
 pub async fn start_proxy(
@@ -31,22 +32,6 @@ pub async fn start_proxy(
     app_handle: tauri::AppHandle,
     app_state: crate::state::AppState,
 ) -> SocketAddr {
-    let state = ProxyState {
-        client,
-        app_handle,
-        app_state,
-    };
-
-    let app = Router::new()
-        .route("/proxy", get(proxy_handler))
-        .route("/api/media/manga/proxy", get(proxy_handler))
-        .route("/health", get(health_handler))
-        .route("/player/next", get(player_next_handler))
-        .route("/player/prev", get(player_prev_handler))
-        .route("/player/stop", get(player_stop_handler))
-        .route("/player/toggle-translation", get(player_toggle_translation_handler))
-        .with_state(state);
-
     let addr = SocketAddr::from(([127, 0, 0, 1], 13370));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
@@ -61,9 +46,23 @@ pub async fn start_proxy(
     let bound = listener.local_addr().unwrap();
 
     log::info!("HLS proxy bound to {}", bound);
-    if bound.port() != 13370 {
-        log::warn!("Proxy running on non-default port {}; HLS playlist rewriting may still reference port 13370", bound.port());
-    }
+
+    let state = ProxyState {
+        client,
+        proxy_port: bound.port(),
+        app_handle,
+        app_state,
+    };
+
+    let app = Router::new()
+        .route("/proxy", get(proxy_handler))
+        .route("/api/media/manga/proxy", get(proxy_handler))
+        .route("/health", get(health_handler))
+        .route("/player/next", get(player_next_handler))
+        .route("/player/prev", get(player_prev_handler))
+        .route("/player/stop", get(player_stop_handler))
+        .route("/player/toggle-translation", get(player_toggle_translation_handler))
+        .with_state(state);
 
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -324,7 +323,7 @@ pub fn percent_encode(s: &str) -> String {
     encoded
 }
 
-fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url) -> String {
+fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url, proxy_port: u16) -> String {
     let mut new_playlist = String::new();
     for line in playlist_text.lines() {
         let trimmed = line.trim();
@@ -334,7 +333,7 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url) -> String {
         } else {
             if let Ok(resolved_url) = base_url.join(trimmed) {
                 let encoded_url = percent_encode(resolved_url.as_str());
-                new_playlist.push_str(&format!("http://127.0.0.1:13370/proxy?url={}", encoded_url));
+                new_playlist.push_str(&format!("http://127.0.0.1:{}/proxy?url={}", proxy_port, encoded_url));
                 new_playlist.push('\n');
             } else {
                 new_playlist.push_str(line);
@@ -411,7 +410,7 @@ async fn proxy_handler(
     if is_playlist {
         if let Ok(text) = String::from_utf8(bytes.clone()) {
             if let Ok(base_url) = reqwest::Url::parse(url) {
-                let rewritten = rewrite_playlist(&text, &base_url);
+                let rewritten = rewrite_playlist(&text, &base_url, state.proxy_port);
                 bytes = rewritten.into_bytes();
             }
         }

@@ -17,9 +17,9 @@ export function MangaView({ onSelect }: MangaViewProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["manga-data"],
     queryFn: async () => {
-      const [trending, popular, reading] = await Promise.all([
+      const [trending, seasonal, reading] = await Promise.all([
         mediaApi.getTrending("MANGA"),
-        mediaApi.search("", "MANGA", 1, { minScore: 70 }),
+        mediaApi.getSeasonal("MANGA"),
         mediaApi.getUserList("watching", "MANGA"),
       ]);
 
@@ -31,7 +31,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
 
       return {
         trendingList: trending.media || [],
-        popularList: popular.media || [],
+        popularList: seasonal.media || [],
         readingList: reading.media || [],
         planningList: planning.media || [],
       };

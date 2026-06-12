@@ -98,7 +98,7 @@ const MediaRow = memo(function MediaRow({
 
         <div
           ref={rowRef}
-          className="flex space-x-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2 snap-x snap-mandatory"
+          className="flex space-x-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2 snap-x snap-proximity"
         >
           {/* Primary items */}
           {items.map((item, idx) => (

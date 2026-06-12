@@ -144,7 +144,7 @@ pub struct UpdateCheckResponse {
 }
 
 #[tauri::command]
-pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateCheckResponse, String> {
+pub async fn check_update(_state: State<'_, AppState>) -> Result<UpdateCheckResponse, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     Ok(UpdateCheckResponse { current_version })
 }

@@ -134,6 +134,9 @@ pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn open_in_browser(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http and https URLs are allowed".to_string());
+    }
     open::that(&url).map_err(|e| e.to_string())?;
     Ok(())
 }

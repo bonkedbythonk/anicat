@@ -579,6 +579,15 @@ async fn download_episode(
         }
     };
 
+    if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") {
+        let err = "Invalid stream URL scheme".to_string();
+        if let Ok(db) = state.open_db() {
+            let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
+        }
+        notify(&err);
+        return;
+    }
+
     notify(&format!("Downloading episode {}...", episode_number));
 
     // Determine download path

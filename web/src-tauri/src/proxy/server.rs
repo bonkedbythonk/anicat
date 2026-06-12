@@ -351,6 +351,17 @@ async fn proxy_handler(
 ) -> Result<Response, StatusCode> {
     let url = &params.url;
 
+    // Restrict proxy to known media domains only (SSRF prevention)
+    let allowed_domains = [
+        "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
+        "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
+    ];
+    let is_allowed = allowed_domains.iter().any(|d| url.contains(d));
+    if !is_allowed {
+        log::warn!("Proxy blocked request to disallowed domain: {}", url);
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let mut req_builder = state.client.get(url);
 
     if let Some(range) = headers.get("range") {

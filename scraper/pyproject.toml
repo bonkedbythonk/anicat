@@ -8,4 +8,5 @@ dependencies = [
     "uvicorn>=0.34",
     "curl_cffi>=0.9",
     "selectolax>=0.3",
+    "pyinstaller>=6",
 ]

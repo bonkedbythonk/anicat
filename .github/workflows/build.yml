@@ -27,6 +27,9 @@ on:
       nightly:
         type: boolean
         default: false
+      release-draft:
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -64,6 +67,34 @@ jobs:
       - name: install python dependencies
         run: uv sync
 
+      - name: bundle standalone scraper binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd scraper
+          uv run pyinstaller --onefile --name anicat-scraper \
+            --hidden-import curl_cffi \
+            --hidden-import selectolax \
+            --collect-all curl_cffi \
+            --collect-all selectolax \
+            main.py
+          mkdir -p ../web/src-tauri/resources/scraper-bin
+          mv dist/anicat-scraper ../web/src-tauri/resources/scraper-bin/
+          cd ..
+
+      - name: bundle standalone scraper binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd scraper
+          uv run pyinstaller --onefile --name anicat-scraper --console \
+            --hidden-import curl_cffi \
+            --hidden-import selectolax \
+            --collect-all curl_cffi \
+            --collect-all selectolax \
+            main.py
+          mkdir -p ../web/src-tauri/resources/scraper-bin
+          cp dist/anicat-scraper.exe ../web/src-tauri/resources/scraper-bin/
+          cd ..
+
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -82,7 +113,10 @@ jobs:
         id: cache-mpv
         uses: actions/cache@v4
         with:
-          path: web/src-tauri/resources/mpv*
+          path: |
+            web/src-tauri/resources/mpv
+            web/src-tauri/resources/mpv_config
+            web/src-tauri/resources/lib
           key: mpv-${{ runner.os }}-${{ hashFiles('scripts/setup_bundled_player.sh', 'scripts/setup_bundled_player_windows.ps1') }}
 
       - name: Setup Bundled Player Companion (macOS)
@@ -91,14 +125,18 @@ jobs:
 
       - name: Setup Bundled Player Companion (Windows)
         if: runner.os == 'Windows' && steps.cache-mpv.outputs.cache-hit != 'true'
-        run: ./scripts/setup_bundled_player_windows.ps1
         shell: powershell
+        run: |
+          if (Test-Path "./scripts/setup_bundled_player_windows.ps1") { ./scripts/setup_bundled_player_windows.ps1 }
+
+      - name: Ensure resources directories exist
+        run: mkdir -p web/src-tauri/resources/lib web/src-tauri/resources/mpv_config
 
       - name: build frontend
         working-directory: web
         run: npm run build
 
-      - uses: tauri-apps/tauri-action@v2
+      - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -106,5 +144,5 @@ jobs:
           tagName: ${{ inputs.release-tag }}
           releaseName: ${{ inputs.release-name }}
           releaseBody: ${{ inputs.release-body }}
-          releaseDraft: true
+          releaseDraft: ${{ inputs.release-draft }}
           prerelease: ${{ inputs.prerelease || inputs.nightly }}

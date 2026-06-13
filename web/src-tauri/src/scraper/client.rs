@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -244,59 +245,21 @@ impl ScraperManager {
 
     async fn start_process(&self) -> Result<u16, String> {
         let port = find_free_port()?;
+        let script_dir = Path::new(&self.scraper_script).parent().unwrap_or(Path::new("."));
 
-        let mut cmd = Command::new(&self.python_path);
-        if self.python_path.contains("uv") {
-            cmd.arg("run").arg("python");
-        }
-        let mut child = cmd.arg(&self.scraper_script)
-            .arg("--port")
-            .arg(port.to_string())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| format!("Failed to start scraper: {}", e))?;
-
-        // Wait for readiness with backoff
-        let mut delay_ms = READY_RETRY_MS;
-        for attempt in 0..MAX_READY_ATTEMPTS {
-            sleep(Duration::from_millis(delay_ms)).await;
-
-            let health_url = format!("http://127.0.0.1:{}/health", port);
-            match self.http_client.get(&health_url).timeout(Duration::from_secs(2)).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let sp = ScraperProcess {
-                        child,
-                        port,
-                        last_used: Instant::now(),
-                    };
-                    *self.process.lock().await = Some(sp);
-
-                    // Spawn idle watchdog
-                    let process = self.process.clone();
-                    let http_client = self.http_client.clone();
-                    tokio::spawn(async move {
-                        idle_watchdog(process, http_client).await;
-                    });
-
-                    log::info!("Scraper ready on port {} (attempt {})", port, attempt + 1);
-                    return Ok(port);
-                }
-                _ => {
-                    // Increase delay on each attempt
-                    delay_ms = (delay_ms * 2).min(2000);
-                }
+        // Bundled standalone binary — run directly, no Python wrapper
+        let mut cmd = if self.python_path.is_empty() {
+            Command::new(&self.scraper_script)
+        } else {
+            let mut c = Command::new(&self.python_path);
+            if self.python_path.contains("uv") {
+                c.arg("run").arg("python");
             }
-        }
-
-        // Kill the process if it didn't become ready
-        let _ = child.kill();
-        Err(format!(
-            "Scraper failed to become ready within {} attempts",
-            MAX_READY_ATTEMPTS
-        ))
+            c
+        };
+        start_and_wait(cmd, &self.scraper_script, script_dir, port, &self.process, &self.http_client).await
     }
-}
+    }
 
 // ── Idle watchdog ─────────────────────────────────────────
 
@@ -351,4 +314,41 @@ fn percent_encode(s: &str) -> String {
         }
     }
     result
+}
+
+async fn start_and_wait(
+    mut cmd: Command,
+    script_path: &str,
+    script_dir: &Path,
+    port: u16,
+    process: &Arc<Mutex<Option<ScraperProcess>>>,
+    http_client: &reqwest::Client,
+) -> Result<u16, String> {
+    let mut child = cmd.arg(script_path)
+        .arg("--port").arg(port.to_string())
+        .current_dir(script_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to start scraper: {}", e))?;
+
+    let mut delay_ms = READY_RETRY_MS;
+    for attempt in 0..MAX_READY_ATTEMPTS {
+        sleep(Duration::from_millis(delay_ms)).await;
+        let health_url = format!("http://127.0.0.1:{}/health", port);
+        match http_client.get(&health_url).timeout(Duration::from_secs(2)).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let sp = ScraperProcess { child, port, last_used: Instant::now() };
+                *process.lock().await = Some(sp);
+                let p = process.clone();
+                let c = http_client.clone();
+                tokio::spawn(async move { idle_watchdog(p, c).await; });
+                log::info!("Scraper ready on port {} (attempt {})", port, attempt + 1);
+                return Ok(port);
+            }
+            _ => { delay_ms = (delay_ms * 2).min(2000); }
+        }
+    }
+    let _ = child.kill();
+    Err(format!("Scraper failed to become ready within {} attempts", MAX_READY_ATTEMPTS))
 }

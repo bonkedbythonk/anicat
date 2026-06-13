@@ -353,8 +353,10 @@ async fn proxy_handler(
 
     // Restrict proxy to known media domains only (SSRF prevention)
     let allowed_domains = [
+        "anilist.co", "anilistcdn",
         "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
         "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
+        "gravatar.com",
     ];
     let is_allowed = allowed_domains.iter().any(|d| url.contains(d));
     if !is_allowed {
@@ -429,7 +431,7 @@ async fn proxy_handler(
         if let Some(pos) = bytes.windows(4).position(|w| w == b"IEND") {
             let offset = pos + 8;
             if offset < bytes.len() {
-                bytes = bytes[offset..].to_vec();
+                bytes = bytes[..offset].to_vec();
                 strip_headers = true;
             }
         }

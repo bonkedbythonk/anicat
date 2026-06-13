@@ -53,3 +53,4 @@ jobs:
       release-name: Anicat ${{ github.ref_name }}
       release-body: See the assets below to download the latest version of Anicat.
       prerelease: false
+      release-draft: true

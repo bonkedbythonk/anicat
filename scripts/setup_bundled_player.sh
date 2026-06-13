@@ -33,7 +33,8 @@ if [ -z "$APP_DIR" ]; then
 fi
 
 echo "Copying MPV standalone binary and dynamic libraries..."
-cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/"
+cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv"
+cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv.exe"
 cp -R "$APP_DIR/Contents/MacOS/lib" "$RESOURCES_DIR/"
 
 echo "=== 2b. Bundling MoltenVK Vulkan driver for macOS GPU acceleration ==="

@@ -178,31 +178,59 @@ impl AppState {
         );
 
         let scraper_python = std::env::var("ANICAT_SCRAPER_PYTHON")
-            .unwrap_or_else(|_| "uv".to_string());
+            .unwrap_or_else(|_| {
+                // 1. Check for bundled standalone binary (production)
+                if let Ok(exe) = std::env::current_exe() {
+                    for parent in [
+                        exe.parent().and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } }),
+                        exe.parent().map(|d| d.to_path_buf()),
+                    ] {
+                        if let Some(ref dir) = parent {
+                            let binary = dir.join("scraper-bin").join("anicat-scraper");
+                            if binary.exists() {
+                                log::info!("Using bundled scraper binary: {}", binary.display());
+                                return String::new();
+                            }
+                        }
+                    }
+                }
+                // 2. Dev fallback: prefer uv (auto-manages deps), then system Python
+                for cmd in &["uv", "python3", "python"] {
+                    if std::process::Command::new(cmd).arg("--version").stderr(std::process::Stdio::null()).status().is_ok() {
+                        return cmd.to_string();
+                    }
+                }
+                "python3".to_string()
+            });
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
                 if let Ok(exe) = std::env::current_exe() {
                     if let Some(resource_dir) = exe.parent()
                         .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
-                        .or_else(|| {
-                            let r = exe.parent().unwrap_or(&exe).to_path_buf();
-                            if r.join("scraper").exists() { Some(r) } else { None }
-                        })
                     {
-                        let path = resource_dir.join("scraper").join("main.py");
-                        if path.exists() {
-                            return path.to_string_lossy().to_string();
+                        // 1. Bundled standalone binary (production)
+                        let bin = resource_dir.join("scraper-bin").join("anicat-scraper");
+                        if bin.exists() {
+                            return bin.to_string_lossy().to_string();
+                        }
+                        // 2. Bundled main.py (old dev fallback)
+                        let py = resource_dir.join("scraper").join("main.py");
+                        if py.exists() {
+                            return py.to_string_lossy().to_string();
+                        }
+                    } else {
+                        let r = exe.parent().unwrap_or(&exe).to_path_buf();
+                        let bin = r.join("scraper-bin").join("anicat-scraper");
+                        if bin.exists() {
+                            return bin.to_string_lossy().to_string();
+                        }
+                        if r.join("scraper").exists() {
+                            return r.join("scraper").join("main.py").to_string_lossy().to_string();
                         }
                     }
                 }
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-                manifest_dir
-                    .join("..")
-                    .join("..")
-                    .join("scraper")
-                    .join("main.py")
-                    .to_string_lossy()
-                    .to_string()
+                manifest_dir.join("..").join("..").join("scraper").join("main.py").to_string_lossy().to_string()
             });
         let scraper_manager = crate::scraper::ScraperManager::new(
             http_client.clone(),

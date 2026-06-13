@@ -167,6 +167,7 @@ Get-MpvBinaries -DestDir $ResourcesDir
 if (-not (Test-Path "$ResourcesDir\mpv.exe")) {
     throw "mpv.exe not found in $ResourcesDir after Get-MpvBinaries"
 }
+Copy-Item "$ResourcesDir\mpv.exe" -Destination "$ResourcesDir\mpv" -Force
 Write-Host "MPV binary size: $('{0:N0}' -f (Get-Item "$ResourcesDir\mpv.exe").Length) bytes"
 
 Write-Host "=== 4. Setting up isolated themed configuration directories ==="

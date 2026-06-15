@@ -44,7 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
-cd anicat/web
+cd anicat
+uv sync
+cd web
 npm install
 npm run tauri dev
 ```

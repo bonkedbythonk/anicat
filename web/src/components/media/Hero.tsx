@@ -137,22 +137,39 @@ const Hero = memo(function Hero({
         const now = Date.now();
         const timeDiff = airingTime - now;
 
+        const airingDate = new Date(airingTime);
+        const currentDate = new Date(now);
+        const isSameDay = airingDate.getDate() === currentDate.getDate() &&
+                          airingDate.getMonth() === currentDate.getMonth() &&
+                          airingDate.getFullYear() === currentDate.getFullYear();
+
+        const tomorrowDate = new Date(now + 86400000);
+        const isTomorrow = airingDate.getDate() === tomorrowDate.getDate() &&
+                           airingDate.getMonth() === tomorrowDate.getMonth() &&
+                           airingDate.getFullYear() === tomorrowDate.getFullYear();
+
         if (timeDiff <= 0) {
           const progress = item.user_status?.progress || 0;
           const nextEpNum = nextAiring.episode;
           const isUnwatched = nextEpNum > progress;
+          const label = isSameDay ? `Episode ${nextEpNum} aired today` : `Episode ${nextEpNum} aired`;
           items.push({
             item,
             type: "airing_today",
-            reasonText: `Episode ${nextEpNum} aired today`,
+            reasonText: label,
             badgeColor: "bg-gradient-to-r from-emerald-500 to-teal-500 shadow-md shadow-emerald-500/20 text-white border-t border-white/10",
             playEpisode: isUnwatched ? String(nextEpNum) : null,
           });
         } else {
+          const label = isSameDay
+            ? `Episode ${nextAiring.episode} airing today`
+            : isTomorrow
+              ? `Episode ${nextAiring.episode} airing tomorrow`
+              : `Episode ${nextAiring.episode} airing soon`;
           items.push({
             item,
             type: "airing_today",
-            reasonText: `Episode ${nextAiring.episode} airing today`,
+            reasonText: label,
             badgeColor: "bg-gradient-to-r from-amber-500 to-orange-500 shadow-md shadow-amber-500/20 text-white border-t border-white/10",
             playEpisode: null,
           });

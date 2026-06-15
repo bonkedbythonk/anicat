@@ -3,11 +3,11 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['curl_cffi', 'selectolax', 'Crypto', 'nodriver', 'fastapi', 'uvicorn', 'starlette']
-
-for pkg in ['curl_cffi', 'selectolax', 'pycryptodome', 'nodriver', 'fastapi', 'uvicorn', 'starlette']:
-    tmp_ret = collect_all(pkg)
-    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = ['curl_cffi', 'selectolax']
+tmp_ret = collect_all('curl_cffi')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('selectolax')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(

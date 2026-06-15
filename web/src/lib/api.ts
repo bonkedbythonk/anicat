@@ -700,15 +700,15 @@ export const mediaApi = {
   triggerUpdate: async () => {
     try {
       const url = latestDownloadUrl || "https://github.com/bonkedbythonk/anicat/releases";
-      await invoke("open_in_browser", { url });
+      await invoke("trigger_update", { url });
       return {
         status: "success",
-        message: "Opening release download page in your browser...",
+        message: "Update downloaded and installed! Restart the app to use the new version.",
       };
     } catch (err) {
       return {
         status: "error",
-        message: "Failed to open release page.",
+        message: "Failed to install update. Try downloading from the website.",
       };
     }
   },

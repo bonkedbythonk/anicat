@@ -162,5 +162,85 @@ pub async fn check_update(_state: State<'_, AppState>) -> Result<UpdateCheckResp
 
 #[tauri::command]
 pub async fn trigger_update(url: String) -> Result<(), String> {
-    open::that(&url).map_err(|e| e.to_string())
+    if !url.contains("github.com/bonkedbythonk/anicat/releases") && !url.contains(".dmg") {
+        return Err("Invalid update URL".to_string());
+    }
+
+    let tmp_dir = std::env::temp_dir().join("anicat_update");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let dmg_path = tmp_dir.join("Anicat.dmg");
+
+    // Download the DMG
+    log::info!("Downloading update from {}", url);
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Failed to download update: {}", e))?;
+    let bytes = resp.bytes()
+        .await
+        .map_err(|e| format!("Failed to read download: {}", e))?;
+    std::fs::write(&dmg_path, &bytes).map_err(|e| e.to_string())?;
+    log::info!("Downloaded {} bytes to {:?}", bytes.len(), dmg_path);
+
+    // Mount the DMG
+    let mount_output = std::process::Command::new("hdiutil")
+        .args(["attach", "-nobrowse", "-noautoopen"])
+        .arg(&dmg_path)
+        .output()
+        .map_err(|e| format!("Failed to mount DMG: {}", e))?;
+    let mount_output_str = String::from_utf8_lossy(&mount_output.stdout);
+    log::info!("hdiutil attach: {}", mount_output_str);
+
+    // Parse the mount point from hdiutil output: "/Volumes/Anicat 5.1.1"
+    let mount_point = mount_output_str
+        .lines()
+        .find_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                Some(parts.last().unwrap_or(&"").to_string())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "Could not find mount point".to_string())?;
+    log::info!("DMG mounted at: {}", mount_point);
+
+    // Find the .app in the mounted volume
+    let app_path = format!("{}/Anicat.app", mount_point);
+    if !std::path::Path::new(&app_path).exists() {
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", &mount_point, "-quiet"])
+            .output();
+        return Err("Anicat.app not found in DMG".to_string());
+    }
+
+    // Copy over the existing installation
+    let dst = "/Applications/Anicat.app";
+    log::info!("Copying {} to {}", app_path, dst);
+    let copy_output = std::process::Command::new("ditto")
+        .args([&app_path, dst])
+        .output()
+        .map_err(|e| format!("Failed to copy app: {}", e))?;
+    if !copy_output.status.success() {
+        let stderr = String::from_utf8_lossy(&copy_output.stderr);
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", &mount_point, "-quiet"])
+            .output();
+        return Err(format!("Failed to copy app: {}", stderr));
+    }
+
+    // Remove quarantine
+    let _ = std::process::Command::new("xattr")
+        .args(["-dr", "com.apple.quarantine", dst])
+        .output();
+
+    // Unmount DMG
+    let _ = std::process::Command::new("hdiutil")
+        .args(["detach", &mount_point, "-quiet"])
+        .output();
+
+    // Clean up temp files
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    log::info!("Update installed successfully to {}", dst);
+    Ok(())
 }

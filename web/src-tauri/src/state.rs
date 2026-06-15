@@ -230,32 +230,42 @@ impl AppState {
         let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
             .unwrap_or_else(|_| {
                 if let Ok(exe) = std::env::current_exe() {
+                    log::info!("[scraper] current_exe: {:?}", exe);
                     if let Some(resource_dir) = exe.parent()
                         .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
                     {
+                        log::info!("[scraper] resource_dir exists: {:?}", resource_dir);
                         // 1. Bundled standalone binary (production)
                         let bin = resource_dir.join("scraper-bin").join("anicat-scraper");
+                        log::info!("[scraper] checking bundled binary: {:?} exists={}", bin, bin.exists());
                         if bin.exists() {
                             return bin.to_string_lossy().to_string();
                         }
                         // 2. Bundled main.py (old dev fallback)
                         let py = resource_dir.join("scraper").join("main.py");
+                        log::info!("[scraper] checking bundled main.py: {:?} exists={}", py, py.exists());
                         if py.exists() {
                             return py.to_string_lossy().to_string();
                         }
                     } else {
                         let r = exe.parent().unwrap_or(&exe).to_path_buf();
+                        log::info!("[scraper] no Resources dir, trying parent: {:?}", r);
                         let bin = r.join("scraper-bin").join("anicat-scraper");
+                        log::info!("[scraper] checking binary at: {:?} exists={}", bin, bin.exists());
                         if bin.exists() {
                             return bin.to_string_lossy().to_string();
                         }
                         if r.join("scraper").exists() {
-                            return r.join("scraper").join("main.py").to_string_lossy().to_string();
+                            let py = r.join("scraper").join("main.py");
+                            log::info!("[scraper] checking main.py at: {:?} exists={}", py, py.exists());
+                            return py.to_string_lossy().to_string();
                         }
                     }
                 }
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-                manifest_dir.join("..").join("..").join("scraper").join("main.py").to_string_lossy().to_string()
+                let fallback = manifest_dir.join("..").join("..").join("scraper").join("main.py");
+                log::warn!("[scraper] falling back to dev path: {:?}", fallback);
+                fallback.to_string_lossy().to_string()
             });
         let scraper_manager = crate::scraper::ScraperManager::new(
             http_client.clone(),

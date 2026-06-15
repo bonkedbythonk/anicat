@@ -4,9 +4,7 @@
 
   <p>
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square" alt="Platform">
-    <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=stable" alt="Latest stable release">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
-    <img src="https://img.shields.io/github/last-commit/bonkedbythonk/anicat/nightly?style=flat-square&label=nightly" alt="Last nightly commit">
   </p>
 
   <img src="assets/branding/dashboard.png" alt="Anicat Desktop" width="720">

@@ -72,10 +72,13 @@ const Hero = memo(function Hero({
   onFocusChange,
 }: HeroProps) {
   const [isIntersecting, setIsIntersecting] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
   const [clicked, setClicked] = useState(false);
   const clickedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const desktopQueueRef = useRef<HTMLDivElement>(null);
+  const mobileQueueRef = useRef<HTMLDivElement>(null);
 
   // 1. Build the priority queue
   const queue = useMemo(() => {
@@ -230,6 +233,17 @@ const Hero = memo(function Hero({
 
   // 4. Trailer autoplay removed
 
+  // 5. Auto-cycle / rotate slides every 8 seconds when not hovered and visible
+  useEffect(() => {
+    if (queue.length <= 1 || isHovered || !isIntersecting) return;
+
+    const timer = setInterval(() => {
+      setFocusedIndex((prev) => (prev + 1) % queue.length);
+    }, 8000);
+
+    return () => clearInterval(timer);
+  }, [queue.length, isHovered, isIntersecting]);
+
   if (!item) {
     return (
       <div className="flex flex-col gap-4">
@@ -265,12 +279,39 @@ const Hero = memo(function Hero({
     };
   }, []);
 
+  // Scroll focused item in desktop/mobile queue into view when activeIndex changes
+  useEffect(() => {
+    if (desktopQueueRef.current) {
+      const activeEl = desktopQueueRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }
+    }
+    if (mobileQueueRef.current) {
+      const activeEl = mobileQueueRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
+      }
+    }
+  }, [activeIndex]);
+
   // Determine button state and label
   const isAiringFuture = activeCcItem?.type === "airing_today" && !activeCcItem.playEpisode;
   const nextEpisodeToWatch = activeCcItem?.playEpisode;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div 
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="flex flex-col gap-4"
+    >
       {/* Hero card container */}
       <div ref={containerRef} className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden group -mx-6 lg:mx-0 lg:rounded-2xl hero-card-container forced-dark-container">
         {/* Background */}
@@ -279,9 +320,9 @@ const Hero = memo(function Hero({
           <img
             src={proxyImage(item.banner_image || item.cover_image?.large || item.cover_image?.medium)}
             alt={title}
-              className={`absolute inset-0 w-full h-full object-cover transition-[transform,filter,opacity] duration-[3s] ease-in-out ${
+              className={`absolute inset-0 w-full h-full object-cover transition duration-[1500ms] ease-in-out ${
                 hasBanner
-                  ? "brightness-[0.45] group-hover:brightness-[0.55] scale-[1.03] group-hover:scale-100"
+                  ? "brightness-[0.45] group-hover:brightness-[0.55] scale-100 group-hover:scale-[1.03]"
                   : "brightness-[0.28] blur-xl scale-110"
               } opacity-100`}
           />
@@ -398,7 +439,10 @@ const Hero = memo(function Hero({
 
           {/* Right side: Watchlist Command Center Queue Shelf */}
           {queue.length > 1 && (
-            <div className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide">
+            <div 
+              ref={desktopQueueRef}
+              className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide"
+            >
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">
                   Up Next
@@ -417,6 +461,7 @@ const Hero = memo(function Hero({
                     <button
                       key={`${ccItem.item.id}-${index}`}
                       onClick={() => setFocusedIndex(index)}
+                      data-active={isFocused ? "true" : "false"}
                       className={`w-full flex items-center gap-3 p-2 rounded-xl text-left border transition-[background-color,border-color] duration-200 group cursor-pointer ${
                         isFocused
                           ? "bg-accent/10 border-accent/30 shadow-[0_0_15px_rgba(0,0,0,0.1)] shadow-accent/25"
@@ -467,7 +512,10 @@ const Hero = memo(function Hero({
 
       {/* Mobile Queue Shelf */}
       {queue.length > 1 && (
-        <div className="flex md:hidden overflow-x-auto w-full gap-2 px-6 pb-4 pt-1 scrollbar-hide select-none">
+        <div 
+          ref={mobileQueueRef}
+          className="flex md:hidden overflow-x-auto w-full gap-2 px-6 pb-4 pt-1 scrollbar-hide select-none"
+        >
           {queue.map((ccItem, index) => {
             const isFocused = index === activeIndex;
             const ccTitle = ccItem.item.title.english || ccItem.item.title.romaji || "Unknown";
@@ -475,6 +523,7 @@ const Hero = memo(function Hero({
               <button
                 key={`${ccItem.item.id}-m${index}`}
                 onClick={() => setFocusedIndex(index)}
+                data-active={isFocused ? "true" : "false"}
                 className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-[background-color,border-color] duration-150 ${
                     isFocused
                       ? "bg-accent border-accent text-white"

@@ -201,7 +201,7 @@ pub async fn get_episodes(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
+    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
     let is_manga = provider_name == "mangakatana";
 
     let db = state.open_db().map_err(|e| e.to_string())?;
@@ -211,7 +211,7 @@ pub async fn get_episodes(
         let res = if is_manga {
             state.scraper_manager.get_manga(&slug).await.map(|info| info.episodes)
         } else {
-            state.scraper_manager.get_anime(&slug).await.map(|info| info.episodes)
+            state.scraper_manager.get_anime(&slug, &provider_name).await.map(|info| info.episodes)
         };
         match res {
             Ok(eps) => eps,
@@ -233,7 +233,7 @@ pub async fn get_episodes(
         let results = if is_manga {
             state.scraper_manager.search_manga(&title).await.unwrap_or_default()
         } else {
-            state.scraper_manager.search(&title).await.unwrap_or_default()
+            state.scraper_manager.search(&title, &provider_name).await.unwrap_or_default()
         };
 
         if let Some(best) = find_best_match(&title, results, |r| &r.title) {
@@ -243,7 +243,7 @@ pub async fn get_episodes(
             let res = if is_manga {
                 state.scraper_manager.get_manga(&best.id).await.map(|info| info.episodes)
             } else {
-                state.scraper_manager.get_anime(&best.id).await.map(|info| info.episodes)
+                state.scraper_manager.get_anime(&best.id, &provider_name).await.map(|info| info.episodes)
             };
             res.unwrap_or_default()
         } else {
@@ -280,7 +280,7 @@ pub async fn resolve_stream(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
+    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
 
     let db = state.open_db()?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
@@ -288,7 +288,7 @@ pub async fn resolve_stream(
 
     let servers = state
         .scraper_manager
-        .get_streams(&slug, episode_number)
+        .get_streams(&slug, episode_number, &provider_name)
         .await?;
 
     let result = serde_json::json!({ "streams": servers });
@@ -299,8 +299,10 @@ pub async fn resolve_stream(
 pub async fn search_provider(
     state: State<'_, AppState>,
     query: String,
+    provider: Option<String>,
 ) -> Result<Vec<crate::scraper::AnimeRef>, String> {
-    state.scraper_manager.search(&query).await
+    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    state.scraper_manager.search(&query, &provider_name).await
 }
 
 #[tauri::command]
@@ -330,12 +332,12 @@ pub async fn debug_provider_streams(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "anineko".to_string());
+    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
     let db = state.open_db()?;
     let slug = match registry::service::get_provider_slug(&db, media_id, &provider_name) {
         Some(s) => s,
         None => {
-            // Auto-search: get title from AniList, search AniNeko, save slug
+            // Auto-search: get title from AniList, search provider, save slug
             let mut vars = std::collections::HashMap::new();
             vars.insert("id".to_string(), serde_json::json!(media_id));
             vars.insert("type".to_string(), serde_json::json!("ANIME"));
@@ -351,7 +353,7 @@ pub async fn debug_provider_streams(
             if title.is_empty() {
                 return Err(format!("No title found for media {}", media_id));
             }
-            let results = state.scraper_manager.search(&title).await.unwrap_or_default();
+            let results = state.scraper_manager.search(&title, &provider_name).await.unwrap_or_default();
             match find_best_match(&title, results, |r| &r.title) {
                 Some(best) => {
                     let _ = registry::service::set_provider_slug(&db, media_id, &provider_name, &best.id);
@@ -359,14 +361,14 @@ pub async fn debug_provider_streams(
                 }
                 None => {
                     return Err(format!(
-                        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"AniNeko search for '{}' returned no results"}}"#,
+                        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"Search for '{}' returned no results"}}"#,
                         media_id, provider_name, title
                     ));
                 }
             }
         }
     };
-    let mut result = state.scraper_manager.debug_streams(&slug, episode_number).await?;
+    let mut result = state.scraper_manager.debug_streams(&slug, episode_number, &provider_name).await?;
     if let Some(obj) = result.as_object_mut() {
         obj.insert("resolved_slug".to_string(), serde_json::json!(slug));
         obj.insert("provider".to_string(), serde_json::json!(provider_name));
@@ -535,27 +537,25 @@ async fn download_episode(
     }
 
     // Get stream URL
-    let provider = "anineko";
-    let slug = {
-        let db = match state.open_db() {
-            Ok(d) => d,
-            Err(_) => {
-                notify("Failed to open database");
-                return;
-            }
-        };
-        match crate::registry::service::get_provider_slug(&db, media_id, provider) {
-            Some(s) => s,
-            None => {
-                let err = format!("No provider mapping for media {}", media_id);
-                let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
-                notify(&err);
-                return;
-            }
+    let db = match state.open_db() {
+        Ok(d) => d,
+        Err(_) => {
+            notify("Failed to open database");
+            return;
         }
     };
+    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "allanime") {
+        (s, "allanime")
+    } else if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "allanime") {
+        (s, "allanime")
+    } else {
+        let err = format!("No provider mapping for media {}", media_id);
+        let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
+        notify(&err);
+        return;
+    };
 
-    let servers = match state.scraper_manager.get_streams(&slug, episode_number as i32).await {
+    let servers = match state.scraper_manager.get_streams(&slug, episode_number as i32, provider).await {
         Ok(s) => s,
         Err(e) => {
             let err = format!("Failed to get stream: {}", e);

@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, User, Clock, Tv, BookOpen, Bookmark, Heart, Sparkles } from "lucide-react";
+import { Loader2, User, Clock, Tv, BookOpen, Bookmark, Heart } from "lucide-react";
 import { mediaApi, type UserProfile, type MediaItem } from "@/lib/api";
 import { proxyImage } from "@/lib/proxy";
 import { useAppStore } from "@/stores/app";
-import { sanitizeHtml } from "@/lib/sanitize";
 import { LazyCard } from "@/components/media/LazyCard";
 
 interface ProfileViewProps {
@@ -51,31 +50,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
     return `${days} Days, ${hours} Hours`;
   }
 
-  // Basic AniList markdown/HTML simple formatter with sanitization
-  function cleanAbout(html?: string) {
-    if (!html) return "";
-    return sanitizeHtml(
-      html
-        .replace(/img\d+\(([^)]+)\)/g, '<img src="$1" class="rounded-lg max-w-full my-2 inline-block" />')
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">$1</a>')
-        .replace(/__(.*?)__/g, "<strong>$1</strong>")
-        .replace(/\*+(.*?)\*+/g, "<em>$1</em>")
-        .replace(/~+(.*?)~+/g, "<del>$1</del>")
-        .replace(/\n/g, "<br />")
-    );
-  }
 
-  const maxGenreCount = profile.genres && profile.genres.length > 0 
-    ? Math.max(...profile.genres.map(g => g.count)) 
-    : 1;
-
-  const genreColors = [
-    "from-violet-500 to-indigo-500",
-    "from-pink-500 to-rose-500",
-    "from-cyan-500 to-blue-500",
-    "from-amber-500 to-orange-500",
-    "from-emerald-500 to-teal-500"
-  ];
 
   const favorites = favType === "ANIME" 
     ? profile.favorite_anime || [] 
@@ -174,52 +149,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
         </div>
       </div>
 
-      {/* 3. Biography & Top Genres Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Biography Card */}
-        <div className="lg:col-span-2 rounded-2xl bg-surface border border-white/[0.04] p-6 space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-            <User size={18} className="text-accent" />
-            <span>Biography</span>
-          </h2>
-          {profile.about ? (
-            <div 
-              className="text-gray-400 text-sm leading-relaxed overflow-y-auto max-h-60 pr-2 scrollbar-thin"
-              dangerouslySetInnerHTML={{ __html: cleanAbout(profile.about) }}
-            />
-          ) : (
-            <p className="text-gray-500 text-sm italic">No biography provided on AniList.</p>
-          )}
-        </div>
 
-        {/* Genre Breakdown Card */}
-        <div className="rounded-2xl bg-surface border border-white/[0.04] p-6 space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-            <Sparkles size={18} className="text-accent" />
-            <span>Top Genres</span>
-          </h2>
-          {profile.genres && profile.genres.length > 0 ? (
-            <div className="space-y-3">
-              {profile.genres.map((g, i) => (
-                <div key={g.genre} className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <span className="text-gray-300">{g.genre}</span>
-                    <span className="text-gray-500">{g.count} titles</span>
-                  </div>
-                  <div className="w-full bg-white/[0.03] h-2 rounded-full overflow-hidden border border-white/[0.02]">
-                    <div 
-                      style={{ width: `${(g.count / maxGenreCount) * 100}%` }}
-                      className={`h-full bg-gradient-to-r ${genreColors[i % genreColors.length]} rounded-full transition-all duration-500`}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-sm italic">No genre data available.</p>
-          )}
-        </div>
-      </div>
 
       {/* 4. Interactive Favorites Showcase Grid */}
       <div className="space-y-6">

@@ -88,6 +88,7 @@ impl AniListClient {
 
         let _permit = self.request_lock.acquire().await.map_err(|e| format!("Semaphore error: {}", e))?;
 
+        let vars_str = serde_json::to_string(&variables).unwrap_or_else(|_| "{}".to_string());
         let body = GraphQLRequest {
             query: query.to_string(),
             variables,
@@ -106,18 +107,27 @@ impl AniListClient {
             }
         }
 
+        let query_first_line = query.lines().map(|s| s.trim()).find(|s| !s.is_empty()).unwrap_or("");
+        log::info!("Sending request to AniList API: query='{}' variables={}", query_first_line, vars_str);
         let resp = req
             .send()
             .await
-            .map_err(|e| format!("AniList request failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("AniList request connection failed: {}", e);
+                format!("AniList request failed: {}", e)
+            })?;
 
         let status = resp.status();
         let text = resp
             .text()
             .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+            .map_err(|e| {
+                log::error!("Failed to read AniList response body: {}", e);
+                format!("Failed to read response: {}", e)
+            })?;
 
         if !status.is_success() {
+            log::error!("AniList request failed with status {}: {}", status.as_u16(), text);
             if status.as_u16() == 429 {
                 let mut rl = self.rate_limited_until.lock().unwrap();
                 *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
@@ -126,8 +136,12 @@ impl AniListClient {
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
 
+        log::info!("AniList request succeeded (HTTP {})", status.as_u16());
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
-            .map_err(|e| format!("Failed to parse response: {}\nBody: {}", e, text))?;
+            .map_err(|e| {
+                log::error!("Failed to parse AniList response JSON: {}, body: {}", e, text);
+                format!("Failed to parse response: {}\nBody: {}", e, text)
+            })?;
 
         if let Some(errors) = parsed.errors {
             if !errors.is_empty() {

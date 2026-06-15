@@ -33,6 +33,14 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
                     .map(|s| s.to_string());
                 log::info!("AniList health check successful: viewer={:?}", name);
                 state.anilist_client.set_username(name.clone());
+                if let Some(ref name_str) = name {
+                    let mut config = state.inner.config.write().await;
+                    if config.api.anilist_username.as_ref() != Some(name_str) {
+                        config.api.anilist_username = Some(name_str.clone());
+                        drop(config);
+                        let _ = state.save_config().await;
+                    }
+                }
                 (true, name, None)
             }
             Err(e) => {

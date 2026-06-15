@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Search, Loader2, SlidersHorizontal, Activity } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LazyCard } from "@/components/media/LazyCard";
+import { MediaCard } from "@/components/media/MediaCard";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
@@ -18,11 +18,74 @@ export function SearchView({ onSelect }: SearchViewProps) {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
   const [suggestions, setSuggestions] = useState<MediaItem[]>([]);
-  const [shuffleKey, setShuffleKey] = useState(0); // triggers client-side re-shuffle
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
   const queryClient = useQueryClient();
+
+  // Cached discovery feed — refetches silently every 5 min, not on every mount
+  const {
+    data: discoveryRaw,
+    isLoading: loadingDiscovery,
+    isError: discoveryError,
+  } = useQuery({
+    queryKey: ["search-discovery", type],
+    queryFn: async () => {
+      const [trending, seasonal, recent] = await Promise.all([
+        mediaApi.getTrending(type),
+        mediaApi.getSeasonal(type),
+        mediaApi.getRecent(type, 12),
+      ]);
+      return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
+    },
+  });
+
+  // Random picks — cached per type, re-fetched with "New Random" button
+  const {
+    data: randomListRaw = [],
+    isFetching: fetchingRandom,
+    refetch: refetchRandom,
+  } = useQuery({
+    queryKey: ["search-random", type],
+    queryFn: async () => {
+      const randomPage = Math.floor(Math.random() * 100) + 1;
+      const data = await mediaApi.search("", type, randomPage);
+      return data.media || [];
+    },
+  });
+
+  const randomList = useMemo(() => randomListRaw, [randomListRaw]);
+
+  const [shuffledPools, setShuffledPools] = useState<Record<"ANIME" | "MANGA", MediaItem[]>>({
+    ANIME: [],
+    MANGA: [],
+  });
+
+  useEffect(() => {
+    if (!discoveryRaw) return;
+    setShuffledPools(prev => {
+      if (prev[type].length > 0) return prev;
+      
+      const pool = [...discoveryRaw.trending, ...discoveryRaw.seasonal, ...discoveryRaw.recent];
+      const unique = pool.filter((item, index, array) => array.findIndex(other => other.id === item.id) === index);
+      const shuffled = unique.sort(() => Math.random() - 0.5).slice(0, 18);
+      return {
+        ...prev,
+        [type]: shuffled,
+      };
+    });
+  }, [discoveryRaw, type]);
+
+  const handleShuffle = () => {
+    if (!discoveryRaw) return;
+    const pool = [...discoveryRaw.trending, ...discoveryRaw.seasonal, ...discoveryRaw.recent];
+    const unique = pool.filter((item, index, array) => array.findIndex(other => other.id === item.id) === index);
+    const shuffled = unique.sort(() => Math.random() - 0.5).slice(0, 18);
+    setShuffledPools(prev => ({
+      ...prev,
+      [type]: shuffled,
+    }));
+  };
 
   // Paginated search results — active when query or filters are present
   const {
@@ -58,50 +121,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
   const loading = Boolean(debouncedQuery) && loadingResults;
 
-  // Cached discovery feed — refetches silently every 5 min, not on every mount
-  const {
-    data: discoveryRaw,
-    isLoading: loadingDiscovery,
-    isError: discoveryError,
-  } = useQuery({
-    queryKey: ["search-discovery", type],
-    queryFn: async () => {
-      const [trending, seasonal, recent] = await Promise.all([
-        mediaApi.getTrending(type),
-        mediaApi.getSeasonal(type),
-        mediaApi.getRecent(type, 12),
-      ]);
-      return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
-    },
-  });
 
-  // Random picks — cached per type, re-fetched with "New Random" button
-  const {
-    data: randomListRaw = [],
-    isFetching: fetchingRandom,
-    refetch: refetchRandom,
-  } = useQuery({
-    queryKey: ["search-random", type],
-    queryFn: async () => {
-      const randomPage = Math.floor(Math.random() * 100) + 1;
-      const data = await mediaApi.search("", type, randomPage);
-      return data.media || [];
-    },
-  });
-
-  // Client-side shuffle of discovery pool
-  const discovery = useMemo(() => {
-    if (!discoveryRaw) return [];
-    const pool = [...discoveryRaw.trending, ...discoveryRaw.seasonal, ...discoveryRaw.recent];
-    return pool
-      .sort(() => Math.random() - 0.5)
-      .filter((item, index, array) => array.findIndex(other => other.id === item.id) === index)
-      .slice(0, 18);
-    // shuffleKey triggers a new client-side random sort
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discoveryRaw, shuffleKey]);
-
-  const randomList = useMemo(() => randomListRaw, [randomListRaw]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -163,7 +183,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                   <button
                     key={item.id}
                     onClick={() => {
-                      setQuery(title);
+                      onSelect(item);
                     }}
                     className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-2 text-left transition-colors hover:border-accent/30 hover:bg-white/[0.05]"
                   >
@@ -262,24 +282,48 @@ export function SearchView({ onSelect }: SearchViewProps) {
         const hasFilters = Object.values(filters).some(Boolean);
         
         if (query.trim().length === 0 && !hasFilters) {
+          const discovery = shuffledPools[type];
+          const hasDiscovery = discovery.length > 0;
+          const showSkeleton = loadingDiscovery && !hasDiscovery;
+
           return (
-            <div className="space-y-12">
-              {loadingDiscovery ? (
-                 <div className="flex flex-col items-center justify-center py-24 space-y-4">
-                   <Loader2 className="animate-spin text-accent" size={40} />
-                   <p className="text-gray-500 font-medium">Curating your discovery feed...</p>
-                 </div>
+            <div className="space-y-12 relative">
+              {loadingDiscovery && hasDiscovery && (
+                <div className="absolute top-1/2 left-0 right-0 z-10 flex justify-center -translate-y-1/2 animate-fade-in">
+                  <div className="bg-black/80 px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
+                    <Loader2 className="animate-spin text-accent" size={20} />
+                    <span className="text-xs font-bold text-white uppercase tracking-widest">Loading {type.toLowerCase()}...</span>
+                  </div>
+                </div>
+              )}
+
+              {showSkeleton ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="h-7 bg-white/[0.04] rounded-md w-48 animate-pulse" />
+                    <div className="h-4 bg-white/[0.02] rounded-md w-64 animate-pulse" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div key={i} className="space-y-3 animate-pulse">
+                        <div className="aspect-[2/3] w-full bg-white/[0.04] rounded-2xl border border-white/[0.03]" />
+                        <div className="h-4 bg-white/[0.04] rounded-md w-3/4" />
+                        <div className="h-3 bg-white/[0.02] rounded-md w-1/2" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <>
-                  {discovery.length > 0 && (
-                    <div className="space-y-4">
+                  {hasDiscovery && (
+                    <div className={`space-y-4 transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <h2 className="text-2xl font-extrabold tracking-tight text-white">Discover {type === "ANIME" ? "Anime" : "Manga"}</h2>
                           <p className="text-sm text-gray-500">A rotating mix of trending, seasonal, and recent picks.</p>
                         </div>
                         <button
-                          onClick={() => setShuffleKey(k => k + 1)}
+                          onClick={handleShuffle}
                           className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
                         >
                           Shuffle
@@ -287,14 +331,14 @@ export function SearchView({ onSelect }: SearchViewProps) {
                       </div>
                       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                         {discovery.map((item) => (
-                          <LazyCard key={item.id} item={item} onSelect={onSelect} />
+                          <MediaCard key={item.id} item={item} onSelect={onSelect} />
                         ))}
                       </div>
                     </div>
                   )}
 
                   {randomList.length > 0 && (
-                    <div className="space-y-4 pt-12 border-t border-white/[0.04]">
+                    <div className={`space-y-4 pt-12 border-t border-white/[0.04] transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <h2 className="text-2xl font-extrabold tracking-tight text-white">Random Picks</h2>
@@ -310,13 +354,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
                       </div>
                       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                         {randomList.map((item) => (
-                          <LazyCard key={item.id} item={item} onSelect={onSelect} />
+                          <MediaCard key={item.id} item={item} onSelect={onSelect} />
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {!loadingDiscovery && discovery.length === 0 && randomList.length === 0 && (
+                  {!loadingDiscovery && !hasDiscovery && randomList.length === 0 && (
                     <div className="text-center py-24 bg-white/[0.02] rounded-3xl border border-dashed border-white/[0.06]">
                       <Activity size={40} className="mx-auto text-gray-800 mb-4" />
                       <p className="text-gray-500 font-semibold">Unable to load discovery feed.</p>
@@ -338,7 +382,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
           return (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
               {results.map((item) => (
-                <LazyCard key={item.id} item={item} onSelect={onSelect} />
+                <MediaCard key={item.id} item={item} onSelect={onSelect} />
               ))}
             </div>
           );

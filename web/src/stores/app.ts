@@ -103,7 +103,7 @@ export const useAppStore = create<AppState>((set) => ({
 export const usePlaybackStore = create<PlaybackState>(() => ({
   item: null,
   episode: null,
-  provider: "anineko",
+  provider: "allanime",
   server: null,
 }));
 
@@ -120,7 +120,7 @@ export function clearPlayback() {
   usePlaybackStore.setState({
     item: null,
     episode: null,
-    provider: "anineko",
+    provider: "allanime",
     server: null,
   });
 }
@@ -156,9 +156,9 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   playerType: "external",
-  defaultProvider: "anineko",
+  defaultProvider: "allanime",
   autoplay: true,
-  autoskip: true,
+  autoskip: false,
   animePreview: true,
   preferredQuality: "1080p",
   preferredTitleLanguage: "romaji",
@@ -188,9 +188,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         "embedded",
       defaultProvider:
         ((config as any)?.general?.provider as string) ||
-        "anineko",
+        "allanime",
       autoplay: ((config as any)?.general?.autoplay as boolean) ?? true,
-      autoskip: ((config as any)?.general?.autoskip as boolean) ?? true,
+      autoskip: ((config as any)?.general?.autoskip as boolean) ?? false,
       animePreview:
         ((config as any)?.general?.anime_preview as boolean) ?? true,
       preferredQuality:

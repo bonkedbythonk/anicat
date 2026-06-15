@@ -6,7 +6,6 @@ import {
   Globe,
   ArrowRight,
   Monitor,
-  Calendar,
   Download,
   ShieldAlert,
   Clock,
@@ -27,11 +26,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [connectedUser, setConnectedUser] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
+  const [uiStyle, setUiStyle] = useState<"neon-abyss" | "sakura-zen" | "retro-manga">("neon-abyss");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [downloadsPath, setDownloadsPath] = useState("");
   const [gpuUpscaling, setGpuUpscaling] = useState<"balanced" | "off">("balanced");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
   const [authPending, setAuthPending] = useState(false);
+
+  useEffect(() => {
+    const savedStyle = (localStorage.getItem("anicat_ui_style") as any) || "neon-abyss";
+    setUiStyle(savedStyle);
+  }, []);
 
   useEffect(() => {
     mediaApi.getConfig().then((cfg) => {
@@ -120,6 +125,41 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     window.dispatchEvent(new StorageEvent("storage", { key: "anicat_theme", newValue: newTheme }));
   };
 
+  const handleUiStyleChange = (style: "neon-abyss" | "sakura-zen" | "retro-manga") => {
+    setUiStyle(style);
+    localStorage.setItem("anicat_ui_style", style);
+    document.documentElement.setAttribute("data-style", style);
+    document.documentElement.classList.add("theme-transition");
+
+    const SAKURA_ZEN_FONT_URL = "https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&display=swap";
+    const RETRO_MANGA_FONT_URL = "https://fonts.googleapis.com/css2?family=Bangers&family=Noto+Sans+JP:wght@400;700&display=swap";
+
+    const existingSakura = document.getElementById("font-noto-serif-jp");
+    const existingRetro = document.getElementById("font-retro-manga");
+    if (existingSakura) existingSakura.remove();
+    if (existingRetro) existingRetro.remove();
+
+    if (style === "sakura-zen") {
+      const link = document.createElement("link");
+      link.id = "font-noto-serif-jp";
+      link.rel = "stylesheet";
+      link.href = SAKURA_ZEN_FONT_URL;
+      document.head.appendChild(link);
+    } else if (style === "retro-manga") {
+      const link = document.createElement("link");
+      link.id = "font-retro-manga";
+      link.rel = "stylesheet";
+      link.href = RETRO_MANGA_FONT_URL;
+      document.head.appendChild(link);
+    }
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "anicat_ui_style", newValue: style }));
+
+    setTimeout(() => {
+      document.documentElement.classList.remove("theme-transition");
+    }, 400);
+  };
+
   const handleTimeFormatChange = async (format: "12h" | "24h") => {
     setTimeFormat(format);
     localStorage.setItem("anicat_time_format", format);
@@ -135,7 +175,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-2xl animate-fade-in p-4">
-      <div className="relative w-full max-w-lg bg-card border border-white/[0.08] rounded-3xl p-8 shadow-2xl shadow-black/80 flex flex-col space-y-6">
+      <div className="relative w-full max-w-lg bg-card border border-white/[0.08] rounded-3xl p-8 shadow-2xl shadow-black/80 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide">
         
         {/* Step Indicators */}
         <div className="flex justify-center space-x-2.5">
@@ -164,15 +204,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <div className="space-y-3.5 text-left max-w-sm mx-auto bg-white/[0.02] border border-white/[0.04] p-5 rounded-2xl">
               <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
                 <Globe size={18} className="text-accent shrink-0" />
-                <span>Syncs instantly with your AniList lists</span>
+                <span>Syncs instantly with AniList (Anime & Manga)</span>
               </div>
               <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
                 <Monitor size={18} className="text-accent shrink-0" />
-                <span>Integrated media player with auto-tracking</span>
+                <span>Media player & built-in manga reader</span>
               </div>
               <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
-                <Calendar size={18} className="text-accent shrink-0" />
-                <span>Full airing schedule (Global & Watching)</span>
+                <Sparkles size={18} className="text-accent shrink-0" />
+                <span>High-performance GPU upscaling (Anime4K)</span>
               </div>
               <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
                 <Download size={18} className="text-accent shrink-0" />
@@ -302,6 +342,33 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 </div>
               </div>
 
+              {/* Visual Skin Preference */}
+              <div className="space-y-2.5">
+                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <Palette size={12} className="text-accent" />
+                  <span>Visual Theme Skin</span>
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { key: "neon-abyss", label: "Neon Abyss" },
+                    { key: "sakura-zen", label: "Sakura Zen" },
+                    { key: "retro-manga", label: "Retro Manga" }
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => handleUiStyleChange(t.key as any)}
+                      className={`py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                        uiStyle === t.key
+                          ? "bg-accent text-white shadow-lg shadow-accent/20"
+                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Time Format */}
               <div className="space-y-2.5">
                 <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
@@ -422,10 +489,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">1. Media Playback Controls</h3>
                 <p className="text-gray-400 leading-relaxed">When playing anime in the external MPV window, use these keyboard shortcuts for seamless control:</p>
                 <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Next Episode</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + N</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Prev Episode</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + P</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Skip Intro</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + S</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + S</kbd></div>
                   <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + T</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-play</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + A</kbd></div>
                 </div>
               </div>
 
@@ -433,14 +499,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">2. GPU Upscaling Shaders (Anime4K)</h3>
                 <p className="text-gray-400 leading-relaxed">You can dynamically toggle Anime4K high-quality upscaling shaders directly inside MPV during playback:</p>
                 <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Enable Shaders</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 1</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Disable Shaders</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 2</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Shaders</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 1</kbd></div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">3. Airing Calendar & Tracking</h3>
-                <p className="text-gray-400 leading-relaxed">Use the Airing Calendar view to track when new episodes of your favorite seasonal anime release. The dashboard displays customized cards with your current progress, so you never lose track.</p>
+                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">3. Manga Reading & Tracking</h3>
+                <p className="text-gray-400 leading-relaxed">Read manga chapters with our built-in reader. Your reading progress is automatically tracked and synchronized to AniList, ensuring your library is always up to date.</p>
               </div>
             </div>
 

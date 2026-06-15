@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { useState, useEffect } from "react";
-import { Loader2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Heart } from "lucide-react";
+import { Loader2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Heart, Repeat } from "lucide-react";
 import { MediaCard } from "@/components/media/MediaCard";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
@@ -9,10 +9,11 @@ import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 
-type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped";
+type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped" | "repeating";
 
 const LIST_TABS: { key: WatchStatus; label: string; icon: any }[] = [
   { key: "watching", label: "Reading/Watching", icon: Monitor },
+  { key: "repeating", label: "Rereading/Rewatching", icon: Repeat },
   { key: "completed", label: "Completed", icon: CheckCircle2 },
   { key: "planning", label: "Planning", icon: Bookmark },
   { key: "paused", label: "Paused", icon: Pause },
@@ -77,7 +78,13 @@ export function ListsView({ onSelect }: ListsViewProps) {
             }`}
           >
             <tab.icon size={15} />
-            <span>{tab.key === "watching" ? (type === "MANGA" ? "Reading" : "Watching") : tab.label}</span>
+            <span>
+              {tab.key === "watching"
+                ? (type === "MANGA" ? "Reading" : "Watching")
+                : tab.key === "repeating"
+                  ? (type === "MANGA" ? "Rereading" : "Rewatching")
+                  : tab.label}
+            </span>
           </button>
         ))}
       </div>

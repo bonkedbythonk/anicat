@@ -1,9 +1,14 @@
 name: Release
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
   workflow_dispatch:
+    inputs:
+      tag-name:
+        description: 'Tag to release (e.g. v5.0.1)'
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,14 +19,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.check.outputs.skip }}
+      tag: ${{ steps.release-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+      - name: Determine release tag
+        id: release-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag-name }}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(jq -r .version web/src-tauri/tauri.conf.json)
+            echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          fi
       - name: Check if release already exists
         id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
+          TAG=${{ steps.release-tag.outputs.tag }}
           if gh release view "$TAG" --json tagName --jq '.tagName' 2>/dev/null; then
             echo "Release $TAG already exists — skipping duplicate build."
             echo "skip=true" >> $GITHUB_OUTPUT
@@ -41,16 +56,36 @@ jobs:
           - platform: macos-14
             args: --target aarch64-apple-darwin
             triple: aarch64-apple-darwin
-          - platform: windows-latest
-            args: --target x86_64-pc-windows-msvc
-            triple: x86_64-pc-windows-msvc
     uses: ./.github/workflows/build.yml
     with:
       platform: ${{ matrix.target.platform }}
       args: ${{ matrix.target.args }}
       triple: ${{ matrix.target.triple }}
-      release-tag: ${{ github.ref_name }}
-      release-name: Anicat ${{ github.ref_name }}
-      release-body: See the assets below to download the latest version of Anicat.
-      prerelease: false
-      release-draft: true
+
+  release:
+    needs: [check, build]
+    if: needs.check.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-bundle'
+          path: dist
+          merge-multiple: true
+
+      - name: create release and upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ needs.check.outputs.tag }}
+          find dist -name "*.app" -prune -o -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*.zip" \) -exec mv {} . \;
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Anicat $TAG" \
+            --notes "See the assets below to download the latest version of Anicat."
+          shopt -s nullglob
+          gh release upload "$TAG" *.dmg *.exe *.msi *.zip --clobber

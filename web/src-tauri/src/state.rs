@@ -18,7 +18,7 @@ pub struct GeneralConfig {
     pub provider: String,
     #[serde(default = "default_true")]
     pub autoplay: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub autoskip: bool,
     #[serde(default = "default_true")]
     pub anime_preview: bool,
@@ -34,6 +34,8 @@ pub struct GeneralConfig {
     pub media_api: String,
     #[serde(default = "default_manga_provider")]
     pub manga_provider: String,
+    #[serde(default = "default_fallback_provider")]
+    pub fallback_provider: String,
     #[serde(default = "default_update_branch")]
     pub update_branch: String,
 }
@@ -56,6 +58,8 @@ pub struct StreamConfig {
 pub struct ApiConfig {
     #[serde(default)]
     pub anilist_token: Option<String>,
+    #[serde(default)]
+    pub anilist_username: Option<String>,
 }
 
 fn default_translation_type() -> String {
@@ -63,7 +67,7 @@ fn default_translation_type() -> String {
 }
 
 fn default_provider() -> String {
-    "anineko".into()
+    "allanime".into()
 }
 fn default_true() -> bool {
     true
@@ -89,6 +93,9 @@ fn default_media_api() -> String {
 fn default_manga_provider() -> String {
     "mangakatana".into()
 }
+fn default_fallback_provider() -> String {
+    "anineko".into()
+}
 fn default_update_branch() -> String {
     "stable".into()
 }
@@ -109,6 +116,8 @@ pub struct CurrentPlayback {
     pub title: String,
     pub episode_title: String,
     pub cover_image: String,
+    pub total_episodes: i64,
+    pub start_time: std::time::Instant,
 }
 
 #[derive(Clone)]
@@ -122,6 +131,8 @@ pub struct AppStateInner {
     pub cache: crate::cache::AniListCache,
     pub current_playback: Arc<tokio::sync::Mutex<Option<CurrentPlayback>>>,
     pub discord: crate::discord::DiscordClient,
+    pub proxy_port: Arc<std::sync::Mutex<u16>>,
+    pub user_list_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -176,6 +187,9 @@ impl AppState {
             http_client.clone(),
             config.api.anilist_token.clone(),
         );
+        if let Some(ref username) = config.api.anilist_username {
+            anilist_client.set_username(Some(username.clone()));
+        }
 
         let scraper_python = std::env::var("ANICAT_SCRAPER_PYTHON")
             .unwrap_or_else(|_| {
@@ -195,8 +209,19 @@ impl AppState {
                     }
                 }
                 // 2. Dev fallback: prefer uv (auto-manages deps), then system Python
-                for cmd in &["uv", "python3", "python"] {
-                    if std::process::Command::new(cmd).arg("--version").stderr(std::process::Stdio::null()).status().is_ok() {
+                // uv may be installed at ~/.local/bin/uv (pip install) or /opt/homebrew/bin/uv (brew)
+                // which is not on the system PATH inherited by GUI apps.
+                let candidates = [
+                    "uv",
+                    "/opt/homebrew/bin/uv",
+                    &format!("{}/.local/bin/uv", std::env::var("HOME").unwrap_or_default()),
+                    "python3", "python",
+                ];
+                for cmd in &candidates {
+                    if !cmd.is_empty() && std::process::Command::new(cmd).arg("--version")
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status().is_ok() {
                         return cmd.to_string();
                     }
                 }
@@ -254,6 +279,8 @@ impl AppState {
                 cache: crate::cache::AniListCache::new(),
                 current_playback: Arc::new(tokio::sync::Mutex::new(None)),
                 discord,
+                proxy_port: Arc::new(std::sync::Mutex::new(13370)),
+                user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
             }),
         };
 
@@ -266,7 +293,7 @@ impl AppState {
             Err(_) => AppConfig::default(),
         };
         if config.general.provider == "gogoanime" || config.general.provider == "anizone" || config.general.provider == "animepahe" {
-            config.general.provider = "anineko".into();
+            config.general.provider = "allanime".into();
         }
         config
     }

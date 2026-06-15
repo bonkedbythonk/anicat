@@ -37,6 +37,9 @@ cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv"
 cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv.exe"
 cp -R "$APP_DIR/Contents/MacOS/lib" "$RESOURCES_DIR/"
 
+echo "=== 2a. Ad-hoc signing mpv binary to reduce Gatekeeper warnings ==="
+codesign -s - --force "$RESOURCES_DIR/mpv" "$RESOURCES_DIR/mpv.exe" 2>/dev/null || true
+
 echo "=== 2b. Bundling MoltenVK Vulkan driver for macOS GPU acceleration ==="
 MOLTEN_VK_PREFIX=$(brew --prefix molten-vk 2>/dev/null || true)
 if [ -n "$MOLTEN_VK_PREFIX" ] && [ -f "$MOLTEN_VK_PREFIX/lib/libMoltenVK.dylib" ]; then
@@ -79,6 +82,7 @@ curl -L -o /tmp/anime4k.zip https://github.com/bloc97/Anime4K/releases/download/
 unzip -q -o /tmp/anime4k.zip "*.glsl" -d "$CONFIG_DIR/shaders/"
 
 echo "=== 6. Generating customized mpv.conf styled for AniCat ==="
+if [ ! -f "$CONFIG_DIR/mpv.conf" ]; then
 cat << 'EOF' > "$CONFIG_DIR/mpv.conf"
 # Video Quality Settings
 vo=gpu
@@ -96,7 +100,7 @@ osd-bar=no
 # Show last frame instead of black screen when episode ends
 keep-open=yes
 # Remember volume, position, and other settings between launches
-save-position-on-quit=yes
+save-position-on-quit=no
 
 # Subtitles
 sub-auto=fuzzy
@@ -104,6 +108,7 @@ sub-font="Outfit"
 sub-font-size=44
 sub-bold=yes
 EOF
+fi
 
 # Copy overlay and keybindings if they aren't already in place (preventing cp-onto-itself errors)
 [ -f "$CONFIG_DIR/scripts/anicat_ui/main.lua" ] || cp web/src-tauri/resources/mpv_config/scripts/anicat_ui/main.lua "$CONFIG_DIR/scripts/anicat_ui/main.lua" 2>/dev/null || true

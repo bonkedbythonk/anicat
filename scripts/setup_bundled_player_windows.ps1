@@ -197,6 +197,7 @@ Remove-Item -Recurse -Force "$env:TEMP\anime4k_extract" -ErrorAction SilentlyCon
 Remove-Item -Force $Anime4kZip -ErrorAction SilentlyContinue
 
 Write-Host "=== 7. Generating customized mpv.conf styled for AniCat ==="
+if (-not (Test-Path "$ConfigDir\mpv.conf")) {
 @"
 # Video Quality Settings
 vo=gpu
@@ -214,7 +215,7 @@ osd-bar=no
 # Show last frame instead of black screen when episode ends
 keep-open=yes
 # Remember volume, position, and other settings between launches
-save-position-on-quit=yes
+save-position-on-quit=no
 
 # Subtitles
 sub-auto=fuzzy
@@ -222,6 +223,7 @@ sub-font="Segoe UI"
 sub-font-size=44
 sub-bold=yes
 "@ | Out-File -FilePath "$ConfigDir\mpv.conf" -Encoding utf8
+}
 
 Write-Host "=== 8. Copying overlay and keybindings from pre-configured files ==="
 if (-not (Test-Path "$ConfigDir\scripts\anicat_ui\main.lua")) {

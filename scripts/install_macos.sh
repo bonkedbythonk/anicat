@@ -26,8 +26,8 @@ if [ -n "$BREW_EXE" ]; then
 fi
 
 # We check and install 'uv' (Python package manager), which is required to bootstrap scraper dependencies.
-# Note: Anicat.app bundles its own pre-compiled and optimized 'mpv' binary inside the application resources.
-# If a system-wide 'mpv' is missing, the app automatically falls back to using the bundled player.
+# 'mpv' is pre-bundled inside the app (Anicat.app/Contents/Resources/mpv).
+# The install script removes quarantines below so it runs without warnings.
 if ! command -v uv &> /dev/null; then
     echo "Installing 'uv' (Python package manager) to manage scraper dependencies..."
     if [ -n "$BREW_EXE" ]; then
@@ -144,8 +144,8 @@ cp -R "$MOUNT_POINT/$APP_NAME" "/Applications/"
 hdiutil detach -force "$MOUNT_POINT" 2>/dev/null || hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
 rm -f "$TMP_DMG"
 
-# Remove quarantine flag so the app opens without warnings
-xattr -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
+# Remove quarantine flag recursively from the entire app bundle
+xattr -r -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
 
 # Write nightly config if needed
 if [ "$UPDATE_BRANCH" = "nightly" ]; then

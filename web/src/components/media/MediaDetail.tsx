@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -11,7 +11,7 @@ import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from
 import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useProgressEditor } from "@/lib/useProgressEditor";
-import { useAppStore } from "@/stores/app";
+import { useAppStore, useSettingsStore } from "@/stores/app";
 import { EpisodeList } from "./EpisodeList";
 import MangaReader from "./MangaReader";
 
@@ -50,7 +50,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     },
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
+  const [selectedProvider, setSelectedProvider] = useState<string>("allanime");
 
   // Debug overlay state (DEV only)
 
@@ -135,9 +135,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     const eps = (fullItem as any)?.streaming_episodes;
     if (Array.isArray(eps)) {
       eps.forEach((ep: any, idx: number) => {
-        if (ep?.title && ep.title !== `Episode ${idx + 1}`) {
-          map[idx + 1] = ep.title;
-        }
+        if (!ep?.title) return;
+        const epNumMatch = ep.title.match(/^Episode\s+(\d+)/i);
+        if (epNumMatch && parseInt(epNumMatch[1]) !== idx + 1) return;
+        if (ep.title === `Episode ${idx + 1}`) return;
+        map[idx + 1] = ep.title;
       });
     }
     // AniZip titles override (more complete data)
@@ -229,6 +231,40 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     }
   };
 
+  const autoskip = useSettingsStore((s) => s.autoskip);
+  const setAutoskip = useSettingsStore((s) => s.setAutoskip);
+  const shaderProfile = useSettingsStore((s) => s.shaderProfile);
+  const setShaderProfile = useSettingsStore((s) => s.setShaderProfile);
+
+  const handleToggleAutoskip = async () => {
+    const newVal = !autoskip;
+    setAutoskip(newVal);
+    try {
+      await mediaApi.updateConfig({ general: { autoskip: newVal } });
+    } catch (err) {
+      console.error("Failed to update config on backend:", err);
+    }
+  };
+
+  const handleChangeShaderProfile = async (newVal: string) => {
+    setShaderProfile(newVal);
+    try {
+      await mediaApi.updateConfig({ stream: { shader_profile: newVal } });
+    } catch (err) {
+      console.error("Failed to update config on backend:", err);
+    }
+  };
+
+  const handleToggleUpscaling = async () => {
+    const newVal = shaderProfile === "off" ? "balanced" : "off";
+    setShaderProfile(newVal);
+    try {
+      await mediaApi.updateConfig({ stream: { shader_profile: newVal } });
+    } catch (err) {
+      console.error("Failed to update config on backend:", err);
+    }
+  };
+
   const handleUpdateProgress = async (newProgress: number) => {
     try {
       const updates: Record<string, unknown> = { progress: newProgress };
@@ -243,6 +279,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ["lists"] });
       queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
       dispatchRefresh();
       progressEditor.cancelEditing();
@@ -270,6 +307,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       ["lists"],
       ["home-recently-watched"],
       ["home-watching"],
+      ["home-repeating"],
     ];
     // Snapshot each list cache for rollback
     interface ListPage { media?: MediaItem[]; page_info?: unknown; }
@@ -446,6 +484,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
                             queryClient.invalidateQueries({ queryKey: ["lists"] });
                             queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
+                            queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
                             dispatchRefresh();
                           })
                           .catch((err) => console.error("Failed to update status:", err))
@@ -458,6 +497,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                     <option value="none" className="text-muted-foreground">-- Add to List --</option>
                     <option value="planning" className="text-foreground">Planning</option>
                     <option value="watching" className="text-foreground">{isManga ? "Reading" : "Watching"}</option>
+                    <option value="repeating" className="text-foreground">{isManga ? "Rereading" : "Rewatching"}</option>
                     <option value="completed" className="text-foreground">Completed</option>
                     <option value="paused" className="text-foreground">Paused</option>
                     <option value="dropped" className="text-foreground">Dropped</option>
@@ -479,6 +519,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                   <Trash2 size={22} />
                 </button>
               </div>
+
 
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center space-x-6">
@@ -647,6 +688,34 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       transition={{ duration: 0.18 }}
                     >
                       {!isManga && (
+                        <div className="flex flex-wrap gap-4 items-center p-3.5 bg-foreground/[0.02] border border-border/50 rounded-2xl mb-4">
+                          <button
+                            onClick={handleToggleAutoskip}
+                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                              autoskip 
+                                ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5" 
+                                : "bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60"
+                            }`}
+                          >
+                            <SkipForward size={14} fill={autoskip ? "currentColor" : "none"} />
+                            <span>Auto Skip Intro</span>
+                          </button>
+
+                          <button
+                            onClick={handleToggleUpscaling}
+                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                              shaderProfile !== "off" 
+                                ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5" 
+                                : "bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60"
+                            }`}
+                          >
+                            <Sparkles size={14} className={shaderProfile !== "off" ? "text-accent" : ""} />
+                            <span>Upscaling</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {!isManga && (
                         <div className="flex items-center justify-between mb-3">
                           <p className="text-xs text-muted-foreground">Streaming source</p>
                           <div className="flex items-center gap-2">
@@ -655,6 +724,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             onChange={(e) => setSelectedProvider(e.target.value)}
                             className="text-xs bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-foreground outline-none"
                           >
+                            <option value="allanime">AllAnime</option>
                             <option value="anineko">AniNeko</option>
                           </select>
                            <button
@@ -693,6 +763,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         episodeTitleMap={episodeTitleMap}
                         fillerEpisodes={fillerEpisodes}
                         onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)} 
+                        onWatch={(num) => handleUpdateProgress(Number(num))} 
                         nextAiringEpisode={fullItem.next_airing?.episode}
                         nextAiringTime={fullItem.next_airing?.airing_at}
                         onRetry={async () => {

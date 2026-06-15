@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - nightly
-  schedule:
-    - cron: '0 6 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -22,16 +20,36 @@ jobs:
           - platform: macos-14
             args: --target aarch64-apple-darwin
             triple: aarch64-apple-darwin
-          - platform: windows-latest
-            args: --target x86_64-pc-windows-msvc
-            triple: x86_64-pc-windows-msvc
     uses: ./.github/workflows/build.yml
     with:
       platform: ${{ matrix.target.platform }}
       args: ${{ matrix.target.args }}
       triple: ${{ matrix.target.triple }}
-      release-tag: nightly
-      release-name: Anicat Nightly
-      release-body: Nightly build from the latest commit on the nightly branch.
-      prerelease: true
-      nightly: true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-bundle'
+          path: dist
+          merge-multiple: true
+
+      - name: Update Nightly Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          find dist -name "*.app" -prune -o -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*.zip" \) -exec mv {} . \;
+          gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+          gh release create nightly \
+            --prerelease \
+            --title "Nightly Build" \
+            --target "$GITHUB_SHA" \
+            --notes "Bleeding-edge automated build from the nightly branch. Built on $(date -u +'%Y-%m-%d %H:%M:%S UTC')."
+          shopt -s nullglob
+          gh release upload nightly *.dmg *.exe *.msi *.zip --clobber

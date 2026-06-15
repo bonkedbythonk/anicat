@@ -57,14 +57,6 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
     load();
   }, [watchingOnly]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-accent" size={36} />
-      </div>
-    );
-  }
-
   // Sort globally by nearest airing first, then group by day in that order.
   const sortedItems = items
     .filter((item) => item.next_airing?.airing_at)
@@ -123,49 +115,81 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
         </div>
       </div>
 
-      {Array.from(groups.entries()).map(([date, dayItems]) => (
-        <div key={date} className="space-y-6">
-          <div className="flex items-center space-x-4">
-            <h2 className="text-xl font-bold text-white px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl inline-block">{date}</h2>
-            <div className="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent" />
+      <div className="relative">
+        {loading && items.length > 0 && (
+          <div className="absolute top-1/2 left-0 right-0 z-10 flex justify-center -translate-y-1/2 animate-fade-in">
+            <div className="bg-black/80 px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
+              <Loader2 className="animate-spin text-accent" size={20} />
+              <span className="text-xs font-bold text-white uppercase tracking-widest">Updating Schedule...</span>
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-            {dayItems.map(item => (
-              <div key={item.id} className="space-y-2">
-                <LazyCard item={item} onSelect={onSelect} />
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center space-x-1.5 text-accent">
-                    <Activity size={12} className="animate-pulse" />
-                    <span className="text-[11px] font-black uppercase tracking-wider">Ep {item.next_airing?.episode}</span>
+        )}
+
+        {loading && items.length === 0 ? (
+          <div className="space-y-12 animate-pulse">
+            <div className="space-y-6">
+              <div className="h-8 bg-white/[0.04] rounded-xl w-48" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="space-y-3">
+                    <div className="aspect-[2/3] w-full bg-white/[0.04] rounded-2xl border border-white/[0.03]" />
+                    <div className="h-4 bg-white/[0.04] rounded-md w-3/4" />
+                    <div className="h-3 bg-white/[0.02] rounded-md w-1/2" />
                   </div>
-                  <div className="flex items-center space-x-1.5 text-gray-500">
-                    <Clock size={12} />
-                    <span className="text-[11px] font-bold">
-                      {new Date(
-                        item.next_airing!.airing_at!.endsWith("Z")
-                          ? item.next_airing!.airing_at!
-                          : `${item.next_airing!.airing_at!}Z`
-                      ).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: !use24h })}
-                    </span>
-                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+            <div className="p-6 rounded-full bg-white/[0.02] border border-white/[0.04]">
+              <Calendar size={48} className="text-gray-700" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white">No episodes scheduled</h3>
+              <p className="text-gray-500 max-w-xs">
+                {watchingOnly 
+                  ? "Make sure you have active shows in your Watching list." 
+                  : "Check back later for updated airing times."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className={`space-y-12 transition-opacity duration-200 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
+            {Array.from(groups.entries()).map(([date, dayItems]) => (
+              <div key={date} className="space-y-6">
+                <div className="flex items-center space-x-4">
+                  <h2 className="text-xl font-bold text-white px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl inline-block">{date}</h2>
+                  <div className="h-px flex-1 bg-gradient-to-r from-white/[0.06] to-transparent" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                  {dayItems.map(item => (
+                    <div key={item.id} className="space-y-2">
+                      <LazyCard item={item} onSelect={onSelect} />
+                      <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center space-x-1.5 text-accent">
+                          <Activity size={12} className="animate-pulse" />
+                          <span className="text-[11px] font-black uppercase tracking-wider">Ep {item.next_airing?.episode}</span>
+                        </div>
+                        <div className="flex items-center space-x-1.5 text-gray-500">
+                          <Clock size={12} />
+                          <span className="text-[11px] font-bold">
+                            {new Date(
+                              item.next_airing!.airing_at!.endsWith("Z")
+                                ? item.next_airing!.airing_at!
+                                : `${item.next_airing!.airing_at!}Z`
+                            ).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: !use24h })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      ))}
-
-      {items.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="p-6 rounded-full bg-white/[0.02] border border-white/[0.04]">
-            <Calendar size={48} className="text-gray-700" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-bold text-white">No episodes scheduled</h3>
-            <p className="text-gray-500 max-w-xs">Check back later for updated airing times.</p>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -12,27 +12,8 @@ on:
       triple:
         required: true
         type: string
-      release-tag:
-        type: string
-        default: ''
-      release-name:
-        type: string
-        default: ''
-      release-body:
-        type: string
-        default: ''
-      prerelease:
-        type: boolean
-        default: false
-      nightly:
-        type: boolean
-        default: false
-      release-draft:
-        type: boolean
-        default: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+env: {}
 
 jobs:
   build:
@@ -65,6 +46,7 @@ jobs:
         shell: powershell
 
       - name: install python dependencies
+        working-directory: scraper
         run: uv sync
 
       - name: bundle standalone scraper binary (macOS)
@@ -119,6 +101,13 @@ jobs:
             web/src-tauri/resources/lib
           key: mpv-${{ runner.os }}-${{ hashFiles('scripts/setup_bundled_player.sh', 'scripts/setup_bundled_player_windows.ps1') }}
 
+      - name: Create cross-platform resource placeholders
+        run: |
+          mkdir -p web/src-tauri/resources web/src-tauri/resources/lib
+          touch web/src-tauri/resources/mpv
+          touch web/src-tauri/resources/mpv.exe
+          touch web/src-tauri/resources/lib/.gitkeep
+
       - name: Setup Bundled Player Companion (macOS)
         if: runner.os == 'macOS' && steps.cache-mpv.outputs.cache-hit != 'true'
         run: chmod +x ./scripts/setup_bundled_player.sh && ./scripts/setup_bundled_player.sh
@@ -132,17 +121,23 @@ jobs:
       - name: Ensure resources directories exist
         run: mkdir -p web/src-tauri/resources/lib web/src-tauri/resources/mpv_config
 
+      - name: Create cross-platform resource placeholders
+        run: |
+          touch web/src-tauri/resources/mpv
+          touch web/src-tauri/resources/mpv.exe
+
       - name: build frontend
         working-directory: web
         run: npm run build
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: build tauri app
+        working-directory: web
+        run: npm run tauri build
+
+      - name: upload bundle artifacts
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: web
-          tagName: ${{ inputs.release-tag }}
-          releaseName: ${{ inputs.release-name }}
-          releaseBody: ${{ inputs.release-body }}
-          releaseDraft: ${{ inputs.release-draft }}
-          prerelease: ${{ inputs.prerelease || inputs.nightly }}
+          name: ${{ runner.os == 'macOS' && 'macos-bundle' || 'windows-bundle' }}
+          path: |
+            web/src-tauri/target/release/bundle/
+          if-no-files-found: warn

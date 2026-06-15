@@ -207,7 +207,7 @@ export async function getEpisodes(
   provider?: string,
   title?: string,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider: provider || "anineko", title: title || null });
+  return invoke("get_episodes", { mediaId, provider: provider || "allanime", title: title || null });
 }
 
 export async function getChapterPages(
@@ -227,8 +227,9 @@ export async function resolveStream(
 
 export async function searchProvider(
   query: string,
+  provider?: string,
 ): Promise<{ id: string; title: string; year?: number }[]> {
-  return invoke("search_provider", { query });
+  return invoke("search_provider", { query, provider });
 }
 
 export async function mapProviderSlug(

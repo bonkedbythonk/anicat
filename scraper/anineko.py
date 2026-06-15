@@ -5,17 +5,23 @@ Real DOM structure:
   Episode page: button.nv-server-btn with data-video=URL, data-tab=tab_N
      <span>Hard Sub</span> / <span>DUB</span> for group labels
   Embed URLs: third-party sites that require follow-up fetch for stream URLs
+
+Cloudflare bypass: nodriver solves the JS challenge once, extracts
+cf_clearance cookie, and injects it into curl_cffi for fast subsequent requests.
 """
 
 import re
 import asyncio
 import json
+import logging
 import time
 from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Tuple
 from curl_cffi import requests
 from selectolax.parser import HTMLParser
+
+log = logging.getLogger(__name__)
 
 BASE_URL = "https://anineko.to"
 
@@ -69,41 +75,240 @@ class StreamServer:
     source_type: str = "unknown"
 
 
+# ── Cloudflare challenge solver ─────────────────────────
+
+# How long a cf_clearance cookie is considered valid before proactive refresh
+_CF_COOKIE_TTL = 1500  # 25 minutes (Cloudflare typically gives 30 min)
+
+
+class CloudflareSolver:
+    """Solve Cloudflare JS challenges using nodriver (headless Chrome).
+
+    Launches a real Chrome instance via the DevTools Protocol, navigates to
+    anineko.to, waits for the cf_clearance cookie to appear, then returns
+    the cookies + User-Agent so curl_cffi can reuse them.
+    """
+
+    def __init__(self):
+        self._cf_clearance: Optional[str] = None
+        self._cookies: dict[str, str] = {}
+        self._user_agent: Optional[str] = None
+        self._solved_at: float = 0
+
+    @property
+    def is_valid(self) -> bool:
+        return (
+            self._cf_clearance is not None
+            and (time.monotonic() - self._solved_at) < _CF_COOKIE_TTL
+        )
+
+    def invalidate(self):
+        """Force re-solve on next request."""
+        self._cf_clearance = None
+        self._cookies = {}
+        self._solved_at = 0
+
+    async def solve(self) -> tuple[dict[str, str], str]:
+        """Solve the Cloudflare challenge and return (cookies_dict, user_agent).
+
+        Attempts headless solve first. If that fails (or times out), it falls back
+        to headed mode (where Chrome briefly pops up to solve Turnstile and auto-closes).
+        """
+        try:
+            log.info("Solving Cloudflare challenge: trying headless mode...")
+            return await self._solve_once(headless=True)
+        except Exception as e:
+            log.warning("Headless Cloudflare solve failed: %s. Retrying in headed mode...", e)
+            try:
+                return await self._solve_once(headless=False)
+            except Exception as ee:
+                log.error("Headed Cloudflare solve failed: %s", ee)
+                raise RuntimeError(f"Cloudflare solve failed in both headless and headed modes: {ee}")
+
+    async def _solve_once(self, headless: bool) -> tuple[dict[str, str], str]:
+        import nodriver as uc
+
+        browser = None
+        try:
+            browser_args = [
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+            if headless:
+                browser_args.extend([
+                    "--headless=new",
+                    "--window-size=400,300",
+                    "--window-position=-2000,-2000",
+                ])
+            else:
+                browser_args.extend([
+                    "--window-size=800,600",
+                ])
+
+            browser = await uc.start(
+                headless=headless,
+                browser_args=browser_args,
+            )
+            page = await browser.get(f"{BASE_URL}/home")
+
+            # Wait for the challenge to resolve — poll for cf_clearance cookie
+            cf_clearance = None
+            for attempt in range(24):  # up to ~12 seconds
+                await asyncio.sleep(0.5)
+                try:
+                    cookies = await browser.cookies.get_all()
+                except Exception:
+                    continue
+                for c in cookies:
+                    if c.name == "cf_clearance":
+                        cf_clearance = c.value
+                        break
+                if cf_clearance:
+                    break
+
+            if not cf_clearance:
+                raise RuntimeError(
+                    "Failed to obtain cf_clearance cookie after challenge"
+                )
+
+            # Collect all cookies
+            all_cookies = {}
+            try:
+                cookies = await browser.cookies.get_all()
+                for c in cookies:
+                    all_cookies[c.name] = c.value
+            except Exception:
+                all_cookies["cf_clearance"] = cf_clearance
+
+            # Get the actual User-Agent the browser is using
+            ua = None
+            try:
+                ua = await page.evaluate("navigator.userAgent")
+            except Exception:
+                pass
+
+            self._cf_clearance = cf_clearance
+            self._cookies = all_cookies
+            self._user_agent = ua
+            self._solved_at = time.monotonic()
+
+            log.info("Cloudflare challenge solved (cookie=%s...)", cf_clearance[:20])
+            return all_cookies, ua or ""
+
+        finally:
+            if browser:
+                try:
+                    result = browser.stop()
+                    # nodriver's stop() may return a coroutine or None
+                    if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                        await result
+                except Exception:
+                    pass
+
+
 class AniNekoProvider:
     def __init__(self):
-        self.session = requests.Session(impersonate="chrome131")
+        self._solver = CloudflareSolver()
+        self.session = requests.Session(impersonate="chrome142")
         self.session.headers.update(
             {
                 "User-Agent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
+                    "Chrome/142.0.0.0 Safari/537.36"
                 ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
             }
         )
+        self._clearance_lock = asyncio.Lock()
+
+    async def _ensure_clearance(self):
+        """Ensure we have a valid cf_clearance cookie, solving if needed."""
+        if self._solver.is_valid:
+            return
+        async with self._clearance_lock:
+            # Double-check after acquiring lock
+            if self._solver.is_valid:
+                return
+            cookies, ua = await self._solver.solve()
+            # Match impersonation to the Chrome version that solved the challenge
+            ver_match = re.search(r'Chrome/(\d+)', ua or "")
+            if ver_match:
+                chrome_ver = ver_match.group(1)
+                new_session = requests.Session(impersonate=f"chrome{chrome_ver}")
+                new_session.headers.update(self.session.headers)
+                new_session.cookies.update(self.session.cookies)
+                self.session = new_session
+            # Inject cookies into curl_cffi session
+            for name, value in cookies.items():
+                self.session.cookies.set(name, value, domain=".anineko.to")
+            # Match the User-Agent that solved the challenge
+            if ua:
+                self.session.headers["User-Agent"] = ua
+
+    def _handle_cf_block(self, resp) -> bool:
+        """Check if response is a Cloudflare challenge. Returns True if blocked."""
+        if resp.status_code == 403:
+            # Check for CF challenge page signature
+            if "cf-mitigated" in resp.headers.get("cf-mitigated", "") or \
+               "Just a moment" in resp.text[:500]:
+                log.warning("Cloudflare challenge detected, invalidating clearance")
+                self._solver.invalidate()
+                return True
+            # Any 403 from anineko.to is likely CF
+            self._solver.invalidate()
+            return True
+        return False
+
+    async def _cf_get(self, url: str, **kwargs) -> requests.Response:
+        """HTTP GET with automatic Cloudflare challenge handling.
+
+        Tries curl_cffi first. Only opens Chrome to solve the challenge if
+        Cloudflare is actually blocking (403). When CF isn't challenging,
+        no browser is needed at all.
+        """
+        kwargs.setdefault("timeout", 20)
+        # Use cached clearance if we have one, otherwise try without
+        if self._solver.is_valid:
+            pass  # cookies already in session from last solve
+        resp = self.session.get(url, **kwargs)
+        if self._handle_cf_block(resp):
+            # CF is actively challenging — solve and retry
+            await self._ensure_clearance()
+            resp = self.session.get(url, **kwargs)
+        return resp
 
     async def search(self, query: str) -> list[AnimeRef]:
         attempts = self._build_search_attempts(query)
-        for attempt in attempts:
-            for tries in range(1):  # single try per fallback — fast retries handled by Rust
-                try:
-                    resp = self.session.get(
-                        f"{BASE_URL}/browser",
-                        params={"keyword": attempt},
-                        timeout=20,
-                    )
-                    resp.raise_for_status()
-                    results = self._parse_search(resp.text)
-                    if results:
-                        return results
-                    break  # No results for this attempt, try next
-                except Exception:
-                    if tries == 2:
-                        break
-                    await self._sleep(1 + tries)
-        return []
+
+        async def run_attempt(attempt: str) -> list[AnimeRef]:
+            try:
+                resp = await self._cf_get(
+                    f"{BASE_URL}/browser",
+                    params={"keyword": attempt},
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                return self._parse_search(resp.text)
+            except Exception as e:
+                log.warning("Search attempt for '%s' failed: %s", attempt, e)
+                return []
+
+        # Run all attempts concurrently
+        tasks = [run_attempt(att) for att in attempts]
+        all_results = await asyncio.gather(*tasks)
+
+        # Merge results, preserving priority of attempts and removing duplicates
+        merged = []
+        seen = set()
+        for results in all_results:
+            for ref in results:
+                if ref.id not in seen:
+                    seen.add(ref.id)
+                    merged.append(ref)
+        return merged
 
     def _build_search_attempts(self, title: str) -> list[str]:
         attempts = []
@@ -126,7 +331,7 @@ class AniNekoProvider:
     async def get(self, slug: str) -> Optional[AnimeInfo]:
         for attempt in range(3):
             try:
-                resp = self.session.get(f"{BASE_URL}/watch/{slug}", timeout=20)
+                resp = await self._cf_get(f"{BASE_URL}/watch/{slug}", timeout=20)
                 resp.raise_for_status()
                 return self._parse_anime(resp.text)
             except Exception as e:
@@ -144,7 +349,7 @@ class AniNekoProvider:
 
         for attempt in range(3):
             try:
-                resp = self.session.get(url, timeout=30)
+                resp = await self._cf_get(url, timeout=30)
                 resp.raise_for_status()
                 html = resp.text
                 page_title = self._extract_title(html)
@@ -475,7 +680,7 @@ class AniNekoProvider:
 
         # 2. General network page extraction
         try:
-            resp = self.session.get(embed_url, timeout=15)
+            resp = self.session.get(embed_url, timeout=15)  # embed URLs are third-party, no CF
             if resp.status_code != 200:
                 return None
             text = resp.text

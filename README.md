@@ -1,9 +1,9 @@
 <div align="center">
-  <h1>Anicat</h1>
+  <h1>Anicat (broken due to scraping issues)</h1>
   <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=stable" alt="Latest stable release">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
     <img src="https://img.shields.io/github/last-commit/bonkedbythonk/anicat/nightly?style=flat-square&label=nightly" alt="Last nightly commit">
@@ -16,12 +16,10 @@
 
 ## Quick Install
 
-**macOS** — paste in Terminal:
+Paste in Terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
-
-**Windows** — download the latest `_x64-setup.exe` from [Releases](https://github.com/bonkedbythonk/anicat/releases).
 
 ---
 
@@ -53,7 +51,7 @@ npm install
 npm run tauri dev
 ```
 
-Requires Rust, Node.js, and system deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/). macOS also needs `mpv` (`brew install mpv`).
+Requires Rust, Node.js, system deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/), and `mpv` (`brew install mpv`).
 
 ## Dependencies
 

@@ -132,7 +132,7 @@ async fn player_next_handler(
                 Some(title),
                 Some(episode_title),
                 Some(cover_image),
-                None,
+                Some(play_info.total_episodes),
             )
             .await;
             if let Err(ref e) = result {
@@ -208,7 +208,7 @@ async fn player_prev_handler(
                 Some(title),
                 Some(episode_title),
                 Some(cover_image),
-                None,
+                Some(play_info.total_episodes),
             )
             .await;
         });
@@ -357,6 +357,10 @@ async fn proxy_handler(
         "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
         "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
         "gravatar.com",
+        "allanime.day", "allanimecdn", "youtu-chan.com",
+        "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
+        "filemoon.sx", "filemoon.art", "filemoon.top",
+        "repackager.wixmp.com",
     ];
     let is_allowed = allowed_domains.iter().any(|d| url.contains(d));
     if !is_allowed {
@@ -431,7 +435,7 @@ async fn proxy_handler(
         if let Some(pos) = bytes.windows(4).position(|w| w == b"IEND") {
             let offset = pos + 8;
             if offset < bytes.len() {
-                bytes = bytes[..offset].to_vec();
+                bytes = bytes[offset..].to_vec();
                 strip_headers = true;
             }
         }

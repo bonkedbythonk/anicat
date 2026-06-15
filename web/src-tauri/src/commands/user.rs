@@ -14,58 +14,95 @@ pub async fn get_user_list(
     status: Option<String>,
     media_type: Option<String>,
 ) -> Result<Value, String> {
-    let _has_token = state.anilist_client.has_token();
-    
-    let mut resolved_user_name = user_name;
-    if resolved_user_name.is_none() || resolved_user_name.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
-        if let Some(cached_name) = state.anilist_client.get_username() {
-            resolved_user_name = Some(cached_name);
-        } else {
-            let profile_result: Value = state
+    let resolved_type = media_type.clone().unwrap_or_else(|| "ANIME".to_string());
+
+    // Acquire lock to prevent concurrent redundant fetches (coalescing)
+    let _lock = state.inner.user_list_lock.lock().await;
+
+    // Cache key for the unified/full list collection containing all statuses
+    let cache_key_all = AniListCache::key("get_user_list", &[
+        ("status", "all"),
+        ("type", &resolved_type),
+    ]);
+
+    let full_collection = match state.cache.get(&cache_key_all) {
+        Some(cached) => cached,
+        None => {
+            // Resolve authenticated Viewer username if user_name is not specified
+            let mut resolved_user_name = user_name.clone();
+            if resolved_user_name.is_none() || resolved_user_name.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+                if let Some(cached_name) = state.anilist_client.get_username() {
+                    resolved_user_name = Some(cached_name);
+                } else {
+                    let profile_result: Value = state
+                        .anilist_client
+                        .execute(queries::USER_PROFILE_QUERY, HashMap::new())
+                        .await?;
+                    if let Some(name) = profile_result.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()) {
+                        let name_str = name.to_string();
+                        state.anilist_client.set_username(Some(name_str.clone()));
+                        // Save username to configuration
+                        let mut config = state.inner.config.write().await;
+                        if config.api.anilist_username.as_ref() != Some(&name_str) {
+                            config.api.anilist_username = Some(name_str.clone());
+                            drop(config);
+                            let _ = state.save_config().await;
+                        }
+                        resolved_user_name = Some(name_str);
+                    } else {
+                        return Err("Failed to resolve authenticated Viewer username".to_string());
+                    }
+                }
+            }
+
+            let mut vars = HashMap::new();
+            if let Some(ref name) = resolved_user_name {
+                vars.insert("userName".to_string(), serde_json::json!(name));
+            }
+            vars.insert("type".to_string(), serde_json::json!(resolved_type));
+
+            let result: Value = state
                 .anilist_client
-                .execute(queries::USER_PROFILE_QUERY, HashMap::new())
+                .execute(queries::USER_LIST_QUERY, vars)
                 .await?;
-            if let Some(name) = profile_result.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()) {
-                let name_str = name.to_string();
-                state.anilist_client.set_username(Some(name_str.clone()));
-                resolved_user_name = Some(name_str);
-            } else {
-                return Err("Failed to resolve authenticated Viewer username".to_string());
+
+            if let Some(lists) = result.get("MediaListCollection").and_then(|m| m.get("lists")).and_then(|l| l.as_array()) {
+                for (idx, list) in lists.iter().enumerate() {
+                    let name = list.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let entries = list.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0);
+                    log::info!("  List[{}]: name={}, entries={}", idx, name, entries);
+                }
+            }
+
+            state.cache.set(cache_key_all.clone(), result.clone(), "get_user_list");
+            result
+        }
+    };
+
+    // Release the lock early before processing and filtering the JSON
+    drop(_lock);
+
+    // If a specific status is requested, filter in-place to keep only the matching list
+    if let Some(ref target_status) = status {
+        let mut filtered_collection = full_collection;
+        if let Some(mlc) = filtered_collection.get_mut("MediaListCollection") {
+            if let Some(lists) = mlc.get_mut("lists") {
+                if let Some(lists_arr) = lists.as_array_mut() {
+                    let target_upper = target_status.to_uppercase();
+                    lists_arr.retain(|list_val| {
+                        if let Some(list_status) = list_val.get("status").and_then(|s| s.as_str()) {
+                            list_status.to_uppercase() == target_upper
+                        } else {
+                            false
+                        }
+                    });
+                }
             }
         }
-    }
-
-    let mut vars = HashMap::new();
-    if let Some(ref name) = resolved_user_name {
-        vars.insert("userName".to_string(), serde_json::json!(name));
-    }
-    if let Some(ref s) = status {
-        vars.insert("status".to_string(), serde_json::json!(s));
-    }
-    vars.insert("type".to_string(), serde_json::json!(media_type.clone().unwrap_or_else(|| "ANIME".to_string())));
-
-    let cache_key = AniListCache::key("get_user_list", &[
-        ("status", &status.as_deref().unwrap_or("all")),
-        ("type", &media_type.as_deref().unwrap_or("ANIME")),
-    ]);
-    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
-
-    let result: Value = state
-        .anilist_client
-        .execute(queries::USER_LIST_QUERY, vars)
-        .await?;
-
-    if let Some(lists) = result.get("MediaListCollection").and_then(|m| m.get("lists")).and_then(|l| l.as_array()) {
-        for (idx, list) in lists.iter().enumerate() {
-            let name = list.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let entries = list.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0);
-            log::info!("  List[{}]: name={}, entries={}", idx, name, entries);
-        }
+        Ok(filtered_collection)
     } else {
+        Ok(full_collection)
     }
-
-    state.cache.set(cache_key, result.clone(), "get_user_list");
-    Ok(result)
 }
 
 #[tauri::command]
@@ -114,6 +151,7 @@ pub async fn save_media_list_entry(
     let score = updates.get("score").and_then(|v| v.as_f64());
     state.cache.update_user_list_progress(media_id, progress, status, score);
 
+    state.cache.invalidate("get_user_list");
     state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }
@@ -133,6 +171,7 @@ pub async fn delete_media_list_entry(
     
     // In-place cache removal to avoid CDN cache lag on subsequent requests
     state.cache.remove_from_user_list_by_entry_id(entry_id);
+    state.cache.invalidate("get_user_list");
     state.cache.invalidate("get_airing_schedule");
     Ok(result)
 }

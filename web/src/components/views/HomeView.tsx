@@ -14,13 +14,15 @@ interface HomeViewProps {
 }
 
 // UX-22: Default row configuration
-type RowId = "continue" | "airingToday" | "newForYou" | "smartPlaylist" | "trending" | "newlyReleasing" | "seasonal";
+type RowId = "continue" | "airingToday" | "newForYou" | "smartPlaylist" | "trending" | "newlyReleasing" | "seasonal" | "watching" | "planning";
 
 const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
   { id: "airingToday", title: "Airing Today", visible: true },
   { id: "continue", title: "Continue Watching", visible: true },
+  { id: "watching", title: "Watching", visible: true },
+  { id: "planning", title: "Planning", visible: true },
   { id: "newForYou", title: "New for You", visible: true },
-  { id: "smartPlaylist", title: "Smart Playlist", visible: true },
+  { id: "smartPlaylist", title: "Smart Picks", visible: true },
   { id: "trending", title: "Trending Now", visible: true },
   { id: "newlyReleasing", title: "Newly Releasing", visible: true },
   { id: "seasonal", title: "Seasonal Highlights", visible: true },
@@ -84,6 +86,12 @@ export function HomeView({ onSelect }: HomeViewProps) {
     enabled: isAuthenticated,
   });
 
+  const repeatingQuery = useQuery({
+    queryKey: ["home-repeating"],
+    queryFn: () => mediaApi.getUserList("repeating", "ANIME"),
+    enabled: isAuthenticated,
+  });
+
   const trendingQuery = useQuery({
     queryKey: ["home-trending"],
     queryFn: () => mediaApi.getTrending("ANIME"),
@@ -96,18 +104,39 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const newlyReleasingQuery = useQuery({
     queryKey: ["home-newly-releasing"],
-    queryFn: () => mediaApi.search('', 'MANGA', 1, { status: 'RELEASING' }),
+    queryFn: () => mediaApi.search('', 'ANIME', 1, { status: 'RELEASING' }),
   });
 
-  // 5. Smart Playlist — personalized recommendations (cached, non-blocking)
+  // 5. Smart Playlist — kept for cache compatibility, replaced by smartPicks below
   const smartPlaylistQuery = useQuery({
     queryKey: ["home-smart-playlist"],
     queryFn: () => mediaApi.getSmartPlaylist(),
+    enabled: false,
+  });
+
+  // 6. Planning List — user's plan-to-watch
+  const planningQuery = useQuery({
+    queryKey: ["home-planning"],
+    queryFn: () => mediaApi.getUserList("planning", "ANIME"),
     enabled: isAuthenticated,
   });
 
+  // Smart Picks: blend planning list items (shuffled) with trending items
+  const smartPicks = useMemo(() => {
+    const planning = planningQuery.data?.media || [];
+    const trending = trendingQuery.data?.media || [];
+    const shuffled = [...planning].sort(() => Math.random() - 0.5);
+    const planningIds = new Set(planning.map((m: MediaItem) => m.id));
+    const fill = trending.filter((m: MediaItem) => !planningIds.has(m.id));
+    return [...shuffled, ...fill].slice(0, 20);
+  }, [planningQuery.data, trendingQuery.data]);
+
   // 6. "New for You" — based on AniList watching list + schedule
-  const watchingMedia = watchingQuery.data?.media || [];
+  const watchingMedia = useMemo(() => {
+    const watching = watchingQuery.data?.media || [];
+    const repeating = repeatingQuery.data?.media || [];
+    return [...watching, ...repeating];
+  }, [watchingQuery.data, repeatingQuery.data]);
   const watchingIds = useMemo(() => watchingMedia.map((m) => m.id), [watchingMedia]);
 
   // UX-13: Airing Today — schedule for current day (must be after watchingIds)
@@ -148,13 +177,12 @@ export function HomeView({ onSelect }: HomeViewProps) {
   // 6. Continue Watching = items from the user's AniList watching list
   //    that have unwatched episodes, sorted by most recently updated first.
   const continueWatchingList = useMemo(() => {
-    const watching = watchingQuery.data?.media || [];
-    return watching.filter((m) => !isCaughtUp(m)).sort((a, b) => {
+    return watchingMedia.filter((m) => !isCaughtUp(m)).sort((a, b) => {
       const aTime = Number(a.user_status?.updated_at) || Number(a.media_list_entry?.updated_at) || 0;
       const bTime = Number(b.user_status?.updated_at) || Number(b.media_list_entry?.updated_at) || 0;
       return bTime - aTime;
     });
-  }, [watchingQuery.data]);
+  }, [watchingMedia]);
 
 
 
@@ -314,7 +342,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         <MediaRow
           title="Continue Watching"
           items={continueWatchingList}
-          secondaryItems={smartPlaylistQuery.data?.media ? smartPlaylistQuery.data.media : undefined}
+          secondaryItems={smartPicks.length > 0 ? smartPicks : undefined}
           secondaryLabel="Smart Picks"
           onSelect={onSelect}
         />
@@ -330,8 +358,16 @@ export function HomeView({ onSelect }: HomeViewProps) {
         )
       )}
 
-      {isAuthenticated && isRowVisible("smartPlaylist") && smartPlaylistQuery.data?.media && smartPlaylistQuery.data.media.length > 0 && (
-        <MediaRow title="Smart Playlist" items={smartPlaylistQuery.data.media} onSelect={onSelect} />
+      {isAuthenticated && isRowVisible("watching") && watchingMedia.length > 0 && (
+        <MediaRow title="Currently Watching" items={watchingMedia} onSelect={onSelect} />
+      )}
+
+      {isAuthenticated && isRowVisible("planning") && planningQuery.data?.media && planningQuery.data.media.length > 0 && (
+        <MediaRow title="Planning" items={planningQuery.data.media} onSelect={onSelect} />
+      )}
+
+      {isAuthenticated && isRowVisible("smartPlaylist") && smartPicks.length > 0 && (
+        <MediaRow title="Smart Picks" items={smartPicks} onSelect={onSelect} />
       )}
 
       {isRowVisible("trending") && (

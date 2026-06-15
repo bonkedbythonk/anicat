@@ -42,7 +42,7 @@ pub struct AnimeInfo {
 
 // ── Manager ───────────────────────────────────────────────
 
-const IDLE_TIMEOUT_SECS: u64 = 60;
+const IDLE_TIMEOUT_SECS: u64 = 300;
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -88,12 +88,14 @@ impl ScraperManager {
         &self.python_path
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<AnimeRef>, String> {
+    pub async fn search(&self, query: &str, provider: &str) -> Result<Vec<AnimeRef>, String> {
+        log::info!("Searching scraper: query='{}', provider={}", query, provider);
         let port = self.ensure_running().await?;
         let url = format!(
-            "http://127.0.0.1:{}/search?query={}",
+            "http://127.0.0.1:{}/search?query={}&provider={}",
             port,
-            percent_encode(query)
+            percent_encode(query),
+            provider
         );
         let resp = self
             .http_client
@@ -103,12 +105,21 @@ impl ScraperManager {
             .await
             .map_err(|e| format!("Scraper search failed: {}", e))?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse search: {}", e))
+        match serde_json::from_str::<Vec<AnimeRef>>(&body) {
+            Ok(results) => {
+                log::info!("Scraper search returned {} results", results.len());
+                Ok(results)
+            }
+            Err(e) => {
+                log::error!("Failed to parse scraper search response: {}, error: {}", body, e);
+                Err(format!("Parse search: {}", e))
+            }
+        }
     }
 
-    pub async fn get_anime(&self, slug: &str) -> Result<AnimeInfo, String> {
+    pub async fn get_anime(&self, slug: &str, provider: &str) -> Result<AnimeInfo, String> {
         let port = self.ensure_running().await?;
-        let url = format!("http://127.0.0.1:{}/get?slug={}", port, slug);
+        let url = format!("http://127.0.0.1:{}/get?slug={}&provider={}", port, slug, provider);
         let resp = self
             .http_client
             .get(&url)
@@ -124,11 +135,13 @@ impl ScraperManager {
         &self,
         slug: &str,
         episode: i32,
+        provider: &str,
     ) -> Result<Vec<StreamServer>, String> {
+        log::info!("Requesting streams from scraper: provider={}, slug={}, episode={}", provider, slug, episode);
         let port = self.ensure_running().await?;
         let url = format!(
-            "http://127.0.0.1:{}/streams?slug={}&episode={}",
-            port, slug, episode
+            "http://127.0.0.1:{}/streams?slug={}&episode={}&provider={}",
+            port, slug, episode, provider
         );
         let resp = self
             .http_client
@@ -138,7 +151,16 @@ impl ScraperManager {
             .await
             .map_err(|e| format!("Scraper streams failed: {}", e))?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse streams: {}", e))
+        match serde_json::from_str::<Vec<StreamServer>>(&body) {
+            Ok(servers) => {
+                log::info!("Scraper found {} stream servers for episode {}", servers.len(), episode);
+                Ok(servers)
+            }
+            Err(e) => {
+                log::error!("Failed to parse scraper streams response: {}, error: {}", body, e);
+                Err(format!("Parse streams: {}", e))
+            }
+        }
     }
 
     pub async fn search_manga(&self, query: &str) -> Result<Vec<AnimeRef>, String> {
@@ -204,11 +226,12 @@ impl ScraperManager {
         &self,
         slug: &str,
         episode: i32,
+        provider: &str,
     ) -> Result<serde_json::Value, String> {
         let port = self.ensure_running().await?;
         let url = format!(
-            "http://127.0.0.1:{}/debug/streams?slug={}&episode={}",
-            port, slug, episode
+            "http://127.0.0.1:{}/debug/streams?slug={}&episode={}&provider={}",
+            port, slug, episode, provider
         );
         let resp = self
             .http_client
@@ -249,15 +272,20 @@ impl ScraperManager {
 
         // Bundled standalone binary — run directly, no Python wrapper
         let mut cmd = if self.python_path.is_empty() {
-            Command::new(&self.scraper_script)
+            let mut c = Command::new(&self.scraper_script);
+            c.arg("--port").arg(port.to_string());
+            c
         } else {
             let mut c = Command::new(&self.python_path);
             if self.python_path.contains("uv") {
                 c.arg("run").arg("python");
             }
+            c.arg(&self.scraper_script).arg("--port").arg(port.to_string());
             c
         };
-        start_and_wait(cmd, &self.scraper_script, script_dir, port, &self.process, &self.http_client).await
+        cmd.current_dir(script_dir);
+
+        start_and_wait(cmd, port, &self.process, &self.http_client).await
     }
     }
 
@@ -318,19 +346,17 @@ fn percent_encode(s: &str) -> String {
 
 async fn start_and_wait(
     mut cmd: Command,
-    script_path: &str,
-    script_dir: &Path,
     port: u16,
     process: &Arc<Mutex<Option<ScraperProcess>>>,
     http_client: &reqwest::Client,
 ) -> Result<u16, String> {
-    let mut child = cmd.arg(script_path)
-        .arg("--port").arg(port.to_string())
-        .current_dir(script_dir)
+    let mut child = cmd
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start scraper: {}", e))?;
+
+    let stderr = child.stderr.take();
 
     let mut delay_ms = READY_RETRY_MS;
     for attempt in 0..MAX_READY_ATTEMPTS {
@@ -338,8 +364,14 @@ async fn start_and_wait(
         let health_url = format!("http://127.0.0.1:{}/health", port);
         match http_client.get(&health_url).timeout(Duration::from_secs(2)).send().await {
             Ok(resp) if resp.status().is_success() => {
+                let mut proc_guard = process.lock().await;
+                if proc_guard.is_some() {
+                    let _ = child.kill();
+                    return Ok(proc_guard.as_ref().map(|s| s.port).unwrap_or(port));
+                }
                 let sp = ScraperProcess { child, port, last_used: Instant::now() };
-                *process.lock().await = Some(sp);
+                *proc_guard = Some(sp);
+                drop(proc_guard);
                 let p = process.clone();
                 let c = http_client.clone();
                 tokio::spawn(async move { idle_watchdog(p, c).await; });
@@ -350,5 +382,19 @@ async fn start_and_wait(
         }
     }
     let _ = child.kill();
-    Err(format!("Scraper failed to become ready within {} attempts", MAX_READY_ATTEMPTS))
+    let stderr_text = if let Some(mut stderr) = stderr {
+        use std::io::Read;
+        let mut buf = String::new();
+        stderr.read_to_string(&mut buf).ok();
+        buf
+    } else {
+        String::new()
+    };
+    if !stderr_text.is_empty() {
+        log::error!("Scraper stderr:\n{}", stderr_text);
+    }
+    Err(format!(
+        "Scraper failed to become ready within {} attempts.\nStderr:\n{}",
+        MAX_READY_ATTEMPTS, stderr_text
+    ))
 }

@@ -1,12 +1,13 @@
 {
   "name": "anicat",
-  "version": "5.0.0",
+  "version": "5.0.6",
   "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build:scraper": "python3 ../scripts/build_scraper.py",
+    "build": "npm run build:scraper && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
   },

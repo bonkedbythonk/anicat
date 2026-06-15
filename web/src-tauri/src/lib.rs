@@ -67,8 +67,12 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let app_state_clone = app_state.clone();
 
+            let proxy_port_arc = app_state.inner.proxy_port.clone();
             let handle1 = tauri::async_runtime::spawn(async move {
                 let bound = proxy::server::start_proxy(client, app_handle, app_state_clone).await;
+                if let Ok(mut port) = proxy_port_arc.lock() {
+                    *port = bound.port();
+                }
                 log::info!("HLS proxy started on {}", bound);
             });
 

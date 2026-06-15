@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { useState, useEffect, useRef } from "react";
-import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video } from "lucide-react";
+import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { mediaApi, type Episode } from "@/lib/api";
 import { useSettingsStore } from "@/stores/app";
@@ -17,6 +17,7 @@ interface EpisodeListProps {
   onPlayEpisode?: (epNum: string, provider?: string, server?: string) => void;
   playerType?: "embedded" | "external";
   onUnwatch?: (epNum: string) => void;
+  onWatch?: (epNum: string) => void;
   nextAiringEpisode?: number;
   nextAiringTime?: number;
   onRetry?: () => void;
@@ -37,6 +38,7 @@ export function EpisodeList({
   onPlayEpisode,
   playerType = "external",
   onUnwatch,
+  onWatch,
   nextAiringEpisode,
   nextAiringTime,
   onRetry,
@@ -130,11 +132,13 @@ export function EpisodeList({
   };
 
   const getStreamGroupFromServer = (s: any) => {
-    if (s.group) return s.group;
+    if (s.group) {
+      if (s.group === "sub") return "hard_sub";
+      return s.group;
+    }
     const n = (s.name || "").toLowerCase();
-    if (n.includes("hard") || n.includes("sub")) return "hard_sub";
     if (n.includes("dub")) return "dub";
-    if (n.includes("soft")) return "soft_sub";
+    if (n.includes("sub")) return "hard_sub";
     return "default";
   };
 
@@ -144,6 +148,15 @@ export function EpisodeList({
     if (status === "queued") return <Clock size={16} className="text-yellow-400 shrink-0" />;
     if (status === "failed") return <AlertCircle size={16} className="text-red-400 shrink-0" />;
     return null;
+  };
+
+  const serverSpeedRank = (server: any) => {
+    const url = (server.url || "").toLowerCase();
+    if (url.includes("tools.fast4speed.rsvp")) return 0;
+    if (url.includes("wixstatic.com") || url.includes("wixmp.com")) return 1;
+    if (url.includes("sharepoint") || url.includes("fast4speed")) return 2;
+    if (url.includes("mp4upload") || url.includes("youtu-chan")) return 3;
+    return 4;
   };
 
   const getSortedStreams = (streams: any[]) => {
@@ -173,8 +186,10 @@ export function EpisodeList({
       if (aWeight !== bWeight) {
         return aWeight - bWeight;
       }
-      
-      return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base", numeric: true });
+
+      const aSpeed = serverSpeedRank(a);
+      const bSpeed = serverSpeedRank(b);
+      return aSpeed - bSpeed;
     });
   };
 
@@ -409,18 +424,29 @@ export function EpisodeList({
                         <Download size={16} />
                       )}
                     </button>
-                    {isWatched && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onUnwatch) onUnwatch(epNum);
-                        }}
-                        title={isManga ? "Backtrack to before this chapter" : "Mark as unwatched"}
-                        className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-red-500/20 hover:text-red-400 transition-all active:scale-90"
-                      >
-                        <XCircle size={16} />
-                      </button>
-                    )}
+                     {isWatched ? (
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           if (onUnwatch) onUnwatch(epNum);
+                         }}
+                         title={isManga ? "Backtrack to before this chapter" : "Mark as unwatched"}
+                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-red-500/20 hover:text-red-400 transition-all active:scale-90"
+                       >
+                         <XCircle size={16} />
+                       </button>
+                     ) : (
+                       <button
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           if (onWatch) onWatch(epNum);
+                         }}
+                         title={isManga ? "Mark as read" : "Mark as watched"}
+                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-green-500/20 hover:text-green-400 transition-all active:scale-90"
+                       >
+                         <Check size={16} />
+                       </button>
+                     )}
                   </div>
                 ) : (
                   <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-foreground/[0.04] border border-border rounded-[10px] shrink-0">
@@ -434,7 +460,9 @@ export function EpisodeList({
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/10 pb-2 mb-2 gap-2">
                     <div className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Available Stream Servers</div>
                     <div className="flex items-center space-x-1 bg-foreground/[0.03] p-0.5 rounded-lg border border-border/40 text-[9px] font-bold self-start sm:self-auto">
-                      {(["hard_sub", "soft_sub", "dub"] as const).map((mode) => (
+                      {(["hard_sub", "soft_sub", "dub"] as const)
+                        .filter(mode => resolvedStreams.length === 0 || resolvedStreams.some(s => getStreamGroupFromServer(s) === mode))
+                        .map((mode) => (
                         <button
                           key={mode}
                           onClick={(e) => {
@@ -471,7 +499,7 @@ export function EpisodeList({
                         
                         return (
                           <button
-                            key={s.name || idx}
+                            key={`${s.name}-${idx}`}
                             disabled={isAnyLoading}
                             onClick={() => handlePlaySpecificStream(epNum, s.name)}
                             className={`flex items-center justify-between p-3 rounded-xl text-left transition-all active:scale-95 group/btn ${

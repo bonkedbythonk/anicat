@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { useCallback, useRef, memo } from "react";
+import { useCallback, useRef, memo, useState } from "react";
 import { Play, BookOpen, Star } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type MediaItem, mediaApi } from "@/lib/api";
@@ -31,10 +31,10 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         queryFn: () => mediaApi.getDetails(item.id),
       });
       queryClient.prefetchQuery({
-        queryKey: ["media-episodes", item.id, item.type === "MANGA" ? "mangakatana" : "anineko"],
+        queryKey: ["media-episodes", item.id, item.type === "MANGA" ? "mangakatana" : "allanime"],
         queryFn: () => mediaApi.getEpisodes(
           item.id,
-          item.type === "MANGA" ? "mangakatana" : "anineko",
+          item.type === "MANGA" ? "mangakatana" : "allanime",
           item.title.english || item.title.romaji || item.title.native || undefined
         ),
       });
@@ -73,6 +73,8 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
     progress < currentReleased &&
     (totalCount === 0 || progress < totalCount);
 
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   return (
     <div 
       onClick={() => onSelect?.(item)} 
@@ -86,7 +88,10 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           alt={title} 
           loading="lazy"
           decoding="async"
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+          onLoad={() => setImageLoaded(true)}
+          className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-[1.03] ${
+            imageLoaded ? "opacity-100" : "opacity-0"
+          }`}
         />
         
         {/* Play overlay */}

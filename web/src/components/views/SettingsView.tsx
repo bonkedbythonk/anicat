@@ -525,19 +525,28 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   description="Primary source for streaming video."
                 >
                   <select
-                    value={String(config.general?.provider || "anineko")}
+                    value={String(config.general?.provider || "allanime")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
+                    <option value="allanime">AllAnime</option>
                     <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
 
                 <SettingField
-                  label="Fallback Providers"
-                  description="Only one provider is configured. Fallbacks are not needed."
+                  label="Fallback Provider"
+                  description="Used when the primary provider fails to find streams."
                 >
-                  <p className="text-xs text-muted-foreground">No fallbacks available.</p>
+                  <select
+                    value={String(config.general?.fallback_provider || "anineko")}
+                    onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
+                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                  >
+                    <option value="none">None</option>
+                    <option value="allanime">AllAnime</option>
+                    <option value="anineko">AniNeko</option>
+                  </select>
                 </SettingField>
 
                 <SettingField
@@ -585,22 +594,54 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
+                <SettingField
+                  label="Auto-Skip Intros"
+                  description="Automatically skip openings and endings using AniSkip database times (Press S in player to skip manually when disabled)."
+                >
+                  <select
+                    value={config.general?.autoskip ? "true" : "false"}
+                    onChange={(e) => {
+                      updateField("general", "autoskip", e.target.value === "true");
+                      useSettingsStore.getState().setAutoskip(e.target.value === "true");
+                    }}
+                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                  >
+                    <option value="false">Disabled (Manual S)</option>
+                    <option value="true">Enabled (Automatic)</option>
+                  </select>
+                </SettingField>
 
               </CardSection>
 
               <CardSection title="Video Player">
-                <SettingField label="GPU Upscaling" description="Anime4K CNN upscaling for mpv (On uses balanced profile, Off disables GPU shaders).">
-                  <select
-                    value={String(config.stream?.shader_profile || "balanced")}
-                    onChange={(e) => updateField("stream", "shader_profile", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                <SettingField label="GPU Upscaling" description="Anime4K CNN upscaling for mpv — enhances sharpness and detail.">
+                  <button
+                    onClick={() => {
+                      const current = config.stream?.shader_profile || "balanced";
+                      updateField("stream", "shader_profile", current === "off" ? "balanced" : "off");
+                    }}
+                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
+                      (config.stream?.shader_profile || "balanced") !== "off"
+                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
+                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
+                    }`}
                   >
-                    <option value="balanced">On</option>
-                    <option value="off">Off</option>
-                  </select>
+                    <Cpu size={16} />
+                    <span>{(config.stream?.shader_profile || "balanced") !== "off" ? "On" : "Off"}</span>
+                  </button>
                 </SettingField>
+              </CardSection>
 
-
+              <CardSection title="Keyboard Shortcuts">
+                <div className="space-y-3 text-xs leading-relaxed">
+                  <p className="text-gray-400">When playing media in the external MPV window, you can use these shortcuts:</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle GPU Shaders</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + A</kbd></div>
+                  </div>
+                </div>
               </CardSection>
             </div>
           )}
@@ -900,7 +941,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   <div className="flex items-center space-x-2">
                     <input ref={debugMediaIdRef} type="number" placeholder="Anime ID" className="w-[92px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
                     <input ref={debugEpisodeRef} type="number" placeholder="Episode #" defaultValue="1" className="w-[100px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
-                    <select ref={debugProviderRef} defaultValue="anineko" className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
+                    <select ref={debugProviderRef} defaultValue="allanime" className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
+                      <option value="allanime" className="bg-[#121212]">AllAnime</option>
                       <option value="anineko" className="bg-[#121212]">AniNeko</option>
                     </select>
                     <button

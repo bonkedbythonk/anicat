@@ -19,6 +19,7 @@
   --color-border: var(--border-color);
   --color-white: var(--dynamic-white);
   --color-black: var(--dynamic-black);
+  --color-muted-foreground: var(--text-muted);
 
   --radius-sm: 10px;
   --radius-md: 14px;
@@ -189,45 +190,7 @@ html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .force
   background-image: linear-gradient(to right, rgba(5, 5, 5, 0.75) 0%, rgba(5, 5, 5, 0.15) 50%, transparent 100%) !important;
 }
 
-/* Sakura Zen — serif body + headings */
-html[data-style="sakura-zen"] body,
-html[data-style="sakura-zen"] .text-foreground,
-html[data-style="sakura-zen"] p,
-html[data-style="sakura-zen"] span,
-html[data-style="sakura-zen"] div:not([class*="font-"]):not([class*="text-[0"]):not([class*="text-[1"]) {
-  font-family: "Noto Serif JP", serif !important;
-}
-html[data-style="sakura-zen"] h1,
-html[data-style="sakura-zen"] h2,
-html[data-style="sakura-zen"] h3,
-html[data-style="sakura-zen"] h4,
-html[data-style="sakura-zen"] h5,
-html[data-style="sakura-zen"] .font-bold,
-html[data-style="sakura-zen"] .font-black,
-html[data-style="sakura-zen"] .font-semibold {
-  font-family: "Noto Serif JP", serif !important;
-  font-weight: 700 !important;
-}
-
-/* Retro Manga — Bangers headings, Noto Sans JP body */
-html[data-style="retro-manga"] body,
-html[data-style="retro-manga"] p,
-html[data-style="retro-manga"] span,
-html[data-style="retro-manga"] div:not([class*="font-"]):not([class*="text-[0"]):not([class*="text-[1"]) {
-  font-family: "Noto Sans JP", sans-serif !important;
-}
-html[data-style="retro-manga"] h1,
-html[data-style="retro-manga"] h2,
-html[data-style="retro-manga"] h3,
-html[data-style="retro-manga"] h4,
-html[data-style="retro-manga"] h5,
-html[data-style="retro-manga"] .font-bold,
-html[data-style="retro-manga"] .font-black,
-html[data-style="retro-manga"] .font-semibold {
-  font-family: "Bangers", cursive !important;
-  font-weight: 400 !important;
-  letter-spacing: 0.02em;
-}
+/* Custom theme overrides */
 
 /* Sakura Zen forced dark override */
 html[data-style="sakura-zen"] .forced-dark-container .bg-gradient-to-t {
@@ -499,13 +462,18 @@ html[data-style="sakura-zen"] span:not(.font-mono):not(code),
 html[data-style="sakura-zen"] p, html[data-style="sakura-zen"] button,
 html[data-style="sakura-zen"] input, html[data-style="sakura-zen"] select,
 html[data-style="sakura-zen"] label, html[data-style="sakura-zen"] li,
-html[data-style="sakura-zen"] td, html[data-style="sakura-zen"] th {
+html[data-style="sakura-zen"] td, html[data-style="sakura-zen"] th,
+html[data-style="sakura-zen"] a, html[data-style="sakura-zen"] div:not([class*="font-mono"]):not([class*="icon"]):not(svg) {
   font-family: 'Noto Serif JP', Georgia, serif !important;
 }
 html[data-style="sakura-zen"] h1, html[data-style="sakura-zen"] h2,
-html[data-style="sakura-zen"] h3, html[data-style="sakura-zen"] h4 {
+html[data-style="sakura-zen"] h3, html[data-style="sakura-zen"] h4,
+html[data-style="sakura-zen"] h5, html[data-style="sakura-zen"] h6,
+html[data-style="sakura-zen"] .font-bold,
+html[data-style="sakura-zen"] .font-black,
+html[data-style="sakura-zen"] .font-semibold {
   font-family: 'Noto Serif JP', Georgia, serif !important;
-  font-weight: 600;
+  font-weight: 700 !important;
   letter-spacing: -0.02em;
 }
 html[data-style="sakura-zen"] kbd, html[data-style="sakura-zen"] code,
@@ -621,12 +589,17 @@ html[data-style="retro-manga"] span:not(.font-mono):not(code),
 html[data-style="retro-manga"] p, html[data-style="retro-manga"] input,
 html[data-style="retro-manga"] select, html[data-style="retro-manga"] label,
 html[data-style="retro-manga"] li, html[data-style="retro-manga"] td,
-html[data-style="retro-manga"] th {
+html[data-style="retro-manga"] th, html[data-style="retro-manga"] button,
+html[data-style="retro-manga"] a, html[data-style="retro-manga"] div:not([class*="font-mono"]):not([class*="icon"]):not(svg) {
   font-family: 'Noto Sans JP', sans-serif !important;
 }
 
 html[data-style="retro-manga"] h1, html[data-style="retro-manga"] h2,
-html[data-style="retro-manga"] h3, html[data-style="retro-manga"] h4 {
+html[data-style="retro-manga"] h3, html[data-style="retro-manga"] h4,
+html[data-style="retro-manga"] h5, html[data-style="retro-manga"] h6,
+html[data-style="retro-manga"] .font-bold,
+html[data-style="retro-manga"] .font-black,
+html[data-style="retro-manga"] .font-semibold {
   font-family: 'Bangers', Impact, sans-serif !important;
   font-weight: normal !important;
   letter-spacing: 0.05em !important;

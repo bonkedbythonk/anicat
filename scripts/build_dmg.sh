@@ -2,8 +2,8 @@
 set -e
 
 # This script performs a full production build of Anicat and packages it as a .dmg for macOS.
-# 1. Builds the Python sidecar binary
-# 2. Builds the Next.js frontend
+# 1. Builds the Python scraper as a standalone PyInstaller binary
+# 2. Builds the Vite frontend
 # 3. Bundles everything into a macOS Application and DMG using Tauri
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,9 +11,18 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "🏗️ Starting Full Production Build of Anicat..."
 
-# 1. Build Sidecar
-echo "📡 Step 1: Building Python Sidecar..."
-bash "$SCRIPT_DIR/build_sidecar.sh"
+# 1. Build Python scraper binary via PyInstaller
+echo "📡 Step 1: Building Standalone Python Scraper..."
+cd "$PROJECT_ROOT/scraper"
+uv run pyinstaller --onefile --name anicat-scraper \
+  --hidden-import curl_cffi \
+  --hidden-import selectolax \
+  --collect-all curl_cffi \
+  --collect-all selectolax \
+  main.py
+mkdir -p "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin"
+mv dist/anicat-scraper "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin/"
+cd "$PROJECT_ROOT"
 
 # 2. Setup Portable Companion Player
 echo "🎬 Step 2: Configuring Portable Companion Player..."
@@ -27,7 +36,6 @@ cd "$PROJECT_ROOT/web"
 npm install
 
 # Run the Tauri build command
-# This will trigger 'npm run build' (Next.js) internally as defined in tauri.conf.json
 npx tauri build
 
 echo "✨ Build Complete!"

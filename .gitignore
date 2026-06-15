@@ -131,3 +131,5 @@ docs/
 web/src/**/*.js
 web/src/*.js
 
+scraper-bin/
+mpv-shot*.jpg

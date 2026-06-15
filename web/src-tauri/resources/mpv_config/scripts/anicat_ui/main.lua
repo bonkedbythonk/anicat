@@ -200,8 +200,6 @@ local function get_current_shader_mode()
   local current = mp.get_property('glsl-shaders') or ''
   if current == '' then
     return 'off'
-  elseif current:find('Anime4K_Upscale_Denoise_CNN_x2_M.glsl') or current:find('Anime4K_Restore_CNN_Soft_M.glsl') then
-    return 'deblock'
   else
     return 'standard'
   end
@@ -218,21 +216,7 @@ local function enable_standard_shaders()
   local path_str = table.concat(shader_paths, ":")
   mp.commandv("change-list", "glsl-shaders", "set", path_str)
   refresh_shaders_state()
-  mp.osd_message("Upscaling: Standard (Sharp)", 2.0)
-end
-
-local function enable_deblock_shaders()
-  local shader_paths = {
-    "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-    "~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl",
-    "~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_M.glsl",
-    "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
-    "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl"
-  }
-  local path_str = table.concat(shader_paths, ":")
-  mp.commandv("change-list", "glsl-shaders", "set", path_str)
-  refresh_shaders_state()
-  mp.osd_message("Upscaling: Low-Bitrate / Deblock", 2.0)
+  mp.osd_message("Upscaling: Enabled (Sharp)", 2.0)
 end
 
 local function enable_shaders()
@@ -249,8 +233,6 @@ local function toggle_shaders()
   local mode = get_current_shader_mode()
   if mode == 'off' then
     enable_standard_shaders()
-  elseif mode == 'standard' then
-    enable_deblock_shaders()
   else
     disable_shaders()
   end

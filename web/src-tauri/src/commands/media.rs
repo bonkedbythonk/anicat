@@ -230,22 +230,89 @@ pub async fn get_episodes(
                 .map_err(|e| e.to_string());
         };
 
-        let results = if is_manga {
-            state.scraper_manager.search_manga(&title).await.unwrap_or_default()
+        // Fetch full titles from AniList to match robustly
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(media_id));
+        vars.insert("type".to_string(), serde_json::json!(if is_manga { "MANGA" } else { "ANIME" }));
+        
+        let detail_res: Result<crate::anilist::responses::MediaResponse, String> = state
+            .anilist_client
+            .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+            .await
+            .map_err(|e| e.to_string());
+
+        let mut romaji_title = String::new();
+        let mut english_title = String::new();
+        let mut native_title = String::new();
+
+        if let Ok(detail) = detail_res {
+            if let Some(m) = detail.media {
+                if let Some(t) = m.title {
+                    romaji_title = t.romaji.unwrap_or_default();
+                    english_title = t.english.unwrap_or_default();
+                    native_title = t.native.unwrap_or_default();
+                }
+            }
+        }
+
+        // Fallback to frontend-passed title if all are empty
+        if romaji_title.is_empty() && english_title.is_empty() {
+            romaji_title = title.clone();
+        }
+
+        let mut target_titles = vec![];
+        if !romaji_title.is_empty() { target_titles.push(romaji_title.as_str()); }
+        if !english_title.is_empty() { target_titles.push(english_title.as_str()); }
+        if !native_title.is_empty() { target_titles.push(native_title.as_str()); }
+
+        let search_query = if !english_title.is_empty() {
+            &english_title
+        } else if !romaji_title.is_empty() {
+            &romaji_title
         } else {
-            state.scraper_manager.search(&title, &provider_name).await.unwrap_or_default()
+            &title
         };
 
-        if let Some(best) = find_best_match(&title, results, |r| &r.title) {
+        let results = if is_manga {
+            match state.scraper_manager.search_manga(search_query).await {
+                Ok(res) => res,
+                Err(e) => {
+                    log::error!("Manga search failed for '{}': {}", search_query, e);
+                    vec![]
+                }
+            }
+        } else {
+            match state.scraper_manager.search(search_query, &provider_name).await {
+                Ok(res) => res,
+                Err(e) => {
+                    log::error!("Anime search failed for '{}' using provider '{}': {}", search_query, provider_name, e);
+                    vec![]
+                }
+            }
+        };
+
+        if let Some(best) = find_best_match(&target_titles, results, |r| &r.title) {
             let _ = registry::service::set_provider_slug(
                 &db, media_id, &provider_name, &best.id,
             );
             let res = if is_manga {
-                state.scraper_manager.get_manga(&best.id).await.map(|info| info.episodes)
+                match state.scraper_manager.get_manga(&best.id).await {
+                    Ok(info) => info.episodes,
+                    Err(e) => {
+                        log::error!("get_manga failed for slug '{}': {}", best.id, e);
+                        vec![]
+                    }
+                }
             } else {
-                state.scraper_manager.get_anime(&best.id, &provider_name).await.map(|info| info.episodes)
+                match state.scraper_manager.get_anime(&best.id, &provider_name).await {
+                    Ok(info) => info.episodes,
+                    Err(e) => {
+                        log::error!("get_anime failed for slug '{}' on provider '{}': {}", best.id, provider_name, e);
+                        vec![]
+                    }
+                }
             };
-            res.unwrap_or_default()
+            res
         } else {
             vec![]
         }
@@ -346,15 +413,34 @@ pub async fn debug_provider_streams(
                 .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
                 .await
                 .map_err(|e| format!("Failed to get anime title: {}", e))?;
-            let title = detail.media
-                .and_then(|m| m.title)
-                .and_then(|t| t.english.or(t.romaji))
-                .unwrap_or_default();
-            if title.is_empty() {
-                return Err(format!("No title found for media {}", media_id));
+            let mut romaji_t = String::new();
+            let mut english_t = String::new();
+            let mut native_t = String::new();
+            if let Some(ref m) = detail.media {
+                if let Some(ref t) = m.title {
+                    romaji_t = t.romaji.clone().unwrap_or_default();
+                    english_t = t.english.clone().unwrap_or_default();
+                    native_t = t.native.clone().unwrap_or_default();
+                }
             }
-            let results = state.scraper_manager.search(&title, &provider_name).await.unwrap_or_default();
-            match find_best_match(&title, results, |r| &r.title) {
+
+            let search_query = if !english_t.is_empty() {
+                &english_t
+            } else if !romaji_t.is_empty() {
+                &romaji_t
+            } else {
+                return Err(format!("No title found for media {}", media_id));
+            };
+
+            let results = state.scraper_manager.search(search_query, &provider_name).await.unwrap_or_default();
+
+            let mut targets = vec![];
+            if !romaji_t.is_empty() { targets.push(romaji_t.as_str()); }
+            if !english_t.is_empty() { targets.push(english_t.as_str()); }
+            if !native_t.is_empty() { targets.push(native_t.as_str()); }
+            if targets.is_empty() { targets.push(search_query); }
+
+            match find_best_match(&targets, results, |r| &r.title) {
                 Some(best) => {
                     let _ = registry::service::set_provider_slug(&db, media_id, &provider_name, &best.id);
                     best.id
@@ -362,7 +448,7 @@ pub async fn debug_provider_streams(
                 None => {
                     return Err(format!(
                         r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"Search for '{}' returned no results"}}"#,
-                        media_id, provider_name, title
+                        media_id, provider_name, search_query
                     ));
                 }
             }
@@ -1068,22 +1154,33 @@ fn calculate_similarity(target: &str, candidate: &str) -> f64 {
     1.0 - (lev as f64 / max_len)
 }
 
-fn find_best_match<T, F>(target: &str, candidates: Vec<T>, get_title: F) -> Option<T>
+fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F) -> Option<T>
 where
     F: Fn(&T) -> &str,
 {
-    let mut best_candidate = None;
+    let mut best_index = None;
     let mut best_score = 0.4_f64;
 
-    for candidate in candidates {
-        let score = calculate_similarity(target, get_title(&candidate));
-        if score > best_score {
-            best_score = score;
-            best_candidate = Some(candidate);
+    for (idx, candidate) in candidates.iter().enumerate() {
+        let cand_title = get_title(candidate);
+        for &target in target_titles {
+            if target.is_empty() {
+                continue;
+            }
+            let score = calculate_similarity(target, cand_title);
+            if score > best_score {
+                best_score = score;
+                best_index = Some(idx);
+            }
         }
     }
 
-    best_candidate
+    if let Some(idx) = best_index {
+        let mut candidates = candidates;
+        Some(candidates.remove(idx))
+    } else {
+        None
+    }
 }
 
 fn is_progress_line(line: &str) -> bool {
@@ -1101,5 +1198,35 @@ fn is_progress_line(line: &str) -> bool {
     (trimmed.contains("[download]") && has_progress_keywords)
         || (trimmed.starts_with(|c: char| c.is_ascii_digit() || c == '.') && trimmed.contains('%'))
         || (trimmed.contains('%') && (trimmed.contains("at") || trimmed.contains("ETA")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    struct DummyAnime {
+        title: String,
+        id: String,
+    }
+
+    #[test]
+    fn test_find_best_match_multi() {
+        let candidates = vec![
+            DummyAnime {
+                title: "The Ramparts of Ice".to_string(),
+                id: "123".to_string(),
+            },
+            DummyAnime {
+                title: "Bleach".to_string(),
+                id: "456".to_string(),
+            },
+        ];
+
+        let targets = vec!["Koori no Jouheki", "The Ramparts of Ice", "氷 of 城壁"];
+        let matched = find_best_match(&targets, candidates, |r| &r.title);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().id, "123");
+    }
 }
 

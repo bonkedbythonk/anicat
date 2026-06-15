@@ -190,14 +190,21 @@ pub async fn trigger_update(url: String) -> Result<(), String> {
     let mount_output_str = String::from_utf8_lossy(&mount_output.stdout);
     log::info!("hdiutil attach: {}", mount_output_str);
 
-    // Parse the mount point from hdiutil output: "/Volumes/Anicat 5.1.1"
+    // Parse the mount point from hdiutil output (handles spaces in volume name, e.g., "/Volumes/Anicat 5.1.3")
     let mount_point = mount_output_str
         .lines()
         .find_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                Some(parts.last().unwrap_or(&"").to_string())
+            if let Some(idx) = line.find("/Volumes/") {
+                Some(line[idx..].trim().to_string())
             } else {
+                // Fallback: split by tab in case it's a custom mount directory outside of /Volumes/
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 3 {
+                    let last = parts.last().unwrap_or(&"").trim();
+                    if !last.is_empty() && last.starts_with('/') {
+                        return Some(last.to_string());
+                    }
+                }
                 None
             }
         })

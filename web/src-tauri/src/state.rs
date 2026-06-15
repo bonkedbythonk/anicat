@@ -193,24 +193,24 @@ impl AppState {
 
         let scraper_python = std::env::var("ANICAT_SCRAPER_PYTHON")
             .unwrap_or_else(|_| {
-                // 1. Check for bundled standalone binary (production)
                 if let Ok(exe) = std::env::current_exe() {
-                    for parent in [
-                        exe.parent().and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } }),
-                        exe.parent().map(|d| d.to_path_buf()),
-                    ] {
-                        if let Some(ref dir) = parent {
-                            let binary = dir.join("scraper-bin").join("anicat-scraper");
-                            if binary.exists() {
-                                log::info!("Using bundled scraper binary: {}", binary.display());
-                                return String::new();
-                            }
+                    if let Some(resource_dir) = exe.parent()
+                        .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
+                    {
+                        let base_dir = if resource_dir.join("resources").exists() {
+                            resource_dir.join("resources")
+                        } else {
+                            resource_dir.clone()
+                        };
+                        // Prefer bundled standalone binary
+                        let binary = base_dir.join("scraper-bin").join("anicat-scraper");
+                        if binary.exists() {
+                            log::info!("[scraper] using bundled binary: {}", binary.display());
+                            return String::new();
                         }
                     }
                 }
-                // 2. Dev fallback: prefer uv (auto-manages deps), then system Python
-                // uv may be installed at ~/.local/bin/uv (pip install) or /opt/homebrew/bin/uv (brew)
-                // which is not on the system PATH inherited by GUI apps.
+                // Dev fallback
                 let candidates = [
                     "uv",
                     "/opt/homebrew/bin/uv",
@@ -235,30 +235,29 @@ impl AppState {
                         .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
                     {
                         log::info!("[scraper] resource_dir exists: {:?}", resource_dir);
-                        // 1. Bundled standalone binary (production)
-                        let bin = resource_dir.join("scraper-bin").join("anicat-scraper");
+                        let base_dir = if resource_dir.join("resources").exists() {
+                            resource_dir.join("resources")
+                        } else {
+                            resource_dir.clone()
+                        };
+                        // Prefer bundled standalone binary
+                        let bin = base_dir.join("scraper-bin").join("anicat-scraper");
                         log::info!("[scraper] checking bundled binary: {:?} exists={}", bin, bin.exists());
                         if bin.exists() {
                             return bin.to_string_lossy().to_string();
                         }
-                        // 2. Bundled main.py (old dev fallback)
-                        let py = resource_dir.join("scraper").join("main.py");
-                        log::info!("[scraper] checking bundled main.py: {:?} exists={}", py, py.exists());
-                        if py.exists() {
-                            return py.to_string_lossy().to_string();
-                        }
                     } else {
                         let r = exe.parent().unwrap_or(&exe).to_path_buf();
                         log::info!("[scraper] no Resources dir, trying parent: {:?}", r);
-                        let bin = r.join("scraper-bin").join("anicat-scraper");
+                        let base_dir = if r.join("resources").exists() {
+                            r.join("resources")
+                        } else {
+                            r.clone()
+                        };
+                        let bin = base_dir.join("scraper-bin").join("anicat-scraper");
                         log::info!("[scraper] checking binary at: {:?} exists={}", bin, bin.exists());
                         if bin.exists() {
                             return bin.to_string_lossy().to_string();
-                        }
-                        if r.join("scraper").exists() {
-                            let py = r.join("scraper").join("main.py");
-                            log::info!("[scraper] checking main.py at: {:?} exists={}", py, py.exists());
-                            return py.to_string_lossy().to_string();
                         }
                     }
                 }

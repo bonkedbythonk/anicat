@@ -1,6 +1,6 @@
 [package]
 name = "anicat"
-version = "5.1.1"
+version = "5.1.3"
 license = "GPL-3.0-only"
 edition = "2021"
 

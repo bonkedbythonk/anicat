@@ -93,7 +93,13 @@ pub struct PlaybackStart {
 fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
-    let prod_config = resource_dir.join("mpv_config");
+    let base_dir = if resource_dir.join("resources").exists() {
+        resource_dir.join("resources")
+    } else {
+        resource_dir.clone()
+    };
+
+    let prod_config = base_dir.join("mpv_config");
     let config_dir = if prod_config.exists() {
         prod_config.to_string_lossy().to_string()
     } else {
@@ -122,7 +128,7 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     } else {
         "mpv"
     };
-    let mpv_bin = resource_dir.join(mpv_name);
+    let mpv_bin = base_dir.join(mpv_name);
     if !mpv_bin.exists() {
         let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
@@ -143,7 +149,7 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         ));
     }
 
-    let lib_dir = resource_dir.join("lib");
+    let lib_dir = base_dir.join("lib");
 
     Ok((
         mpv_bin.to_string_lossy().to_string(),
@@ -445,6 +451,20 @@ pub async fn start_playback(
     log::info!("mpv binary: {}", mpv_bin);
     log::info!("mpv config: {}", config_dir);
     log::info!("mpv lib dir: {}", lib_dir);
+
+    // Self-healing permission setup for mpv binary
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(&mpv_bin) {
+            let mut perms = metadata.permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&mpv_bin, perms);
+                log::info!("Set executable permissions for mpv binary");
+            }
+        }
+    }
 
     let mut cmd = tokio::process::Command::new(&mpv_bin);
     cmd.arg(format!("--config-dir={}", config_dir));

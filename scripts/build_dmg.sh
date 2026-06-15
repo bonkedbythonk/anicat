@@ -17,8 +17,18 @@ cd "$PROJECT_ROOT/scraper"
 uv run pyinstaller --onefile --name anicat-scraper \
   --hidden-import curl_cffi \
   --hidden-import selectolax \
+  --hidden-import Crypto \
+  --hidden-import nodriver \
+  --hidden-import fastapi \
+  --hidden-import uvicorn \
+  --hidden-import starlette \
   --collect-all curl_cffi \
   --collect-all selectolax \
+  --collect-all pycryptodome \
+  --collect-all nodriver \
+  --collect-all fastapi \
+  --collect-all uvicorn \
+  --collect-all starlette \
   main.py
 mkdir -p "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin"
 mv dist/anicat-scraper "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin/"

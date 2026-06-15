@@ -9,57 +9,7 @@ REPO="bonkedbythonk/anicat"
 APP_NAME="Anicat.app"
 INSTALL_PATH="/Applications/$APP_NAME"
 
-# Step 0: Checking and installing dependencies
-echo "Step 0: Checking system dependencies..."
 
-BREW_EXE=$(command -v brew || true)
-if [ -z "$BREW_EXE" ]; then
-    if [ -f "/opt/homebrew/bin/brew" ]; then
-        BREW_EXE="/opt/homebrew/bin/brew"
-    elif [ -f "/usr/local/bin/brew" ]; then
-        BREW_EXE="/usr/local/bin/brew"
-    fi
-fi
-
-if [ -n "$BREW_EXE" ]; then
-    eval "$($BREW_EXE shellenv)"
-fi
-
-# We check and install 'uv' (Python package manager), which is required to bootstrap scraper dependencies.
-# 'mpv' is pre-bundled inside the app (Anicat.app/Contents/Resources/mpv).
-# The install script removes quarantines below so it runs without warnings.
-if ! command -v uv &> /dev/null; then
-    echo "Installing 'uv' (Python package manager) to manage scraper dependencies..."
-    if [ -n "$BREW_EXE" ]; then
-        $BREW_EXE install uv --quiet
-    else
-        # Standalone installation (runs in 2 seconds, no root/sudo privileges needed)
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        export PATH="$HOME/.local/bin:$PATH"
-    fi
-else
-    echo "  - 'uv' is already installed."
-fi
-
-# Ensure ~/.local/bin is in PATH for the rest of the script and future shell sessions if uv was installed via script
-if [ -d "$HOME/.local/bin" ]; then
-    SHELL_CONFIG=""
-    if [[ "$SHELL" == */zsh ]]; then
-        SHELL_CONFIG="$HOME/.zshrc"
-    elif [[ "$SHELL" == */bash ]]; then
-        SHELL_CONFIG="$HOME/.bash_profile"
-    fi
-
-    if [ -n "$SHELL_CONFIG" ] && [ -f "$SHELL_CONFIG" ]; then
-        if ! grep -q ".local/bin" "$SHELL_CONFIG" 2>/dev/null; then
-            echo "Adding ~/.local/bin to PATH in $SHELL_CONFIG..."
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_CONFIG"
-        fi
-    fi
-fi
-
-echo "All dependencies checked."
-echo ""
 echo "Step 1: Finding the latest version..."
 UPDATE_BRANCH="stable"
 CONFIG_FILE="$HOME/Library/Application Support/anicat/config.toml"

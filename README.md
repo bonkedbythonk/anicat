@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Anicat (broken due to scraping issues)</h1>
+  <h1>Anicat</h1>
   <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
 
   <p>
@@ -60,7 +60,7 @@ Requires Rust, Node.js, system deps for [Tauri v2](https://v2.tauri.app/start/pr
 | [AniList](https://anilist.co) | Library, tracking, search, profile |
 | [mpv](https://mpv.io) | External media player (recommended) |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Episode downloading |
-| [Python 3](https://python.org) | Scraper subprocess (AniNeko, MangaKatana) |
+| [Python 3](https://python.org) | Required for CLI/TUI mode & building from source |
 
 ## Legal
 

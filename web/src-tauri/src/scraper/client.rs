@@ -272,6 +272,18 @@ impl ScraperManager {
 
         // Bundled standalone binary — run directly, no Python wrapper
         let mut cmd = if self.python_path.is_empty() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = std::fs::metadata(&self.scraper_script) {
+                    let mut perms = metadata.permissions();
+                    if perms.mode() & 0o111 == 0 {
+                        perms.set_mode(0o755);
+                        let _ = std::fs::set_permissions(&self.scraper_script, perms);
+                        log::info!("[scraper] Set executable permissions for standalone binary");
+                    }
+                }
+            }
             let mut c = Command::new(&self.scraper_script);
             c.arg("--port").arg(port.to_string());
             c
@@ -285,9 +297,17 @@ impl ScraperManager {
         };
         cmd.current_dir(script_dir);
 
+        log::info!(
+            "[scraper] Spawning process: python_path='{}', script='{}', port={}, current_dir={:?}",
+            self.python_path,
+            self.scraper_script,
+            port,
+            script_dir
+        );
+
         start_and_wait(cmd, port, &self.process, &self.http_client).await
     }
-    }
+}
 
 // ── Idle watchdog ─────────────────────────────────────────
 
@@ -357,6 +377,19 @@ async fn start_and_wait(
         .map_err(|e| format!("Failed to start scraper: {}", e))?;
 
     let stderr = child.stderr.take();
+    if let Some(stderr) = stderr {
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    if !line.trim().is_empty() {
+                        log::warn!("[scraper-py] {}", line);
+                    }
+                }
+            }
+        });
+    }
 
     let mut delay_ms = READY_RETRY_MS;
     for attempt in 0..MAX_READY_ATTEMPTS {
@@ -382,19 +415,26 @@ async fn start_and_wait(
         }
     }
     let _ = child.kill();
-    let stderr_text = if let Some(mut stderr) = stderr {
-        use std::io::Read;
-        let mut buf = String::new();
-        stderr.read_to_string(&mut buf).ok();
-        buf
-    } else {
-        String::new()
-    };
-    if !stderr_text.is_empty() {
-        log::error!("Scraper stderr:\n{}", stderr_text);
-    }
     Err(format!(
-        "Scraper failed to become ready within {} attempts.\nStderr:\n{}",
-        MAX_READY_ATTEMPTS, stderr_text
+        "Scraper failed to become ready within {} attempts. Check logs above for details.",
+        MAX_READY_ATTEMPTS
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_search() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let http_client = reqwest::Client::new();
+        let python_path = "uv".to_string();
+        let scraper_script = "/Users/thomas/Documents/randomcode/personal/anicat/scraper/main.py".to_string();
+
+        let manager = ScraperManager::new(http_client, python_path, scraper_script);
+        let results = manager.search("The Ramparts of Ice", "allanime").await.unwrap();
+        println!("TEST_SEARCH_RESULTS: {:?}", results);
+        assert!(!results.is_empty());
+    }
 }

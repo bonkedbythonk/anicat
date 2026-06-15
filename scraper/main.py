@@ -7,8 +7,18 @@ Communicates via HTTP on localhost ephemeral port.
 import argparse
 import time
 import uvicorn
+import logging
+import sys
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("anicat-scraper")
 
 PROVIDERS: dict[str, object | None] = {}
 
@@ -47,9 +57,13 @@ async def last_used():
 @app.get("/search")
 async def search(query: str = Query(...), provider: str = Query("anineko")):
     _touch()
-    prov = _load_provider(provider)
-    results = await prov.search(query)
-    return [{"id": r.id, "title": r.title, "year": r.year if hasattr(r, "year") else None} for r in results]
+    try:
+        prov = _load_provider(provider)
+        results = await prov.search(query)
+        return [{"id": r.id, "title": r.title, "year": r.year if hasattr(r, "year") else None} for r in results]
+    except Exception as e:
+        logger.exception(f"Search failed for query='{query}' provider='{provider}'")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/get")
@@ -68,26 +82,31 @@ async def get_anime(slug: str = Query(...), provider: str = Query("anineko")):
             ],
         }
     except Exception as e:
+        logger.exception(f"Get failed for slug='{slug}' provider='{provider}'")
         return {"title": "", "episodes": [], "error": str(e)}
 
 
 @app.get("/streams")
 async def get_streams(slug: str = Query(...), episode: int = Query(...), provider: str = Query("anineko")):
     _touch()
-    prov = _load_provider(provider)
-    servers, _ = await prov.streams(slug, episode, debug=False)
-    return [
-        {
-            "name": s.name,
-            "url": s.url,
-            "quality": s.quality,
-            "is_m3u8": s.is_m3u8,
-            "headers": s.headers,
-            "group": s.group,
-            "source_type": s.source_type,
-        }
-        for s in servers
-    ]
+    try:
+        prov = _load_provider(provider)
+        servers, _ = await prov.streams(slug, episode, debug=False)
+        return [
+            {
+                "name": s.name,
+                "url": s.url,
+                "quality": s.quality,
+                "is_m3u8": s.is_m3u8,
+                "headers": s.headers,
+                "group": s.group,
+                "source_type": s.source_type,
+            }
+            for s in servers
+        ]
+    except Exception as e:
+        logger.exception(f"Streams failed for slug='{slug}' episode={episode} provider='{provider}'")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/debug/streams")
@@ -213,59 +232,71 @@ async def debug_test():
 @app.get("/manga/search")
 async def manga_search(query: str = Query(...)):
     _touch()
-    prov = _load_provider("mangakatana")
-    results = await prov.search(query)
-    return [{"id": r["id"], "title": r["title"], "year": None} for r in results]
+    try:
+        prov = _load_provider("mangakatana")
+        results = await prov.search(query)
+        return [{"id": r["id"], "title": r["title"], "year": None} for r in results]
+    except Exception as e:
+        logger.exception(f"Manga search failed for query='{query}'")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/manga/get")
 async def get_manga(slug: str = Query(...)):
     _touch()
-    prov = _load_provider("mangakatana")
-    info = await prov.get(slug)
-    if info is None:
-        return {"title": "", "episodes": []}
-    return {
-        "title": info["title"],
-        "episodes": [
-            {"number": ep["number"], "title": ep["title"], "image": ep.get("image")}
-            for ep in info["chapters"]
-        ],
-    }
+    try:
+        prov = _load_provider("mangakatana")
+        info = await prov.get(slug)
+        if info is None:
+            return {"title": "", "episodes": []}
+        return {
+            "title": info["title"],
+            "episodes": [
+                {"number": ep["number"], "title": ep["title"], "image": ep.get("image")}
+                for ep in info["chapters"]
+            ],
+        }
+    except Exception as e:
+        logger.exception(f"Manga get failed for slug='{slug}'")
+        return {"title": "", "episodes": [], "error": str(e)}
 
 
 @app.get("/manga/chapter")
 async def get_chapter(slug: str = Query(...), chapter: str = Query(...)):
     _touch()
-    prov = _load_provider("mangakatana")
-    info = await prov.get(slug)
-    if not info or not info.get("chapters"):
-        return {"thumbnails": [], "title": ""}
-    
-    target_ch = None
-    for ep in info["chapters"]:
-        if str(ep["number"]) == chapter:
-            target_ch = ep
-            break
-            
-    if not target_ch:
-        try:
-            ch_float = float(chapter)
-            for ep in info["chapters"]:
-                if abs(float(ep["number"]) - ch_float) < 0.01:
-                    target_ch = ep
-                    break
-        except ValueError:
-            pass
-            
-    if not target_ch:
-        return {"thumbnails": [], "title": ""}
+    try:
+        prov = _load_provider("mangakatana")
+        info = await prov.get(slug)
+        if not info or not info.get("chapters"):
+            return {"thumbnails": [], "title": ""}
         
-    pages_info = await prov.get_pages(target_ch["url"])
-    if not pages_info:
-        return {"thumbnails": [], "title": ""}
-        
-    return pages_info
+        target_ch = None
+        for ep in info["chapters"]:
+            if str(ep["number"]) == chapter:
+                target_ch = ep
+                break
+                
+        if not target_ch:
+            try:
+                ch_float = float(chapter)
+                for ep in info["chapters"]:
+                    if abs(float(ep["number"]) - ch_float) < 0.01:
+                        target_ch = ep
+                        break
+            except ValueError:
+                pass
+                
+        if not target_ch:
+            return {"thumbnails": [], "title": ""}
+            
+        pages_info = await prov.get_pages(target_ch["url"])
+        if not pages_info:
+            return {"thumbnails": [], "title": ""}
+            
+        return pages_info
+    except Exception as e:
+        logger.exception(f"Manga chapter failed for slug='{slug}' chapter='{chapter}'")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 if __name__ == "__main__":

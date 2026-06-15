@@ -56,11 +56,14 @@ jobs:
           uv run pyinstaller --onefile --name anicat-scraper \
             --hidden-import curl_cffi \
             --hidden-import selectolax \
+            --hidden-import pycryptodome \
             --collect-all curl_cffi \
             --collect-all selectolax \
+            --collect-all pycryptodome \
             main.py
           mkdir -p ../web/src-tauri/resources/scraper-bin
           mv dist/anicat-scraper ../web/src-tauri/resources/scraper-bin/
+          chmod +x ../web/src-tauri/resources/scraper-bin/anicat-scraper
           cd ..
 
       - name: bundle standalone scraper binary (Windows)
@@ -70,8 +73,10 @@ jobs:
           uv run pyinstaller --onefile --name anicat-scraper --console \
             --hidden-import curl_cffi \
             --hidden-import selectolax \
+            --hidden-import pycryptodome \
             --collect-all curl_cffi \
             --collect-all selectolax \
+            --collect-all pycryptodome \
             main.py
           mkdir -p ../web/src-tauri/resources/scraper-bin
           cp dist/anicat-scraper.exe ../web/src-tauri/resources/scraper-bin/

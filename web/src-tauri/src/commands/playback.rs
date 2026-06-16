@@ -232,6 +232,23 @@ pub async fn start_playback(
 
     let db = state.open_db()?;
 
+    let resume_seconds = {
+        let mut sec = 0;
+        if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, media_id) {
+            if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
+                let duration = entry.duration;
+                if duration > 0 {
+                    let pct = (entry.stop_time as f64 / duration as f64) * 100.0;
+                    if pct < 90.0 && entry.stop_time > 5 {
+                        sec = entry.stop_time;
+                        log::info!("Found resume position: {}s (duration: {}s, {:.1}%)", sec, duration, pct);
+                    }
+                }
+            }
+        }
+        sec
+    };
+
     let local_file_path = {
         let mut path_found = None;
         if let Ok(items) = crate::registry::service::get_all_queue(&db) {
@@ -472,6 +489,10 @@ pub async fn start_playback(
     cmd.arg("--ontop");
     cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));
 
+    if resume_seconds > 0 {
+        cmd.arg(format!("--start={}", resume_seconds));
+    }
+
     if !title_str.is_empty() {
         let media_title = format!("{} - Episode {}", title_str, episode_number);
         cmd.arg(format!("--force-media-title={}", media_title));
@@ -618,8 +639,17 @@ pub async fn start_playback(
             }));
         }
 
+        let mut load_cmd = vec![
+            serde_json::json!("loadfile"),
+            serde_json::json!(stream_url),
+            serde_json::json!("replace"),
+        ];
+        if resume_seconds > 0 {
+            load_cmd.push(serde_json::json!("0")); // index argument
+            load_cmd.push(serde_json::json!(format!("start={}", resume_seconds)));
+        }
         commands.push(serde_json::json!({
-            "command": ["loadfile", stream_url, "replace"]
+            "command": load_cmd
         }));
 
         commands.push(serde_json::json!({
@@ -696,7 +726,6 @@ pub async fn start_playback(
     }
 
     let discord = state.discord.clone();
-    let db_path = state.db_path.clone();
     let monitor_media_id = media_id;
     let monitor_episode = episode_number;
     let app_handle = app.clone();
@@ -725,44 +754,15 @@ pub async fn start_playback(
                 }
             };
             if exited {
-                let (monitor_media_id, monitor_episode, elapsed) = {
+                let (monitor_media_id, monitor_episode) = {
                     let guard = app_state_clone.current_playback.lock().await;
                     if let Some(ref pb) = *guard {
-                        (pb.media_id, pb.episode_number, pb.start_time.elapsed().as_secs_f64())
+                        (pb.media_id, pb.episode_number)
                     } else {
-                        (monitor_media_id, monitor_episode, 0.0)
+                        (monitor_media_id, monitor_episode)
                     }
                 };
 
-                // Record in local registry — always, for resume tracking
-                if let Ok(db) = rusqlite::Connection::open(&db_path) {
-                    let _ = crate::registry::service::record_watched_episode(
-                        &db, monitor_media_id, monitor_episode, 0, 0,
-                    );
-                }
-                // Only mark as watched on AniList if mpv ran for at least 60 seconds
-                if elapsed >= 60.0 {
-                    let status = if total_eps > 0 && monitor_episode >= total_eps {
-                        "COMPLETED"
-                    } else {
-                        "CURRENT"
-                    };
-
-                    let mut vars = HashMap::new();
-                    vars.insert("mediaId".to_string(), serde_json::json!(monitor_media_id));
-                    vars.insert("status".to_string(), serde_json::json!(status));
-                    vars.insert("progress".to_string(), serde_json::json!(monitor_episode));
-                    let _: Result<Value, String> = app_state_clone.anilist_client.execute(
-                        crate::anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION,
-                        vars,
-                    ).await;
-
-                    app_state_clone.cache.update_user_list_progress(monitor_media_id, Some(monitor_episode), Some(status), None);
-                    app_state_clone.cache.invalidate("get_user_list");
-                    app_state_clone.cache.invalidate("get_airing_schedule");
-                } else {
-                    log::info!("mpv exited after {:.1}s — skipping AniList progress update", elapsed);
-                }
                 // Notify frontend
                 let _ = app_handle.emit("progress_updated", serde_json::json!({
                     "media_id": monitor_media_id,
@@ -773,7 +773,7 @@ pub async fn start_playback(
                     let mut guard = app_state_clone.current_playback.lock().await;
                     *guard = None;
                 }
-                log::info!("mpv exited, progress recorded, Discord presence cleared");
+                log::info!("mpv exited, Discord presence cleared");
                 break;
             }
         }

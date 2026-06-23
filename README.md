@@ -44,14 +44,12 @@ curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
-cd anicat
-uv sync
-cd web
+cd anicat/web
 npm install
 npm run tauri dev
 ```
 
-Requires Rust, Node.js, [uv](https://docs.astral.sh/uv/), system deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/), and `mpv` (`brew install mpv`).
+Requires Rust, Node.js, [uv](https://docs.astral.sh/uv/) (for the Python scraper sidecar in `scraper/`), system deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/), and `mpv` (`brew install mpv`).
 
 ## Dependencies
 

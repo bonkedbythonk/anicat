@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect } from "react";
 import { Loader2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Heart, Repeat } from "lucide-react";
@@ -49,7 +48,7 @@ export function ListsView({ onSelect }: ListsViewProps) {
       fetchFn: async (page) => {
         const data = await mediaApi.getUserList(activeTab, type, page);
         return {
-          items: data.media || [],
+          items: (data.media || []) as MediaItem[],
           hasNextPage: data.page_info?.has_next_page || false,
         };
       },

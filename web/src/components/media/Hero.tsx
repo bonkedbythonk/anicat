@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { Play, Maximize, BookOpen, Loader2, Clock, Tv } from "lucide-react";
@@ -157,7 +156,7 @@ const Hero = memo(function Hero({
 
         if (timeDiff <= 0) {
           const progress = item.user_status?.progress || 0;
-          const nextEpNum = nextAiring.episode;
+          const nextEpNum = nextAiring.episode ?? 0;
           const isUnwatched = nextEpNum > progress;
           const label = isSameDay ? `Episode ${nextEpNum} aired today` : `Episode ${nextEpNum} aired`;
           items.push({
@@ -284,7 +283,7 @@ const Hero = memo(function Hero({
   const isManga = item.type === "MANGA";
   const hasBanner = !!item.banner_image;
 
-  const latestAvailable = item.next_airing ? (item.next_airing.episode - 1) : total;
+  const latestAvailable = item.next_airing?.episode ? (item.next_airing.episode - 1) : total;
   const isFinished = total > 0 && currentProgress >= total;
   const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-export function InfiniteScroll({ children, onLoadMore, hasMore, loading }: { children: ReactNode; onLoadMore: () => void; hasMore: boolean; loading?: boolean }) {
+export function InfiniteScroll({ children, onLoadMore, hasMore, loading }: { children?: ReactNode; onLoadMore: () => void; hasMore: boolean; loading?: boolean }) {
   const loadMoreRef = useRef(onLoadMore);
   loadMoreRef.current = onLoadMore;
   const sentinel = useRef<HTMLDivElement>(null);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect, useRef } from "react";
 import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check } from "lucide-react";
@@ -241,7 +240,7 @@ export function EpisodeList({
     setResolvedStreams([]);
 
     try {
-      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider);
+      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider) as { streams?: any[] };
       setResolvedStreams(data.streams || []);
     } catch (err: any) {
       console.error("Failed to load stream servers:", err);

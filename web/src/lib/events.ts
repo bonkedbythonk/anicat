@@ -10,14 +10,7 @@ export function getQueryClient() { return queryClient; }
 
 export function dispatchRefresh() {
   if (!queryClient) return;
-  queryClient.invalidateQueries({ queryKey: ["home-watching"] });
-  queryClient.invalidateQueries({ queryKey: ["home-last-watched"] });
-  queryClient.invalidateQueries({ queryKey: ["home-airing-today"] });
-  queryClient.invalidateQueries({ queryKey: ["home-recent-releases"] });
-  queryClient.invalidateQueries({ queryKey: ["home-smart-playlist"] });
-  queryClient.invalidateQueries({ queryKey: ["home-trending"] });
-  queryClient.invalidateQueries({ queryKey: ["home-seasonal"] });
-  queryClient.invalidateQueries({ queryKey: ["home-newly-releasing"] });
+  invalidateProgressQueries(queryClient);
 }
 
 export function invalidateEpisodes(mediaId: number) {
@@ -25,10 +18,29 @@ export function invalidateEpisodes(mediaId: number) {
   queryClient.invalidateQueries({ queryKey: ["media-episodes", mediaId] });
 }
 
+// Single source of truth for which query families carry per-media progress/status.
 const PROGRESS_QUERY_KEY_PREFIXES = [
-  "user-list", "trending", "seasonal", "upcoming",
-  "smart-playlist", "search", "home-",
+  "home-", "user-list", "lists", "schedule", "search",
+  "trending", "seasonal", "upcoming", "smart-playlist",
+  "profile", "recently-watched",
 ];
+
+// Invalidate every cache that can display a media item's progress/status, so the
+// UI reconciles with AniList after a watch or an inline edit. Pass a mediaId to
+// also refresh that title's detail drawer and episode list.
+export function invalidateProgressQueries(qc: QueryClient, mediaId?: number) {
+  qc.invalidateQueries({
+    predicate: (q) => {
+      const firstKey = String(q.queryKey[0] ?? "");
+      return PROGRESS_QUERY_KEY_PREFIXES.some((p) => firstKey.startsWith(p));
+    },
+    refetchType: "all",
+  });
+  if (mediaId !== undefined) {
+    qc.invalidateQueries({ queryKey: ["media-detail", mediaId], refetchType: "all" });
+    qc.invalidateQueries({ queryKey: ["media-episodes", mediaId], refetchType: "all" });
+  }
+}
 
 export function updateProgressInQueries(qc: QueryClient, mediaId: number, progress: number, status?: string) {
   const queries = qc.getQueryCache().getAll();

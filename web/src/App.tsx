@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getQueryClient } from "@/lib/events";
+import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
 import { initProxyPort } from "@/lib/proxy";
 
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -120,10 +120,9 @@ export default function App() {
     const unlistenProgress = listen<{ media_id: number; episode_number: number }>("progress_updated", (event) => {
       const qc = getQueryClient();
       if (qc) {
-        qc.invalidateQueries({ queryKey: ["media-detail", event.payload.media_id], refetchType: "all" });
-        qc.invalidateQueries({ queryKey: ["home-watching"], refetchType: "all" });
-        qc.invalidateQueries({ queryKey: ["home-last-watched"], refetchType: "all" });
-        qc.invalidateQueries({ queryKey: ["lists"], refetchType: "active" });
+        // Reconcile every progress-bearing view (home rows, lists, schedule,
+        // search, profile, detail drawer) with AniList — not just a few keys.
+        invalidateProgressQueries(qc, event.payload.media_id);
       }
     });
     return () => {

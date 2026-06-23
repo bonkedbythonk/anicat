@@ -71,6 +71,12 @@ Thumbs.db
 *.iws
 *.sublime-workspace
 
+# AI assistant working dirs & captures
+.claude/
+.copilot/
+.kilo/
+.playwright-mcp/
+
 # Development artifacts
 .anicat.iconset/
 applet.icns

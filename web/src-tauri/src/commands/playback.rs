@@ -243,13 +243,22 @@ pub async fn start_playback(
     let db = state.open_db()?;
 
     let resume_seconds = {
+        // Treat an episode that reached the "watched" threshold (the same 80%
+        // used to mark it complete on AniList in record_playback_progress) as
+        // finished — don't drop the user back near the end of something they
+        // already completed. Also ignore trivially small positions so a brief
+        // sample doesn't start the episode in the middle. This is the fix for
+        // "episodes resume mid-way instead of starting over": the old cutoff was
+        // 90%, which left the 80–90% band marked watched yet still resuming.
+        const FINISHED_PCT: f64 = 80.0;
+        const MIN_RESUME_SECONDS: i64 = 30;
         let mut sec = 0;
         if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, media_id) {
             if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
                 let duration = entry.duration;
                 if duration > 0 {
                     let pct = (entry.stop_time as f64 / duration as f64) * 100.0;
-                    if pct < 90.0 && entry.stop_time > 5 {
+                    if pct < FINISHED_PCT && entry.stop_time >= MIN_RESUME_SECONDS {
                         sec = entry.stop_time;
                         log::info!("Found resume position: {}s (duration: {}s, {:.1}%)", sec, duration, pct);
                     }

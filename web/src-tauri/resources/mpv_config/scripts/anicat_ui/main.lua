@@ -6,6 +6,8 @@ local opts = {
   skip_times = '',
   auto_next = 'no',
   autoskip = 'yes',
+  current_episode = 0,
+  total_episodes = 0,
 }
 
 options.read_options(opts, 'anicat_ui')
@@ -38,6 +40,24 @@ local function get_skip_times_opt()
   return val
 end
 
+local function get_current_episode_opt()
+  local script_opts = mp.get_property_native("script-opts")
+  local val = opts.current_episode
+  if script_opts and script_opts["anicat_ui-current_episode"] ~= nil then
+    val = tonumber(script_opts["anicat_ui-current_episode"]) or val
+  end
+  return val
+end
+
+local function get_total_episodes_opt()
+  local script_opts = mp.get_property_native("script-opts")
+  local val = opts.total_episodes
+  if script_opts and script_opts["anicat_ui-total_episodes"] ~= nil then
+    val = tonumber(script_opts["anicat_ui-total_episodes"]) or val
+  end
+  return val
+end
+
 local state = {
   overlay = mp.create_osd_overlay('ass-events'),
   width = 1280,
@@ -50,6 +70,7 @@ local state = {
   file_loaded = false,
   next_triggered = false,
   first_play = false,
+  last_pos = 0,
 }
 
 local function parse_skip_times(raw)
@@ -165,8 +186,10 @@ local function check_active_skip()
   if mp.get_property_native("seeking") then
     return false
   end
-  local pos = mp.get_property_number('time-pos') or 0
-  state.position = pos
+  local pos = mp.get_property_number('time-pos')
+  if pos then
+    state.position = pos
+  end
   local active = get_active_skip(pos)
   if active ~= state.active_skip then
     state.active_skip = active
@@ -216,7 +239,7 @@ local function enable_standard_shaders()
   local path_str = table.concat(shader_paths, ":")
   mp.commandv("change-list", "glsl-shaders", "set", path_str)
   refresh_shaders_state()
-  mp.osd_message("Upscaling: Enabled (Sharp)", 2.0)
+  mp.osd_message("Upscaling: Enabled", 2.0)
 end
 
 local function enable_shaders()
@@ -293,11 +316,17 @@ local function toggle_auto_next()
   end
 end
 
-local function notify_backend(action, sync)
-  local pos = state.position or 0
+local function notify_backend(action, sync, manual)
+  local pos = mp.get_property_number('time-pos')
+  if not pos or pos <= 0 then
+    pos = state.last_pos or state.position or 0
+  end
   local duration = state.duration or 0
   local url = "http://127.0.0.1:13370/player/" .. action .. "?pos=" .. math.floor(pos) .. "&duration=" .. math.floor(duration)
-  msg.info("notify_backend called: action=" .. tostring(action) .. ", url=" .. url .. ", sync=" .. tostring(sync))
+  if manual then
+    url = url .. "&manual=true"
+  end
+  msg.info("notify_backend called: action=" .. tostring(action) .. ", url=" .. url .. ", sync=" .. tostring(sync) .. ", manual=" .. tostring(manual))
   
   local cmd = {
     name = "subprocess",
@@ -317,13 +346,29 @@ local function notify_backend(action, sync)
   end
 end
 
-local function play_next(sync)
+local function play_next(sync, manual)
+  if manual == nil then
+    manual = true
+  end
+  local current_ep = get_current_episode_opt()
+  local total_eps = get_total_episodes_opt()
+  if total_eps > 0 and current_ep >= total_eps then
+    mp.osd_message('Already at the last episode.', 3.0)
+    return
+  end
+
   state.next_triggered = true
   mp.osd_message('Loading next episode...', 3.0)
-  notify_backend("next", sync)
+  notify_backend("next", sync, manual)
 end
 
 local function play_prev(sync)
+  local current_ep = get_current_episode_opt()
+  if current_ep <= 1 then
+    mp.osd_message('Already at the first episode.', 3.0)
+    return
+  end
+
   state.next_triggered = true
   mp.osd_message('Loading previous episode...', 3.0)
   notify_backend("prev", sync)
@@ -347,6 +392,9 @@ local function register_script_messages()
   mp.register_script_message('anicat-next-episode', play_next)
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)
+  mp.register_script_message('anicat-cancel-next', function()
+    state.next_triggered = false
+  end)
 
   -- Force bind the skip keys directly in the player
   if mp.add_forced_key_binding then
@@ -354,11 +402,35 @@ local function register_script_messages()
   end
 end
 
-mp.observe_property('time-pos', 'number', render_unforced)
+mp.observe_property('time-pos', 'number', function(name, val)
+  if val and val > 0 then
+    state.last_pos = val
+    state.position = val
+  end
+  render_unforced()
+end)
 mp.observe_property('duration', 'number', render_unforced)
 mp.observe_property('mouse-pos', 'native', render_unforced)
 mp.observe_property('seeking', 'native', render_unforced)
 mp.observe_property('script-opts', 'native', function()
+  if state.file_loaded then
+    local skips = parse_skip_times(get_skip_times_opt())
+    local chapter_skips = parse_chapters_for_skips()
+    for _, cs in ipairs(chapter_skips) do
+      local duplicate = false
+      for _, s in ipairs(skips) do
+        if math.abs(s.start - cs.start) < 2.0 then
+          duplicate = true
+          break
+        end
+      end
+      if not duplicate then
+        skips[#skips + 1] = cs
+      end
+    end
+    state.skips = skips
+    msg.info("script-opts updated: total skip segments = " .. #skips)
+  end
   render(true)
 end)
 mp.observe_property('glsl-shaders', 'string', function()
@@ -415,15 +487,44 @@ mp.register_event('playback-restart', function()
   end
 end)
 
+-- Periodically report playback position to Rust backend for crash recovery
+local progress_timer = mp.add_periodic_timer(30, function()
+  notify_backend("progress")
+end)
+
 mp.register_event('shutdown', function()
+  progress_timer:stop()
   notify_backend("stop", true)
 end)
 
 mp.observe_property('eof-reached', 'bool', function(name, val)
   if val and get_auto_next_opt() == 'yes' and not state.next_triggered then
+    local current_ep = get_current_episode_opt()
+    local total_eps = get_total_episodes_opt()
+    if total_eps > 0 and current_ep >= total_eps then
+      state.next_triggered = false
+      mp.osd_message('No more episodes available.', 3.0)
+      return
+    end
+
     state.next_triggered = true
     mp.osd_message('Loading next episode...', 3.0)
-    play_next()
+    play_next(nil, false)
+
+    -- Clear stuck "Loading next episode" if no file loads within 10s
+    mp.add_timeout(10, function()
+      if state.next_triggered and not state.file_loaded then
+        state.next_triggered = false
+        mp.osd_message('No more episodes available.', 3.0)
+      end
+    end)
+  end
+end)
+
+mp.observe_property('pause', 'bool', function(name, val)
+  if state.file_loaded then
+    local action = val and "pause" or "resume"
+    notify_backend(action)
   end
 end)
 

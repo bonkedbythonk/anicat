@@ -16,7 +16,7 @@ import json
 import logging
 import time
 from urllib.parse import urljoin, urlparse
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from curl_cffi import requests
 from selectolax.parser import HTMLParser
@@ -505,13 +505,8 @@ class AniNekoProvider:
         matches = re.findall(
             r'<button[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</button>',
             html,
-            re.DOTALL | re.IGNORECASE,
         )
         for url, rest_attrs, inner in matches:
-            data_tab = ""
-            tab_m = re.search(r'data-tab\s*=\s*"([^"]+)"', rest_attrs)
-            if tab_m:
-                data_tab = tab_m.group(1)
             # Server name from text inside button
             name = re.sub(r"<[^>]+>", "", inner).strip()[:40]
             # Group from span inside button
@@ -591,8 +586,6 @@ class AniNekoProvider:
                 try:
                     obj = json.loads(obj_str)
                 except (json.JSONDecodeError, ValueError):
-                    # Try braces balancing
-                    depth = 0
                     start = obj_str.find("{")
                     if start < 0:
                         start = s.find(obj_str)
@@ -767,16 +760,14 @@ if __name__ == "__main__":
         else:
             print("  FAILED: no anime info")
 
-        if info and info.episodes:
-            ep_num = info.episodes[0].number
-            slug2 = "classroom-of-the-elite-iv"
-            print(f"\nDebug streams: {slug2} ep 1")
-            sources, debug = await provider.streams(slug2, 1, debug=True)
-            print(f"  Found {len(sources)} sources")
-            for s in sources[:5]:
-                print(f"    [{s.source_type}] {s.name}: {s.url[:80]}...")
-            print(f"\n  Debug log: {len(debug)} passes")
-            for d in debug:
-                print(f"    {d.get('pass', 'unknown')}: {d.get('found', '?')} items")
+        slug2 = "classroom-of-the-elite-iv"
+        print(f"\nDebug streams: {slug2} ep 1")
+        sources, debug = await provider.streams(slug2, 1, debug=True)
+        print(f"  Found {len(sources)} sources")
+        for s in sources[:5]:
+            print(f"    [{s.source_type}] {s.name}: {s.url[:80]}...")
+        print(f"\n  Debug log: {len(debug)} passes")
+        for d in debug:
+            print(f"    {d.get('pass', 'unknown')}: {d.get('found', '?')} items")
 
     asyncio.run(main())

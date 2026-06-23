@@ -4,13 +4,14 @@ import {
   Home,
   Search,
   Download,
-  Library,
   Settings,
   Monitor,
   Bell,
   User,
   Calendar,
   BookOpen,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 
 const navItems = [
@@ -33,6 +34,8 @@ export function Sidebar() {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const selectedItem = useAppStore((s) => s.selectedItem);
   const closeDetail = useAppStore((s) => s.closeDetail);
+  const compact = useAppStore((s) => s.sidebarCompact);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   const handleNavigate = (view: typeof currentView) => {
     if (selectedItem) closeDetail();
@@ -40,35 +43,45 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[72px] lg:w-[248px] z-50 flex flex-col py-6 transition-all duration-300 glass-fixed">
+    <aside className="fixed left-0 top-0 bottom-0 z-50 flex flex-col py-6 transition-all duration-300 glass-fixed" style={{ width: compact ? 72 : 248 }}>
       <div
         data-tauri-drag-region
-        className="flex flex-col items-center justify-center px-4 lg:px-6 mb-10 pt-14 cursor-default select-none w-full bg-black/[0.001]"
+        className={`flex flex-col items-center justify-center mb-10 pt-14 cursor-default select-none w-full bg-black/[0.001] transition-all duration-300 ${
+          compact ? "px-2" : "px-4 lg:px-6"
+        }`}
       >
         <img
           src="/anicat_logo.png"
           alt="Anicat Logo"
-          className="w-24 h-auto lg:w-32 opacity-95 hover:opacity-100 transition-opacity object-contain pointer-events-none anicat-logo"
+          className={`opacity-95 hover:opacity-100 transition-all duration-300 object-contain pointer-events-none anicat-logo ${
+            compact ? "w-8 h-8" : "w-24 lg:w-32"
+          }`}
         />
-        {import.meta.env.DEV && (
-          <span className="mt-1.5 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/25 rounded-md select-none font-mono pointer-events-none">
+        {import.meta.env.DEV && !compact && (
+          <span className="mt-1.5 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/25 rounded-md select-none font-mono pointer-events-none animate-fade-in">
             Local Dev
           </span>
         )}
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 lg:px-6 pt-2 overflow-y-auto scrollbar-hide">
+      <nav className={`flex-1 space-y-1 pt-2 overflow-y-auto scrollbar-hide transition-all duration-300 ${
+        compact ? "px-2" : "px-3 lg:px-6"
+      }`}>
         {navItems.map((item) => {
           const isActive = currentView === item.view;
           return (
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 pl-3 pr-3 lg:pr-6 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
+              className={`relative w-full flex items-center transition-colors duration-200 group border cursor-pointer border-transparent py-2.5 rounded-xl ${
+                compact 
+                  ? "justify-center px-0" 
+                  : "justify-start pl-3 pr-6 space-x-3"
+              }`}
             >
               {isActive && (
                 <motion.div
-                  layoutId="nav-active-pill-primary"
+                  layoutId={compact ? "nav-active-pill-compact" : "nav-active-pill-primary"}
                   className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
@@ -81,7 +94,9 @@ export function Sidebar() {
                     : "text-gray-500 dark:text-gray-400 group-hover:text-accent"
                 }`}
               />
-              <span className="relative hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
+              <span className={`relative items-center justify-between flex-1 text-[13px] font-semibold tracking-wide ${
+                compact ? "hidden" : "flex"
+              }`}>
                 <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
                   {item.label}
                 </span>
@@ -98,7 +113,7 @@ export function Sidebar() {
           );
         })}
 
-        <div className="my-4 mx-3 border-t border-border" />
+        <div className={`my-4 border-t border-border transition-all duration-300 ${compact ? "mx-4" : "mx-3"}`} />
 
         {secondaryItems.map((item) => {
           const isActive = currentView === item.view;
@@ -106,11 +121,15 @@ export function Sidebar() {
             <button
               key={item.view}
               onClick={() => handleNavigate(item.view)}
-              className="relative w-full flex items-center justify-center lg:justify-start lg:space-x-3 pl-3 pr-3 lg:pr-6 py-2.5 rounded-xl transition-colors duration-200 group border cursor-pointer border-transparent"
+              className={`relative w-full flex items-center transition-colors duration-200 group border cursor-pointer border-transparent py-2.5 rounded-xl ${
+                compact 
+                  ? "justify-center px-0" 
+                  : "justify-start pl-3 pr-6 space-x-3"
+              }`}
             >
               {isActive && (
                 <motion.div
-                  layoutId="nav-active-pill-secondary"
+                  layoutId={compact ? "nav-active-pill-secondary-compact" : "nav-active-pill-secondary"}
                   className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
@@ -125,7 +144,9 @@ export function Sidebar() {
                   }`}
                 />
               </div>
-              <span className="relative hidden lg:flex items-center justify-between flex-1 text-[13px] font-semibold tracking-wide">
+              <span className={`relative items-center justify-between flex-1 text-[13px] font-semibold tracking-wide ${
+                compact ? "hidden" : "flex"
+              }`}>
                 <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
                   {item.label}
                 </span>
@@ -142,6 +163,29 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className={`mt-2 transition-all duration-300 ${compact ? "px-2" : "px-3 lg:px-6"}`}>
+        <button
+          onClick={toggleSidebar}
+          className={`w-full flex items-center transition-colors duration-200 group border border-transparent hover:bg-white/[0.04] cursor-pointer text-gray-500 py-2.5 rounded-xl ${
+            compact 
+              ? "justify-center px-0" 
+              : "justify-start pl-3 pr-6 space-x-3"
+          }`}
+          title={compact ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {compact ? (
+            <PanelLeft size={20} className="shrink-0" />
+          ) : (
+            <PanelLeftClose size={20} className="shrink-0" />
+          )}
+          <span className={`relative items-center text-[13px] font-semibold tracking-wide text-gray-400 ${
+            compact ? "hidden" : "flex"
+          }`}>
+            Collapse
+          </span>
+        </button>
+      </div>
     </aside>
   );
 }

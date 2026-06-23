@@ -154,7 +154,7 @@ async def debug_streams(slug: str = Query(...), episode: int = Query(...), provi
                 content={"slug": slug, "episode": episode, "errors": [str(e)]},
             )
 
-    import re, json as _json
+    import re
 
     try:
         url = f"https://anineko.to/watch/{slug}/ep-{episode}"

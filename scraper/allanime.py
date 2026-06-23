@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
-from curl_cffi import requests
 from curl_cffi.requests import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -156,40 +155,40 @@ async def get_links(session, provider_path: str) -> list:
     all_links = []
     
     if 'tools.fast4speed.rsvp' in provider_path:
-        all_links.append({'resolution': 'Yt', 'url': provider_path, 'needsReferer': True})
+        all_links.append({'resolution': 'mp4', 'url': provider_path, 'needsReferer': True})
         return all_links
         
     if 'mp4upload.com' in provider_path:
         return await get_mp4upload_links(session, provider_path)
-        
+
+    clock_timeout = 2 if '/clock.' in provider_path else 1
     fetch_url = provider_path if provider_path.startswith('http') else f"https://{ALLANIME_BASE}{provider_path}"
     
     try:
-        resp = await session.get(fetch_url, timeout=1)
-        if resp.status_code == 200:
-            provider_data = resp.json()
-            if 'links' in provider_data and isinstance(provider_data['links'], list):
-                for link in provider_data['links']:
-                    url = link.get('link')
-                    res = link.get('resolutionStr') or 'unknown'
-                    if not url:
-                        continue
-                    if 'repackager.wixmp.com' in url:
-                        cleaned = url.replace('repackager.wixmp.com/', '').split('.urlset')[0]
-                        qualities_match = re.search(r'/,([^/]*),/mp4', url)
-                        if qualities_match:
-                            qualities = qualities_match.group(1).split(',')
-                            for q in qualities:
-                                q_url = re.sub(r',[^/]*', q, cleaned, count=1)
-                                all_links.append({'resolution': q, 'url': q_url})
-                        else:
-                            all_links.append({'resolution': res, 'url': url})
-                    else:
-                        all_links.append({'resolution': res, 'url': url})
-            if 'hls' in provider_data and provider_data['hls'] and 'url' in provider_data['hls']:
-                all_links.append({'resolution': 'hls', 'url': provider_data['hls']['url']})
-    except Exception as e:
-        log.warning(f"get_links failed: {e}")
+        resp = await session.get(fetch_url, timeout=clock_timeout)
+        if resp.status_code != 200:
+            return all_links
+        provider_data = resp.json()
+        if 'links' in provider_data and isinstance(provider_data['links'], list):
+            for link in provider_data['links']:
+                url = link.get('link')
+                res = link.get('resolutionStr') or 'unknown'
+                if not url:
+                    continue
+                if 'repackager.wixmp.com' in url:
+                    cleaned = url.replace('repackager.wixmp.com/', '').split('.urlset')[0]
+                    qualities_match = re.search(r'/,([^/]*),/mp4', url)
+                    if qualities_match:
+                        qualities = qualities_match.group(1).split(',')
+                        for q in qualities:
+                            q_url = re.sub(r',[^/]*', q, cleaned, count=1)
+                            all_links.append({'resolution': q, 'url': q_url})
+                else:
+                    all_links.append({'resolution': res, 'url': url})
+        if 'hls' in provider_data and provider_data['hls'] and 'url' in provider_data['hls']:
+            all_links.append({'resolution': 'hls', 'url': provider_data['hls']['url']})
+    except Exception:
+        pass
     return all_links
 
 
@@ -246,6 +245,25 @@ def parse_source_lines(api_data: dict) -> list:
     return resp_lines
 
 
+async def get_okru_links(session, embed_url: str) -> list:
+    all_links = []
+    try:
+        resp = await session.get(embed_url, timeout=5)
+        if resp.status_code == 200:
+            html = resp.text
+            m3u8_urls = re.findall(r'https?://[^"\'\\` <>]+\.m3u8[^"\'\\` <>]*', html)
+            mp4_urls = re.findall(r'https?://[^"\'\\` <>]+\.mp4[^"\'\\` <>]*', html)
+            for url in m3u8_urls:
+                url = url.replace('\\/', '/')
+                all_links.append({'resolution': 'hls', 'url': url, 'referer': 'https://ok.ru/'})
+            for url in mp4_urls:
+                url = url.replace('\\/', '/')
+                all_links.append({'resolution': 'mp4', 'url': url, 'referer': 'https://ok.ru/'})
+    except Exception as e:
+        log.warning(f"ok.ru extract failed: {e}")
+    return all_links
+
+
 class AllAnimeProvider:
     def __init__(self):
         self.session = AsyncSession(impersonate="chrome131")
@@ -256,9 +274,14 @@ class AllAnimeProvider:
             "Referer": ALLANIME_REFR,
             "Origin": ALLANIME_REFR,
         })
-        self._episode_offsets: dict[str, int] = {}
+
 
     async def search(self, query: str) -> list[AnimeRef]:
+        # Clean query: AllAnime's GraphQL API fails when search queries contain apostrophes.
+        # We replace "'s" (case-insensitive) with an empty string and then remove remaining apostrophes.
+        cleaned_query = re.sub(r"'s\b", "", query, flags=re.IGNORECASE)
+        cleaned_query = cleaned_query.replace("'", "")
+        
         search_gql = """query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) {
             shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) {
                 edges {
@@ -278,7 +301,7 @@ class AllAnimeProvider:
                     "search": {
                         "allowAdult": False,
                         "allowUnknown": False,
-                        "query": query
+                        "query": cleaned_query
                     },
                     "limit": 40,
                     "page": 1,
@@ -348,65 +371,6 @@ class AllAnimeProvider:
                 except ValueError:
                     continue
 
-            # Detect split-season entries (e.g. "Season 2 Part 2") and offset
-            # episode numbers so titles from AniZip/AniList align correctly.
-            part_match = re.search(r'(?i)\bpart\s*(\d+|one|two|three)\b', title)
-            if part_match and episodes:
-                season_match = _re.search(r'(?i)(?:Season|S)\s*(\d+)', title)
-                season_num = season_match.group(1) if season_match else None
-                base_title = _re.sub(r'(?i)\s*[-–—]?\s*(?:Season\s*\d*\s*)?[-–—~]?\s*Part\s*\w+', '', title).strip()
-                if base_title and base_title != title:
-                    search_gql = """query($search: SearchInput $limit: Int) {
-                        shows(search: $search limit: $limit) { edges { _id name englishName } }
-                    }"""
-                    search_payload = {
-                        "variables": {
-                            "search": {"allowAdult": False, "allowUnknown": False, "query": base_title},
-                            "limit": 10
-                        },
-                        "query": search_gql
-                    }
-                    try:
-                        search_resp = await self.session.post(f"{ALLANIME_API}/api", json=search_payload, timeout=8)
-                        search_data = search_resp.json()
-                        edges = search_data.get("data", {}).get("shows", {}).get("edges", [])
-                        if season_num:
-                            season_label = f"Season {season_num}"
-                            edges.sort(key=lambda e: 0 if season_label in (e.get("englishName") or e.get("name", "")) else 1)
-                        offset = 0
-                        for edge in edges:
-                            eid = edge.get("_id")
-                            ename = edge.get("englishName") or edge.get("name", "")
-                            if not eid or eid == slug:
-                                continue
-                            if re.search(r'(?i)\bpart\s', ename):
-                                continue
-                            if base_title not in ename and not ename.startswith(base_title):
-                                continue
-                            try:
-                                ep_resp = await self.session.post(f"{ALLANIME_API}/api", json={
-                                    "variables": {"showId": eid},
-                                    "query": "query ($showId: String!) { show( _id: $showId ) { availableEpisodesDetail } }"
-                                }, timeout=8)
-                                ep_data = ep_resp.json()
-                                prev_detail = ep_data.get("data", {}).get("show", {}).get("availableEpisodesDetail", {}) or {}
-                                prev_subs = prev_detail.get("sub", []) or []
-                                prev_dubs = prev_detail.get("dub", []) or []
-                                prev_all = sorted(set(prev_subs + prev_dubs), key=lambda x: float(x) if x else 0.0)
-                                if prev_all:
-                                    prev_last = int(float(prev_all[-1]))
-                                    if prev_last > 0:
-                                        offset = prev_last
-                                        break
-                            except Exception:
-                                continue
-                        if offset > 0:
-                            for ep in episodes:
-                                ep.number += offset
-                            self._episode_offsets[slug] = offset
-                    except Exception:
-                        pass
-
             return AnimeInfo(title=title, episodes=episodes)
         except Exception as e:
             log.error(f"AllAnime get failed: {e}")
@@ -414,8 +378,7 @@ class AllAnimeProvider:
 
     async def streams(self, slug: str, episode: int, debug: bool = False) -> Tuple[List[StreamServer], List[dict]]:
         debug_log = []
-        offset = self._episode_offsets.get(slug, 0)
-        ep_no = str(episode - offset if offset > 0 else episode)
+        ep_no = str(episode)
 
         episode_embed_gql = """query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
             episode( showId: $showId translationType: $translationType episodeString: $episodeString ) {
@@ -424,17 +387,8 @@ class AllAnimeProvider:
             }
         }"""
 
-        provider_defs = [
-            { 'name': 'Default', 'filemoon': False },
-            { 'name': 'Mp4', 'filemoon': False },
-            { 'name': 'Yt-mp4', 'filemoon': False },
-            { 'name': 'S-mp4', 'filemoon': False },
-            { 'name': 'Fm-mp4', 'filemoon': True },
-            { 'name': 'Fm-Hls', 'filemoon': True },
-            { 'name': 'Luf-Mp4', 'filemoon': False }
-        ]
-
-        async def resolve_one(prov, entry, mode):
+        async def resolve_entry(entry, mode):
+            source_name = entry.get('sourceName', 'Unknown')
             resolved_path = None
             if 'directUrl' in entry:
                 resolved_path = entry['directUrl']
@@ -444,8 +398,12 @@ class AllAnimeProvider:
             if not resolved_path:
                 return []
 
-            if prov['filemoon']:
-                links = await get_filemoon_links(self.session, resolved_path)
+            if 'ok.ru' in resolved_path or 'okcdn' in resolved_path:
+                links = await get_okru_links(self.session, resolved_path)
+            elif 'tools.fast4speed.rsvp' in resolved_path:
+                links = [{'resolution': 'mp4', 'url': resolved_path, 'needsReferer': True}]
+            elif 'mp4upload.com' in resolved_path:
+                links = await get_mp4upload_links(self.session, resolved_path)
             else:
                 links = await get_links(self.session, resolved_path)
 
@@ -468,7 +426,7 @@ class AllAnimeProvider:
                     headers['Referer'] = "https://allanime.day/"
 
                 resolved_servers.append(StreamServer(
-                    name=f"AllAnime - {prov['name']} ({res}) - {mode.capitalize()}",
+                    name=f"AllAnime - {source_name} ({res}) - {mode.capitalize()}",
                     url=final_url,
                     quality=res,
                     is_m3u8=bool(".m3u8" in final_url or "master.m3u8" in final_url),
@@ -522,10 +480,8 @@ class AllAnimeProvider:
                 return []
 
             tasks = []
-            for prov in provider_defs:
-                entry = next((r for r in resp_lines if r['sourceName'] == prov['name']), None)
-                if entry:
-                    tasks.append(resolve_one(prov, entry, mode))
+            for entry in resp_lines:
+                tasks.append(resolve_entry(entry, mode))
             return tasks
 
         mode_results = await asyncio.gather(fetch_mode("sub"), fetch_mode("dub"), return_exceptions=True)

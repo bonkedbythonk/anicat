@@ -152,12 +152,100 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 #[derive(Serialize)]
 pub struct UpdateCheckResponse {
     pub current_version: String,
+    pub update_available: bool,
+    pub latest_version: String,
+    pub release_url: Option<String>,
+    pub release_notes: Option<String>,
 }
 
 #[tauri::command]
-pub async fn check_update(_state: State<'_, AppState>) -> Result<UpdateCheckResponse, String> {
+pub async fn check_update(
+    state: State<'_, AppState>,
+    update_branch: Option<String>,
+) -> Result<UpdateCheckResponse, String> {
+    let branch = update_branch.unwrap_or_else(|| "stable".to_string());
+
+    let url = if branch == "nightly" {
+        "https://api.github.com/repos/bonkedbythonk/anicat/releases/tags/nightly"
+    } else {
+        "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest"
+    };
+
     let current_version = env!("CARGO_PKG_VERSION").to_string();
-    Ok(UpdateCheckResponse { current_version })
+
+    let resp = state
+        .http_client
+        .get(url)
+        .header("User-Agent", "Anicat")
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check for updates: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Ok(UpdateCheckResponse {
+            current_version: current_version.clone(),
+            update_available: false,
+            latest_version: current_version.clone(),
+            release_url: None,
+            release_notes: None,
+        });
+    }
+
+    let data: serde_json::Value = resp.json().await.map_err(|e| format!("Failed to parse release data: {}", e))?;
+
+    let tag = data.get("tag_name").and_then(|v| v.as_str()).unwrap_or("");
+    let mut latest_version = tag.trim_start_matches('v').to_string();
+
+    // Nightly tag doesn't contain version — parse from body or asset name
+    if latest_version.is_empty() || latest_version == "nightly" {
+        let body = data.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(cap) = body.split("Version:").nth(1).and_then(|s| s.trim().split_whitespace().next()) {
+            latest_version = cap.to_string();
+        } else if let Some(asset) = data.get("assets").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+            if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                if let Some(cap) = name.split('_').nth(1) {
+                    latest_version = cap.to_string();
+                }
+            }
+        }
+    }
+
+    let mut release_url = None;
+    if let Some(assets) = data.get("assets").and_then(|a| a.as_array()) {
+        for asset in assets {
+            if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                if name.ends_with(".dmg") {
+                    if let Some(download_url) = asset.get("browser_download_url").and_then(|u| u.as_str()) {
+                        release_url = Some(download_url.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if release_url.is_none() {
+        release_url = data.get("html_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+    }
+
+    let body = data.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    let curr_parts: Vec<u32> = current_version.split('.').filter_map(|p| p.parse().ok()).collect();
+    let lat_parts: Vec<u32> = latest_version.split('.').filter_map(|p| p.parse().ok()).collect();
+    let update_available = lat_parts > curr_parts;
+
+    Ok(UpdateCheckResponse {
+        current_version,
+        update_available,
+        latest_version,
+        release_url,
+        release_notes: body,
+    })
+}
+
+#[tauri::command]
+pub fn get_proxy_port(state: State<'_, AppState>) -> u16 {
+    state.inner.proxy_port.lock().map(|g| *g).unwrap_or(13370)
 }
 
 #[tauri::command]

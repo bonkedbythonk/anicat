@@ -2,10 +2,6 @@
 
 * {
   -webkit-tap-highlight-color: transparent;
-  scrollbar-width: none;
-}
-*::-webkit-scrollbar {
-  display: none;
 }
 
 .scroll-container {
@@ -124,7 +120,7 @@ html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .media
   border-left: 1px solid var(--border-color) !important;
 }
 
-html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-white { color: var(--foreground) !important; }
+html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *) { color: var(--foreground) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-100 { color: rgba(38, 35, 31, 0.90) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-200 { color: rgba(38, 35, 31, 0.80) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-300 { color: rgba(38, 35, 31, 0.70) !important; }
@@ -169,7 +165,7 @@ html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .force
 .forced-dark-container .text-gray-400,
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .forced-dark-container .text-gray-400 { color: #9ca3af !important; }
 .forced-dark-container .text-gray-500,
-html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .forced-dark-container .text-gray-500 { color: #6b7280 !important; }
+html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .forced-dark-container .text-gray-500 { color: #9ca3af !important; }
 .forced-dark-container .text-zinc-400,
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .forced-dark-container .text-zinc-400 { color: #a1a1aa !important; }
 .forced-dark-container .text-zinc-500,
@@ -493,7 +489,7 @@ html[data-style="sakura-zen"] .text-gray-500 { color: rgba(215, 155, 173, 0.65) 
 html[data-style="sakura-zen"] .text-gray-600 { color: rgba(210, 150, 168, 0.55) !important; }
 html[data-style="sakura-zen"] .text-gray-700 { color: rgba(200, 140, 158, 0.45) !important; }
 html[data-style="sakura-zen"] .text-gray-800 { color: rgba(200, 140, 158, 0.35) !important; }
-html[data-style="sakura-zen"] .text-white     { color: var(--foreground) !important; }
+html[data-style="sakura-zen"] .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *)     { color: var(--foreground) !important; }
 
 html[data-style="sakura-zen"].light .text-gray-100 { color: rgba(58, 37, 53, 0.95) !important; }
 html[data-style="sakura-zen"].light .text-gray-200 { color: rgba(58, 37, 53, 0.88) !important; }
@@ -540,7 +536,6 @@ html[data-style="sakura-zen"].light .media-detail-drawer {
 }
 
 html[data-style="sakura-zen"] .card-glow:hover {
-  transform: translateY(-7px);
   box-shadow: var(--sk-card-hover-shadow);
 }
 
@@ -634,13 +629,13 @@ html[data-style="retro-manga"].light body {
 
 html[data-style="retro-manga"] aside {
   background: var(--background) !important;
-  border-right: 4px solid #000000 !important;
+  border-right: 2px solid var(--border-color) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 html[data-style="retro-manga"].light aside {
-  border-right: 4px solid #191410 !important;
+  border-right: 2px solid var(--border-color) !important;
 }
 
 html[data-style="retro-manga"] .card-glow {
@@ -701,7 +696,7 @@ html[data-style="retro-manga"] .text-gray-500 { color: rgba(244, 239, 230, 0.45)
 html[data-style="retro-manga"] .text-gray-600 { color: rgba(244, 239, 230, 0.45) !important; }
 html[data-style="retro-manga"] .text-gray-700 { color: rgba(244, 239, 230, 0.35) !important; }
 html[data-style="retro-manga"] .text-gray-800 { color: rgba(244, 239, 230, 0.25) !important; }
-html[data-style="retro-manga"] .text-white     { color: var(--foreground) !important; }
+html[data-style="retro-manga"] .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *)     { color: var(--foreground) !important; }
 
 html[data-style="retro-manga"].light .text-gray-100 { color: rgba(25, 20, 16, 0.95) !important; }
 html[data-style="retro-manga"].light .text-gray-200 { color: rgba(25, 20, 16, 0.88) !important; }
@@ -715,3 +710,38 @@ html[data-style="retro-manga"].light .text-gray-800 { color: rgba(25, 20, 16, 0.
 html[data-style="retro-manga"] *:not([class*="rounded-full"]) {
   border-radius: 0px !important;
 }
+
+/* Ensure text-white inside buttons, badges, or accent/colored backgrounds is always white */
+button.text-white,
+button .text-white,
+[role="button"].text-white,
+[role="button"] .text-white,
+.bg-accent .text-white,
+.bg-accent.text-white,
+[class*="bg-blue"] .text-white,
+[class*="bg-blue"].text-white,
+[class*="bg-indigo"] .text-white,
+[class*="bg-indigo"].text-white,
+[class*="bg-purple"] .text-white,
+[class*="bg-purple"].text-white,
+[class*="bg-pink"] .text-white,
+[class*="bg-pink"].text-white,
+[class*="bg-red"] .text-white,
+[class*="bg-red"].text-white,
+[class*="bg-emerald"] .text-white,
+[class*="bg-emerald"].text-white,
+[class*="bg-green"] .text-white,
+[class*="bg-green"].text-white,
+[class*="bg-violet"] .text-white,
+[class*="bg-violet"].text-white,
+[class*="bg-fuchsia"] .text-white,
+[class*="bg-fuchsia"].text-white,
+.forced-dark-container .text-white,
+.forced-dark-container .text-white\/90,
+.forced-dark-container .text-white\/80,
+.forced-dark-container .text-white\/70,
+.forced-dark-container .text-white\/60,
+.forced-dark-container .text-white\/50 {
+  color: #ffffff !important;
+}
+

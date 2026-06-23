@@ -121,6 +121,11 @@ export function HomeView({ onSelect }: HomeViewProps) {
     enabled: isAuthenticated,
   });
 
+  const lastWatchedQuery = useQuery({
+    queryKey: ["home-last-watched"],
+    queryFn: () => mediaApi.getAllLastWatched(),
+  });
+
   // Smart Picks: blend planning list items (shuffled) with trending items
   const smartPicks = useMemo(() => {
     const planning = planningQuery.data?.media || [];
@@ -144,6 +149,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
     queryKey: ["home-airing-today"],
     queryFn: () => mediaApi.getSchedule(0, 1, 1, 15, watchingIds),
     enabled: isAuthenticated && watchingIds.length > 0,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
   // UX-22: Customizable row visibility
@@ -175,19 +182,32 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }, []);
 
   // 6. Continue Watching = items from the user's AniList watching list
-  //    that have unwatched episodes, sorted by most recently updated first.
+  //    that have unwatched episodes, sorted by local last watched time first,
+  //    falling back to AniList update time.
   const continueWatchingList = useMemo(() => {
+    const lastWatchedMap = lastWatchedQuery.data || {};
     return watchingMedia.filter((m) => !isCaughtUp(m)).sort((a, b) => {
+      const aLocal = lastWatchedMap[a.id] || lastWatchedMap[String(a.id)];
+      const bLocal = lastWatchedMap[b.id] || lastWatchedMap[String(b.id)];
+      if (aLocal || bLocal) {
+        const aVal = aLocal ? new Date(aLocal).getTime() : 0;
+        const bVal = bLocal ? new Date(bLocal).getTime() : 0;
+        if (aVal !== bVal) {
+          return bVal - aVal;
+        }
+      }
       const aTime = Number(a.user_status?.updated_at) || Number(a.media_list_entry?.updated_at) || 0;
       const bTime = Number(b.user_status?.updated_at) || Number(b.media_list_entry?.updated_at) || 0;
       return bTime - aTime;
     });
-  }, [watchingMedia]);
+  }, [watchingMedia, lastWatchedQuery.data]);
 
 
 
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
+    staleTime: 30_000,
+    refetchInterval: 60_000,
     queryFn: async () => {
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;

@@ -4,6 +4,7 @@ import { useAppStore, useSettingsStore } from "@/stores/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getQueryClient } from "@/lib/events";
+import { initProxyPort } from "@/lib/proxy";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
@@ -34,9 +35,13 @@ export default function App() {
   const currentView = useAppStore((s) => s.currentView);
   const selectedItem = useAppStore((s) => s.selectedItem);
   const initialAction = useAppStore((s) => s.initialAction);
+  const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
   const setConnectionState = useAppStore((s) => s.setConnectionState);
   const openDetail = useAppStore((s) => s.openDetail);
   const closeDetail = useAppStore((s) => s.closeDetail);
+  const sidebarCompact = useAppStore((s) => s.sidebarCompact);
+
+  const sidebarW = sidebarCompact ? 72 : 248;
 
   const [health, setHealth] = useState<any>(null);
   const [onboardingSeen, setOnboardingSeen] = useState(true);
@@ -79,6 +84,7 @@ export default function App() {
   useEffect(() => {
     loadConfig();
     checkConnection();
+    initProxyPort();
     const interval = setInterval(checkConnection, 300_000);
     window.addEventListener("anicat_health_recheck", checkConnection);
     return () => {
@@ -116,6 +122,7 @@ export default function App() {
       if (qc) {
         qc.invalidateQueries({ queryKey: ["media-detail", event.payload.media_id], refetchType: "all" });
         qc.invalidateQueries({ queryKey: ["home-watching"], refetchType: "all" });
+        qc.invalidateQueries({ queryKey: ["home-last-watched"], refetchType: "all" });
         qc.invalidateQueries({ queryKey: ["lists"], refetchType: "active" });
       }
     });
@@ -162,7 +169,8 @@ export default function App() {
       {/* Titlebar drag region for macOS */}
       <div
         data-tauri-drag-region
-        className="fixed top-0 left-[72px] lg:left-[248px] right-0 h-10 z-40 pointer-events-none select-none"
+        className="fixed top-0 right-0 h-10 z-40 pointer-events-none select-none"
+        style={{ left: sidebarW }}
       >
         <div
           data-tauri-drag-region
@@ -170,7 +178,7 @@ export default function App() {
         />
       </div>
 
-      <main className="flex-1 ml-[72px] lg:ml-[248px] flex flex-col overflow-hidden relative">
+      <main className="flex-1 flex flex-col overflow-hidden relative" style={{ marginLeft: sidebarW }}>
         <div className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10">
           <AnimatePresence mode="wait">
             <motion.div

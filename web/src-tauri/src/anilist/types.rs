@@ -88,6 +88,7 @@ pub struct MediaItem {
     pub end_date: Option<FuzzyDate>,
     #[serde(rename = "nextAiringEpisode")]
     pub next_airing_episode: Option<NextAiringEpisode>,
+    pub synonyms: Option<Vec<String>>,
     #[serde(alias = "streamingEpisodes")]
     pub streaming_episodes: Option<Vec<StreamingEpisode>>,
     pub trailer: Option<MediaTrailer>,

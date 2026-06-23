@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use chrono::Datelike;
 use serde_json::Value;
 use tauri::State;
 use tauri::Manager;
@@ -107,7 +108,7 @@ pub async fn get_seasonal(
     media_type: Option<String>,
 ) -> Result<Value, String> {
     let s = season.clone().unwrap_or_else(|| "SPRING".to_string());
-    let y = season_year.unwrap_or(2026);
+    let y = season_year.unwrap_or_else(|| chrono::Local::now().year() as i64);
     let mtype = media_type.unwrap_or_else(|| "ANIME".to_string());
     let key = AniListCache::key("get_seasonal", &[("season", &s), ("year", &y.to_string()), ("page", &page.unwrap_or(1).to_string()), ("type", &mtype)]);
     if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
@@ -202,10 +203,22 @@ pub async fn get_episodes(
     title: Option<String>,
 ) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let fallback = {
+        let cfg = state.config.read().await;
+        cfg.general.fallback_provider.clone()
+    };
     let is_manga = provider_name == "mangakatana";
 
     let db = state.open_db().map_err(|e| e.to_string())?;
-    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name);
+    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
+        .or_else(|| {
+            if fallback != provider_name {
+                log::info!("get_episodes: no slug for '{}', trying fallback '{}'", provider_name, fallback);
+                registry::service::get_provider_slug(&db, media_id, &fallback)
+            } else {
+                None
+            }
+        });
 
     let mut episodes = if let Some(slug) = slug {
         let res = if is_manga {
@@ -224,90 +237,28 @@ pub async fn get_episodes(
             }
         }
     } else {
-        // No mapping yet — auto-search by media title (frontend must pass this)
-        let Some(title) = title.filter(|t| !t.is_empty()) else {
-            return serde_json::to_value(Vec::<crate::scraper::Episode>::new())
-                .map_err(|e| e.to_string());
-        };
-
-        // Fetch full titles from AniList to match robustly
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("id".to_string(), serde_json::json!(media_id));
-        vars.insert("type".to_string(), serde_json::json!(if is_manga { "MANGA" } else { "ANIME" }));
-        
-        let detail_res: Result<crate::anilist::responses::MediaResponse, String> = state
-            .anilist_client
-            .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-            .await
-            .map_err(|e| e.to_string());
-
-        let mut romaji_title = String::new();
-        let mut english_title = String::new();
-        let mut native_title = String::new();
-
-        if let Ok(detail) = detail_res {
-            if let Some(m) = detail.media {
-                if let Some(t) = m.title {
-                    romaji_title = t.romaji.unwrap_or_default();
-                    english_title = t.english.unwrap_or_default();
-                    native_title = t.native.unwrap_or_default();
-                }
-            }
-        }
-
-        // Fallback to frontend-passed title if all are empty
-        if romaji_title.is_empty() && english_title.is_empty() {
-            romaji_title = title.clone();
-        }
-
-        let mut target_titles = vec![];
-        if !romaji_title.is_empty() { target_titles.push(romaji_title.as_str()); }
-        if !english_title.is_empty() { target_titles.push(english_title.as_str()); }
-        if !native_title.is_empty() { target_titles.push(native_title.as_str()); }
-
-        let search_query = if !english_title.is_empty() {
-            &english_title
-        } else if !romaji_title.is_empty() {
-            &romaji_title
-        } else {
-            &title
-        };
-
-        let results = if is_manga {
-            match state.scraper_manager.search_manga(search_query).await {
-                Ok(res) => res,
-                Err(e) => {
-                    log::error!("Manga search failed for '{}': {}", search_query, e);
-                    vec![]
-                }
-            }
-        } else {
-            match state.scraper_manager.search(search_query, &provider_name).await {
-                Ok(res) => res,
-                Err(e) => {
-                    log::error!("Anime search failed for '{}' using provider '{}': {}", search_query, provider_name, e);
-                    vec![]
-                }
-            }
-        };
-
-        if let Some(best) = find_best_match(&target_titles, results, |r| &r.title) {
-            let _ = registry::service::set_provider_slug(
-                &db, media_id, &provider_name, &best.id,
-            );
+        if let Some(slug) = resolve_and_save_provider_slug(
+            &state,
+            media_id,
+            &provider_name,
+            is_manga,
+            title,
+        )
+        .await?
+        {
             let res = if is_manga {
-                match state.scraper_manager.get_manga(&best.id).await {
+                match state.scraper_manager.get_manga(&slug).await {
                     Ok(info) => info.episodes,
                     Err(e) => {
-                        log::error!("get_manga failed for slug '{}': {}", best.id, e);
+                        log::error!("get_manga failed for slug '{}': {}", slug, e);
                         vec![]
                     }
                 }
             } else {
-                match state.scraper_manager.get_anime(&best.id, &provider_name).await {
+                match state.scraper_manager.get_anime(&slug, &provider_name).await {
                     Ok(info) => info.episodes,
                     Err(e) => {
-                        log::error!("get_anime failed for slug '{}' on provider '{}': {}", best.id, provider_name, e);
+                        log::error!("get_anime failed for slug '{}' on provider '{}': {}", slug, provider_name, e);
                         vec![]
                     }
                 }
@@ -348,18 +299,37 @@ pub async fn resolve_stream(
     provider: Option<String>,
 ) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let fallback = {
+        let cfg = state.config.read().await;
+        cfg.general.fallback_provider.clone()
+    };
 
     let db = state.open_db()?;
-    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
-        .ok_or_else(|| format!("No provider mapping for media {}", media_id))?;
 
-    let servers = state
-        .scraper_manager
-        .get_streams(&slug, episode_number, &provider_name)
-        .await?;
+    // Try primary provider
+    if let Some(slug) = registry::service::get_provider_slug(&db, media_id, &provider_name) {
+        if let Ok(servers) = state
+            .scraper_manager
+            .get_streams(&slug, episode_number, &provider_name)
+            .await
+        {
+            return Ok(serde_json::json!({ "streams": servers }));
+        }
+    }
 
-    let result = serde_json::json!({ "streams": servers });
-    Ok(result)
+    // Try fallback provider
+    if fallback != provider_name {
+        log::info!("resolve_stream: primary provider '{}' failed, trying fallback '{}'", provider_name, fallback);
+        if let Some(slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
+            let servers = state
+                .scraper_manager
+                .get_streams(&slug, episode_number, &fallback)
+                .await?;
+            return Ok(serde_json::json!({ "streams": servers }));
+        }
+    }
+
+    Err(format!("No stream found for media {} on '{}' or fallback '{}'", media_id, provider_name, fallback))
 }
 
 #[tauri::command]
@@ -369,7 +339,18 @@ pub async fn search_provider(
     provider: Option<String>,
 ) -> Result<Vec<crate::scraper::AnimeRef>, String> {
     let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
-    state.scraper_manager.search(&query, &provider_name).await
+    let fallback = {
+        let cfg = state.config.read().await;
+        cfg.general.fallback_provider.clone()
+    };
+
+    let results = state.scraper_manager.search(&query, &provider_name).await?;
+    if !results.is_empty() || fallback == provider_name {
+        return Ok(results);
+    }
+
+    log::info!("search_provider: '{}' returned 0 results for '{}', trying fallback '{}'", provider_name, query, fallback);
+    state.scraper_manager.search(&query, &fallback).await
 }
 
 #[tauri::command]
@@ -400,64 +381,53 @@ pub async fn debug_provider_streams(
     provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
-    let db = state.open_db()?;
-    let slug = match registry::service::get_provider_slug(&db, media_id, &provider_name) {
-        Some(s) => s,
-        None => {
-            // Auto-search: get title from AniList, search provider, save slug
-            let mut vars = std::collections::HashMap::new();
-            vars.insert("id".to_string(), serde_json::json!(media_id));
-            vars.insert("type".to_string(), serde_json::json!("ANIME"));
-            let detail: crate::anilist::responses::MediaResponse = state
-                .anilist_client
-                .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-                .await
-                .map_err(|e| format!("Failed to get anime title: {}", e))?;
-            let mut romaji_t = String::new();
-            let mut english_t = String::new();
-            let mut native_t = String::new();
-            if let Some(ref m) = detail.media {
-                if let Some(ref t) = m.title {
-                    romaji_t = t.romaji.clone().unwrap_or_default();
-                    english_t = t.english.clone().unwrap_or_default();
-                    native_t = t.native.clone().unwrap_or_default();
-                }
-            }
-
-            let search_query = if !english_t.is_empty() {
-                &english_t
-            } else if !romaji_t.is_empty() {
-                &romaji_t
-            } else {
-                return Err(format!("No title found for media {}", media_id));
-            };
-
-            let results = state.scraper_manager.search(search_query, &provider_name).await.unwrap_or_default();
-
-            let mut targets = vec![];
-            if !romaji_t.is_empty() { targets.push(romaji_t.as_str()); }
-            if !english_t.is_empty() { targets.push(english_t.as_str()); }
-            if !native_t.is_empty() { targets.push(native_t.as_str()); }
-            if targets.is_empty() { targets.push(search_query); }
-
-            match find_best_match(&targets, results, |r| &r.title) {
-                Some(best) => {
-                    let _ = registry::service::set_provider_slug(&db, media_id, &provider_name, &best.id);
-                    best.id
-                }
-                None => {
-                    return Err(format!(
-                        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"Search for '{}' returned no results"}}"#,
-                        media_id, provider_name, search_query
-                    ));
-                }
-            }
-        }
+    let fallback = {
+        let cfg = state.config.read().await;
+        cfg.general.fallback_provider.clone()
     };
-    let mut result = state.scraper_manager.debug_streams(&slug, episode_number, &provider_name).await?;
+    let db = state.open_db()?;
+
+    // Try each provider in order: primary → fallback
+    let providers = if fallback != provider_name {
+        vec![provider_name.as_str(), fallback.as_str()]
+    } else {
+        vec![provider_name.as_str()]
+    };
+
+    let mut slug = None;
+    let mut resolved_provider = provider_name.clone();
+    for prov in &providers {
+        if let Some(s) = registry::service::get_provider_slug(&db, media_id, prov) {
+            slug = Some(s);
+            resolved_provider = prov.to_string();
+            break;
+        }
+        // Auto-search: get title from AniList, search provider, save slug
+        if let Some(found_slug) = resolve_and_save_provider_slug(
+            &state,
+            media_id,
+            prov,
+            false, // debug_provider_streams is always anime
+            None,
+        )
+        .await?
+        {
+            slug = Some(found_slug);
+            resolved_provider = prov.to_string();
+            break;
+        }
+        log::info!("debug_provider_streams: '{}' found no match", prov);
+    }
+
+    let slug = slug.ok_or_else(|| format!(
+        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"No results on primary or fallback provider"}}"#,
+        media_id, provider_name
+    ))?;
+
+    let mut result = state.scraper_manager.debug_streams(&slug, episode_number, &resolved_provider).await?;
     if let Some(obj) = result.as_object_mut() {
         obj.insert("resolved_slug".to_string(), serde_json::json!(slug));
-        obj.insert("provider".to_string(), serde_json::json!(provider_name));
+        obj.insert("provider".to_string(), serde_json::json!(resolved_provider));
     }
     Ok(result)
 }
@@ -632,8 +602,8 @@ async fn download_episode(
     };
     let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "allanime") {
         (s, "allanime")
-    } else if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "allanime") {
-        (s, "allanime")
+    } else if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "anineko") {
+        (s, "anineko")
     } else {
         let err = format!("No provider mapping for media {}", media_id);
         let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
@@ -1154,7 +1124,120 @@ fn calculate_similarity(target: &str, candidate: &str) -> f64 {
     1.0 - (lev as f64 / max_len)
 }
 
-fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F) -> Option<T>
+pub async fn resolve_and_save_provider_slug(
+    state: &AppState,
+    media_id: i64,
+    provider_name: &str,
+    is_manga: bool,
+    frontend_title: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("id".to_string(), serde_json::json!(media_id));
+    vars.insert("type".to_string(), serde_json::json!(if is_manga { "MANGA" } else { "ANIME" }));
+
+    let detail_res: Result<crate::anilist::responses::MediaResponse, String> = state
+        .anilist_client
+        .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+        .await
+        .map_err(|e| e.to_string());
+
+    let mut romaji_title = String::new();
+    let mut english_title = String::new();
+    let mut native_title = String::new();
+    let mut synonyms_vec = vec![];
+
+    if let Ok(ref detail) = detail_res {
+        if let Some(ref m) = detail.media {
+            if let Some(ref t) = m.title {
+                romaji_title = t.romaji.clone().unwrap_or_default();
+                english_title = t.english.clone().unwrap_or_default();
+                native_title = t.native.clone().unwrap_or_default();
+            }
+            if let Some(ref syns) = m.synonyms {
+                for s in syns {
+                    synonyms_vec.push(s.clone());
+                }
+            }
+        }
+    }
+
+    if romaji_title.is_empty() && english_title.is_empty() {
+        if let Some(ref t) = frontend_title {
+            romaji_title = t.clone();
+        }
+    }
+
+    let mut target_titles = vec![];
+    if !romaji_title.is_empty() { target_titles.push(romaji_title.as_str()); }
+    if !english_title.is_empty() { target_titles.push(english_title.as_str()); }
+    if !native_title.is_empty() { target_titles.push(native_title.as_str()); }
+    for s in &synonyms_vec {
+        target_titles.push(s.as_str());
+    }
+
+    let mut search_candidates = vec![];
+    if !english_title.is_empty() {
+        search_candidates.push(english_title.clone());
+    }
+    if !romaji_title.is_empty() && !search_candidates.contains(&romaji_title) {
+        search_candidates.push(romaji_title.clone());
+    }
+    for s in &synonyms_vec {
+        if !s.is_empty() && !search_candidates.contains(s) {
+            search_candidates.push(s.clone());
+        }
+    }
+    if search_candidates.is_empty() {
+        if let Some(ref t) = frontend_title {
+            if !t.is_empty() {
+                search_candidates.push(t.clone());
+            }
+        }
+    }
+
+    if search_candidates.is_empty() {
+        return Ok(None);
+    }
+
+    let mut results = vec![];
+    for (idx, query) in search_candidates.iter().enumerate() {
+        if idx > 0 {
+            log::info!("resolve_and_save_provider_slug: sleeping 1.5s before next query to prevent rate limiting");
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        }
+        log::info!("resolve_and_save_provider_slug: searching '{}' on '{}'", query, provider_name);
+        let search_res = if is_manga {
+            state.scraper_manager.search_manga(query).await
+        } else {
+            state.scraper_manager.search(query, provider_name).await
+        };
+
+        match search_res {
+            Ok(res) => {
+                if !res.is_empty() {
+                    log::info!("resolve_and_save_provider_slug: found {} results for query '{}'", res.len(), query);
+                    results = res;
+                    break;
+                }
+            }
+            Err(e) => {
+                log::error!("resolve_and_save_provider_slug: search failed for '{}' on '{}': {}", query, provider_name, e);
+            }
+        }
+    }
+
+    if let Some(best) = find_best_match(&target_titles, results, |r| &r.title) {
+        log::info!("resolve_and_save_provider_slug: matched '{}' to slug '{}'", best.title, best.id);
+        let db = state.open_db()?;
+        let _ = registry::service::set_provider_slug(&db, media_id, provider_name, &best.id);
+        Ok(Some(best.id))
+    } else {
+        log::warn!("resolve_and_save_provider_slug: no match found for media_id={}", media_id);
+        Ok(None)
+    }
+}
+
+pub fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F) -> Option<T>
 where
     F: Fn(&T) -> &str,
 {
@@ -1227,6 +1310,44 @@ mod tests {
         let matched = find_best_match(&targets, candidates, |r| &r.title);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().id, "123");
+    }
+
+    #[tokio::test]
+    async fn test_synonym_fallbacks() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let state = AppState::new();
+        let db = state.open_db().unwrap();
+        
+        let _ = registry::service::clear_provider_cache(&db, 149893);
+        let _ = registry::service::clear_provider_cache(&db, 20668);
+
+        // Test Mistress Kanan is Devilishly Easy on MangaKatana
+        let slug_manga = resolve_and_save_provider_slug(
+            &state,
+            149893,
+            "mangakatana",
+            true, // is_manga
+            Some("Mistress Kanan is Devilishly Easy".to_string()),
+        )
+        .await
+        .unwrap();
+        println!("RESOLVED MANGA SLUG: {:?}", slug_manga);
+        assert!(slug_manga.is_some());
+        assert!(slug_manga.unwrap().contains("kanan-sama-is-easy-as-hell"));
+
+        // Test Monthly Girls' Nozaki-kun on AllAnime
+        let slug_anime = resolve_and_save_provider_slug(
+            &state,
+            20668,
+            "allanime",
+            false, // is_manga
+            Some("Monthly Girls' Nozaki-kun".to_string()),
+        )
+        .await
+        .unwrap();
+        println!("RESOLVED ANIME SLUG: {:?}", slug_anime);
+        assert!(slug_anime.is_some());
+        assert_eq!(slug_anime.unwrap(), "5oBy5h4pAPn6wrxvv");
     }
 }
 

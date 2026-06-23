@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::proxy::server::percent_encode;
+use crate::util::percent_encode;
 use crate::state::AppState;
 
 static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync::Mutex::new(None);
@@ -62,6 +62,17 @@ async fn try_send_ipc(ipc_path: &str, commands: Vec<serde_json::Value>) -> Resul
         let _ = commands;
         Err("Unsupported platform".to_string())
     }
+}
+
+pub async fn cancel_mpv_next(message: &str) -> Result<(), String> {
+    let ipc_path = get_ipc_path();
+    let cmd_osd = serde_json::json!({
+        "command": ["show-text", message, 3000]
+    });
+    let cmd_cancel = serde_json::json!({
+        "command": ["script-message", "anicat-cancel-next"]
+    });
+    try_send_ipc(&ipc_path, vec![cmd_osd, cmd_cancel]).await
 }
 
 pub async fn kill_current_mpv() {
@@ -224,11 +235,10 @@ pub async fn start_playback(
             episode_title: episode_title_str.clone(),
             cover_image: cover_image_str.clone(),
             total_episodes: total_eps,
-            start_time: std::time::Instant::now(),
+            last_position: 0,
+            last_duration: 0,
         });
     }
-
-    state.discord.set_presence(&title_str, episode_number, &episode_title_str, total_eps);
 
     let db = state.open_db()?;
 
@@ -248,6 +258,8 @@ pub async fn start_playback(
         }
         sec
     };
+
+    state.discord.set_presence(&title_str, episode_number, &episode_title_str, total_eps, resume_seconds, false);
 
     let local_file_path = {
         let mut path_found = None;
@@ -284,7 +296,21 @@ pub async fn start_playback(
         log::info!("Playing offline local download: {}", local_path);
         local_path
     } else {
-        let slug = crate::registry::service::get_provider_slug(&db, media_id, &provider_name)
+        let slug = match crate::registry::service::get_provider_slug(&db, media_id, &provider_name) {
+            Some(s) => Some(s),
+            None => {
+                super::media::resolve_and_save_provider_slug(
+                    &state,
+                    media_id,
+                    &provider_name,
+                    false, // is_manga is false for playback
+                    title.clone(),
+                )
+                .await
+                .ok()
+                .flatten()
+            }
+        }
             .ok_or_else(|| format!("No provider mapping for media {}", media_id))?;
 
         let servers = state
@@ -321,122 +347,125 @@ pub async fn start_playback(
         let mut stream_url = raw_stream_url.clone();
         if stream_url.contains("vibeplayer.site") || stream_url.contains("m3u8") {
             let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-            let encoded_url = crate::proxy::server::percent_encode(&stream_url);
+            let encoded_url = percent_encode(&stream_url);
             stream_url = format!("http://127.0.0.1:{}/proxy?url={}", proxy_port, encoded_url);
             log::info!("Proxied stream URL: {}", stream_url);
         }
         stream_url
     };
 
-    let mal_id = {
-        let mut vars = HashMap::new();
-        vars.insert("id".to_string(), serde_json::json!(media_id));
-        vars.insert("type".to_string(), serde_json::json!("ANIME"));
-        let res: Result<crate::anilist::responses::MediaResponse, String> = state
-            .anilist_client
-            .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-            .await;
-        let mut found = None;
-        if let Ok(r) = res {
-            if let Some(media) = r.media {
-                log::info!("[aniskip] AniList media id={}, id_mal={:?}, title_romaji={:?}, title_english={:?}",
-                    media.id, media.id_mal,
-                    media.title.as_ref().and_then(|t| t.romaji.as_deref()),
-                    media.title.as_ref().and_then(|t| t.english.as_deref()));
-                // 1. Direct idMal from AniList
-                if let Some(id) = media.id_mal {
-                    log::info!("[aniskip] Using MAL ID {} from AniList", id);
-                    found = Some(id);
-                // 2. Fallback: search Jikan by title
-                } else if let Some(search_title) = media.title.as_ref()
-                    .and_then(|t| t.english.as_deref().or(t.romaji.as_deref()))
-                    .filter(|t| !t.is_empty())
-                    .or_else(|| if !title_str.is_empty() { Some(&title_str as &str) } else { None })
-                {
-                    let jikan_url = format!(
-                        "https://api.jikan.moe/v4/anime?q={}&limit=1&sfw",
-                        percent_encode(search_title)
-                    );
-                    log::info!("[aniskip] Jikan searching by title '{}' url={}", search_title, jikan_url);
-                    match reqwest::Client::new()
-                        .get(&jikan_url)
-                        .timeout(std::time::Duration::from_secs(5))
-                        .send()
-                        .await
+    // Sync AniList watching list after confirming stream is available
+    if state.anilist_client.has_token() && media_id > 0 {
+        let anilist = state.anilist_client.clone();
+        let m_id = media_id;
+        tokio::spawn(async move {
+            let mut vars = std::collections::HashMap::new();
+            vars.insert("mediaId".to_string(), serde_json::json!(m_id));
+            vars.insert("status".to_string(), serde_json::json!("CURRENT"));
+            if let Err(e) = anilist
+                .execute::<serde_json::Value>(
+                    crate::anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION,
+                    vars,
+                )
+                .await
+            {
+                log::warn!("Failed to sync AniList watching list: {}", e);
+            }
+        });
+    }
+
+    let skip_times_arg = String::new();
+    let state_clone = (*state).clone();
+    let title_clone = title_str.clone();
+    tokio::spawn(async move {
+        let mal_id = {
+            let mut vars = HashMap::new();
+            vars.insert("id".to_string(), serde_json::json!(media_id));
+            vars.insert("type".to_string(), serde_json::json!("ANIME"));
+            let res: Result<crate::anilist::responses::MediaResponse, String> = state_clone
+                .anilist_client
+                .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+                .await;
+            let mut found = None;
+            if let Ok(r) = res {
+                if let Some(media) = r.media {
+                    log::info!("[aniskip] AniList media id={}, id_mal={:?}, title_romaji={:?}, title_english={:?}",
+                        media.id, media.id_mal,
+                        media.title.as_ref().and_then(|t| t.romaji.as_deref()),
+                        media.title.as_ref().and_then(|t| t.english.as_deref()));
+                    // 1. Direct idMal from AniList
+                    if let Some(id) = media.id_mal {
+                        log::info!("[aniskip] Using MAL ID {} from AniList", id);
+                        found = Some(id);
+                    // 2. Fallback: search Jikan by title
+                    } else if let Some(search_title) = media.title.as_ref()
+                        .and_then(|t| t.english.as_deref().or(t.romaji.as_deref()))
+                        .filter(|t| !t.is_empty())
+                        .or_else(|| if !title_clone.is_empty() { Some(&title_clone as &str) } else { None })
                     {
-                        Ok(resp) => {
-                            let status = resp.status();
-                            log::info!("[aniskip] Jikan response status: {}", status);
-                            if let Ok(body) = resp.text().await {
-                                log::info!("[aniskip] Jikan response body (first 500 chars): {}", &body[..body.len().min(500)]);
-                                if let Ok(jikan_res) = serde_json::from_str::<serde_json::Value>(&body) {
-                                    if let Some(data) = jikan_res["data"].as_array() {
-                                        log::info!("[aniskip] Jikan returned {} results", data.len());
-                                        found = data.first().and_then(|f| {
-                                            let mal = f["mal_id"].as_i64();
-                                            log::info!("[aniskip] Jikan first result: mal_id={:?}, title='{}'", mal, f["title"].as_str().unwrap_or("?"));
-                                            mal
-                                        });
-                                    } else {
-                                        log::warn!("[aniskip] Jikan response has no data array: {:?}", jikan_res);
+                        let jikan_url = format!(
+                            "https://api.jikan.moe/v4/anime?q={}&limit=1&sfw",
+                            percent_encode(search_title)
+                        );
+                        log::info!("[aniskip] Jikan searching by title '{}' url={}", search_title, jikan_url);
+                        match reqwest::Client::new()
+                            .get(&jikan_url)
+                            .timeout(std::time::Duration::from_secs(5))
+                            .send()
+                            .await
+                        {
+                            Ok(resp) => {
+                                let status = resp.status();
+                                log::info!("[aniskip] Jikan response status: {}", status);
+                                if let Ok(body) = resp.text().await {
+                                    if let Ok(jikan_res) = serde_json::from_str::<serde_json::Value>(&body) {
+                                        if let Some(data) = jikan_res["data"].as_array() {
+                                            found = data.first().and_then(|f| f["mal_id"].as_i64());
+                                        }
                                     }
-                                } else {
-                                    log::warn!("[aniskip] Failed to parse Jikan response as JSON");
                                 }
                             }
+                            Err(e) => log::warn!("[aniskip] Jikan request error: {}", e),
                         }
-                        Err(e) => log::warn!("[aniskip] Jikan request error: {}", e),
                     }
-                } else {
-                    log::warn!("[aniskip] No title available for Jikan search");
                 }
-            } else {
-                log::warn!("[aniskip] AniList returned null media");
             }
-        } else {
-            log::warn!("[aniskip] AniList query failed");
-        }
-        log::info!("[aniskip] Resolved MAL ID: {:?}", found);
-        found
-    };
+            found
+        };
 
-    let mut skip_times_arg = String::new();
-    if let Some(m_id) = mal_id {
-        let client = reqwest::Client::new();
-        let url = format!(
-            "https://api.aniskip.com/v2/skip-times/{}/{}?types[]=op&types[]=ed&episodeLength=0",
-            m_id, episode_number
-        );
-        log::info!("[aniskip] Fetching AniSkip times from: {}", url);
-        match client.get(&url).timeout(std::time::Duration::from_millis(5000)).send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                log::info!("[aniskip] AniSkip response status: {}", status);
-                if status.is_success() {
-                    #[derive(serde::Deserialize)]
-                    struct AniSkipResult {
-                        #[serde(default)]
-                        results: Vec<AniSkipTime>,
-                    }
-                    #[derive(serde::Deserialize)]
-                    struct AniSkipTime {
-                        #[serde(rename = "skipType")]
-                        skip_type: String,
-                        interval: AniSkipInterval,
-                    }
-                    #[derive(serde::Deserialize)]
-                    struct AniSkipInterval {
-                        #[serde(rename = "startTime")]
-                        start_time: f64,
-                        #[serde(rename = "endTime")]
-                        end_time: f64,
-                    }
-                    match resp.json::<AniSkipResult>().await {
-                        Ok(aniskip_res) => {
-                            log::info!("[aniskip] AniSkip returned {} results", aniskip_res.results.len());
+        let mut bg_skip_times_arg = String::new();
+        if let Some(m_id) = mal_id {
+            let client = reqwest::Client::new();
+            let url = format!(
+                "https://api.aniskip.com/v2/skip-times/{}/{}?types[]=op&types[]=ed&episodeLength=0",
+                m_id, episode_number
+            );
+            log::info!("[aniskip] Fetching AniSkip times from: {}", url);
+            match client.get(&url).timeout(std::time::Duration::from_millis(5000)).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        #[derive(serde::Deserialize)]
+                        struct AniSkipResult {
+                            #[serde(default)]
+                            results: Vec<AniSkipTime>,
+                        }
+                        #[derive(serde::Deserialize)]
+                        struct AniSkipTime {
+                            #[serde(rename = "skipType")]
+                            skip_type: String,
+                            interval: AniSkipInterval,
+                        }
+                        #[derive(serde::Deserialize)]
+                        struct AniSkipInterval {
+                            #[serde(rename = "startTime")]
+                            start_time: f64,
+                            #[serde(rename = "endTime")]
+                            end_time: f64,
+                        }
+                        if let Ok(aniskip_res) = resp.json::<AniSkipResult>().await {
                             let mut parts = Vec::new();
                             for result in aniskip_res.results {
-                                log::info!("[aniskip]   result: type={} start={} end={}", result.skip_type, result.interval.start_time, result.interval.end_time);
                                 parts.push(format!(
                                     "{},{},{}",
                                     result.skip_type,
@@ -445,24 +474,45 @@ pub async fn start_playback(
                                 ));
                             }
                             if !parts.is_empty() {
-                                skip_times_arg = parts.join(";");
-                                log::info!("[aniskip] Found skip times: {}", skip_times_arg);
-                            } else {
-                                log::info!("[aniskip] AniSkip returned empty results array");
+                                bg_skip_times_arg = parts.join(";");
+                                log::info!("[aniskip] Found skip times in background: {}", bg_skip_times_arg);
                             }
                         }
-                        Err(e) => log::warn!("[aniskip] AniSkip JSON parse error: {}", e),
                     }
-                } else {
-                    let body = resp.text().await.unwrap_or_default();
-                    log::warn!("[aniskip] AniSkip non-200: body={}", &body[..body.len().min(200)]);
+                }
+                Err(e) => log::warn!("[aniskip] AniSkip request error: {}", e),
+            }
+        }
+
+        if !bg_skip_times_arg.is_empty() {
+            let (autoskip, autoplay) = {
+                let cfg = state_clone.config.read().await;
+                (cfg.general.autoskip, cfg.general.autoplay)
+            };
+            let mut script_opts = Vec::new();
+            let encoded = bg_skip_times_arg.replace(",", "%2C");
+            script_opts.push(format!("anicat_ui-skip_times={}", encoded));
+            script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
+            script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
+            script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
+            script_opts.push(format!("anicat_ui-total_episodes={}", total_eps));
+            let script_opts_str = script_opts.join(",");
+
+            let ipc_path = get_ipc_path();
+            let cmd = serde_json::json!({
+                "command": ["set_property", "script-opts", script_opts_str]
+            });
+            
+            // Retry sending over IPC in case MPV is still launching
+            for i in 0..15 {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if try_send_ipc(&ipc_path, vec![cmd.clone()]).await.is_ok() {
+                    log::info!("[aniskip] Dynamically loaded skip times via IPC on attempt {}", i + 1);
+                    break;
                 }
             }
-            Err(e) => log::warn!("[aniskip] AniSkip request error: {}", e),
         }
-    } else {
-        log::warn!("[aniskip] No MAL ID resolved, skipping AniSkip API call");
-    }
+    });
 
     let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
     log::info!("mpv binary: {}", mpv_bin);
@@ -511,6 +561,8 @@ pub async fn start_playback(
     }
     script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
+    script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
+    script_opts.push(format!("anicat_ui-total_episodes={}", total_eps));
     let script_opts_str = script_opts.join(",");
     log::info!("[aniskip] mpv script-opts: {}", script_opts_str);
     cmd.arg(format!("--script-opts={}", script_opts_str));
@@ -627,6 +679,8 @@ pub async fn start_playback(
         }
         script_opts_parts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
         script_opts_parts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
+        script_opts_parts.push(format!("anicat_ui-current_episode={}", episode_number));
+        script_opts_parts.push(format!("anicat_ui-total_episodes={}", total_eps));
         
         commands.push(serde_json::json!({
             "command": ["set_property", "script-opts", script_opts_parts.join(",")]
@@ -667,19 +721,18 @@ pub async fn start_playback(
     }
 
     if reused {
-        {
-            let mut guard = state.current_playback.lock().await;
-            *guard = Some(crate::state::CurrentPlayback {
-                media_id,
-                episode_number,
-                provider: provider_name.clone(),
-                title: title_str.clone(),
-                episode_title: episode_title_str.clone(),
-                cover_image: cover_image_str.clone(),
-                total_episodes: total_eps,
-                start_time: std::time::Instant::now(),
-            });
-        }
+        let mut guard = state.current_playback.lock().await;
+        *guard = Some(crate::state::CurrentPlayback {
+            media_id,
+            episode_number,
+            provider: provider_name.clone(),
+            title: title_str.clone(),
+            episode_title: episode_title_str.clone(),
+            cover_image: cover_image_str.clone(),
+            total_episodes: total_eps,
+            last_position: 0,
+            last_duration: 0,
+        });
         return Ok(PlaybackStart { stream_url });
     }
 
@@ -721,7 +774,8 @@ pub async fn start_playback(
             episode_title: episode_title_str.clone(),
             cover_image: cover_image_str.clone(),
             total_episodes: total_eps,
-            start_time: std::time::Instant::now(),
+            last_position: 0,
+            last_duration: 0,
         });
     }
 
@@ -762,6 +816,37 @@ pub async fn start_playback(
                         (monitor_media_id, monitor_episode)
                     }
                 };
+
+                // Give the Lua script time to send position via player/stop
+                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+                // If player_stop already saved position, current_playback is None.
+                // If still set, save last known position as a fallback.
+                let should_save = {
+                    let guard = app_state_clone.current_playback.lock().await;
+                    guard.is_some()
+                };
+                if should_save {
+                    let (last_pos, last_dur) = {
+                        let guard = app_state_clone.current_playback.lock().await;
+                        if let Some(ref pb) = *guard {
+                            (pb.last_position, pb.last_duration)
+                        } else {
+                            (0, 0)
+                        }
+                    };
+                    if last_pos > 0 {
+                        let _ = crate::commands::playback::record_playback_progress(
+                            &app_state_clone,
+                            monitor_media_id,
+                            monitor_episode,
+                            last_pos,
+                            last_dur,
+                        )
+                        .await;
+                        log::info!("Saved last known playback position: {}s / {}s", last_pos, last_dur);
+                    }
+                }
 
                 // Notify frontend
                 let _ = app_handle.emit("progress_updated", serde_json::json!({
@@ -863,4 +948,12 @@ pub async fn get_watched_episodes(
 ) -> Result<Vec<WatchEntry>, String> {
     let db = state.open_db()?;
     crate::registry::service::get_watched_episodes(&db, media_id)
+}
+
+#[tauri::command]
+pub async fn get_all_last_watched(
+    state: State<'_, AppState>,
+) -> Result<HashMap<i64, String>, String> {
+    let db = state.open_db()?;
+    crate::registry::service::get_all_last_watched(&db)
 }

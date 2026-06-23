@@ -32,11 +32,11 @@ fi
 
 # 1. Canonical source
 echo "$NEW_VERSION" > version.txt
-echo "[1/6] version.txt  -> $NEW_VERSION"
+echo "[1/7] version.txt  -> $NEW_VERSION"
 
 # 2. pyproject.toml
 "${SED_INPLACE[@]}" "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
-echo "[2/6] pyproject.toml  -> $NEW_VERSION"
+echo "[2/7] pyproject.toml  -> $NEW_VERSION"
 
 # 3. web/package.json
 node -e "
@@ -44,7 +44,7 @@ node -e "
   p.version = '$NEW_VERSION';
   require('fs').writeFileSync('./web/package.json', JSON.stringify(p, null, 2) + '\n');
 "
-echo "[3/6] web/package.json  -> $NEW_VERSION"
+echo "[3/7] web/package.json  -> $NEW_VERSION"
 
 # 4. web/src-tauri/tauri.conf.json
 node -e "
@@ -52,13 +52,17 @@ node -e "
   t.version = '$NEW_VERSION';
   require('fs').writeFileSync('./web/src-tauri/tauri.conf.json', JSON.stringify(t, null, 2) + '\n');
 "
-echo "[4/6] web/src-tauri/tauri.conf.json  -> $NEW_VERSION"
+echo "[4/7] web/src-tauri/tauri.conf.json  -> $NEW_VERSION"
 
 # 5. flake.nix
 "${SED_INPLACE[@]}" "s/version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" flake.nix
-echo "[5/6] flake.nix  -> $NEW_VERSION"
+echo "[5/7] flake.nix  -> $NEW_VERSION"
 
-# 6. anicat_media/_version.py (baked into Python bytecode, no runtime file reading)
+# 6. web/src-tauri/Cargo.toml
+"${SED_INPLACE[@]}" "s/^version = .*/version = \"$NEW_VERSION\"/" web/src-tauri/Cargo.toml
+echo "[6/7] web/src-tauri/Cargo.toml  -> $NEW_VERSION"
+
+# 7. anicat_media/_version.py (baked into Python bytecode, no runtime file reading)
 # Preserve any existing __commit__ value if present, otherwise leave empty.
 EXISTING_COMMIT=""
 if [ -f anicat_media/_version.py ]; then
@@ -69,7 +73,7 @@ cat > anicat_media/_version.py <<- PYEOF
 __version__ = "$NEW_VERSION"
 __commit__ = "${EXISTING_COMMIT}"
 PYEOF
-echo "[6/6] anicat_media/_version.py  -> $NEW_VERSION"
+echo "[7/7] anicat_media/_version.py  -> $NEW_VERSION"
 
 echo ""
 echo "All files bumped to $NEW_VERSION."

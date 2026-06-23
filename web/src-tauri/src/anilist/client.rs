@@ -16,6 +16,7 @@ pub struct AniListClient {
     username: Mutex<Option<String>>,
     rate_limited_until: Mutex<Option<Instant>>,
     request_lock: Arc<tokio::sync::Semaphore>,
+    query_cache: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Clone for AniListClient {
@@ -26,6 +27,7 @@ impl Clone for AniListClient {
             username: Mutex::new(self.username.lock().unwrap().clone()),
             rate_limited_until: Mutex::new(*self.rate_limited_until.lock().unwrap()),
             request_lock: self.request_lock.clone(),
+            query_cache: self.query_cache.clone(),
         }
     }
 }
@@ -37,7 +39,8 @@ impl AniListClient {
             token: Mutex::new(token),
             username: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
-            request_lock: Arc::new(tokio::sync::Semaphore::new(1)),
+            request_lock: Arc::new(tokio::sync::Semaphore::new(3)),
+            query_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -64,11 +67,33 @@ impl AniListClient {
         self.username.lock().ok().and_then(|u| u.clone())
     }
 
+    fn cache_key(query: &str, variables: &HashMap<String, serde_json::Value>) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        query.hash(&mut hasher);
+        let vars_serialized = serde_json::to_string(variables).unwrap_or_else(|_| "{}".to_string());
+        vars_serialized.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+
     pub async fn execute<T: DeserializeOwned>(
         &self,
         query: &str,
         variables: HashMap<String, serde_json::Value>,
     ) -> Result<T, String> {
+        let ck = Self::cache_key(query, &variables);
+        {
+            let cache = self.query_cache.lock().unwrap();
+            if let Some(cached) = cache.get(&ck) {
+                if let Ok(parsed) = serde_json::from_str::<AnilistResponse<T>>(cached) {
+                    if let Some(data) = parsed.data {
+                        log::info!("AniList cache hit for query");
+                        return Ok(data);
+                    }
+                }
+            }
+        }
+
         {
             let wait_duration = {
                 let rl = self.rate_limited_until.lock().unwrap();
@@ -137,6 +162,13 @@ impl AniListClient {
         }
 
         log::info!("AniList request succeeded (HTTP {})", status.as_u16());
+
+        {
+            if let Ok(mut cache) = self.query_cache.lock() {
+                cache.insert(ck, text.clone());
+            }
+        }
+
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
             .map_err(|e| {
                 log::error!("Failed to parse AniList response JSON: {}, body: {}", e, text);

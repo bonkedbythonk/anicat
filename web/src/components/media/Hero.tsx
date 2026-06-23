@@ -76,9 +76,16 @@ const Hero = memo(function Hero({
   const [clicked, setClicked] = useState(false);
   const clickedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const desktopQueueRef = useRef<HTMLDivElement>(null);
   const mobileQueueRef = useRef<HTMLDivElement>(null);
+
+  // Periodically recompute queue to reflect aired episodes
+  useEffect(() => {
+    const interval = setInterval(() => setRefreshTick(t => t + 1), 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // 1. Build the priority queue
   const queue = useMemo(() => {
@@ -209,7 +216,7 @@ const Hero = memo(function Hero({
     }
 
     return items;
-  }, [singleItem, continueList, recentReleases, airingToday, fallbackList]);
+  }, [singleItem, continueList, recentReleases, airingToday, fallbackList, refreshTick]);
 
   // Adjust focused index if out of bounds
   const activeIndex = Math.min(focusedIndex, Math.max(0, queue.length - 1));
@@ -225,9 +232,9 @@ const Hero = memo(function Hero({
 
   // 2. Query for configuration (e.g. video auto-play setting)
   const { data: config = null } = useQuery({
-    queryKey: ["media-config", item?.id],
-    queryFn: () => (item ? mediaApi.getConfig() : Promise.resolve(null)),
-    enabled: !!item,
+    queryKey: ["media-config"],
+    queryFn: () => mediaApi.getConfig(),
+    staleTime: 30_000,
   });
 
   // 3. Intersection observer for video autoplay

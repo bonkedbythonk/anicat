@@ -193,6 +193,27 @@ pub fn get_watched_episodes(
     Ok(entries)
 }
 
+pub fn get_all_last_watched(
+    conn: &rusqlite::Connection,
+) -> Result<HashMap<i64, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT media_id, MAX(watched_at) FROM watch_history GROUP BY media_id")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    
+    let mut map = HashMap::new();
+    for r in rows {
+        if let Ok((id, time)) = r {
+            map.insert(id, time);
+        }
+    }
+    Ok(map)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LibraryEntry {
     pub media_id: i64,

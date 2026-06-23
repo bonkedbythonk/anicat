@@ -366,6 +366,10 @@ export async function getWatchHistory(
   return invoke("get_watched_episodes", { mediaId });
 }
 
+export async function getAllLastWatched(): Promise<Record<number, string>> {
+  return invoke("get_all_last_watched");
+}
+
 // ── Health ────────────────────────────────────────────────
 
 export async function getHealth(): Promise<{
@@ -388,9 +392,13 @@ export async function getLogs(): Promise<string> {
 }
 
 export async function checkUpdate(): Promise<{ version: string; url: string; notes: string } | null> {
-  const data = await invoke<{ version: string; url: string; notes: string } | null>("check_update");
-  if (data?.url) latestDownloadUrl = data.url;
-  return data;
+  try {
+    const data = await invoke<{ current_version: string; update_available: boolean; latest_version: string; release_url: string | null; release_notes: string | null } | null>("check_update");
+    if (data?.release_url) latestDownloadUrl = data.release_url;
+    return data ? { version: data.latest_version || data.current_version, url: data.release_url || "", notes: data.release_notes || "" } : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function triggerUpdate(): Promise<void> {
@@ -404,6 +412,7 @@ export const API_BASE_ORIGIN = "http://127.0.0.1:13370";
 export const mediaApi = {
   getConfig,
   setConfig,
+  getAllLastWatched,
   searchMedia: searchAnime,
   getMediaDetail: async (id: number, mediaType?: string) => {
     const result = await getAnimeDetail(id, mediaType);
@@ -646,66 +655,33 @@ export const mediaApi = {
     try {
       const config = await getConfig();
       const branch = config?.general?.update_branch || "stable";
-      const currentVersion = await invoke<string>("get_app_version");
+      const result = await invoke<{
+        current_version: string;
+        update_available: boolean;
+        latest_version: string;
+        release_url: string | null;
+        release_notes: string | null;
+      }>("check_update", { updateBranch: branch });
 
-      const url = branch === "nightly"
-        ? "https://api.github.com/repos/bonkedbythonk/anicat/releases/tags/nightly"
-        : "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest";
+      if (result.release_url) {
+        latestDownloadUrl = result.release_url;
+      }
 
-      const res = await fetch(url);
-      if (!res.ok) {
-        return {
-          status: "error",
-          message: `Failed to check for updates: GitHub API returned status ${res.status}`,
-        };
-      }
-      
-      const data = await res.json();
-      let latestVersion = (data.tag_name || "v4.0.0").replace(/^v/, "");
-      if (latestVersion === "nightly") {
-        // Parse semver from release body (e.g. "Version: 5.1.3") or asset name (e.g. "Anicat_5.1.3_aarch64.dmg")
-        const bodyMatch = data.body?.match(/Version:\s*([0-9]+\.[0-9]+\.[0-9]+)/i);
-        if (bodyMatch?.[1]) {
-          latestVersion = bodyMatch[1];
-        } else {
-          const assetName = data.assets?.[0]?.name || "";
-          const assetMatch = assetName.match(/_([0-9]+\.[0-9]+\.[0-9]+)_/);
-          if (assetMatch?.[1]) {
-            latestVersion = assetMatch[1];
-          }
-        }
-      }
-      
-      const cleanVersion = (v: string) => v.split(".").map(Number);
-      const curr = cleanVersion(currentVersion);
-      const lat = cleanVersion(latestVersion);
-      
-      let updateAvailable = false;
-      for (let i = 0; i < 3; i++) {
-        if ((lat[i] || 0) > (curr[i] || 0)) {
-          updateAvailable = true;
-          break;
-        } else if ((lat[i] || 0) < (curr[i] || 0)) {
-          break;
-        }
-      }
-      
-      if (updateAvailable) {
-        latestDownloadUrl = data.assets?.[0]?.browser_download_url || data.html_url;
+      if (result.update_available) {
         return {
           status: "success",
           update_available: true,
-          message: `A new ${branch === "nightly" ? "nightly" : "version"} ${data.tag_name} is available!`,
-          release_notes: data.body,
-          release_url: data.html_url,
-        };
-      } else {
-        return {
-          status: "success",
-          update_available: false,
-          message: "Anicat is already up to date!",
+          message: `A new version ${result.latest_version} is available!`,
+          release_notes: result.release_notes,
+          release_url: result.release_url,
         };
       }
+
+      return {
+        status: "success",
+        update_available: false,
+        message: "Anicat is already up to date!",
+      };
     } catch (err) {
       console.error("[checkUpdate] error:", err);
       return {

@@ -18,7 +18,7 @@ interface EpisodeListProps {
   onUnwatch?: (epNum: string) => void;
   onWatch?: (epNum: string) => void;
   nextAiringEpisode?: number;
-  nextAiringTime?: number;
+  nextAiringTime?: number | string;
   onRetry?: () => void;
   selectedProvider?: string;
   mediaTitle?: string;

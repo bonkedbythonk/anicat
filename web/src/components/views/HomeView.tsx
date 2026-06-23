@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import { Loader2, Clock, User } from "lucide-react";
@@ -185,7 +184,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   //    that have unwatched episodes, sorted by local last watched time first,
   //    falling back to AniList update time.
   const continueWatchingList = useMemo(() => {
-    const lastWatchedMap = lastWatchedQuery.data || {};
+    const lastWatchedMap = (lastWatchedQuery.data || {}) as Record<string, string>;
     return watchingMedia.filter((m) => !isCaughtUp(m)).sort((a, b) => {
       const aLocal = lastWatchedMap[a.id] || lastWatchedMap[String(a.id)];
       const bLocal = lastWatchedMap[b.id] || lastWatchedMap[String(b.id)];

@@ -894,7 +894,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                         `API Connected: ${health?.api_connected}`,
                         `API Authenticated: ${health?.api_authenticated}`,
                         `Is Offline: ${health?.is_offline}`,
-                        `Data Version: ${health?.data_version}`,
                         `Timestamp: ${new Date().toISOString()}`,
                         `\n--- LATEST LOGS ---\n`,
                         logs.logs

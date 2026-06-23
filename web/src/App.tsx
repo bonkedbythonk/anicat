@@ -62,7 +62,6 @@ export default function App() {
         connected: boolean;
         authenticated: boolean;
         offline: boolean;
-        data_version: number;
         auth_error: string | null;
         token_present: boolean;
         current_version: string;

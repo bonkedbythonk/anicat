@@ -376,7 +376,6 @@ export async function getHealth(): Promise<{
   connected: boolean;
   authenticated: boolean;
   offline: boolean;
-  data_version: number;
 }> {
   return invoke("check_health");
 }
@@ -728,7 +727,6 @@ export interface HealthStatus {
   connected: boolean;
   authenticated: boolean;
   offline: boolean;
-  data_version: number;
   update_available?: boolean;
   token_present?: boolean;
   viewer_name?: string | null;

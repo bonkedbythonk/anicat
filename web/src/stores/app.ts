@@ -45,9 +45,6 @@ interface AppState {
     tokenPresent: boolean;
   }) => void;
 
-  // Metrics last loaded
-  dataVersion: number;
-  setDataVersion: (v: number) => void;
 
   // Sidebar
   sidebarCompact: boolean;
@@ -93,8 +90,6 @@ export const useAppStore = create<AppState>((set) => ({
       tokenPresent: state.tokenPresent,
     }),
 
-  dataVersion: 0,
-  setDataVersion: (dataVersion) => set({ dataVersion }),
 
   sidebarCompact: localStorage.getItem("anicat_sidebar_compact") === "true",
   toggleSidebar: () =>

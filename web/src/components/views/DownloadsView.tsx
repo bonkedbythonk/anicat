@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,7 +25,7 @@ export function DownloadsView() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"library" | "queue">("library");
   const [selectedMediaId, setSelectedMediaId] = useState<number | null>(null);
-  const [playingItem, setPlayingItem] = useState<{ mediaId: number; ep: string } | null>(null);
+  const [playingItem, setPlayingItem] = useState<{ mediaId: number; ep: number } | null>(null);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -88,7 +87,7 @@ export function DownloadsView() {
     }
   };
 
-  const handleRemove = async (mediaId: number, ep: string) => {
+  const handleRemove = async (mediaId: number, ep: number) => {
     // Optimistically remove the item from local UI state
     setQueue(prev =>
       prev.filter(item => !(item.media_id === mediaId && item.episode_number === ep))
@@ -102,7 +101,7 @@ export function DownloadsView() {
     }
   };
 
-  const handlePlay = async (mediaId: number, ep: string) => {
+  const handlePlay = async (mediaId: number, ep: number) => {
     setPlayingItem({ mediaId, ep });
     try {
       await mediaApi.play(mediaId, ep);
@@ -171,8 +170,8 @@ export function DownloadsView() {
   // Sort episodes in each group numerically
   Object.values(completedGroups).forEach((group) => {
     group.episodes.sort((a, b) => {
-      const numA = parseFloat(a.episode_number);
-      const numB = parseFloat(b.episode_number);
+      const numA = a.episode_number;
+      const numB = b.episode_number;
       return (isNaN(numA) ? 0 : numA) - (isNaN(numB) ? 0 : numB);
     });
   });

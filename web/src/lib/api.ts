@@ -43,8 +43,8 @@ function snakify(item: Record<string, unknown>): Record<string, unknown> {
   return item;
 }
 
-function snakifyMediaList(items: unknown[]): unknown[] {
-  return items.map((m) => snakify(m as Record<string, unknown>));
+function snakifyMediaList(items: unknown[]): MediaItem[] {
+  return items.map((m) => snakify(m as Record<string, unknown>)) as unknown as MediaItem[];
 }
 
 export async function getConfig(): Promise<{
@@ -119,7 +119,7 @@ interface MediaCharacters {
   } | null;
 }
 
-export async function searchAnime(query: string, page?: number, mediaType?: string, filters?: Record<string, string>): Promise<PagedMedia> {
+export async function searchAnime(query: string, page?: number, mediaType?: string, filters?: SearchFilters): Promise<PagedMedia> {
   return invoke("search_media", { query, page, mediaType, ...filters });
 }
 
@@ -575,7 +575,7 @@ export const mediaApi = {
       console.warn("[removeFromQueue] failed:", err);
     }
   },
-  search: async (query: string = '', _type?: string, page?: number, filters?: Record<string, string>) => {
+  search: async (query: string = '', _type?: string, page?: number, filters?: SearchFilters) => {
     const result = await searchAnime(query || '', page, _type, filters);
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
@@ -731,6 +731,7 @@ export interface HealthStatus {
   token_present?: boolean;
   viewer_name?: string | null;
   auth_error?: string | null;
+  current_version?: string;
 }
 
 export interface PlaybackStatus {
@@ -751,7 +752,7 @@ export interface QueueItem {
 }
 
 export interface SearchFilters {
-  genre?: string[];
+  genre?: string;
   year?: number;
   season?: string;
   format?: string;
@@ -760,20 +761,27 @@ export interface SearchFilters {
   minScore?: number;
 }
 
+// Matches the snake_cased object built by getProfile() below.
 export type UserProfile = {
   id: number;
   name: string;
-  avatar?: { large?: string; medium?: string };
-  bannerImage?: string;
-  about?: string;
-  statistics?: {
-    anime?: {
-      count: number;
-      meanScore: number;
-      minutesWatched: number;
-      episodesWatched: number;
-    };
-  };
+  about?: string | null;
+  avatar?: string | null;
+  avatar_url?: string | null;
+  banner_image?: string | null;
+  banner_url?: string | null;
+  site_url?: string | null;
+  minutes_watched?: number;
+  episodes_watched?: number;
+  anime_count?: number;
+  mean_score?: number;
+  chapters_read?: number;
+  manga_count?: number;
+  volumes_read?: number;
+  statistics?: unknown;
+  genres?: string[];
+  favorite_anime?: MediaItem[];
+  favorite_manga?: MediaItem[];
 };
 
 export type { MediaItem, Episode, Character } from "./types";

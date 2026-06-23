@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Search, Loader2, SlidersHorizontal, Activity } from "lucide-react";
@@ -34,7 +33,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
       const [trending, seasonal, recent] = await Promise.all([
         mediaApi.getTrending(type),
         mediaApi.getSeasonal(type),
-        mediaApi.getRecent(type, 12),
+        mediaApi.getRecent(type),
       ]);
       return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
     },
@@ -99,7 +98,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
       const data = await mediaApi.search(debouncedQuery, type, page, filters);
       return {
         items: data.media || [],
-        hasNextPage: data.page_info?.has_next_page || false,
+        hasNextPage: data.page_info?.hasNextPage || false,
       };
     },
     queryKey: ["search", debouncedQuery, type, filters],
@@ -188,7 +187,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-2 text-left transition-colors hover:border-accent/30 hover:bg-white/[0.05]"
                   >
                     <img
-                      src={item.cover_image.large}
+                      src={item.cover_image?.large}
                       alt={title}
                       className="h-14 w-10 rounded-lg object-cover"
                     />

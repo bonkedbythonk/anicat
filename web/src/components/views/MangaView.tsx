@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { useMemo } from "react";
@@ -22,7 +21,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
         mediaApi.getUserList("reading", "MANGA"),
       ]);
 
-      let planning = { media: [] };
+      let planning: { media: MediaItem[] } = { media: [] };
       try {
         const result = await mediaApi.getUserList("planning", "MANGA");
         planning = result;

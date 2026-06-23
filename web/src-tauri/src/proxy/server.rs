@@ -87,13 +87,16 @@ async fn player_next_handler(
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested next episode: pos={:?}, duration={:?}, manual={:?}", params.pos, params.duration, params.manual);
+    // Navigating to the next episode records the actual position of the
+    // current one — it never force-completes it. The episode only counts as
+    // watched if that real position is past the threshold (record_playback_
+    // progress decides). So skipping forward mid-episode no longer marks the
+    // skipped episode as watched.
     let play_info = {
         let mut guard = state.app_state.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
-                let is_manual = params.manual.unwrap_or(false);
-                let record_pos = if is_manual && duration > 0 { duration } else { pos };
-                pb.last_position = record_pos;
+                pb.last_position = pos;
                 pb.last_duration = duration;
             }
         }
@@ -101,9 +104,7 @@ async fn player_next_handler(
     };
     if let Some(play_info) = play_info {
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
-            let is_manual = params.manual.unwrap_or(false);
-            let record_pos = if is_manual && duration > 0 { duration } else { pos };
-            if record_pos > 0 && duration > 0 {
+            if pos > 0 && duration > 0 {
                 let app_state_clone = state.app_state.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
@@ -112,7 +113,7 @@ async fn player_next_handler(
                         &app_state_clone,
                         media_id,
                         ep_num,
-                        record_pos,
+                        pos,
                         duration,
                     )
                     .await {

@@ -9,6 +9,11 @@ use crate::state::AppState;
 
 static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync::Mutex::new(None);
 
+/// An episode counts as "watched" once playback passes this fraction of its
+/// duration. The same line decides completion (advancing AniList progress) and
+/// stops offering a resume — there is exactly one watched threshold.
+const WATCHED_THRESHOLD_PCT: f64 = 85.0;
+
 fn get_ipc_path() -> String {
     if cfg!(target_os = "windows") {
         r"\\.\pipe\anicat-mpv".to_string()
@@ -243,14 +248,10 @@ pub async fn start_playback(
     let db = state.open_db()?;
 
     let resume_seconds = {
-        // Treat an episode that reached the "watched" threshold (the same 80%
-        // used to mark it complete on AniList in record_playback_progress) as
-        // finished — don't drop the user back near the end of something they
-        // already completed. Also ignore trivially small positions so a brief
-        // sample doesn't start the episode in the middle. This is the fix for
-        // "episodes resume mid-way instead of starting over": the old cutoff was
-        // 90%, which left the 80–90% band marked watched yet still resuming.
-        const FINISHED_PCT: f64 = 80.0;
+        // An episode past the watched threshold is finished — don't drop the
+        // user back near the end of something they already completed. Also
+        // ignore trivially small positions so a brief sample doesn't start the
+        // episode in the middle.
         const MIN_RESUME_SECONDS: i64 = 30;
         let mut sec = 0;
         if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, media_id) {
@@ -258,7 +259,7 @@ pub async fn start_playback(
                 let duration = entry.duration;
                 if duration > 0 {
                     let pct = (entry.stop_time as f64 / duration as f64) * 100.0;
-                    if pct < FINISHED_PCT && entry.stop_time >= MIN_RESUME_SECONDS {
+                    if pct < WATCHED_THRESHOLD_PCT && entry.stop_time >= MIN_RESUME_SECONDS {
                         sec = entry.stop_time;
                         log::info!("Found resume position: {}s (duration: {}s, {:.1}%)", sec, duration, pct);
                     }
@@ -899,7 +900,10 @@ pub async fn record_playback_progress(
 
     if duration > 0 {
         let percentage = (stop_time as f64 / duration as f64) * 100.0;
-        if percentage >= 80.0 {
+        // Completion is the ONLY automatic way AniList progress advances: you
+        // played the episode past the watched threshold. Navigation (next/prev)
+        // records the real position but never forces this.
+        if percentage >= WATCHED_THRESHOLD_PCT {
             let total_episodes = {
                 let guard = state.current_playback.lock().await;
                 guard.as_ref().map(|p| p.total_episodes).unwrap_or(0)

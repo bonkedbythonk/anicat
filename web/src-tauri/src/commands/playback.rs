@@ -702,15 +702,19 @@ pub async fn start_playback(
             }));
         }
 
-        let mut load_cmd = vec![
+        // Always pass an explicit start position. The first episode launches
+        // mpv with a global --start=<resume> option; without a per-file start
+        // here, `loadfile … replace` re-applies that global start to the next
+        // episode, dropping the user into it at the previous episode's
+        // position. resume_seconds is 0 for a fresh episode, so this starts it
+        // at the beginning; for a partially-watched one it resumes correctly.
+        let load_cmd = vec![
             serde_json::json!("loadfile"),
             serde_json::json!(stream_url),
             serde_json::json!("replace"),
+            serde_json::json!("0"), // index argument
+            serde_json::json!(format!("start={}", resume_seconds)),
         ];
-        if resume_seconds > 0 {
-            load_cmd.push(serde_json::json!("0")); // index argument
-            load_cmd.push(serde_json::json!(format!("start={}", resume_seconds)));
-        }
         commands.push(serde_json::json!({
             "command": load_cmd
         }));

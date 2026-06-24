@@ -1088,7 +1088,7 @@ const UPSCALING_PROFILES = [
     tier: "S",
     bars: 2,
     tagline: "Minimal heat",
-    detail: "M1 · M2",
+    detail: "Any chip · stays cool",
     recommended: true,
   },
   {
@@ -1097,7 +1097,7 @@ const UPSCALING_PROFILES = [
     tier: "M",
     bars: 3,
     tagline: "Visibly sharper",
-    detail: "M3 · M4 · M5",
+    detail: "M3 / M4 / M5 and newer",
     recommended: false,
   },
   {
@@ -1106,7 +1106,7 @@ const UPSCALING_PROFILES = [
     tier: "L",
     bars: 4,
     tagline: "4K-level detail",
-    detail: "M3 Max · M4 Pro+",
+    detail: "Pro · Max · Ultra chips",
     recommended: false,
   },
 ] as const;

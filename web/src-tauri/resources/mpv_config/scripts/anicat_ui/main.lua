@@ -220,22 +220,6 @@ local function skip_current_segment()
   end
 end
 
--- Cycle order for the temporary in-player toggle (Ctrl+1).
--- "off" means no shaders. The configured profile in Anicat settings is never
--- written to from here — everything below is session-only.
-local CYCLE_ORDER = { 'off', 'eco', 'balanced', 'sharp' }
-
--- Tracks the active temporary profile for this mpv session.
--- Starts as whatever Anicat passed via script-opts, or 'eco' as fallback.
-local temp_profile = nil  -- resolved on first use
-
-local function get_temp_profile()
-  if temp_profile == nil then
-    temp_profile = opts.shader_profile ~= '' and opts.shader_profile or 'eco'
-  end
-  return temp_profile
-end
-
 local function get_shader_paths_for_profile(profile)
   local restore, upscale
   if profile == 'sharp' then
@@ -274,23 +258,13 @@ local function apply_profile(profile, show_osd)
   end
 end
 
--- Ctrl+1: cycle Off → Eco → Balanced → Sharp → Off (session only, no config write)
-local function cycle_upscaling()
-  local current = get_temp_profile()
-  local next_idx = 1
-  for i, v in ipairs(CYCLE_ORDER) do
-    if v == current then
-      next_idx = (i % #CYCLE_ORDER) + 1
-      break
-    end
-  end
-  temp_profile = CYCLE_ORDER[next_idx]
-  apply_profile(temp_profile, true)
+-- Ctrl+1/2/3/4: set a specific profile (session only, no config write)
+local function set_upscaling(profile)
+  apply_profile(profile or opts.shader_profile, true)
 end
 
 local function enable_standard_shaders()
-  local profile = get_temp_profile()
-  apply_profile(profile, false)
+  apply_profile(opts.shader_profile, false)
 end
 
 local function enable_shaders()
@@ -304,7 +278,12 @@ local function disable_shaders()
 end
 
 local function toggle_shaders()
-  cycle_upscaling()
+  local current = mp.get_property('glsl-shaders') or ''
+  if current == '' then
+    apply_profile(opts.shader_profile, true)
+  else
+    apply_profile('off', true)
+  end
 end
 
 local function render(force)
@@ -433,7 +412,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
-  mp.register_script_message('anicat-cycle-upscaling', cycle_upscaling)
+  mp.register_script_message('anicat-set-upscaling', set_upscaling)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
   mp.register_script_message('anicat-next-episode', play_next)

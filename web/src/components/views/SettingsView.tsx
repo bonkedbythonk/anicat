@@ -625,7 +625,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle GPU Shaders</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Cycle Upscaling (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + A</kbd></div>
                   </div>
                 </div>

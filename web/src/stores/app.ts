@@ -15,6 +15,7 @@ interface AppState {
 
   // Detail drawer
   selectedItem: MediaItem | null;
+  detailStack: MediaItem[];
   initialAction: "play" | null;
   initialPlayEpisode: string | null;
   openDetail: (item: MediaItem, action?: "play" | null, episode?: string | null) => void;
@@ -61,13 +62,28 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   currentView: "home",
-  setCurrentView: (currentView) => set({ currentView }),
+  // Switching top-level view exits any detail page and drops its back-stack.
+  setCurrentView: (currentView) => set({ currentView, selectedItem: null, detailStack: [], initialAction: null, initialPlayEpisode: null }),
 
   selectedItem: null,
+  detailStack: [],
   initialAction: null,
   initialPlayEpisode: null,
-  openDetail: (selectedItem, initialAction, initialPlayEpisode) => set({ selectedItem, initialAction: initialAction || null, initialPlayEpisode: initialPlayEpisode || null }),
-  closeDetail: () => set({ selectedItem: null, initialAction: null, initialPlayEpisode: null }),
+  openDetail: (selectedItem, initialAction, initialPlayEpisode) => set((s) => ({
+    // Push the current detail item so back returns to it (prequel/sequel hops),
+    // not all the way out to the previous view.
+    detailStack: s.selectedItem ? [...s.detailStack, s.selectedItem] : s.detailStack,
+    selectedItem,
+    initialAction: initialAction || null,
+    initialPlayEpisode: initialPlayEpisode || null,
+  })),
+  closeDetail: () => set((s) => {
+    if (s.detailStack.length > 0) {
+      const prev = s.detailStack[s.detailStack.length - 1];
+      return { detailStack: s.detailStack.slice(0, -1), selectedItem: prev, initialAction: null, initialPlayEpisode: null };
+    }
+    return { selectedItem: null, detailStack: [], initialAction: null, initialPlayEpisode: null };
+  }),
 
   helpOpen: false,
   updatesOpen: false,

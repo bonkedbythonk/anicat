@@ -21,7 +21,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<"general" | "player" | "downloads" | "account" | "maintenance">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "player" | "account" | "maintenance">("general");
 
   // Read default tab from store (set by Connect button on HomeView)
   useEffect(() => {
@@ -291,13 +291,12 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
   const tabs = [
     { id: "general", label: "General", icon: Cpu },
     { id: "player", label: "Player", icon: PlayCircle },
-    { id: "downloads", label: "Downloads", icon: HardDrive },
     { id: "account", label: "Account", icon: Globe },
     { id: "maintenance", label: "Maintenance", icon: RotateCcw },
   ] as const;
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl">
+    <div className="space-y-8 animate-fade-in max-w-6xl">
       {successMessage && (
         <div className="flex items-center space-x-3 px-5 py-3.5 rounded-2xl bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm animate-fade-in shadow-lg">
           <CheckCircle2 size={18} />
@@ -326,26 +325,29 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
         </div>
       </div>
 
-      {/* Horizontal tab bar — easier to scan than sidebar */}
-      <div className="flex space-x-1 bg-white/[0.02] p-1 rounded-xl border border-white/[0.06] overflow-x-auto scrollbar-hide">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg font-semibold text-sm whitespace-nowrap transition-all flex-1 justify-center ${
-              activeTab === tab.id
-                ? "bg-accent text-white shadow-lg shadow-accent/20"
-                : "text-gray-500 hover:text-white hover:bg-white/[0.04]"
-            }`}
-          >
-            <tab.icon size={16} />
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Vertical nav rail — full-height settings layout */}
+        <nav className="lg:w-56 shrink-0">
+          <div className="lg:sticky lg:top-2 flex lg:flex-col gap-1 bg-white/[0.02] lg:bg-transparent p-1 lg:p-0 rounded-xl border lg:border-0 border-white/[0.06] overflow-x-auto scrollbar-hide">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-semibold text-sm whitespace-nowrap transition-all justify-center lg:w-full lg:justify-start ${
+                  activeTab === tab.id
+                    ? "bg-accent text-white shadow-lg shadow-accent/20"
+                    : "text-gray-500 hover:text-white hover:bg-white/[0.04]"
+                }`}
+              >
+                <tab.icon size={18} />
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
 
         {/* Settings form */}
-        <div className="space-y-6">
+        <div className="flex-1 min-w-0 space-y-6">
           {activeTab === "general" && (
             <div className="space-y-6 animate-fade-in">
               <CardSection title="Appearance">
@@ -367,6 +369,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                 <SettingField
                   label="Style"
                   description="Choose a complete visual skin for the interface."
+                  stack
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* Neon Abyss */}
@@ -486,15 +489,13 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     const row = (homeRows || rowDefs.map(x => ({ id: x.id, visible: true }))).find((x: any) => x.id === r.id);
                     const visible = row ? row.visible : true;
                     return (
-                      <label key={r.id} className="flex items-center justify-between py-2 cursor-pointer group">
-                        <div>
-                          <div className="text-sm font-medium text-foreground group-hover:text-accent transition-colors">{r.label}</div>
-                        </div>
+                      <label key={r.id} className="flex items-center justify-between px-3 py-3 rounded-xl hover:bg-white/[0.015] transition-colors cursor-pointer group">
+                        <div className="text-sm font-semibold text-white group-hover:text-accent transition-colors">{r.label}</div>
                         <input
                           type="checkbox"
                           checked={visible}
                           onChange={() => toggleHomeRow(r.id)}
-                          className="accent-accent rounded cursor-pointer"
+                          className="accent-accent rounded cursor-pointer w-4 h-4"
                         />
                       </label>
                     );
@@ -502,11 +503,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                 })()}
               </CardSection>
 
-              <CardSection title="Integrations">
-                <SettingField
-                  label="Discord Rich Presence"
-                  description="Enable Discord Rich Presence to show your current activity."
-                >
+              <CardSection title="Advanced" description="Rarely need to change these after initial setup.">
+                <SettingField label="Discord Rich Presence" description="Show current anime in your Discord status.">
                   <select
                     value={config.general?.discord ? "true" : "false"}
                     onChange={(e) => updateField("general", "discord", e.target.value === "true")}
@@ -516,13 +514,20 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     <option value="true">Enabled</option>
                   </select>
                 </SettingField>
-              </CardSection>
 
-              <CardSection title="Content Sources">
-                <SettingField
-                  label="Anime Provider"
-                  description="Primary source for streaming video."
-                >
+                <SettingField label="Download Location" description="Where downloaded episodes are saved.">
+                  <div className="relative">
+                    <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
+                    <input
+                      type="text"
+                      value={String(config.general?.downloads_path || "")}
+                      onChange={(e) => updateField("general", "downloads_path", e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent/40 outline-none transition-all"
+                    />
+                  </div>
+                </SettingField>
+
+                <SettingField label="Anime Provider" description="Primary streaming source.">
                   <select
                     value={String(config.general?.provider || "allanime")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
@@ -533,10 +538,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField
-                  label="Fallback Provider"
-                  description="Used when the primary provider fails to find streams."
-                >
+                <SettingField label="Fallback Provider" description="Used when the primary provider fails.">
                   <select
                     value={String(config.general?.fallback_provider || "anineko")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
@@ -548,10 +550,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField
-                  label="Manga Provider"
-                  description="Source for manga chapters."
-                >
+                <SettingField label="Manga Provider" description="Source for manga chapters.">
                   <select
                     value={String(config.general?.manga_provider || "mangakatana")}
                     onChange={(e) => updateField("general", "manga_provider", e.target.value)}
@@ -561,10 +560,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField
-                  label="Search & Tracking API"
-                  description="Source for anime search, lists, and metadata."
-                >
+                <SettingField label="Search & Tracking API" description="Metadata and list sync source.">
                   <select
                     value={String(config.general?.media_api || "anilist")}
                     onChange={(e) => updateField("general", "media_api", e.target.value)}
@@ -595,7 +591,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
 
                 <SettingField
                   label="Auto-Skip Intros"
-                  description="Automatically skip openings and endings using AniSkip database times (Press S in player to skip manually when disabled)."
+                  description="Automatically skip openings and endings using AniSkip. Press S in-player to skip manually when disabled."
                 >
                   <select
                     value={config.general?.autoskip ? "true" : "false"}
@@ -610,12 +606,9 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-              </CardSection>
-
-              <CardSection title="Video Player">
                 <SettingField
                   label="GPU Upscaling"
-                  description="Anime4K upscaling via mpv — sharpens lines and adds depth. Minimal battery impact. Toggle in-player with Ctrl+1 (session only)."
+                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Ctrl+1 in-player toggles temporarily without changing this setting."
                 >
                   <button
                     onClick={() => updateField("stream", "shader_profile", (config.stream?.shader_profile || "on") === "off" ? "on" : "off")}
@@ -641,24 +634,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + A</kbd></div>
                   </div>
                 </div>
-              </CardSection>
-            </div>
-          )}
-
-          {activeTab === "downloads" && (
-            <div className="space-y-6 animate-fade-in">
-              <CardSection title="Storage">
-                <SettingField label="Download Location" description="Where downloaded media is saved on disk.">
-                  <div className="relative">
-                    <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
-                    <input
-                      type="text"
-                      value={String(config.general?.downloads_path || "")}
-                      onChange={(e) => updateField("general", "downloads_path", e.target.value)}
-                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent/40 outline-none transition-all"
-                    />
-                  </div>
-                </SettingField>
               </CardSection>
             </div>
           )}
@@ -1058,28 +1033,31 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
           )}
 
         </div>
+      </div>
     </div>
   );
 }
 
 function CardSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-4">
-      <div className="pb-3 border-b border-white/[0.04]">
-        <h3 className="text-base font-bold text-white">{title}</h3>
-        {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
+    <section className="rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+      <div className="px-6 pt-5 pb-4 border-b border-white/[0.05]">
+        <h3 className="text-lg font-bold text-white">{title}</h3>
+        {description && <p className="text-xs text-gray-500 mt-1">{description}</p>}
       </div>
-      {children}
-    </div>
+      <div className="p-3 sm:p-4 space-y-1">{children}</div>
+    </section>
   );
 }
 
-function SettingField({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
+function SettingField({ label, description, children, stack }: { label: string; description?: string; children: React.ReactNode; stack?: boolean }) {
   return (
-    <div className="space-y-2.5 p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-      <label className="text-xs font-bold text-accent uppercase tracking-wider">{label}</label>
-      {children}
-      {description && <p className="text-[11px] text-gray-600">{description}</p>}
+    <div className={`px-3 py-3.5 rounded-xl hover:bg-white/[0.015] transition-colors ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-4"}`}>
+      <div className="flex-1 min-w-0">
+        <label className="text-sm font-semibold text-white">{label}</label>
+        {description && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{description}</p>}
+      </div>
+      <div className={stack ? "" : "w-full sm:w-64 shrink-0"}>{children}</div>
     </div>
   );
 }

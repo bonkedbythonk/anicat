@@ -46,6 +46,41 @@ export default function App() {
   const [health, setHealth] = useState<any>(null);
   const [onboardingSeen, setOnboardingSeen] = useState(true);
 
+  // Two-finger swipe left on trackpad = go back from detail page
+  useEffect(() => {
+    // Registered once. Reading live state from the store (instead of effect
+    // deps) keeps the cooldown alive across detail navigations — otherwise a
+    // re-subscribe on every selectedItem change would reset it, letting the
+    // inertial momentum tail pop the whole prequel/sequel chain at once.
+    let accX = 0;
+    let accY = 0;
+    let cooldownUntil = 0;
+    let reset: ReturnType<typeof setTimeout>;
+
+    const onWheel = (e: WheelEvent) => {
+      const { selectedItem: cur, closeDetail: close } = useAppStore.getState();
+      if (!cur) return;
+      const now = Date.now();
+      // Ignore the inertial momentum tail after a swipe so one physical gesture
+      // pops exactly one level.
+      if (now < cooldownUntil) return;
+      accX += e.deltaX;
+      accY += Math.abs(e.deltaY);
+      clearTimeout(reset);
+      reset = setTimeout(() => { accX = 0; accY = 0; }, 180);
+      // Swipe left (negative deltaX on macOS) with horizontal dominance = back
+      if (accX < -60 && Math.abs(accX) > accY * 2) {
+        accX = 0;
+        accY = 0;
+        cooldownUntil = now + 600;
+        close();
+      }
+    };
+
+    window.addEventListener('wheel', onWheel, { passive: true });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, []);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const seen = localStorage.getItem("anicat_onboarding_seen") === "true";
@@ -177,22 +212,30 @@ export default function App() {
       </div>
 
       <main className="flex-1 flex flex-col overflow-hidden relative" style={{ marginLeft: sidebarW }}>
-        <div className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10">
-          <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait">
+          {selectedItem ? (
+            <motion.div
+              key={`detail-${selectedItem.id}`}
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className="flex-1 overflow-y-auto scroll-container transform-gpu"
+            >
+              <MediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
+            </motion.div>
+          ) : (
             <motion.div
               key={currentView}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className="h-full"
+              className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10"
             >
               {renderView()}
             </motion.div>
-          </AnimatePresence>
-        </div>
-        <AnimatePresence>
-          {selectedItem && <MediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />}
+          )}
         </AnimatePresence>
       </main>
 

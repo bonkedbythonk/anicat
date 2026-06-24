@@ -311,6 +311,7 @@ impl ScraperManager {
             c.arg(&self.scraper_script).arg("--port").arg(port.to_string());
             c
         };
+        crate::util::suppress_console(&mut cmd);
         cmd.current_dir(script_dir);
 
         log::info!(

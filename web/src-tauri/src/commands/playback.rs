@@ -126,17 +126,12 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
             .to_string()
     };
 
-    if cfg!(target_os = "macos") {
-        if let Ok(path) = std::process::Command::new("which")
-            .arg("mpv")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        {
-            if !path.is_empty() && std::path::Path::new(&path).exists() {
-                log::info!("Found system mpv at: {}", path);
-                return Ok((path, config_dir, String::new()));
-            }
-        }
+    // Prefer a system-installed mpv if present (Homebrew on macOS; winget,
+    // scoop, or choco on Windows), falling back to the bundled binary below.
+    let mpv_query = if cfg!(target_os = "windows") { "mpv.exe" } else { "mpv" };
+    if let Some(path) = crate::util::find_on_path(mpv_query) {
+        log::info!("Found system mpv at: {}", path);
+        return Ok((path, config_dir, String::new()));
     }
 
     let mpv_name = if cfg!(target_os = "windows") {
@@ -695,6 +690,7 @@ pub async fn start_playback(
     }
 
     let mut cmd = tokio::process::Command::new(&mpv_bin);
+    crate::util::suppress_console_tokio(&mut cmd);
     cmd.arg(format!("--config-dir={}", config_dir));
     cmd.arg("--force-window=yes");
     cmd.arg("--ontop");
@@ -787,6 +783,12 @@ pub async fn start_playback(
     }
     if cfg!(target_os = "linux") {
         cmd.env("LD_LIBRARY_PATH", &lib_dir);
+    }
+    if cfg!(target_os = "windows") && !lib_dir.is_empty() {
+        // Windows resolves DLLs via the exe directory and PATH; prepend the
+        // bundled lib dir so any mpv DLLs there are found.
+        let existing = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{};{}", lib_dir, existing));
     }
 
     let has_active_mpv = {

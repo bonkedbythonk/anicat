@@ -278,7 +278,12 @@ fn find_bundled_binary(exe_dir: &std::path::Path) -> Option<String> {
     } else {
         exe_dir.to_path_buf()
     };
-    let bin = base_dir.join("scraper-bin").join("anicat-scraper");
+    let bin_name = if cfg!(target_os = "windows") {
+        "anicat-scraper.exe"
+    } else {
+        "anicat-scraper"
+    };
+    let bin = base_dir.join("scraper-bin").join(bin_name);
     if bin.exists() {
         log::info!("[scraper] using bundled binary: {}", bin.display());
         Some(bin.to_string_lossy().to_string())

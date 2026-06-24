@@ -763,6 +763,7 @@ async fn download_episode(
     cmd.arg("-o").arg(&filepath);
     cmd.arg("--force-overwrites");
     cmd.arg("--no-playlist");
+    crate::util::suppress_console_tokio(&mut cmd);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 

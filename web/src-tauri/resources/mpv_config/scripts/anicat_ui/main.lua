@@ -220,51 +220,19 @@ local function skip_current_segment()
   end
 end
 
-local function get_shader_paths_for_profile(profile)
-  local restore, upscale
-  if profile == 'sharp' then
-    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_L.glsl"
-    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_L.glsl"
-  elseif profile == 'balanced' then
-    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl"
-    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"
-  else
-    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_S.glsl"
-    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl"
-  end
-  return {
-    "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-    restore,
-    upscale,
-    "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
-    "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl",
-    "~~/shaders/Anime4K_Thin_HQ.glsl",
-  }
-end
-
-local function apply_profile(profile, show_osd)
-  if profile == 'off' then
-    mp.commandv("set", "glsl-shaders", "")
-    refresh_shaders_state()
-    if show_osd then mp.osd_message("Upscaling: Off  (temp — settings unchanged)", 2.5) end
-  else
-    local paths = get_shader_paths_for_profile(profile)
-    mp.commandv("change-list", "glsl-shaders", "set", table.concat(paths, ":"))
-    refresh_shaders_state()
-    if show_osd then
-      local label = ({ eco = "Eco", balanced = "Balanced", sharp = "Sharp" })[profile] or profile
-      mp.osd_message("Upscaling: " .. label .. "  (temp — settings unchanged)", 2.5)
-    end
-  end
-end
-
--- Ctrl+1/2/3/4: set a specific profile (session only, no config write)
-local function set_upscaling(profile)
-  apply_profile(profile or opts.shader_profile, true)
-end
+local SHADERS = {
+  "~~/shaders/Anime4K_Clamp_Highlights.glsl",
+  "~~/shaders/Anime4K_Restore_CNN_Soft_S.glsl",
+  "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl",
+  "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
+  "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl",
+  "~~/shaders/Anime4K_Thin_HQ.glsl",
+  "~~/shaders/Anime4K_Darken_HQ.glsl",
+}
 
 local function enable_standard_shaders()
-  apply_profile(opts.shader_profile, false)
+  mp.commandv("change-list", "glsl-shaders", "set", table.concat(SHADERS, ":"))
+  refresh_shaders_state()
 end
 
 local function enable_shaders()
@@ -274,15 +242,17 @@ end
 local function disable_shaders()
   mp.commandv("set", "glsl-shaders", "")
   refresh_shaders_state()
-  mp.osd_message("Upscaling: Off  (temp — settings unchanged)", 2.5)
 end
 
+-- Ctrl+1: toggle upscaling on/off (session only, no config write)
 local function toggle_shaders()
   local current = mp.get_property('glsl-shaders') or ''
   if current == '' then
-    apply_profile(opts.shader_profile, true)
+    enable_standard_shaders()
+    mp.osd_message("Upscaling: On  (temp — settings unchanged)", 2.0)
   else
-    apply_profile('off', true)
+    disable_shaders()
+    mp.osd_message("Upscaling: Off  (temp — settings unchanged)", 2.0)
   end
 end
 
@@ -412,7 +382,6 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
-  mp.register_script_message('anicat-set-upscaling', set_upscaling)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
   mp.register_script_message('anicat-next-episode', play_next)

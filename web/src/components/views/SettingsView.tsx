@@ -613,10 +613,22 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
               </CardSection>
 
               <CardSection title="Video Player">
-                <UpscalingPicker
-                  value={(config.stream?.shader_profile as string) || "eco"}
-                  onChange={(v) => updateField("stream", "shader_profile", v)}
-                />
+                <SettingField
+                  label="GPU Upscaling"
+                  description="Anime4K upscaling via mpv — sharpens lines and adds depth. Minimal battery impact. Toggle in-player with Ctrl+1 (session only)."
+                >
+                  <button
+                    onClick={() => updateField("stream", "shader_profile", (config.stream?.shader_profile || "on") === "off" ? "on" : "off")}
+                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
+                      (config.stream?.shader_profile || "on") !== "off"
+                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
+                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <Cpu size={16} />
+                    <span>{(config.stream?.shader_profile || "on") !== "off" ? "On" : "Off"}</span>
+                  </button>
+                </SettingField>
               </CardSection>
 
               <CardSection title="Keyboard Shortcuts">
@@ -625,10 +637,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Upscaling Off (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Upscaling Eco (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 2</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Upscaling Balanced (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 3</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Upscaling Sharp (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 4</kbd></div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
                     <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + A</kbd></div>
                   </div>
                 </div>
@@ -1075,114 +1084,3 @@ function SettingField({ label, description, children }: { label: string; descrip
   );
 }
 
-const UPSCALING_PROFILES = [
-  {
-    id: "off",
-    name: "Off",
-    tier: null,
-    bars: 0,
-    tagline: "No upscaling",
-    detail: "Raw stream output",
-    recommended: false,
-  },
-  {
-    id: "eco",
-    name: "Eco",
-    tier: "S",
-    bars: 2,
-    tagline: "Minimal heat",
-    detail: "Any chip · stays cool",
-    recommended: true,
-  },
-  {
-    id: "balanced",
-    name: "Balanced",
-    tier: "M",
-    bars: 3,
-    tagline: "Visibly sharper",
-    detail: "M3 / M4 / M5 and newer",
-    recommended: false,
-  },
-  {
-    id: "sharp",
-    name: "Sharp",
-    tier: "L",
-    bars: 4,
-    tagline: "4K-level detail",
-    detail: "Pro · Max · Ultra chips",
-    recommended: false,
-  },
-] as const;
-
-type UpscalingProfileId = typeof UPSCALING_PROFILES[number]["id"];
-
-function QualityBars({ filled, total = 4 }: { filled: number; total?: number }) {
-  return (
-    <div className="flex gap-[3px]">
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={`h-[5px] rounded-full transition-all ${
-            i < filled ? "bg-accent w-4" : "bg-white/[0.1] w-4"
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
-
-function UpscalingPicker({ value, onChange }: { value: string; onChange: (v: UpscalingProfileId) => void }) {
-  const active = (value || "eco") as UpscalingProfileId;
-  return (
-    <div className="space-y-3 p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-bold text-accent uppercase tracking-wider">GPU Upscaling</label>
-        <span className="text-[10px] text-gray-500 font-medium">Anime4K CNN shaders via mpv</span>
-      </div>
-      <div className="grid grid-cols-4 gap-2">
-        {UPSCALING_PROFILES.map((p) => {
-          const isActive = active === p.id;
-          return (
-            <button
-              key={p.id}
-              onClick={() => onChange(p.id)}
-              className={`relative flex flex-col gap-2 p-3 rounded-xl border-2 text-left transition-all ${
-                isActive
-                  ? "border-accent bg-accent/10 shadow-sm shadow-accent/10"
-                  : "border-white/[0.06] bg-white/[0.01] hover:border-white/[0.14] hover:bg-white/[0.03]"
-              }`}
-            >
-              {p.recommended && (
-                <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-px bg-accent text-white text-[9px] font-black rounded-full whitespace-nowrap tracking-wide">
-                  ★ REC
-                </span>
-              )}
-              <div className="flex items-center justify-between">
-                <span className={`text-sm font-black ${isActive ? "text-white" : "text-gray-300"}`}>
-                  {p.name}
-                </span>
-                {p.tier && (
-                  <span className={`text-[9px] font-black px-1.5 py-px rounded-md ${
-                    isActive ? "bg-accent/20 text-accent" : "bg-white/[0.06] text-gray-500"
-                  }`}>
-                    {p.tier}
-                  </span>
-                )}
-              </div>
-              <QualityBars filled={p.bars} />
-              <div className="space-y-0.5">
-                <div className={`text-[11px] font-bold ${isActive ? "text-white" : "text-gray-400"}`}>
-                  {p.tagline}
-                </div>
-                <div className="text-[10px] text-gray-600 leading-tight">{p.detail}</div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-      <p className="text-[11px] text-gray-600">
-        Ctrl+1 in the player toggles upscaling on/off using your chosen profile. Sharp requires a powerful GPU — use Eco or Balanced on battery.
-      </p>
-    </div>
-  );
-}

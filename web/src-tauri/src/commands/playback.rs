@@ -591,33 +591,15 @@ pub async fn start_playback(
 
     if shader_profile != "off" {
         let shader_dir = std::path::Path::new(&config_dir).join("shaders");
-        let shader_names: &[&str] = match shader_profile.as_str() {
-            "sharp" => &[
-                "Anime4K_Clamp_Highlights.glsl",
-                "Anime4K_Restore_CNN_Soft_L.glsl",
-                "Anime4K_Upscale_CNN_x2_L.glsl",
-                "Anime4K_AutoDownscalePre_x2.glsl",
-                "Anime4K_AutoDownscalePre_x4.glsl",
-                "Anime4K_Thin_HQ.glsl",
-            ],
-            "balanced" => &[
-                "Anime4K_Clamp_Highlights.glsl",
-                "Anime4K_Restore_CNN_Soft_M.glsl",
-                "Anime4K_Upscale_CNN_x2_M.glsl",
-                "Anime4K_AutoDownscalePre_x2.glsl",
-                "Anime4K_AutoDownscalePre_x4.glsl",
-                "Anime4K_Thin_HQ.glsl",
-            ],
-            _ => &[
-                // "eco" and any legacy value: S-tier, minimal heat
-                "Anime4K_Clamp_Highlights.glsl",
-                "Anime4K_Restore_CNN_Soft_S.glsl",
-                "Anime4K_Upscale_CNN_x2_S.glsl",
-                "Anime4K_AutoDownscalePre_x2.glsl",
-                "Anime4K_AutoDownscalePre_x4.glsl",
-                "Anime4K_Thin_HQ.glsl",
-            ],
-        };
+        let shader_names = [
+            "Anime4K_Clamp_Highlights.glsl",
+            "Anime4K_Restore_CNN_Soft_S.glsl",
+            "Anime4K_Upscale_CNN_x2_S.glsl",
+            "Anime4K_AutoDownscalePre_x2.glsl",
+            "Anime4K_AutoDownscalePre_x4.glsl",
+            "Anime4K_Thin_HQ.glsl",
+            "Anime4K_Darken_HQ.glsl",
+        ];
         let shader_arg: Vec<String> = shader_names
             .iter()
             .map(|n| shader_dir.join(n))

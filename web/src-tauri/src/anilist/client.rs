@@ -37,7 +37,7 @@ impl AniListClient {
             token: Mutex::new(token),
             username: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
-            request_lock: Arc::new(tokio::sync::Semaphore::new(1)),
+            request_lock: Arc::new(tokio::sync::Semaphore::new(3)),
         }
     }
 
@@ -137,6 +137,7 @@ impl AniListClient {
         }
 
         log::info!("AniList request succeeded (HTTP {})", status.as_u16());
+
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
             .map_err(|e| {
                 log::error!("Failed to parse AniList response JSON: {}, body: {}", e, text);

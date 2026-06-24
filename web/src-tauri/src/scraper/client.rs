@@ -42,7 +42,7 @@ pub struct AnimeInfo {
 
 // ── Manager ───────────────────────────────────────────────
 
-const IDLE_TIMEOUT_SECS: u64 = 300;
+const IDLE_TIMEOUT_SECS: u64 = 120;
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -54,6 +54,7 @@ struct ScraperProcess {
 
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
+    spawn_lock: tokio::sync::Mutex<()>,
     http_client: reqwest::Client,
     python_path: String,
     scraper_script: String,
@@ -63,6 +64,7 @@ impl Clone for ScraperManager {
     fn clone(&self) -> Self {
         Self {
             process: self.process.clone(),
+            spawn_lock: tokio::sync::Mutex::new(()),
             http_client: self.http_client.clone(),
             python_path: self.python_path.clone(),
             scraper_script: self.scraper_script.clone(),
@@ -78,6 +80,7 @@ impl ScraperManager {
     ) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
+            spawn_lock: tokio::sync::Mutex::new(()),
             http_client,
             python_path,
             scraper_script,
@@ -94,7 +97,7 @@ impl ScraperManager {
         let url = format!(
             "http://127.0.0.1:{}/search?query={}&provider={}",
             port,
-            percent_encode(query),
+            crate::util::percent_encode(query),
             provider
         );
         let resp = self
@@ -168,7 +171,7 @@ impl ScraperManager {
         let url = format!(
             "http://127.0.0.1:{}/manga/search?query={}",
             port,
-            percent_encode(query)
+            crate::util::percent_encode(query)
         );
         let resp = self
             .http_client
@@ -186,7 +189,7 @@ impl ScraperManager {
         let url = format!(
             "http://127.0.0.1:{}/manga/get?slug={}",
             port,
-            percent_encode(slug)
+            crate::util::percent_encode(slug)
         );
         let resp = self
             .http_client
@@ -208,8 +211,8 @@ impl ScraperManager {
         let url = format!(
             "http://127.0.0.1:{}/manga/chapter?slug={}&chapter={}",
             port,
-            percent_encode(slug),
-            percent_encode(chapter)
+            crate::util::percent_encode(slug),
+            crate::util::percent_encode(chapter)
         );
         let resp = self
             .http_client
@@ -251,18 +254,31 @@ impl ScraperManager {
         {
             let mut proc = self.process.lock().await;
             if let Some(ref mut sp) = *proc {
-                // Check if child is still alive
                 let exited = sp.child.try_wait().map(|r| r.is_some()).unwrap_or(true);
                 if !exited {
                     sp.last_used = Instant::now();
                     return Ok(sp.port);
                 }
-                // Process died — clean up
                 *proc = None;
             }
         }
 
-        // Start new process
+        // Serialize spawns: only one thread starts a new process
+        let _lock = self.spawn_lock.lock().await;
+
+        // Double-check after acquiring lock (another thread may have started it)
+        {
+            let mut proc = self.process.lock().await;
+            if let Some(ref mut sp) = *proc {
+                let exited = sp.child.try_wait().map(|r| r.is_some()).unwrap_or(true);
+                if !exited {
+                    sp.last_used = Instant::now();
+                    return Ok(sp.port);
+                }
+                *proc = None;
+            }
+        }
+
         self.start_process().await
     }
 
@@ -335,7 +351,7 @@ async fn idle_watchdog(
             log::info!("Stopping idle scraper (pid={})", if let Some(ref sp) = *proc { sp.child.id() } else { 0 });
             if let Some(mut sp) = proc.take() {
                 let _ = sp.child.kill();
-                let _ = sp.child.wait();
+                let _ = tokio::time::timeout(Duration::from_secs(5), async { sp.child.wait() }).await;
             }
             return;
         }
@@ -348,20 +364,6 @@ fn find_free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("No free port: {}", e))?;
     listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
-}
-
-fn percent_encode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            b' ' => result.push('+'),
-            _ => result.push_str(&format!("%{:02X}", byte)),
-        }
-    }
-    result
 }
 
 async fn start_and_wait(

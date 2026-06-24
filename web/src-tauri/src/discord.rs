@@ -59,19 +59,22 @@ impl DiscordClient {
         }
     }
 
-    pub fn set_presence(&self, title: &str, episode: i64, episode_title: &str, total_episodes: i64) {
+    pub fn set_presence(&self, title: &str, episode: i64, episode_title: &str, total_episodes: i64, pos: i64, paused: bool) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(ref mut client) = *inner {
-                let state = if episode_title.is_empty() {
+                let mut state_str = if episode_title.is_empty() {
                     format!("Episode {}", episode)
                 } else {
                     episode_title.to_string()
                 };
+                if paused {
+                    state_str = format!("{} (Paused)", state_str);
+                }
 
-                let act = activity::Activity::new()
+                let mut act = activity::Activity::new()
                     .activity_type(ActivityType::Watching)
                     .details(title)
-                    .state(&state)
+                    .state(&state_str)
                     .assets(
                         activity::Assets::new()
                             .large_image("anicat")
@@ -81,6 +84,14 @@ impl DiscordClient {
                         activity::Party::new()
                             .size([episode as i32, total_episodes as i32]),
                     );
+
+                if !paused {
+                    let start_time = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64 - pos;
+                    act = act.timestamps(activity::Timestamps::new().start(start_time));
+                }
 
                 let _ = client.set_activity(act);
             }

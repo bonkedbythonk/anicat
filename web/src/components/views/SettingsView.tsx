@@ -1,10 +1,9 @@
-// @ts-nocheck
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
-import { useAppStore } from "@/stores/app";
+import { useAppStore, useSettingsStore } from "@/stores/app";
 import type { UiStyle } from "@/hooks/useTheme";
 import { ErrorBanner } from "@/components/ErrorBanner";
 
@@ -184,7 +183,7 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
         // If we don't know of an update yet, check for one first!
         const res = await mediaApi.checkUpdate();
         if (res.status === "success") {
-          setStagedHasUpdate(res.update_available);
+          setStagedHasUpdate(res.update_available ?? false);
           setUpdateMessage({ text: res.message, type: "success" });
           if (res.release_notes) setReleaseNotes(res.release_notes);
           if (res.release_url) setReleaseUrl(res.release_url);
@@ -891,10 +890,9 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                         `Anicat Version: ${health?.current_version || "unknown"}`,
                         `Platform: ${window.navigator.platform}`,
                         `User Agent: ${window.navigator.userAgent}`,
-                        `API Connected: ${health?.api_connected}`,
-                        `API Authenticated: ${health?.api_authenticated}`,
-                        `Is Offline: ${health?.is_offline}`,
-                        `Data Version: ${health?.data_version}`,
+                        `API Connected: ${health?.connected}`,
+                        `API Authenticated: ${health?.authenticated}`,
+                        `Is Offline: ${health?.offline}`,
                         `Timestamp: ${new Date().toISOString()}`,
                         `\n--- LATEST LOGS ---\n`,
                         logs.logs

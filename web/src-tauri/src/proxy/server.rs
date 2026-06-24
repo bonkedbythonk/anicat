@@ -17,6 +17,7 @@ struct ProxyQuery {
 struct PlaybackParams {
     pos: Option<i64>,
     duration: Option<i64>,
+    manual: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -43,7 +44,7 @@ pub async fn start_proxy(
                 .expect("Failed to bind any port for HLS proxy")
         }
     };
-    let bound = listener.local_addr().unwrap();
+    let bound = listener.local_addr().expect("Failed to get proxy listener address");
 
     log::info!("HLS proxy bound to {}", bound);
 
@@ -62,10 +63,15 @@ pub async fn start_proxy(
         .route("/player/prev", get(player_prev_handler))
         .route("/player/stop", get(player_stop_handler))
         .route("/player/toggle-translation", get(player_toggle_translation_handler))
+        .route("/player/progress", get(player_progress_handler))
+        .route("/player/pause", get(player_pause_handler))
+        .route("/player/resume", get(player_resume_handler))
         .with_state(state);
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        if let Err(e) = axum::serve(listener, app).await {
+            log::error!("HLS proxy server error: {}", e);
+        }
     });
 
     bound
@@ -80,9 +86,20 @@ async fn player_next_handler(
     State(state): State<ProxyState>,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
-    log::info!("Player requested next episode: pos={:?}, duration={:?}", params.pos, params.duration);
+    log::info!("Player requested next episode: pos={:?}, duration={:?}, manual={:?}", params.pos, params.duration, params.manual);
+    // Navigating to the next episode records the actual position of the
+    // current one — it never force-completes it. The episode only counts as
+    // watched if that real position is past the threshold (record_playback_
+    // progress decides). So skipping forward mid-episode no longer marks the
+    // skipped episode as watched.
     let play_info = {
-        let guard = state.app_state.current_playback.lock().await;
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+        }
         guard.clone()
     };
     if let Some(play_info) = play_info {
@@ -107,6 +124,15 @@ async fn player_next_handler(
         }
 
         let next_ep = play_info.episode_number + 1;
+        let total = play_info.total_episodes;
+        if total > 0 && next_ep > total {
+            log::info!("Already at last episode ({}), no next episode", total);
+            if let Err(e) = crate::commands::playback::cancel_mpv_next("Already at the last episode.").await {
+                log::error!("Failed to cancel mpv next: {}", e);
+            }
+            notify_frontend(&state.app_handle, "No more episodes available.");
+            return Ok("ok");
+        }
         log::info!(
             "Starting playback for next episode: media_id={}, episode={}, provider={}",
             play_info.media_id,
@@ -137,6 +163,9 @@ async fn player_next_handler(
             .await;
             if let Err(ref e) = result {
                 log::warn!("Failed to start next episode: {}", e);
+                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next("No more episodes available.").await {
+                    log::error!("Failed to cancel mpv next: {}", cancel_err);
+                }
                 notify_frontend(&app_handle_clone, "No more episodes available.");
             }
         });
@@ -153,7 +182,13 @@ async fn player_prev_handler(
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested previous episode: pos={:?}, duration={:?}", params.pos, params.duration);
     let play_info = {
-        let guard = state.app_state.current_playback.lock().await;
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+        }
         guard.clone()
     };
     if let Some(play_info) = play_info {
@@ -180,8 +215,11 @@ async fn player_prev_handler(
         let prev_ep = play_info.episode_number - 1;
         if prev_ep < 1 {
             log::warn!("Previous episode cannot be less than 1");
+            if let Err(e) = crate::commands::playback::cancel_mpv_next("Already at the first episode.").await {
+                log::error!("Failed to cancel mpv next: {}", e);
+            }
             notify_frontend(&state.app_handle, "Already at the first episode.");
-            return Err(StatusCode::BAD_REQUEST);
+            return Ok("ok");
         }
         log::info!(
             "Starting playback for previous episode: media_id={}, episode={}, provider={}",
@@ -198,8 +236,8 @@ async fn player_prev_handler(
             use tauri::Manager;
             let tauri_state = app_handle.state::<crate::state::AppState>();
             let app_handle_clone = app_handle.clone();
-            let _ = crate::commands::playback::start_playback(
-                app_handle_clone,
+            let result = crate::commands::playback::start_playback(
+                app_handle_clone.clone(),
                 tauri_state,
                 play_info.media_id,
                 prev_ep,
@@ -211,6 +249,13 @@ async fn player_prev_handler(
                 Some(play_info.total_episodes),
             )
             .await;
+            if let Err(ref e) = result {
+                log::warn!("Failed to start previous episode: {}", e);
+                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next("Failed to load previous episode.").await {
+                    log::error!("Failed to cancel mpv next: {}", cancel_err);
+                }
+                notify_frontend(&app_handle_clone, "Failed to load previous episode.");
+            }
         });
         return Ok("ok");
     }
@@ -225,7 +270,13 @@ async fn player_stop_handler(
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested stop: pos={:?}, duration={:?}", params.pos, params.duration);
     let play_info = {
-        let guard = state.app_state.current_playback.lock().await;
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+        }
         guard.clone()
     };
     if let Some(play_info) = play_info {
@@ -252,6 +303,78 @@ async fn player_stop_handler(
     }
     log::warn!("No current playback session found for stop request");
     Err(StatusCode::BAD_REQUEST)
+}
+
+async fn player_progress_handler(
+    State(state): State<ProxyState>,
+    Query(params): Query<PlaybackParams>,
+) -> Result<&'static str, StatusCode> {
+    let mut guard = state.app_state.current_playback.lock().await;
+    if let Some(ref mut pb) = *guard {
+        if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+            pb.last_position = pos;
+            pb.last_duration = duration;
+        }
+    }
+    Ok("ok")
+}
+
+async fn player_pause_handler(
+    State(state): State<ProxyState>,
+    Query(params): Query<PlaybackParams>,
+) -> Result<&'static str, StatusCode> {
+    log::info!("Player requested pause: pos={:?}, duration={:?}", params.pos, params.duration);
+    let play_info = {
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+        }
+        guard.clone()
+    };
+    if let Some(play_info) = play_info {
+        let pos = params.pos.unwrap_or(0);
+        state.app_state.discord.set_presence(
+            &play_info.title,
+            play_info.episode_number,
+            &play_info.episode_title,
+            play_info.total_episodes,
+            pos,
+            true, // paused = true
+        );
+    }
+    Ok("ok")
+}
+
+async fn player_resume_handler(
+    State(state): State<ProxyState>,
+    Query(params): Query<PlaybackParams>,
+) -> Result<&'static str, StatusCode> {
+    log::info!("Player requested resume: pos={:?}, duration={:?}", params.pos, params.duration);
+    let play_info = {
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+        }
+        guard.clone()
+    };
+    if let Some(play_info) = play_info {
+        let pos = params.pos.unwrap_or(0);
+        state.app_state.discord.set_presence(
+            &play_info.title,
+            play_info.episode_number,
+            &play_info.episode_title,
+            play_info.total_episodes,
+            pos,
+            false, // paused = false
+        );
+    }
+    Ok("ok")
 }
 
 async fn player_toggle_translation_handler(
@@ -308,21 +431,6 @@ async fn health_handler() -> &'static str {
     "ok"
 }
 
-pub fn percent_encode(s: &str) -> String {
-    let mut encoded = String::new();
-    for b in s.bytes() {
-        match b {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(b as char);
-            }
-            _ => {
-                encoded.push_str(&format!("%{:02X}", b));
-            }
-        }
-    }
-    encoded
-}
-
 fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url, proxy_port: u16) -> String {
     let mut new_playlist = String::new();
     for line in playlist_text.lines() {
@@ -332,7 +440,7 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url, proxy_port: u1
             new_playlist.push('\n');
         } else {
             if let Ok(resolved_url) = base_url.join(trimmed) {
-                let encoded_url = percent_encode(resolved_url.as_str());
+                let encoded_url = crate::util::percent_encode(resolved_url.as_str());
                 new_playlist.push_str(&format!("http://127.0.0.1:{}/proxy?url={}", proxy_port, encoded_url));
                 new_playlist.push('\n');
             } else {

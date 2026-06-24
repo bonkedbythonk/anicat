@@ -45,9 +45,10 @@ interface AppState {
     tokenPresent: boolean;
   }) => void;
 
-  // Metrics last loaded
-  dataVersion: number;
-  setDataVersion: (v: number) => void;
+
+  // Sidebar
+  sidebarCompact: boolean;
+  toggleSidebar: () => void;
 
   // Settings
   settingsDefaultTab: string | null;
@@ -89,8 +90,14 @@ export const useAppStore = create<AppState>((set) => ({
       tokenPresent: state.tokenPresent,
     }),
 
-  dataVersion: 0,
-  setDataVersion: (dataVersion) => set({ dataVersion }),
+
+  sidebarCompact: localStorage.getItem("anicat_sidebar_compact") === "true",
+  toggleSidebar: () =>
+    set((state) => {
+      const next = !state.sidebarCompact;
+      localStorage.setItem("anicat_sidebar_compact", String(next));
+      return { sidebarCompact: next };
+    }),
 
   settingsDefaultTab: null,
   setSettingsDefaultTab: (settingsDefaultTab) => set({ settingsDefaultTab }),

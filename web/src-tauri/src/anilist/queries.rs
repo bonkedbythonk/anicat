@@ -8,6 +8,7 @@ query ($id: Int, $type: MediaType) {
     idMal
     type
     title { romaji english native }
+    synonyms
     coverImage { large medium }
     bannerImage
     description

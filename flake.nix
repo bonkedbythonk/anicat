@@ -1,5 +1,5 @@
 {
-  description = "Anicat Project Flake";
+  description = "Anicat development environment";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -16,85 +16,45 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        inherit (pkgs) lib python312Packages;
-
-        version = "5.1.3";
       in
       {
-        packages.default = python312Packages.buildPythonApplication {
-          pname = "anicat";
-          inherit version;
-          pyproject = true;
-
-          src = self;
-
-          build-system = with python312Packages; [ hatchling ];
-
-          dependencies = with python312Packages; [
-            click
-            inquirerpy
-            httpx
-            rich
-            thefuzz
-            yt-dlp
-            plyer
-            mpv
-            fastapi
-            pycryptodomex
-            pypresence
-            aiofiles
-            pillow
-            uvicorn
-          ] ++ lib.optionals stdenv.isLinux [ dbus-python ];
-
-          postPatch = ''
-            substituteInPlace pyproject.toml \
-              --replace-fail "pydantic>=2.11.7" "pydantic>=2.11.4"
-          '';
-
-          makeWrapperArgs = [
-            "--prefix PATH : ${
-              lib.makeBinPath (
-                with pkgs;
-                [
-                  mpv
-                ]
-              )
-            }"
-          ];
-
-          # Needs to be adapted for the nix derivation build
-          doCheck = false;
-
-          meta = {
-            description = "Minimalist Media CLI for macOS.";
-            homepage = "https://github.com/bonkedbythonk/anicat";
-            changelog = "https://github.com/bonkedbythonk/anicat/releases/tag/v${version}";
-            mainProgram = "anicat";
-            license = lib.licenses.unlicense;
-            maintainers = with lib.maintainers; [ theobori ];
-          };
-        };
-
+        # Anicat is a Tauri (Rust) + React (Node) desktop app with a small
+        # Python scraper sidecar. This flake provides only a dev shell — the
+        # app is built with `npm run tauri build`, not Nix.
         devShells.default = pkgs.mkShell {
-          venvDir = ".venv";
-
-          env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libxcrypt-legacy ];
-
           packages =
             with pkgs;
             [
-              mpv
-              fzf
-              rofi
+              # Frontend
+              nodejs_22
+
+              # Rust / Tauri backend
+              rustc
+              cargo
+              pkg-config
+
+              # Python scraper sidecar (scraper/ has its own uv project)
               uv
-              pyright
+
+              # Media player
+              mpv
             ]
-            ++ (with python3Packages; [
-              venvShellHook
-              hatchling
-            ])
-            ++ self.packages.${system}.default.dependencies;
+            ++ lib.optionals stdenv.isLinux (
+              with pkgs;
+              [
+                # Tauri v2 system dependencies on Linux
+                webkitgtk_4_1
+                gtk3
+                libsoup_3
+                openssl
+              ]
+            )
+            ++ lib.optionals stdenv.isDarwin (
+              with pkgs;
+              [
+                libiconv
+              ]
+            );
         };
       }
     );

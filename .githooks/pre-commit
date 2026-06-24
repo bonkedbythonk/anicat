@@ -39,11 +39,9 @@ bump_and_stage() {
     # pre-commit runs before the commit object is created, so git add
     # updates the index that the commit uses.
     git add "$PROJECT_ROOT/version.txt" \
-            "$PROJECT_ROOT/pyproject.toml" \
-            "$PROJECT_ROOT/anicat_media/_version.py" \
             "$PROJECT_ROOT/web/package.json" \
             "$PROJECT_ROOT/web/src-tauri/tauri.conf.json" \
-            "$PROJECT_ROOT/flake.nix"
+            "$PROJECT_ROOT/web/src-tauri/Cargo.toml"
 }
 
 if echo "$COMMIT_MSG" | grep -qiE '^(breaking change|feat!|fix!)\b|!:\s'; then

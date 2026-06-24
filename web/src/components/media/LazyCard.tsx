@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import type { MediaItem } from "@/lib/types";
 import { proxyImage } from "@/lib/proxy";
 
-export function LazyCard({ item, onSelect }: { item: MediaItem; onSelect: (item: MediaItem) => void }) {
+const LazyCard = memo(function LazyCard({ item, onSelect }: { item: MediaItem; onSelect: (item: MediaItem) => void }) {
   const [loaded, setLoaded] = useState(false);
   const src = item.cover_image?.large;
 
@@ -21,4 +21,6 @@ export function LazyCard({ item, onSelect }: { item: MediaItem; onSelect: (item:
       )}
     </button>
   );
-}
+});
+
+export { LazyCard };

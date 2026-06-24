@@ -11,13 +11,16 @@ INSTALL_PATH="/Applications/$APP_NAME"
 
 
 echo "Step 1: Finding the latest version..."
-UPDATE_BRANCH="stable"
+UPDATE_BRANCH="${UPDATE_BRANCH:-stable}"
+if [ "${1:-}" = "nightly" ]; then
+    UPDATE_BRANCH="nightly"
+fi
 CONFIG_FILE="$HOME/Library/Application Support/anicat/config.toml"
 if [ ! -f "$CONFIG_FILE" ]; then
     CONFIG_FILE="$HOME/.config/anicat/config.toml"
 fi
 
-if [ -f "$CONFIG_FILE" ]; then
+if [ -f "$CONFIG_FILE" ] && [ "$UPDATE_BRANCH" != "nightly" ]; then
     if grep -q 'update_branch = "nightly"' "$CONFIG_FILE"; then
         UPDATE_BRANCH="nightly"
     fi

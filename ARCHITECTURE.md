@@ -1,134 +1,94 @@
-# Anicat Architecture v5
+# Anicat Architecture
 
-## Boundary Map
+Anicat is a macOS-first desktop app for streaming, reading, and tracking anime
+and manga against [AniList](https://anilist.co). It is a [Tauri v2](https://v2.tauri.app)
+application: a React/Vite webview talking to a Rust core, with a small Python
+scraper spawned on demand.
 
-```
-                        ┌──────────────────────────────┐
-                        │        React + Vite          │
-                        │   (presentation, UI state)   │
-                        └──────────┬───────────────────┘
-                                   │ Tauri invoke() IPC
-              ┌────────────────────┼────────────────────┐
-              │                    │                    │
-     ┌────────▼────────┐  ┌───────▼────────┐  ┌───────▼────────┐
-     │  Rust Commands  │  │  Rust Proxy    │  │  Rust Scraper  │
-     │  config/anilist │  │  (axum HLS)    │  │  Manager       │
-     │  registry/media │  │                │  │                │
-     │  user/playback  │  │                │  │                │
-     └────────┬────────┘  └───────┬────────┘  └───────┬────────┘
-              │                   │                    │
-              │                   │           spawn ┌──▼──────────┐
-              │                   │                 │ Python       │
-              │                   │                 │ AniNeko      │
-   ┌──────────▼──────────┐        │                 │ curl_cffi    │
-   │  SQLite             │  ┌─────▼──────┐          │ selectolax   │
-   │  (media registry)   │  │ CDN        │          │ 60s idle die │
-   └─────────────────────┘  └────────────┘          └──────────────┘
-```
-
-## Three Layers, Three Responsibilities
-
-### 1. Rust Core (Tauri IPC) — owns data, state, proxy
-- **Config** — TOML read/write via `serde`, no Python in path
-- **AniList client** — GraphQL via `reqwest` + `serde_json`, token stored in macOS keychain
-- **Media registry** — SQLite (`rusqlite`), same schema, accessed directly
-- **HLS proxy** — `axum` server on `127.0.0.1:13370`, `reqwest` upstream, zero-copy streaming
-- **Playback tracking** — mpv IPC socket control, watch history dispatch
-- **Health/updates** — version check, log delivery, app status
-- **User lists/profile** — AniList mutations through the same GraphQL client
-
-### 2. React + Vite (Tauri WebView) — owns presentation
-- **Zustand** for transient UI state (selected item, current view, overlay visibility)
-- **TanStack Query** for server state (AniList data, episodes, user lists)
-- All backend communication via `invoke("command_name", {args})` — no `fetch()`, no HTTP to localhost for internal ops
-- Only exception: HLS segments go to localhost:13370 (the Rust axum proxy, not Python)
-
-### 3. Python Microservice — owns only AniNeko scraping
-- Isolated FastAPI process, spawned on demand by Rust `ScraperManager`
-- Single responsibility: search AniNeko, get anime info, resolve stream servers
-- `curl_cffi` with Chrome impersonation for Cloudflare bypass
-- `selectolax` for fast HTML parsing
-- Idle timeout: 60 seconds after last request, then self-terminates
-- Rust manager restarts it next time scraping is needed
-- Communicates with Rust core via HTTP on ephemeral port (127.0.0.1:random)
-
-## Why Each Boundary Exists
-
-### Why Rust for data, not Python
-Python's startup cost is too high for every config read, AniList query, and registry lookup. Tauri IPC `invoke()` calls are synchronous from the WebView's perspective and complete in microseconds for local operations. Rust's `serde` deserializes directly to JSON without intermediate Python objects.
-
-### Why Rust for HLS proxy, not Python
-Each episode streams ~300 segments. Python's HTTP overhead per segment (uvicorn → FastAPI → httpx → CDN) compounds into seconds of added latency per episode. Rust's `axum` + `reqwest` uses zero-copy `Bytes` streaming — the CDN response body is forwarded directly to mpv/HLS.js without allocation.
-
-### Why Python for scraping, not Rust
-Cloudflare's TLS fingerprinting requires browser-identical TLS handshakes. `curl_cffi` (Python) is the only reliable solution for this. Rust alternatives (`rquest`, `curl-rust` with impersonation) are immature and break with CF updates. Python's rapid iteration speed matters here — scraping rules change weekly.
-
-### Why Zustand, not React Context
-React Context triggers re-renders of all consumers when any value changes, even with selector patterns. Zustand uses `useStore(selector)` which only re-renders when the selected slice changes. For the selected-item detail drawer (which changes frequently), this eliminates cascading re-renders.
-
-### Why TanStack Query, not manual fetch
-Deduplication, automatic background refetching, and cache invalidation are essential for a data-heavy app. TanStack Query handles stale-while-revalidate, retry, and optimistic updates without boilerplate.
-
-## Performance: Where the Speed Comes From
-
-| Optimization | Before (v4) | After (v5) |
-|---|---|---|
-| Config read | Python FastAPI HTTP round-trip (~2ms) | Rust Tauri IPC (~0.05ms) |
-| AniList query | Python serialization + anilist roundtrip | Rust direct GraphQL (no Python hop) |
-| HLS segment proxy | Python uvicorn → httpx → CDN (~5ms overhead) | Rust axum → reqwest → CDN (~0.5ms overhead) |
-| Navigation | Next.js router + SSR check | react-router instant client-side |
-| Detail open | React Context cascade (4 contexts re-render) | Zustand selector (only detail consumers re-render) |
-| App startup | Next.js SSR + Python sidecar spawn | Vite SPA + Rust direct (no Python unless scraping) |
-
-## Startup Sequence
-
-1. Tauri binary starts → Rust `setup()` hook
-2. Rust reads config from `~/Library/Application Support/anicat/config.toml`
-3. Rust opens SQLite registry
-4. Rust starts axum HLS proxy on `127.0.0.1:13370`
-5. Rust initializes AniList client (loads token from keychain)
-6. Tauri opens WebView → Vite SPA loads
-7. React calls `invoke("get_config")` → Zustand store populated
-8. TanStack Query begins fetching home page data via `invoke()`
-9. Python microservice is NOT started — only spawned when first scraping needed
-
-## Provider Design (Single-Module)
+## Layers
 
 ```
-scraper/
-├── main.py          FastAPI app, health endpoint, idle timer
-├── anineko.py       One class: AniNekoProvider
-│   search(query)    → list[{id, title, year, type}]
-│   get(id)          → {title, episodes: [{number, title, image}]}
-│   streams(id, ep)  → [{server_name, url, quality}]
-│   master(url)      → raw M3U8 content
-└── sidecar.spec     PyInstaller spec for bundling
+              ┌─────────────────────────────────────────┐
+              │            React + Vite (webview)        │
+              │   views, detail drawer, manga reader     │
+              │   Zustand = UI state · TanStack = cache  │
+              └───────────────────┬─────────────────────┘
+                                  │ Tauri invoke() IPC
+        ┌─────────────────────────┼──────────────────────────┐
+        │                         │                          │
+ ┌──────▼───────┐        ┌────────▼────────┐        ┌────────▼─────────┐
+ │ Rust commands│        │  axum HLS proxy │        │ ScraperManager   │
+ │ anilist/auth │        │ 127.0.0.1:13370 │  spawn │ (Rust)           │
+ │ media/user   │        │ + /player/*     │───────▶│  Python sidecar  │
+ │ playback/cfg │        │   events        │        │  anicat-scraper  │
+ └──────┬───────┘        └────────┬────────┘        └────────┬─────────┘
+        │                         │                          │
+ ┌──────▼───────┐         CDN ◀───┘ (segments)      ┌────────▼─────────┐
+ │ SQLite        │                                  │ curl_cffi +      │
+ │ registry +    │                                  │ selectolax       │
+ │ watch history │                                  │ 60s idle timeout │
+ └──────────────┘                                   └──────────────────┘
 ```
 
-Adding a future provider means adding one file + registering it in `main.py`. No abstraction layer needed until there are 3+ providers.
+### React + Vite (webview) — presentation
+- **Zustand** holds transient UI state (current view, selected item, sidebar,
+  notifications) across a few small stores to avoid cross-component re-renders.
+- **TanStack Query** holds server state (AniList data, episode lists, user
+  lists). All backend calls go through `invoke("command", …)`.
+- The only HTTP the webview makes to localhost is for HLS segments, which point
+  at the Rust axum proxy (`127.0.0.1:13370`).
 
-## Migration Notes
+### Rust core (Tauri commands) — data, state, playback, proxy
+- **Config** — TOML at `~/Library/Application Support/anicat/config.toml`.
+- **AniList client** — GraphQL over `reqwest`; OAuth token in the macOS keychain.
+- **Registry** — SQLite via `rusqlite`: provider-slug mappings, watch history
+  (per-episode stop position + duration), and the download queue.
+- **Playback** — launches external **mpv**, controls it over an IPC socket, and
+  records progress. Resume position and AniList progress come from the registry
+  and the player's reported position.
+- **HLS proxy** — an `axum` server that streams CDN segments to mpv/HLS.js,
+  rewrites `.m3u8` playlists to route through itself, and enforces an SSRF
+  domain allowlist. The same server hosts the `/player/*` endpoints the mpv Lua
+  script calls back into (next/prev/progress/stop/translation).
 
-### Kept from v4
-- React component JSX structure (migrated, not redesigned)
-- Tailwind CSS theme system (all 4 skins, light/dark, ambient)
-- HLS.js player UI and controls
-- mpv binary + config + shaders (Anime4K, ModernZ, AniSkip)
-- Keyboard shortcuts design
+### Python scraper sidecar — provider scraping only
+- A FastAPI app in `scraper/` (`main.py`) exposing search / get / streams, with
+  one provider class per file: `anineko.py`, `allanime.py`, `mangakatana.py`.
+- Uses `curl_cffi` (Chrome TLS impersonation, for Cloudflare) and `selectolax`.
+- Spawned on demand by the Rust `ScraperManager`, self-terminates after ~60s
+  idle, and is restarted when scraping is next needed. It has its own
+  `scraper/pyproject.toml` and is unrelated to any root-level Python.
 
-### Removed from v4
-- Next.js framework (SSR, file-based routing, output:export)
-- Python monolithic sidecar (~8000 LOC of API/CLI/config/registry)
-- AniZone scraper (dead/obsolete provider)
-- Manga backend (MangaKatana scraper, Jikan API)
-- Python CLI (FZF, Rofi, inquirer)
-- React Context state (4 contexts → 3 Zustand stores)
-- HTTP fetches to localhost for internal operations
+## Sources of truth (state model)
 
-### New in v5
-- Vite build system (instant HMR, flat SPA output)
-- react-router v7 (client-side routing)
-- Zustand state management
-- Rust backend (~2000 LOC)
-- Python AniNeko microservice (~300 LOC)
-- axum HLS proxy in Rust
+| State | Owner |
+|---|---|
+| List status, score, list progress | **AniList** (remote) |
+| Per-episode resume position, watch history, downloads, provider slugs | **SQLite registry** (local) |
+| Fetched AniList/episode data for the UI | **TanStack Query** cache (frontend) |
+| View, selection, overlays | **Zustand** (frontend) |
+
+After a watch or an inline edit, the frontend reconciles its cache with AniList
+via `invalidateProgressQueries()` (see `web/src/lib/events.ts`).
+
+## mpv integration
+
+- Rust launches mpv with `--input-ipc-server` and sends commands (load file,
+  resume position, skip times, script-opts) over that socket.
+- A bundled Lua script (`resources/mpv_config/scripts/anicat_ui/main.lua`)
+  handles intro/outro skipping (AniSkip + chapter detection), auto-next, and
+  reports playback position back to the Rust proxy's `/player/*` endpoints.
+- AniSkip times are resolved in the background from the AniList → MAL id (with a
+  Jikan title-search fallback) and injected into mpv once it is running.
+
+## Build & release
+
+- **Scraper binary** — `scripts/build_scraper.py` PyInstaller-freezes
+  `scraper/main.py` into `web/src-tauri/resources/scraper-bin/anicat-scraper`,
+  which is what `ScraperManager` spawns in a packaged build.
+- **App** — `npm run tauri build` bundles the webview, the Rust core, the
+  scraper binary, and the bundled mpv + shaders/config.
+- **Versioning** — `scripts/bump-version.sh` is the single source of truth; it
+  writes `version.txt`, `web/package.json`, `web/src-tauri/tauri.conf.json`, and
+  `web/src-tauri/Cargo.toml`. The app reports `CARGO_PKG_VERSION` at runtime.
+- **Install** — end users run the `scripts/install_macos.sh` one-liner.

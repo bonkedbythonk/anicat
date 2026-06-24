@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,14 +34,14 @@ type DetailConfig = {
 export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisode }: MediaDetailProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
-  const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "more">("episodes");
+  const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "seasons" | "more">("episodes");
   // Two-step delete confirm (replaces window.confirm which is broken in Tauri WebView)
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<any>(null);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
 
-  const { data: config = null } = useQuery<DetailConfig | null>({
+  const { data: config = null } = useQuery({
     queryKey: ["media-config", item.id],
     queryFn: async () => {
       const userConfig = await mediaApi.getConfig();
@@ -66,7 +65,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   // Initial detail load via React Query
   const {
-    data: fullItem = item,
+    data: fullItemData,
     isLoading: loading,
   } = useQuery({
     queryKey: ["media-detail", item.id],
@@ -75,6 +74,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       return details;
     },
   });
+  // Fall back to the always-present `item` prop so downstream code never
+  // has to null-check the detail (the query data can be null).
+  const fullItem = fullItemData ?? item;
 
   const banner = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large;
 
@@ -91,7 +93,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     isLoading: loadingEps,
   } = useQuery({
     queryKey: ["media-episodes", item.id, isManga ? "mangakatana" : selectedProvider],
-    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || null),
+    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || undefined),
     enabled: !!selectedProvider || isManga,
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
@@ -266,26 +268,27 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   };
 
   const handleUpdateProgress = async (newProgress: number) => {
-    try {
-      const updates: Record<string, unknown> = { progress: newProgress };
-      if (newProgress > 0) {
-        const currentStatus = fullItem?.media_list_entry?.status ?? fullItem?.user_status?.status;
-        if (!currentStatus || currentStatus === "PLANNING") {
-          updates.status = isManga ? "CURRENT" : "CURRENT";
-        }
+    const updates: Record<string, unknown> = { progress: newProgress };
+    if (newProgress > 0) {
+      const currentStatus = fullItem?.media_list_entry?.status ?? fullItem?.user_status?.status;
+      if (!currentStatus || currentStatus === "PLANNING") {
+        updates.status = "CURRENT";
       }
-      await mediaApi.saveMediaListEntry(item.id, updates);
-      updateProgressInQueries(queryClient, item.id, newProgress);
-      queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["lists"] });
-      queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
-      dispatchRefresh();
-      progressEditor.cancelEditing();
-    } catch (err) {
-      console.error("Failed to update progress:", err);
     }
+    // Optimistic update — reflect the change immediately in all cached views,
+    // then fire the mutation in the background and trigger a background refetch.
+    updateProgressInQueries(queryClient, item.id, newProgress);
+    progressEditor.cancelEditing();
+    mediaApi.saveMediaListEntry(item.id, updates)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["lists"] });
+        queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
+        dispatchRefresh();
+      })
+      .catch((err) => console.error("Failed to update progress:", err));
   };
 
   const handleRemoveFromList = async (bypassConfirm: boolean | React.MouseEvent = false) => {
@@ -645,7 +648,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 <div>
                   <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
                   <div className="text-base text-foreground font-bold">
-                    Episode {fullItem.next_airing.episode} <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at)}</span>
+                    Episode {fullItem.next_airing.episode} <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
                   </div>
                 </div>
               </div>
@@ -756,7 +759,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                           if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv);
                           onClose();
                         }}
-                        playerType={config?.stream?.player_type}
+                        playerType={config?.stream?.player_type as "embedded" | "external" | undefined}
                         selectedProvider={selectedProvider}
                         mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
                         coverImage={fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || ""}
@@ -794,7 +797,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             <Loader2 className="animate-spin text-accent" size={24} />
                           </div>
                         ) : characters.length > 0 ? (
-                          characters.map(char => (
+                          characters.map((char: any) => (
                             <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 bg-foreground/[0.02] border border-border rounded-2xl hover:bg-foreground/[0.04] transition-colors group character-card text-left">
                               {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
                               <div className="min-w-0">

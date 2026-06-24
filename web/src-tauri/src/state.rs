@@ -117,7 +117,8 @@ pub struct CurrentPlayback {
     pub episode_title: String,
     pub cover_image: String,
     pub total_episodes: i64,
-    pub start_time: std::time::Instant,
+    pub last_position: i64,
+    pub last_duration: i64,
 }
 
 #[derive(Clone)]
@@ -191,81 +192,7 @@ impl AppState {
             anilist_client.set_username(Some(username.clone()));
         }
 
-        let scraper_python = std::env::var("ANICAT_SCRAPER_PYTHON")
-            .unwrap_or_else(|_| {
-                if let Ok(exe) = std::env::current_exe() {
-                    if let Some(resource_dir) = exe.parent()
-                        .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
-                    {
-                        let base_dir = if resource_dir.join("resources").exists() {
-                            resource_dir.join("resources")
-                        } else {
-                            resource_dir.clone()
-                        };
-                        // Prefer bundled standalone binary
-                        let binary = base_dir.join("scraper-bin").join("anicat-scraper");
-                        if binary.exists() {
-                            log::info!("[scraper] using bundled binary: {}", binary.display());
-                            return String::new();
-                        }
-                    }
-                }
-                // Dev fallback
-                let candidates = [
-                    "uv",
-                    "/opt/homebrew/bin/uv",
-                    &format!("{}/.local/bin/uv", std::env::var("HOME").unwrap_or_default()),
-                    "python3", "python",
-                ];
-                for cmd in &candidates {
-                    if !cmd.is_empty() && std::process::Command::new(cmd).arg("--version")
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status().is_ok() {
-                        return cmd.to_string();
-                    }
-                }
-                "python3".to_string()
-            });
-        let scraper_script = std::env::var("ANICAT_SCRAPER_SCRIPT")
-            .unwrap_or_else(|_| {
-                if let Ok(exe) = std::env::current_exe() {
-                    log::info!("[scraper] current_exe: {:?}", exe);
-                    if let Some(resource_dir) = exe.parent()
-                        .and_then(|d| { let r = d.join("../Resources"); if r.exists() { Some(r) } else { None } })
-                    {
-                        log::info!("[scraper] resource_dir exists: {:?}", resource_dir);
-                        let base_dir = if resource_dir.join("resources").exists() {
-                            resource_dir.join("resources")
-                        } else {
-                            resource_dir.clone()
-                        };
-                        // Prefer bundled standalone binary
-                        let bin = base_dir.join("scraper-bin").join("anicat-scraper");
-                        log::info!("[scraper] checking bundled binary: {:?} exists={}", bin, bin.exists());
-                        if bin.exists() {
-                            return bin.to_string_lossy().to_string();
-                        }
-                    } else {
-                        let r = exe.parent().unwrap_or(&exe).to_path_buf();
-                        log::info!("[scraper] no Resources dir, trying parent: {:?}", r);
-                        let base_dir = if r.join("resources").exists() {
-                            r.join("resources")
-                        } else {
-                            r.clone()
-                        };
-                        let bin = base_dir.join("scraper-bin").join("anicat-scraper");
-                        log::info!("[scraper] checking binary at: {:?} exists={}", bin, bin.exists());
-                        if bin.exists() {
-                            return bin.to_string_lossy().to_string();
-                        }
-                    }
-                }
-                let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-                let fallback = manifest_dir.join("..").join("..").join("scraper").join("main.py");
-                log::warn!("[scraper] falling back to dev path: {:?}", fallback);
-                fallback.to_string_lossy().to_string()
-            });
+        let (scraper_python, scraper_script) = resolve_scraper_paths();
         let scraper_manager = crate::scraper::ScraperManager::new(
             http_client.clone(),
             scraper_python,
@@ -327,4 +254,77 @@ impl std::ops::Deref for AppState {
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
+}
+
+fn find_bundled_binary(exe_dir: &std::path::Path) -> Option<String> {
+    let base_dir = if exe_dir.join("resources").exists() {
+        exe_dir.join("resources")
+    } else {
+        exe_dir.to_path_buf()
+    };
+    let bin = base_dir.join("scraper-bin").join("anicat-scraper");
+    if bin.exists() {
+        log::info!("[scraper] using bundled binary: {}", bin.display());
+        Some(bin.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
+fn resolve_scraper_paths() -> (String, String) {
+    // Check env overrides first
+    let env_python = std::env::var("ANICAT_SCRAPER_PYTHON").ok();
+    let env_script = std::env::var("ANICAT_SCRAPER_SCRIPT").ok();
+
+    if let (Some(py), Some(script)) = (env_python.as_ref(), env_script.as_ref()) {
+        return (py.clone(), script.clone());
+    }
+
+    // Try to find bundled binary relative to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_dir = exe.parent().unwrap_or(&exe).to_path_buf();
+
+        // Check ../Resources (release bundle layout)
+        if let Some(resource_dir) = exe_dir.parent()
+            .and_then(|d| { let r = d.join("Resources"); if r.exists() { Some(r) } else { None } })
+        {
+            if let Some(bin_path) = find_bundled_binary(&resource_dir) {
+                return (String::new(), bin_path);
+            }
+        }
+
+        // Check alongside the exe (dev layout: target/debug/resources/...)
+        #[cfg(not(debug_assertions))]
+        if let Some(bin_path) = find_bundled_binary(&exe_dir) {
+            return (String::new(), bin_path);
+        }
+    }
+
+    // Dev fallback: use Python via uv
+    let python_path = env_python.unwrap_or_else(|| {
+        let candidates = [
+            "uv",
+            "/opt/homebrew/bin/uv",
+            &format!("{}/.local/bin/uv", std::env::var("HOME").unwrap_or_default()),
+            "python3", "python",
+        ];
+        for cmd in &candidates {
+            if !cmd.is_empty() && std::process::Command::new(cmd).arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status().is_ok() {
+                return cmd.to_string();
+            }
+        }
+        "python3".to_string()
+    });
+
+    let script_path = env_script.unwrap_or_else(|| {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let fallback = manifest_dir.join("..").join("..").join("scraper").join("main.py");
+        log::warn!("[scraper] falling back to dev path: {:?}", fallback);
+        fallback.to_string_lossy().to_string()
+    });
+
+    (python_path, script_path)
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState } from "react";
 import { Loader2, Library } from "lucide-react";
@@ -21,7 +20,7 @@ export function LibraryView({ onSelect }: LibraryViewProps) {
       fetchFn: async (page) => {
         const data = await mediaApi.getUserList("completed", type, page);
         return {
-          items: data.media || [],
+          items: (data.media || []) as MediaItem[],
           hasNextPage: data.page_info?.has_next_page || false,
         };
       },

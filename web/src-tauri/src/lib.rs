@@ -6,6 +6,7 @@ mod proxy;
 mod registry;
 mod scraper;
 mod state;
+mod util;
 
 use state::AppState;
 use tauri::Manager;
@@ -127,6 +128,7 @@ pub fn run() {
             commands::playback::start_playback,
             commands::playback::stop_playback,
             commands::playback::get_watched_episodes,
+            commands::playback::get_all_last_watched,
             commands::health::check_health,
             commands::health::get_app_version,
             commands::health::log_frontend,
@@ -135,6 +137,7 @@ pub fn run() {
             commands::health::open_in_browser,
             commands::health::check_update,
             commands::health::trigger_update,
+            commands::health::get_proxy_port,
             commands::auth::start_anilist_auth,
         ])
         .run(tauri::generate_context!())

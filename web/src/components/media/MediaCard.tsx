@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useCallback, useRef, memo, useState } from "react";
 import { Play, BookOpen, Star } from "lucide-react";

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect } from "react";
 import { Loader2, Globe, Monitor, Activity, Clock, Calendar } from "lucide-react";
@@ -38,7 +37,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
         let mediaIds: number[] | undefined = undefined;
         if (watchingOnly) {
           const watching = await mediaApi.getUserList("watching", "ANIME");
-          mediaIds = (watching.media || []).map(m => m.id);
+          mediaIds = ((watching.media || []) as MediaItem[]).map(m => m.id);
           if (mediaIds.length === 0) {
             setItems([]);
             setLoading(false);
@@ -47,7 +46,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
         }
         
         const data = await mediaApi.getSchedule(1, 7, 1, 50, mediaIds);
-        setItems(data.media || []);
+        setItems((data.media || []) as MediaItem[]);
       } catch (err) {
         console.error("Failed to load schedule:", err);
       } finally {

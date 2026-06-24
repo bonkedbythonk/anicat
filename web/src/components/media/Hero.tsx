@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { Play, Maximize, BookOpen, Loader2, Clock, Tv } from "lucide-react";
@@ -76,9 +75,16 @@ const Hero = memo(function Hero({
   const [clicked, setClicked] = useState(false);
   const clickedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const desktopQueueRef = useRef<HTMLDivElement>(null);
   const mobileQueueRef = useRef<HTMLDivElement>(null);
+
+  // Periodically recompute queue to reflect aired episodes
+  useEffect(() => {
+    const interval = setInterval(() => setRefreshTick(t => t + 1), 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // 1. Build the priority queue
   const queue = useMemo(() => {
@@ -150,7 +156,7 @@ const Hero = memo(function Hero({
 
         if (timeDiff <= 0) {
           const progress = item.user_status?.progress || 0;
-          const nextEpNum = nextAiring.episode;
+          const nextEpNum = nextAiring.episode ?? 0;
           const isUnwatched = nextEpNum > progress;
           const label = isSameDay ? `Episode ${nextEpNum} aired today` : `Episode ${nextEpNum} aired`;
           items.push({
@@ -209,7 +215,7 @@ const Hero = memo(function Hero({
     }
 
     return items;
-  }, [singleItem, continueList, recentReleases, airingToday, fallbackList]);
+  }, [singleItem, continueList, recentReleases, airingToday, fallbackList, refreshTick]);
 
   // Adjust focused index if out of bounds
   const activeIndex = Math.min(focusedIndex, Math.max(0, queue.length - 1));
@@ -225,9 +231,9 @@ const Hero = memo(function Hero({
 
   // 2. Query for configuration (e.g. video auto-play setting)
   const { data: config = null } = useQuery({
-    queryKey: ["media-config", item?.id],
-    queryFn: () => (item ? mediaApi.getConfig() : Promise.resolve(null)),
-    enabled: !!item,
+    queryKey: ["media-config"],
+    queryFn: () => mediaApi.getConfig(),
+    staleTime: 30_000,
   });
 
   // 3. Intersection observer for video autoplay
@@ -277,7 +283,7 @@ const Hero = memo(function Hero({
   const isManga = item.type === "MANGA";
   const hasBanner = !!item.banner_image;
 
-  const latestAvailable = item.next_airing ? (item.next_airing.episode - 1) : total;
+  const latestAvailable = item.next_airing?.episode ? (item.next_airing.episode - 1) : total;
   const isFinished = total > 0 && currentProgress >= total;
   const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
 

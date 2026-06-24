@@ -10,13 +10,7 @@ export function getQueryClient() { return queryClient; }
 
 export function dispatchRefresh() {
   if (!queryClient) return;
-  queryClient.invalidateQueries({ queryKey: ["home-watching"] });
-  queryClient.invalidateQueries({ queryKey: ["home-airing-today"] });
-  queryClient.invalidateQueries({ queryKey: ["home-recent-releases"] });
-  queryClient.invalidateQueries({ queryKey: ["home-smart-playlist"] });
-  queryClient.invalidateQueries({ queryKey: ["home-trending"] });
-  queryClient.invalidateQueries({ queryKey: ["home-seasonal"] });
-  queryClient.invalidateQueries({ queryKey: ["home-newly-releasing"] });
+  invalidateProgressQueries(queryClient);
 }
 
 export function invalidateEpisodes(mediaId: number) {
@@ -24,9 +18,38 @@ export function invalidateEpisodes(mediaId: number) {
   queryClient.invalidateQueries({ queryKey: ["media-episodes", mediaId] });
 }
 
-const PROGRESS_QUERY_KEY_PREFIXES = [
-  "user-list", "trending", "seasonal", "upcoming",
-  "smart-playlist", "search", "home-",
+// Invalidate every cache that can display a media item's progress/status, so the
+// UI reconciles with AniList after a watch or an inline edit. Pass a mediaId to
+// also refresh that title's detail drawer and episode list.
+//
+// Uses explicit queryKey arrays (not a predicate) because TanStack Query v5 with
+// persist-client does not reliably trigger refetches for predicate-only filters.
+export function invalidateProgressQueries(qc: QueryClient, mediaId?: number) {
+  // Home view rows — all "active" so they re-render immediately
+  qc.invalidateQueries({ queryKey: ["home-watching"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-last-watched"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-repeating"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-planning"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-airing-today"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-recent-releases"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-smart-playlist"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-trending"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-seasonal"], refetchType: "all" });
+  qc.invalidateQueries({ queryKey: ["home-newly-releasing"], refetchType: "all" });
+  // Lists / library / profile / manga
+  qc.invalidateQueries({ queryKey: ["lists"], refetchType: "active" });
+  qc.invalidateQueries({ queryKey: ["library"], refetchType: "active" });
+  qc.invalidateQueries({ queryKey: ["profile"], refetchType: "active" });
+  qc.invalidateQueries({ queryKey: ["manga-data"], refetchType: "active" });
+  // Media-specific (only if mediaId provided)
+  if (mediaId !== undefined) {
+    qc.invalidateQueries({ queryKey: ["media-detail", mediaId], refetchType: "all" });
+    qc.invalidateQueries({ queryKey: ["media-episodes", mediaId], refetchType: "all" });
+  }
+}
+
+const OPTIMISTIC_UPDATE_PREFIXES = [
+  "home-", "lists", "library", "profile", "manga-data", "search",
 ];
 
 export function updateProgressInQueries(qc: QueryClient, mediaId: number, progress: number, status?: string) {
@@ -34,7 +57,7 @@ export function updateProgressInQueries(qc: QueryClient, mediaId: number, progre
   for (const q of queries) {
     const queryKey = q.queryKey;
     const firstKey = String(queryKey[0] ?? "");
-    if (!PROGRESS_QUERY_KEY_PREFIXES.some((p) => firstKey.startsWith(p))) continue;
+    if (!OPTIMISTIC_UPDATE_PREFIXES.some((p) => firstKey.startsWith(p))) continue;
 
     const data = q.state.data;
     if (!data) continue;

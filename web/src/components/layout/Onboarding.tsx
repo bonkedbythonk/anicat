@@ -424,9 +424,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <div className="grid grid-cols-4 gap-2">
                   {([
                     { id: "off", name: "Off", bars: 0, detail: "No shaders", rec: false },
-                    { id: "eco", name: "Eco", bars: 2, detail: "Min. heat ★", rec: true },
-                    { id: "balanced", name: "Balanced", bars: 3, detail: "M3 / M4", rec: false },
-                    { id: "sharp", name: "Sharp", bars: 4, detail: "Max quality", rec: false },
+                    { id: "eco", name: "Eco", bars: 2, detail: "M1 · M2", rec: true },
+                    { id: "balanced", name: "Balanced", bars: 3, detail: "M3 · M4 · M5", rec: false },
+                    { id: "sharp", name: "Sharp", bars: 4, detail: "M3 Max · M4 Pro+", rec: false },
                   ] as const).map((g) => (
                     <button
                       key={g.id}

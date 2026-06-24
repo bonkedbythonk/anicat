@@ -1078,8 +1078,8 @@ const UPSCALING_PROFILES = [
     name: "Off",
     tier: null,
     bars: 0,
-    tagline: "Raw stream",
-    detail: "No GPU processing",
+    tagline: "No upscaling",
+    detail: "Raw stream output",
     recommended: false,
   },
   {
@@ -1088,7 +1088,7 @@ const UPSCALING_PROFILES = [
     tier: "S",
     bars: 2,
     tagline: "Minimal heat",
-    detail: "Great for M1 & bed use",
+    detail: "M1 · M2",
     recommended: true,
   },
   {
@@ -1097,7 +1097,7 @@ const UPSCALING_PROFILES = [
     tier: "M",
     bars: 3,
     tagline: "Visibly sharper",
-    detail: "Best for M3 / M4",
+    detail: "M3 · M4 · M5",
     recommended: false,
   },
   {
@@ -1106,7 +1106,7 @@ const UPSCALING_PROFILES = [
     tier: "L",
     bars: 4,
     tagline: "4K-level detail",
-    detail: "M3 Max / M4 Pro only",
+    detail: "M3 Max · M4 Pro+",
     recommended: false,
   },
 ] as const;

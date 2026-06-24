@@ -58,13 +58,14 @@ jobs:
           workspaces: web/src-tauri -> target
 
       # Tauri's build script validates that bundled resource paths exist.
-      # These binaries are macOS-only and not committed; stub them for CI.
+      # resources/mpv, resources/mpv.exe, and resources/lib/ are gitignored
+      # (macOS/Windows binaries built at package time); stub them for CI.
       - name: Stub resource paths
         run: |
-          mkdir -p web/src-tauri/resources/mpv_config/scripts/anicat_ui
-          mkdir -p web/src-tauri/resources/scraper-bin
           touch web/src-tauri/resources/mpv
           touch web/src-tauri/resources/mpv.exe
+          mkdir -p web/src-tauri/resources/lib
+          touch web/src-tauri/resources/lib/.gitkeep
 
       - name: cargo check
         working-directory: web/src-tauri

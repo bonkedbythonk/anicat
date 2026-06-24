@@ -29,7 +29,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [uiStyle, setUiStyle] = useState<"neon-abyss" | "sakura-zen" | "retro-manga">("neon-abyss");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [downloadsPath, setDownloadsPath] = useState("");
-  const [gpuUpscaling, setGpuUpscaling] = useState<"balanced" | "off">("balanced");
+  const [gpuUpscaling, setGpuUpscaling] = useState<"off" | "eco" | "balanced" | "sharp">("eco");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
   const [authPending, setAuthPending] = useState(false);
 
@@ -62,7 +62,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     } catch {}
   };
 
-  const handleGpuUpscalingChange = async (val: "balanced" | "off") => {
+  const handleGpuUpscalingChange = async (val: "off" | "eco" | "balanced" | "sharp") => {
     setGpuUpscaling(val);
     try {
       await mediaApi.updateConfig({ stream: { shader_profile: val } });
@@ -419,20 +419,38 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               <div className="space-y-2.5">
                 <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
                   <Monitor size={12} className="text-accent" />
-                  <span>Anime4K GPU Upscaling Shaders</span>
+                  <span>GPU Upscaling Quality</span>
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["balanced", "off"] as const).map((g) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {([
+                    { id: "off", name: "Off", bars: 0, detail: "No shaders", rec: false },
+                    { id: "eco", name: "Eco", bars: 2, detail: "Min. heat ★", rec: true },
+                    { id: "balanced", name: "Balanced", bars: 3, detail: "M3 / M4", rec: false },
+                    { id: "sharp", name: "Sharp", bars: 4, detail: "Max quality", rec: false },
+                  ] as const).map((g) => (
                     <button
-                      key={g}
-                      onClick={() => handleGpuUpscalingChange(g)}
-                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                        gpuUpscaling === g
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                      key={g.id}
+                      onClick={() => handleGpuUpscalingChange(g.id)}
+                      className={`relative flex flex-col gap-1.5 p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                        gpuUpscaling === g.id
+                          ? "border-accent bg-accent/10"
+                          : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.14]"
                       }`}
                     >
-                      {g === "balanced" ? "On (CNN Shaders)" : "Off"}
+                      {g.rec && (
+                        <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-px bg-accent text-white text-[8px] font-black rounded-full whitespace-nowrap">
+                          ★ REC
+                        </span>
+                      )}
+                      <span className={`text-xs font-black ${gpuUpscaling === g.id ? "text-white" : "text-gray-300"}`}>
+                        {g.name}
+                      </span>
+                      <div className="flex gap-[3px]">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                          <div key={i} className={`h-[4px] flex-1 rounded-full ${i < g.bars ? "bg-accent" : "bg-white/[0.1]"}`} />
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-gray-500">{g.detail}</span>
                     </button>
                   ))}
                 </div>

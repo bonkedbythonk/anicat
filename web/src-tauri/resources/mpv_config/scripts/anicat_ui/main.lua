@@ -8,6 +8,7 @@ local opts = {
   autoskip = 'yes',
   current_episode = 0,
   total_episodes = 0,
+  shader_profile = 'eco',
 }
 
 options.read_options(opts, 'anicat_ui')
@@ -228,24 +229,36 @@ local function get_current_shader_mode()
   end
 end
 
-local function enable_standard_shaders()
-  local shader_paths = {
+local function get_shader_paths_for_profile(profile)
+  local restore, upscale
+  if profile == 'sharp' then
+    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_L.glsl"
+    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_L.glsl"
+  elseif profile == 'balanced' then
+    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl"
+    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"
+  else
+    -- eco and any unknown value: S-tier, minimal heat
+    restore = "~~/shaders/Anime4K_Restore_CNN_Soft_S.glsl"
+    upscale  = "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl"
+  end
+  return {
     "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-    -- Soft_S: half the GPU cost of Soft_M; Soft variant handles streaming
-    -- compression artifacts better than regular Restore (less over-sharpening
-    -- of HEVC macroblocks). S-tier doubles the frametime budget vs M-tier.
-    "~~/shaders/Anime4K_Restore_CNN_Soft_S.glsl",
-    "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl",
+    restore,
+    upscale,
     "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
     "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl",
-    -- Thin_HQ is non-CNN (plain convolution filter) — negligible cost,
-    -- recovers line sharpness that S-tier loses vs M-tier.
     "~~/shaders/Anime4K_Thin_HQ.glsl",
   }
+end
+
+local function enable_standard_shaders()
+  local profile = opts.shader_profile
+  local shader_paths = get_shader_paths_for_profile(profile)
   local path_str = table.concat(shader_paths, ":")
   mp.commandv("change-list", "glsl-shaders", "set", path_str)
   refresh_shaders_state()
-  mp.osd_message("Upscaling: Enabled", 2.0)
+  mp.osd_message("Upscaling: Enabled (" .. profile .. ")", 2.0)
 end
 
 local function enable_shaders()

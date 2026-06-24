@@ -569,10 +569,18 @@ pub async fn start_playback(
         let encoded = skip_times_arg.replace(",", "%2C");
         script_opts.push(format!("anicat_ui-skip_times={}", encoded));
     }
+    let shader_profile = state
+        .config
+        .read()
+        .await
+        .stream
+        .shader_profile
+        .clone();
     script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
     script_opts.push(format!("anicat_ui-total_episodes={}", total_eps));
+    script_opts.push(format!("anicat_ui-shader_profile={}", shader_profile));
     let script_opts_str = script_opts.join(",");
     log::info!("[aniskip] mpv script-opts: {}", script_opts_str);
     cmd.arg(format!("--script-opts={}", script_opts_str));
@@ -581,24 +589,38 @@ pub async fn start_playback(
         cmd.arg("--keep-open=yes");
     }
 
-    let shader_profile = state
-        .config
-        .read()
-        .await
-        .stream
-        .shader_profile
-        .clone();
     if shader_profile != "off" {
         let shader_dir = std::path::Path::new(&config_dir).join("shaders");
-        let shaders = [
-            shader_dir.join("Anime4K_Clamp_Highlights.glsl"),
-            shader_dir.join("Anime4K_Restore_CNN_M.glsl"),
-            shader_dir.join("Anime4K_Upscale_CNN_x2_M.glsl"),
-            shader_dir.join("Anime4K_AutoDownscalePre_x2.glsl"),
-            shader_dir.join("Anime4K_AutoDownscalePre_x4.glsl"),
-        ];
-        let shader_arg: Vec<String> = shaders
+        let shader_names: &[&str] = match shader_profile.as_str() {
+            "sharp" => &[
+                "Anime4K_Clamp_Highlights.glsl",
+                "Anime4K_Restore_CNN_Soft_L.glsl",
+                "Anime4K_Upscale_CNN_x2_L.glsl",
+                "Anime4K_AutoDownscalePre_x2.glsl",
+                "Anime4K_AutoDownscalePre_x4.glsl",
+                "Anime4K_Thin_HQ.glsl",
+            ],
+            "balanced" => &[
+                "Anime4K_Clamp_Highlights.glsl",
+                "Anime4K_Restore_CNN_Soft_M.glsl",
+                "Anime4K_Upscale_CNN_x2_M.glsl",
+                "Anime4K_AutoDownscalePre_x2.glsl",
+                "Anime4K_AutoDownscalePre_x4.glsl",
+                "Anime4K_Thin_HQ.glsl",
+            ],
+            _ => &[
+                // "eco" and any legacy value: S-tier, minimal heat
+                "Anime4K_Clamp_Highlights.glsl",
+                "Anime4K_Restore_CNN_Soft_S.glsl",
+                "Anime4K_Upscale_CNN_x2_S.glsl",
+                "Anime4K_AutoDownscalePre_x2.glsl",
+                "Anime4K_AutoDownscalePre_x4.glsl",
+                "Anime4K_Thin_HQ.glsl",
+            ],
+        };
+        let shader_arg: Vec<String> = shader_names
             .iter()
+            .map(|n| shader_dir.join(n))
             .filter_map(|p| p.to_str().map(|s| s.to_string()))
             .collect();
         if !shader_arg.is_empty() {

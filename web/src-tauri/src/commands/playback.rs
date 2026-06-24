@@ -750,6 +750,10 @@ pub async fn start_playback(
         let shader_arg: Vec<String> = shader_names
             .iter()
             .map(|n| shader_dir.join(n))
+            // Only pass shaders that are actually present — missing files would
+            // make mpv refuse to start (e.g. a build without the bundled
+            // Anime4K shaders). Absent shaders just mean no upscaling.
+            .filter(|p| p.exists())
             .filter_map(|p| p.to_str().map(|s| s.to_string()))
             .collect();
         if !shader_arg.is_empty() {

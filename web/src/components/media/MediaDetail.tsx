@@ -268,26 +268,27 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   };
 
   const handleUpdateProgress = async (newProgress: number) => {
-    try {
-      const updates: Record<string, unknown> = { progress: newProgress };
-      if (newProgress > 0) {
-        const currentStatus = fullItem?.media_list_entry?.status ?? fullItem?.user_status?.status;
-        if (!currentStatus || currentStatus === "PLANNING") {
-          updates.status = isManga ? "CURRENT" : "CURRENT";
-        }
+    const updates: Record<string, unknown> = { progress: newProgress };
+    if (newProgress > 0) {
+      const currentStatus = fullItem?.media_list_entry?.status ?? fullItem?.user_status?.status;
+      if (!currentStatus || currentStatus === "PLANNING") {
+        updates.status = "CURRENT";
       }
-      await mediaApi.saveMediaListEntry(item.id, updates);
-      updateProgressInQueries(queryClient, item.id, newProgress);
-      queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["lists"] });
-      queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
-      dispatchRefresh();
-      progressEditor.cancelEditing();
-    } catch (err) {
-      console.error("Failed to update progress:", err);
     }
+    // Optimistic update — reflect the change immediately in all cached views,
+    // then fire the mutation in the background and trigger a background refetch.
+    updateProgressInQueries(queryClient, item.id, newProgress);
+    progressEditor.cancelEditing();
+    mediaApi.saveMediaListEntry(item.id, updates)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["lists"] });
+        queryClient.invalidateQueries({ queryKey: ["home-watching"], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["home-repeating"], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
+        dispatchRefresh();
+      })
+      .catch((err) => console.error("Failed to update progress:", err));
   };
 
   const handleRemoveFromList = async (bypassConfirm: boolean | React.MouseEvent = false) => {

@@ -43,8 +43,10 @@ function isCaughtUp(item: MediaItem): boolean {
   if (nextAiringEp && nextAiringEp > 0) {
     return progress >= nextAiringEp - 1;
   }
-  // No total and no confirmed next episode — can't confirm there's more to watch
-  return true;
+  // No total and no next-airing schedule — AniList data is incomplete (e.g. right
+  // after an episode drops, before next week's slot is registered). Assume NOT
+  // caught up so the show stays in Continue Watching rather than vanishing.
+  return false;
 }
 
 function MediaRowSkeleton({ title }: { title: string }) {

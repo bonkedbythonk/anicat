@@ -90,6 +90,37 @@ impl AniListCache {
         }
     }
 
+    /// Best-effort lookup of the media's current progress from cached list
+    /// data. Used to guard AniList writes so progress only ever moves forward —
+    /// returns None when no cached entry is known (cold cache), in which case
+    /// callers should proceed with the write.
+    pub fn get_user_list_progress(&self, media_id: i64) -> Option<i64> {
+        let entries = self.entries.lock().unwrap();
+        for (key, (value, _)) in entries.iter() {
+            if key.starts_with("get_user_list") {
+                if let Some(p) = find_media_progress(value, media_id) {
+                    return Some(p);
+                }
+            }
+        }
+        None
+    }
+
+    /// Best-effort lookup of the media's current list status (e.g. "CURRENT")
+    /// from cached list data. Used to skip the redundant status write fired on
+    /// every episode start when the entry is already in that status.
+    pub fn get_user_list_status(&self, media_id: i64) -> Option<String> {
+        let entries = self.entries.lock().unwrap();
+        for (key, (value, _)) in entries.iter() {
+            if key.starts_with("get_user_list") {
+                if let Some(s) = find_media_status(value, media_id) {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+
     pub fn remove_from_user_list_by_entry_id(&self, entry_id: i64) {
         let mut entries = self.entries.lock().unwrap();
         let relevant_prefixes = [
@@ -212,6 +243,72 @@ fn update_media_in_value(
             }
         }
         _ => {}
+    }
+}
+
+/// Recursively find the `progress` of the list entry whose `media.id` matches.
+fn find_media_progress(value: &Value, media_id: i64) -> Option<i64> {
+    match value {
+        Value::Object(map) => {
+            let is_list_entry = map.get("media")
+                .and_then(|m| m.get("id"))
+                .and_then(|id| id.as_i64())
+                .map(|id| id == media_id)
+                .unwrap_or(false);
+            if is_list_entry {
+                if let Some(p) = map.get("progress").and_then(|p| p.as_i64()) {
+                    return Some(p);
+                }
+            }
+            for (_, val) in map.iter() {
+                if let Some(p) = find_media_progress(val, media_id) {
+                    return Some(p);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => {
+            for val in arr.iter() {
+                if let Some(p) = find_media_progress(val, media_id) {
+                    return Some(p);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Recursively find the list `status` of the entry whose `media.id` matches.
+fn find_media_status(value: &Value, media_id: i64) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            let is_list_entry = map.get("media")
+                .and_then(|m| m.get("id"))
+                .and_then(|id| id.as_i64())
+                .map(|id| id == media_id)
+                .unwrap_or(false);
+            if is_list_entry {
+                if let Some(s) = map.get("status").and_then(|s| s.as_str()) {
+                    return Some(s.to_string());
+                }
+            }
+            for (_, val) in map.iter() {
+                if let Some(s) = find_media_status(val, media_id) {
+                    return Some(s);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => {
+            for val in arr.iter() {
+                if let Some(s) = find_media_status(val, media_id) {
+                    return Some(s);
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

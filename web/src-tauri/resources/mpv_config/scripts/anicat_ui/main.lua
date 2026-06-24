@@ -72,6 +72,7 @@ local state = {
   next_triggered = false,
   first_play = false,
   last_pos = 0,
+  preload_sent = false,
 }
 
 local function parse_skip_times(raw)
@@ -197,11 +198,13 @@ local function check_active_skip()
     if active and not active.notified then
       active.notified = true
       msg.info("check_active_skip: entering skip zone type=" .. active.type .. " at pos=" .. pos .. " (end=" .. active.endt .. "), autoskip=" .. get_autoskip_opt())
-      mp.osd_message('Intro - Shift+S to skip', 3.0)
+      local skip_label = active.type == 'ed' and 'Outro' or 'Intro'
+      mp.osd_message(skip_label .. ' — Shift+S to skip', 3.0)
     end
     if active and get_autoskip_opt() == 'yes' then
+      local skip_label = active.type == 'ed' and 'Outro' or 'Intro'
       jump_to(active.endt)
-      mp.osd_message('Skipping intro', 1.5)
+      mp.osd_message('Skipping ' .. skip_label, 1.5)
     end
     return true
   end
@@ -341,10 +344,27 @@ local function notify_backend(action, sync, manual)
   end
 end
 
+-- "Up Next" countdown state, declared early so the navigation paths below can
+-- cancel a running countdown before they act.
+local UP_NEXT_SECONDS = 5
+local up_next_timer = nil
+
+local function stop_up_next()
+  if up_next_timer then
+    up_next_timer:kill()
+    up_next_timer = nil
+  end
+  if mp.remove_key_binding then
+    pcall(mp.remove_key_binding, 'anicat-upnext-now')
+    pcall(mp.remove_key_binding, 'anicat-upnext-cancel')
+  end
+end
+
 local function play_next(sync, manual)
   if manual == nil then
     manual = true
   end
+  stop_up_next()
   local current_ep = get_current_episode_opt()
   local total_eps = get_total_episodes_opt()
   if total_eps > 0 and current_ep >= total_eps then
@@ -358,6 +378,7 @@ local function play_next(sync, manual)
 end
 
 local function play_prev(sync)
+  stop_up_next()
   local current_ep = get_current_episode_opt()
   if current_ep <= 1 then
     mp.osd_message('Already at the first episode.', 3.0)
@@ -374,6 +395,55 @@ local function toggle_translation()
   notify_backend("toggle-translation")
 end
 
+-- "Up Next" countdown shown at the end of an episode before auto-advancing, so
+-- the jump isn't abrupt and can be skipped or cancelled. Paired with the
+-- backend stream preload, the actual load is instant once the countdown ends.
+-- (UP_NEXT_SECONDS / up_next_timer / stop_up_next are declared above play_next.)
+local function advance_now()
+  stop_up_next()
+  play_next(nil, false)
+  -- Clear a stuck "Loading next episode" if nothing loads within 10s.
+  mp.add_timeout(10, function()
+    if state.next_triggered and not state.file_loaded then
+      state.next_triggered = false
+      mp.osd_message('No more episodes available.', 3.0)
+    end
+  end)
+end
+
+local function start_up_next_countdown()
+  local current_ep = get_current_episode_opt()
+  local total_eps = get_total_episodes_opt()
+  if total_eps > 0 and current_ep >= total_eps then
+    state.next_triggered = false
+    mp.osd_message('No more episodes available.', 3.0)
+    return
+  end
+  local next_ep = current_ep + 1
+  state.next_triggered = true
+
+  if mp.add_forced_key_binding then
+    mp.add_forced_key_binding('ENTER', 'anicat-upnext-now', advance_now)
+    mp.add_forced_key_binding('ESC', 'anicat-upnext-cancel', function()
+      stop_up_next()
+      state.next_triggered = false
+      mp.osd_message('Auto-play cancelled', 2.0)
+    end)
+  end
+
+  local remaining = UP_NEXT_SECONDS
+  local function tick()
+    if remaining <= 0 then
+      advance_now()
+      return
+    end
+    mp.osd_message(string.format('Up Next: Episode %d in %ds     [Enter] play now     [Esc] cancel', next_ep, remaining), 1.5)
+    remaining = remaining - 1
+  end
+  tick()
+  up_next_timer = mp.add_periodic_timer(1, tick)
+end
+
 local function register_script_messages()
   if not mp.register_script_message then
     return
@@ -388,6 +458,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)
   mp.register_script_message('anicat-cancel-next', function()
+    stop_up_next()
     state.next_triggered = false
   end)
 
@@ -437,6 +508,8 @@ mp.register_event('file-loaded', function()
   state.file_loaded = true
   state.first_play = true
   state.next_triggered = false
+  state.preload_sent = false
+  stop_up_next()
   state.duration = mp.get_property_number('duration') or 0
   
   local skips = parse_skip_times(get_skip_times_opt())
@@ -478,6 +551,11 @@ mp.register_event('playback-restart', function()
       state.first_play = false
       state.active_skip = nil
       render(true)
+    else
+      -- Fires after a seek settles: report the new position so the backend
+      -- (and Discord countdown) re-anchor immediately instead of drifting
+      -- until the next periodic progress tick.
+      notify_backend("progress")
     end
   end
 end)
@@ -485,6 +563,21 @@ end)
 -- Periodically report playback position to Rust backend for crash recovery
 local progress_timer = mp.add_periodic_timer(30, function()
   notify_backend("progress")
+
+  -- Once we're most of the way through, ask the backend to resolve the next
+  -- episode's stream ahead of time so auto-next is instant. One-shot per file.
+  if not state.preload_sent and get_auto_next_opt() == 'yes' then
+    local pos = mp.get_property_number('time-pos') or 0
+    local dur = mp.get_property_number('duration') or 0
+    if dur > 0 and pos / dur >= 0.85 then
+      local cur = get_current_episode_opt()
+      local total = get_total_episodes_opt()
+      if total <= 0 or cur < total then
+        state.preload_sent = true
+        notify_backend("preload")
+      end
+    end
+  end
 end)
 
 mp.register_event('shutdown', function()
@@ -494,25 +587,9 @@ end)
 
 mp.observe_property('eof-reached', 'bool', function(name, val)
   if val and get_auto_next_opt() == 'yes' and not state.next_triggered then
-    local current_ep = get_current_episode_opt()
-    local total_eps = get_total_episodes_opt()
-    if total_eps > 0 and current_ep >= total_eps then
-      state.next_triggered = false
-      mp.osd_message('No more episodes available.', 3.0)
-      return
-    end
-
-    state.next_triggered = true
-    mp.osd_message('Loading next episode...', 3.0)
-    play_next(nil, false)
-
-    -- Clear stuck "Loading next episode" if no file loads within 10s
-    mp.add_timeout(10, function()
-      if state.next_triggered and not state.file_loaded then
-        state.next_triggered = false
-        mp.osd_message('No more episodes available.', 3.0)
-      end
-    end)
+    -- Show the Up Next countdown instead of jumping immediately; it handles the
+    -- last-episode case and the actual advance (with stuck-load recovery).
+    start_up_next_countdown()
   end
 end)
 

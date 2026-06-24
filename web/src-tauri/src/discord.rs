@@ -33,8 +33,6 @@ impl DiscordClient {
             return;
         }
         *guard = Some(client);
-        drop(guard);
-        self.set_browsing();
     }
 
     pub fn disconnect(&self) {
@@ -47,19 +45,7 @@ impl DiscordClient {
         }
     }
 
-    pub fn set_browsing(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(ref mut client) = *inner {
-                let act = activity::Activity::new()
-                    .activity_type(ActivityType::Watching)
-                    .state("Anicat")
-                    .details("Browsing");
-                let _ = client.set_activity(act);
-            }
-        }
-    }
-
-    pub fn set_presence(&self, title: &str, episode: i64, episode_title: &str, total_episodes: i64, pos: i64, paused: bool) {
+    pub fn set_presence(&self, title: &str, episode: i64, episode_title: &str, total_episodes: i64, pos: i64, duration: i64, paused: bool) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(ref mut client) = *inner {
                 let mut state_str = if episode_title.is_empty() {
@@ -85,12 +71,20 @@ impl DiscordClient {
                             .size([episode as i32, total_episodes as i32]),
                     );
 
-                if !paused {
-                    let start_time = std::time::SystemTime::now()
+                if paused {
+                    // Attach an explicit empty timestamps object. If we omit
+                    // the field entirely, Discord keeps the previous activity's
+                    // running timer; sending an empty object clears it, so a
+                    // paused presence shows no clock at all.
+                    act = act.timestamps(activity::Timestamps::new());
+                } else if duration > 0 && pos < duration {
+                    // Playing: show time remaining via an end timestamp.
+                    let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
-                        .as_secs() as i64 - pos;
-                    act = act.timestamps(activity::Timestamps::new().start(start_time));
+                        .as_secs() as i64;
+                    let end_time = now + (duration - pos);
+                    act = act.timestamps(activity::Timestamps::new().end(end_time));
                 }
 
                 let _ = client.set_activity(act);
@@ -99,6 +93,10 @@ impl DiscordClient {
     }
 
     pub fn clear_presence(&self) {
-        self.set_browsing();
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(ref mut client) = *inner {
+                let _ = client.clear_activity();
+            }
+        }
     }
 }

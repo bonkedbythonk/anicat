@@ -231,10 +231,15 @@ end
 local function enable_standard_shaders()
   local shader_paths = {
     "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-    "~~/shaders/Anime4K_Restore_CNN_M.glsl",
+    -- Soft variant handles streaming compression artifacts better than the
+    -- regular Restore; same GPU cost, less over-sharpening of HEVC blocks.
+    "~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl",
     "~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl",
     "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
-    "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl"
+    "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl",
+    -- Thin_HQ is a non-CNN filter — negligible GPU cost, sharpens line art
+    -- on the upscaled image.
+    "~~/shaders/Anime4K_Thin_HQ.glsl",
   }
   local path_str = table.concat(shader_paths, ":")
   mp.commandv("change-list", "glsl-shaders", "set", path_str)

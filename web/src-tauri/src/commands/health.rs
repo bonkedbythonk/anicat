@@ -159,15 +159,8 @@ pub struct UpdateCheckResponse {
 #[tauri::command]
 pub async fn check_update(
     state: State<'_, AppState>,
-    update_branch: Option<String>,
 ) -> Result<UpdateCheckResponse, String> {
-    let branch = update_branch.unwrap_or_else(|| "stable".to_string());
-
-    let url = if branch == "nightly" {
-        "https://api.github.com/repos/bonkedbythonk/anicat/releases/tags/nightly"
-    } else {
-        "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest"
-    };
+    let url = "https://api.github.com/repos/bonkedbythonk/anicat/releases/latest";
 
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -193,21 +186,7 @@ pub async fn check_update(
     let data: serde_json::Value = resp.json().await.map_err(|e| format!("Failed to parse release data: {}", e))?;
 
     let tag = data.get("tag_name").and_then(|v| v.as_str()).unwrap_or("");
-    let mut latest_version = tag.trim_start_matches('v').to_string();
-
-    // Nightly tag doesn't contain version — parse from body or asset name
-    if latest_version.is_empty() || latest_version == "nightly" {
-        let body = data.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(cap) = body.split("Version:").nth(1).and_then(|s| s.trim().split_whitespace().next()) {
-            latest_version = cap.to_string();
-        } else if let Some(asset) = data.get("assets").and_then(|a| a.as_array()).and_then(|a| a.first()) {
-            if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
-                if let Some(cap) = name.split('_').nth(1) {
-                    latest_version = cap.to_string();
-                }
-            }
-        }
-    }
+    let latest_version = tag.trim_start_matches('v').to_string();
 
     let mut release_url = None;
     if let Some(assets) = data.get("assets").and_then(|a| a.as_array()) {

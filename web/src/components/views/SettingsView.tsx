@@ -210,29 +210,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
     }
   };
 
-  const handleBranchChange = async (newBranch: string) => {
-    if (!config) return;
-    const updated = {
-      ...config,
-      general: {
-        ...config.general,
-        update_branch: newBranch
-      }
-    };
-    setConfig(updated);
-    setStagedHasUpdate(false);
-    setUpdateMessage({ text: "", type: null });
-    try {
-      await mediaApi.updateConfig({
-        general: {
-          update_branch: newBranch
-        }
-      });
-    } catch (err) {
-      console.error("Failed to save branch change:", err);
-    }
-  };
-
   // Auto-save with debounce — saves 800ms after the last change
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const autoSave = useCallback((partialConfig: Record<string, Record<string, unknown>>) => {
@@ -787,17 +764,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
                 </div>
 
                 <div className="space-y-4">
-                  <SettingField label="Update Channel" description="">
-                    <select
-                      value={String(config.general?.update_branch || "stable")}
-                      onChange={(e) => handleBranchChange(e.target.value)}
-                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white animate-fade-in"
-                    >
-                      <option value="stable" className="bg-[#121212] text-white">Stable (official releases)</option>
-                      <option value="nightly" className="bg-[#121212] text-white">Nightly (early access)</option>
-                    </select>
-                  </SettingField>
-
                   <button
                     onClick={handleUpdate}
                     disabled={checkingUpdate}

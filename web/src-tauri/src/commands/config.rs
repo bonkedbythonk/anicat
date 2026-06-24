@@ -51,9 +51,6 @@ pub async fn update_config(
                         if let Some(v) = gen.get("manga_provider").and_then(|v| v.as_str()) {
                             config.general.manga_provider = v.to_string();
                         }
-                        if let Some(v) = gen.get("update_branch").and_then(|v| v.as_str()) {
-                            config.general.update_branch = v.to_string();
-                        }
                         if let Some(v) = gen.get("downloads_path").and_then(|v| v.as_str()) {
                             config.general.downloads_path = v.to_string();
                         }

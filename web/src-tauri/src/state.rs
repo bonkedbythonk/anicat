@@ -36,8 +36,6 @@ pub struct GeneralConfig {
     pub manga_provider: String,
     #[serde(default = "default_fallback_provider")]
     pub fallback_provider: String,
-    #[serde(default = "default_update_branch")]
-    pub update_branch: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -95,9 +93,6 @@ fn default_manga_provider() -> String {
 }
 fn default_fallback_provider() -> String {
     "anineko".into()
-}
-fn default_update_branch() -> String {
-    "stable".into()
 }
 fn default_shader_profile() -> String {
     "balanced".into()

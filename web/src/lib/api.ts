@@ -55,7 +55,6 @@ export async function getConfig(): Promise<{
     anime_preview: boolean;
     preferred_title_language: string;
     downloads_path: string;
-    update_branch?: string;
     time_format?: string;
   };
   stream: {
@@ -652,15 +651,13 @@ export const mediaApi = {
   wipeRegistry: async () => {},
   checkUpdate: async () => {
     try {
-      const config = await getConfig();
-      const branch = config?.general?.update_branch || "stable";
       const result = await invoke<{
         current_version: string;
         update_available: boolean;
         latest_version: string;
         release_url: string | null;
         release_notes: string | null;
-      }>("check_update", { updateBranch: branch });
+      }>("check_update");
 
       if (result.release_url) {
         latestDownloadUrl = result.release_url;

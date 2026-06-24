@@ -12,6 +12,10 @@
 
 ---
 
+Anicat is a native macOS desktop app for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a Svelte/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
+
+---
+
 ## Quick Install
 
 Paste in Terminal:
@@ -42,14 +46,19 @@ curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts
 
 ## Building from Source
 
+**Prerequisites:**
+- Rust (stable toolchain)
+- Node.js
+- [uv](https://docs.astral.sh/uv/) — manages the Python scraper sidecar in `scraper/`
+- `mpv` — `brew install mpv`
+- System deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/)
+
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
 cd anicat/web
 npm install
 npm run tauri dev
 ```
-
-Requires Rust, Node.js, [uv](https://docs.astral.sh/uv/) (for the Python scraper sidecar in `scraper/`), system deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/), and `mpv` (`brew install mpv`).
 
 ## Dependencies
 

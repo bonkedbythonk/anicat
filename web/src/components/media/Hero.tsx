@@ -267,6 +267,40 @@ const Hero = memo(function Hero({
     return () => clearInterval(timer);
   }, [queue.length, isHovered, isIntersecting]);
 
+  // Clean up the click timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (clickedTimerRef.current) clearTimeout(clickedTimerRef.current);
+    };
+  }, []);
+
+  // Scroll the focused item in the desktop/mobile queue into view when
+  // activeIndex changes.
+  useEffect(() => {
+    if (desktopQueueRef.current) {
+      const activeEl = desktopQueueRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }
+    }
+    if (mobileQueueRef.current) {
+      const activeEl = mobileQueueRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
+      }
+    }
+  }, [activeIndex]);
+
+  // Every hook must run before this guard. Returning earlier than any hook
+  // above would change Hero's hook count between renders when the queue blinks
+  // empty (item becomes null), throwing React error #310.
   if (!item) {
     return (
       <div className="flex flex-col gap-4">
@@ -295,35 +329,6 @@ const Hero = memo(function Hero({
       clickedTimerRef.current = setTimeout(() => setClicked(false), 3000);
     }
   };
-
-  useEffect(() => {
-    return () => {
-      if (clickedTimerRef.current) clearTimeout(clickedTimerRef.current);
-    };
-  }, []);
-
-  // Scroll focused item in desktop/mobile queue into view when activeIndex changes
-  useEffect(() => {
-    if (desktopQueueRef.current) {
-      const activeEl = desktopQueueRef.current.querySelector('[data-active="true"]');
-      if (activeEl) {
-        activeEl.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-      }
-    }
-    if (mobileQueueRef.current) {
-      const activeEl = mobileQueueRef.current.querySelector('[data-active="true"]');
-      if (activeEl) {
-        activeEl.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "nearest",
-        });
-      }
-    }
-  }, [activeIndex]);
 
   // Determine button state and label
   const isAiringFuture = activeCcItem?.type === "airing_today" && !activeCcItem.playEpisode;

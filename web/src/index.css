@@ -243,6 +243,17 @@ html, body, #root {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, fill 0.3s ease, stroke 0.3s ease, box-shadow 0.3s ease !important;
 }
 
+/* Mica mode (Windows 11): transparent body so Mica shows through the window.
+   The root div uses bg-black/[0.85] as a dark overlay over the Mica layer.
+   The sidebar uses a more transparent glass so Mica bleeds through more. */
+[data-mica] body {
+  background: transparent !important;
+}
+[data-mica] .glass-fixed {
+  background-color: rgba(12, 12, 14, 0.50);
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
 /* Sidebar — ONE backdrop-blur element, acceptable */
 .glass-fixed {
   background-color: var(--glass-bg);

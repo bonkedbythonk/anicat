@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
 import { initProxyPort } from "@/lib/proxy";
-import { usesOverlayTitlebar } from "@/lib/platform";
+import { usesOverlayTitlebar, isWindows } from "@/lib/platform";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
@@ -113,6 +113,12 @@ export default function App() {
   useKeyboardShortcuts();
   useTheme();
 
+  useEffect(() => {
+    if (isWindows) {
+      document.documentElement.setAttribute("data-mica", "");
+    }
+  }, []);
+
   const checkConnection = useCallback(async () => {
     try {
       const healthData = await invoke<{
@@ -188,7 +194,7 @@ export default function App() {
   }, [setNotification]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground relative">
+    <div className={`flex h-screen w-screen overflow-hidden text-foreground relative ${isWindows ? "bg-black/[0.85]" : "bg-background"}`}>
       <AmbientBackground />
       <Sidebar />
       <AnimatePresence>

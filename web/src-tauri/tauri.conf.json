@@ -20,10 +20,15 @@
         "resizable": true,
         "maximized": true,
         "fullscreen": false,
-        "backgroundColor": "#050505",
+        "backgroundColor": "#00000000",
+        "transparent": true,
         "decorations": true,
         "titleBarStyle": "Overlay",
-        "additionalBrowserArgs": "--disable-features=InputModeDefault"
+        "additionalBrowserArgs": "--disable-features=InputModeDefault",
+        "windowEffects": {
+          "effects": ["mica"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
     "security": {

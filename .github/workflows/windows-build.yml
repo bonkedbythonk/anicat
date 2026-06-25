@@ -52,7 +52,9 @@ jobs:
         shell: pwsh
         run: |
           choco install mpv -y --no-progress
-          $mpv = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mpv" -Recurse -Filter mpv.exe | Select-Object -First 1
+          # The real binaries land under lib\mpvio.install\tools, not lib\mpv;
+          # search the whole choco lib tree for mpv.exe.
+          $mpv = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib" -Recurse -Filter mpv.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $mpv) { throw "mpv.exe not found after choco install" }
           Write-Host "Found mpv at $($mpv.FullName)"
           New-Item -ItemType Directory -Force -Path web/src-tauri/resources | Out-Null

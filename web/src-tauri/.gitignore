@@ -7,6 +7,6 @@
 /resources/mpv
 /resources/mpv.exe
 /resources/lib/
-/resources/mpv_config/scripts/*
-!/resources/mpv_config/scripts/anicat_ui/
-/resources/mpv_config/shaders/
+
+# mpv UI assets (Anime4K shaders + ModernZ skin) are small portable text/lua
+# and are committed so every build — including CI — has upscaling and the skin.

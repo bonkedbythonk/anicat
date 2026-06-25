@@ -1,6 +1,6 @@
 
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
-import { Loader2, Clock, User } from "lucide-react";
+import { Loader2, Clock, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
 import { Hero } from "@/components/media/Hero";
 import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -294,6 +294,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const [activeHeroItem, setActiveHeroItem] = useState<MediaItem | null>(null);
   const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
 
+  const [showLayoutEditor, setShowLayoutEditor] = useState(false);
+
 
   // Global loading only until critical data is loaded
   if (trendingQuery.isLoading && seasonalQuery.isLoading) {
@@ -420,6 +422,39 @@ export function HomeView({ onSelect }: HomeViewProps) {
           )
         )
       )}
+
+      {/* Layout editor */}
+      <div className="flex flex-col items-center gap-4 pt-4">
+        {showLayoutEditor && (
+          <div className="w-full max-w-md rounded-2xl bg-white/[0.04] border border-white/[0.08] p-5 space-y-1">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Visible rows</p>
+            {rowConfig.map((row) => (
+              <button
+                key={row.id}
+                onClick={() => toggleRow(row.id)}
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/[0.05] transition-colors group"
+              >
+                <span className={`text-sm font-medium transition-colors ${row.visible ? "text-foreground" : "text-muted-foreground"}`}>
+                  {row.title}
+                </span>
+                {row.visible ? (
+                  <Eye size={15} className="text-accent shrink-0" />
+                ) : (
+                  <EyeOff size={15} className="text-muted-foreground/50 shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowLayoutEditor((v) => !v)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.05] border border-white/[0.06] transition-all"
+        >
+          {showLayoutEditor ? <X size={13} /> : <LayoutDashboard size={13} />}
+          {showLayoutEditor ? "Done" : "Customize home"}
+        </button>
+      </div>
     </div>
   );
 }

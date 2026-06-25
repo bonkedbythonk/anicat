@@ -169,6 +169,21 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     ))
 }
 
+/// Path to a per-launch mpv log, written next to the app logs. Captures which
+/// scripts (anicat_ui, ModernZ) and shaders actually loaded — the only way to
+/// diagnose mpv on Windows, where there is no attached console.
+fn mpv_log_path() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let dir = dirs::home_dir()?.join("Library/Logs/com.anicat.app");
+    #[cfg(target_os = "windows")]
+    let dir = dirs::data_dir()?.join("com.anicat.app").join("logs");
+    #[cfg(target_os = "linux")]
+    let dir = dirs::cache_dir()?.join("com.anicat.app").join("logs");
+
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("mpv.log").to_string_lossy().to_string())
+}
+
 fn server_speed_rank(server: &crate::scraper::client::StreamServer) -> u8 {
     let url = server.url.to_lowercase();
     if url.contains("tools.fast4speed.rsvp") { return 0; }
@@ -692,6 +707,10 @@ pub async fn start_playback(
     let mut cmd = tokio::process::Command::new(&mpv_bin);
     crate::util::suppress_console_tokio(&mut cmd);
     cmd.arg(format!("--config-dir={}", config_dir));
+    if let Some(log_path) = mpv_log_path() {
+        // Overwritten each launch; records script + shader load results.
+        cmd.arg(format!("--log-file={}", log_path));
+    }
     cmd.arg("--force-window=yes");
     cmd.arg("--ontop");
     cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));

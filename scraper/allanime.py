@@ -275,6 +275,27 @@ class AllAnimeProvider:
             "Origin": ALLANIME_REFR,
         })
 
+    async def _post_api(self, payload: dict, timeout: int = 8, attempts: int = 3) -> dict:
+        """POST to the AllAnime GraphQL API, retrying transient failures.
+
+        AllAnime intermittently returns 5xx or drops the connection. A single
+        failure here used to make the whole provider fall back to AniNeko, so
+        retry a few times with a short backoff before giving up. Client errors
+        (4xx) are not transient and are raised immediately.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(attempts):
+            try:
+                resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=timeout)
+                if resp.status_code >= 500:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                last_exc = e
+                if attempt < attempts - 1:
+                    await asyncio.sleep(0.6 * (attempt + 1))
+        raise last_exc if last_exc else RuntimeError("AllAnime API request failed")
 
     async def search(self, query: str) -> list[AnimeRef]:
         # Clean query: AllAnime's GraphQL API fails when search queries contain apostrophes.
@@ -311,9 +332,7 @@ class AllAnimeProvider:
                 "query": search_gql
             }
             
-            resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
+            data = await self._post_api(payload)
             shows = data.get("data", {}).get("shows", {}).get("edges", [])
             
             results = []
@@ -346,9 +365,7 @@ class AllAnimeProvider:
                 "variables": {"showId": slug},
                 "query": query
             }
-            resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
+            data = await self._post_api(payload)
             show = data.get("data", {}).get("show")
             if not show:
                 return None

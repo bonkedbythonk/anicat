@@ -40,8 +40,10 @@ jobs:
       - name: Ensure python3 shim
         shell: pwsh
         run: |
-          $py = (Get-Command python).Source
-          Copy-Item $py (Join-Path (Split-Path $py) "python3.exe") -Force
+          if (-not (Get-Command python3 -ErrorAction SilentlyContinue)) {
+            $py = (Get-Command python).Source
+            Copy-Item $py (Join-Path (Split-Path $py) "python3.exe") -Force
+          }
           python3 --version
 
       # mpv is bundled into the app. Chocolatey is preinstalled on the runner;

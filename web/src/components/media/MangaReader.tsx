@@ -35,6 +35,11 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
   
   const containerRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the reader put the *app window* into native fullscreen.
+  // Native Tauri fullscreen does not set document.fullscreenElement, and on
+  // Windows there is no system gesture to leave it — so without restoring it
+  // on close the whole app gets stuck fullscreen.
+  const enteredFullscreenRef = useRef(false);
 
   // Load reading direction preference on mount and clear presence on unmount
   useEffect(() => {
@@ -44,6 +49,13 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     }
     return () => {
       mediaApi.clearPlaybackStatus().catch(() => {/* ignore */});
+      // Never leave the app window stuck in native fullscreen, no matter how
+      // the reader closes (Escape, X, finishing, or chapter navigation).
+      if (enteredFullscreenRef.current && window.__TAURI_INTERNALS__) {
+        import("@tauri-apps/api/window")
+          .then(({ getCurrentWindow }) => getCurrentWindow().setFullscreen(false))
+          .catch(() => {/* ignore */});
+      }
     };
   }, []);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -176,7 +188,12 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           toggleFullscreen();
           break;
         case "Escape":
-          if (!document.fullscreenElement) onClose();
+          // First Escape leaves fullscreen; a second one closes the reader.
+          if (enteredFullscreenRef.current) {
+            toggleFullscreen();
+          } else if (!document.fullscreenElement) {
+            onClose();
+          }
           break;
         case "m":
         case "M":
@@ -197,6 +214,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
         const current = await appWindow.isFullscreen();
         await appWindow.setFullscreen(!current);
         setIsFullscreen(!current);
+        enteredFullscreenRef.current = !current;
         return;
       }
     } catch (err) {

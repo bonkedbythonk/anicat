@@ -54,10 +54,10 @@ struct ScraperProcess {
 
 impl Drop for ScraperProcess {
     fn drop(&mut self) {
-        // Kill the child when dropped — covers both the idle watchdog path and
-        // app exit. On Windows, child processes are not killed automatically
-        // when the parent exits, so without this they become zombies.
-        let _ = self.child.kill();
+        // Kill the whole process tree when dropped — covers the idle watchdog
+        // path and any normal teardown. The PyInstaller onefile bootloader
+        // spawns a child, so a plain kill would orphan it (see kill_child_tree).
+        crate::util::kill_child_tree(&mut self.child);
     }
 }
 
@@ -98,6 +98,21 @@ impl ScraperManager {
 
     pub fn python_path(&self) -> &str {
         &self.python_path
+    }
+
+    /// Synchronously kill the running scraper (and its process tree). Called
+    /// from the Tauri exit handler, where Tauri tears the app down via
+    /// `process::exit` and would otherwise skip the async Drop path, leaving
+    /// the scraper orphaned after the window closes.
+    pub fn shutdown_blocking(&self) {
+        // best-effort: if the watchdog momentarily holds the lock, the OS will
+        // still reap the child when our process group ends on Unix; on Windows
+        // the explicit kill below is what matters and the lock is virtually
+        // never held at exit.
+        if let Ok(mut guard) = self.process.try_lock() {
+            // Dropping the ScraperProcess runs kill_child_tree via Drop.
+            let _ = guard.take();
+        }
     }
 
     pub async fn search(&self, query: &str, provider: &str) -> Result<Vec<AnimeRef>, String> {
@@ -359,10 +374,9 @@ async fn idle_watchdog(
 
         if should_kill {
             log::info!("Stopping idle scraper (pid={})", if let Some(ref sp) = *proc { sp.child.id() } else { 0 });
-            if let Some(mut sp) = proc.take() {
-                let _ = sp.child.kill();
-                let _ = tokio::time::timeout(Duration::from_secs(5), async { sp.child.wait() }).await;
-            }
+            // Dropping the taken ScraperProcess runs kill_child_tree via Drop,
+            // tearing down the bootloader and its extracted child together.
+            let _ = proc.take();
             return;
         }
     }

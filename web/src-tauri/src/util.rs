@@ -46,6 +46,28 @@ pub fn suppress_console_tokio(cmd: &mut tokio::process::Command) {
     }
 }
 
+/// Kill a child process *and its descendants*, then reap it.
+///
+/// On Windows the bundled scraper is a PyInstaller `--onefile` binary: the
+/// `.exe` we spawn is a bootloader that extracts itself to a temp dir and
+/// launches a *child* process to actually run the server. `Child::kill`
+/// (TerminateProcess) only terminates the bootloader, orphaning that child —
+/// which is why scraper processes accumulated. `taskkill /T` walks the whole
+/// process tree, so the extracted child goes down with the parent.
+pub fn kill_child_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+        suppress_console(&mut cmd);
+        let _ = cmd.output();
+    }
+    // Fallback / non-Windows: kill the process directly and reap it so it does
+    // not linger as a zombie.
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 pub fn percent_encode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for byte in s.bytes() {

@@ -43,7 +43,7 @@ def main():
     else:
         cmd = pyinstaller_cmd
         
-    print("🚀 Compiling Python scraper to a standalone binary...")
+    print("Compiling Python scraper to a standalone binary...")
     run_cmd(cmd, cwd=scraper_dir)
     
     # Locate built binary
@@ -54,9 +54,9 @@ def main():
     if not os.path.exists(built_bin):
         raise FileNotFoundError(f"Could not find compiled binary at {built_bin}")
         
-    print(f"🚚 Moving compiled binary to {dest_bin}")
+    print(f"Moving compiled binary to {dest_bin}")
     shutil.move(built_bin, dest_bin)
-    print("✅ Scraper binary compilation and bundling complete!")
+    print("Scraper binary compilation and bundling complete!")
 
 if __name__ == "__main__":
     main()

@@ -66,6 +66,7 @@ pub async fn start_proxy(
         .route("/player/progress", get(player_progress_handler))
         .route("/player/pause", get(player_pause_handler))
         .route("/player/resume", get(player_resume_handler))
+        .route("/player/preload", get(player_preload_handler))
         .with_state(state);
 
     tokio::spawn(async move {
@@ -108,6 +109,7 @@ async fn player_next_handler(
                 let app_state_clone = state.app_state.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
+                let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
                     if let Err(e) = crate::commands::playback::record_playback_progress(
                         &app_state_clone,
@@ -115,6 +117,7 @@ async fn player_next_handler(
                         ep_num,
                         pos,
                         duration,
+                        total_eps,
                     )
                     .await {
                         log::error!("Failed to record progress on next episode transition: {}", e);
@@ -197,6 +200,7 @@ async fn player_prev_handler(
                 let app_state_clone = state.app_state.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
+                let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
                     if let Err(e) = crate::commands::playback::record_playback_progress(
                         &app_state_clone,
@@ -204,6 +208,7 @@ async fn player_prev_handler(
                         ep_num,
                         pos,
                         duration,
+                        total_eps,
                     )
                     .await {
                         log::error!("Failed to record progress on previous episode transition: {}", e);
@@ -285,6 +290,7 @@ async fn player_stop_handler(
                 let app_state_clone = state.app_state.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
+                let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
                     if let Err(e) = crate::commands::playback::record_playback_progress(
                         &app_state_clone,
@@ -292,6 +298,7 @@ async fn player_stop_handler(
                         ep_num,
                         pos,
                         duration,
+                        total_eps,
                     )
                     .await {
                         log::error!("Failed to record progress on player stop: {}", e);
@@ -309,11 +316,37 @@ async fn player_progress_handler(
     State(state): State<ProxyState>,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
-    let mut guard = state.app_state.current_playback.lock().await;
-    if let Some(ref mut pb) = *guard {
-        if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
-            pb.last_position = pos;
-            pb.last_duration = duration;
+    // Progress ticks (every 30s and once per completed seek) re-anchor the
+    // Discord countdown to the real position, so skipping around doesn't drift.
+    // Only re-anchor while playing — a tick during pause must not revive the
+    // timer.
+    let play_info = {
+        let mut guard = state.app_state.current_playback.lock().await;
+        if let Some(ref mut pb) = *guard {
+            if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
+                pb.last_position = pos;
+                pb.last_duration = duration;
+            }
+            if pb.paused {
+                None
+            } else {
+                Some(pb.clone())
+            }
+        } else {
+            None
+        }
+    };
+    if let Some(pb) = play_info {
+        if let (Some(pos), Some(dur)) = (params.pos, params.duration) {
+            state.app_state.discord.set_presence(
+                &pb.title,
+                pb.episode_number,
+                &pb.episode_title,
+                pb.total_episodes,
+                pos,
+                dur,
+                false, // playing
+            );
         }
     }
     Ok("ok")
@@ -324,6 +357,9 @@ async fn player_pause_handler(
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested pause: pos={:?}, duration={:?}", params.pos, params.duration);
+    // Only act on a real play->pause transition. mpv emits pause/resume on
+    // window focus changes (e.g. cmd-tab), and re-sending presence each time
+    // makes the timer visibly flicker.
     let play_info = {
         let mut guard = state.app_state.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -331,18 +367,27 @@ async fn player_pause_handler(
                 pb.last_position = pos;
                 pb.last_duration = duration;
             }
+            if pb.paused {
+                None
+            } else {
+                pb.paused = true;
+                Some(pb.clone())
+            }
+        } else {
+            None
         }
-        guard.clone()
     };
     if let Some(play_info) = play_info {
         let pos = params.pos.unwrap_or(0);
+        let dur = params.duration.unwrap_or(0);
         state.app_state.discord.set_presence(
             &play_info.title,
             play_info.episode_number,
             &play_info.episode_title,
             play_info.total_episodes,
             pos,
-            true, // paused = true
+            dur,
+            true, // paused
         );
     }
     Ok("ok")
@@ -360,20 +405,86 @@ async fn player_resume_handler(
                 pb.last_position = pos;
                 pb.last_duration = duration;
             }
+            if pb.paused {
+                pb.paused = false;
+                Some(pb.clone())
+            } else {
+                None
+            }
+        } else {
+            None
         }
-        guard.clone()
     };
     if let Some(play_info) = play_info {
         let pos = params.pos.unwrap_or(0);
+        let dur = params.duration.unwrap_or(0);
         state.app_state.discord.set_presence(
             &play_info.title,
             play_info.episode_number,
             &play_info.episode_title,
             play_info.total_episodes,
             pos,
-            false, // paused = false
+            dur,
+            false, // playing
         );
     }
+    Ok("ok")
+}
+
+async fn player_preload_handler(
+    State(state): State<ProxyState>,
+    Query(_params): Query<PlaybackParams>,
+) -> Result<&'static str, StatusCode> {
+    // Fired by the player once it's most of the way through an episode: resolve
+    // the next episode's stream ahead of time so auto-next is instant.
+    let pb = {
+        let guard = state.app_state.current_playback.lock().await;
+        guard.clone()
+    };
+    let pb = match pb {
+        Some(pb) => pb,
+        None => return Ok("ok"),
+    };
+    let next_ep = pb.episode_number + 1;
+    if pb.total_episodes > 0 && next_ep > pb.total_episodes {
+        return Ok("ok");
+    }
+    // Already preloaded (or being worked on) for this target — don't repeat.
+    {
+        let slot = state.app_state.preloaded_stream.lock().await;
+        if let Some(ref p) = *slot {
+            if p.media_id == pb.media_id && p.episode_number == next_ep {
+                return Ok("ok");
+            }
+        }
+    }
+    let app_state = state.app_state.clone();
+    tokio::spawn(async move {
+        match crate::commands::playback::resolve_stream_for_provider(
+            &app_state,
+            pb.media_id,
+            next_ep,
+            &pb.provider,
+            &None,
+            Some(pb.title.clone()),
+        )
+        .await
+        {
+            Ok((raw_url, headers)) => {
+                let mut slot = app_state.preloaded_stream.lock().await;
+                *slot = Some(crate::state::PreloadedStream {
+                    media_id: pb.media_id,
+                    episode_number: next_ep,
+                    provider: pb.provider.clone(),
+                    raw_url,
+                    headers,
+                    at: std::time::Instant::now(),
+                });
+                log::info!("Preloaded next episode stream: media {} ep {}", pb.media_id, next_ep);
+            }
+            Err(e) => log::warn!("Preload of media {} ep {} failed: {}", pb.media_id, next_ep, e),
+        }
+    });
     Ok("ok")
 }
 

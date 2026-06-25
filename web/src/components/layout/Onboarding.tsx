@@ -29,7 +29,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [uiStyle, setUiStyle] = useState<"neon-abyss" | "sakura-zen" | "retro-manga">("neon-abyss");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [downloadsPath, setDownloadsPath] = useState("");
-  const [gpuUpscaling, setGpuUpscaling] = useState<"balanced" | "off">("balanced");
+  const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
   const [authPending, setAuthPending] = useState(false);
 
@@ -62,7 +62,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     } catch {}
   };
 
-  const handleGpuUpscalingChange = async (val: "balanced" | "off") => {
+  const handleGpuUpscalingChange = async (val: "on" | "off") => {
     setGpuUpscaling(val);
     try {
       await mediaApi.updateConfig({ stream: { shader_profile: val } });
@@ -419,10 +419,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               <div className="space-y-2.5">
                 <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
                   <Monitor size={12} className="text-accent" />
-                  <span>Anime4K GPU Upscaling Shaders</span>
+                  <span>Anime4K GPU Upscaling</span>
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  {(["balanced", "off"] as const).map((g) => (
+                  {(["on", "off"] as const).map((g) => (
                     <button
                       key={g}
                       onClick={() => handleGpuUpscalingChange(g)}
@@ -432,7 +432,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                           : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
                       }`}
                     >
-                      {g === "balanced" ? "On (CNN Shaders)" : "Off"}
+                      {g === "on" ? "On (Recommended)" : "Off"}
                     </button>
                   ))}
                 </div>

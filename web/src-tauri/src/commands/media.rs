@@ -269,6 +269,31 @@ pub async fn get_episodes(
         }
     };
 
+    // Active fallback: if the primary provider yielded nothing (down, no match,
+    // or an empty list), resolve and scrape the fallback provider instead of
+    // showing a dead episode list. Only for anime — manga has one provider.
+    if episodes.is_empty() && !is_manga {
+        let has_fallback = !fallback.is_empty() && fallback != "none" && fallback != provider_name;
+        if has_fallback {
+            log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
+            let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
+                .or(resolve_and_save_provider_slug(&state, media_id, &fallback, false, None).await.ok().flatten());
+            if let Some(slug) = fb_slug {
+                match state.scraper_manager.get_anime(&slug, &fallback).await {
+                    Ok(info) if !info.episodes.is_empty() => {
+                        use tauri::Emitter;
+                        let _ = app.emit("show_notification", serde_json::json!({
+                            "message": format!("{} unavailable — loaded episodes from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
+                        }));
+                        episodes = info.episodes;
+                    }
+                    Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
+                    Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
+                }
+            }
+        }
+    }
+
     // Query download statuses from DB
     if let Ok(mut stmt) = db.prepare("SELECT episode_number, status FROM download_queue WHERE media_id = ?1") {
         if let Ok(status_rows) = stmt.query_map(rusqlite::params![media_id], |row| {
@@ -738,6 +763,7 @@ async fn download_episode(
     cmd.arg("-o").arg(&filepath);
     cmd.arg("--force-overwrites");
     cmd.arg("--no-playlist");
+    crate::util::suppress_console_tokio(&mut cmd);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 

@@ -1,0 +1,6 @@
+[env]
+# Pin the deployment target so all object files (compiler + linker) use the
+# same macOS version. Without this, incremental builds mix objects tagged for
+# the current SDK (26.5) with ones tagged for Tauri's build-script default
+# (11.0), causing "built for newer macOS than being linked" linker failures.
+MACOSX_DEPLOYMENT_TARGET = "14.0"

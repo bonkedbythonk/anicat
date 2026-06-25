@@ -137,9 +137,19 @@ pub fn run() {
             commands::health::open_in_browser,
             commands::health::check_update,
             commands::health::trigger_update,
+            commands::health::relaunch_app,
             commands::health::get_proxy_port,
             commands::auth::start_anilist_auth,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            // Tauri exits the process via process::exit on window close, which
+            // skips Rust destructors — so the scraper's async Drop never runs.
+            // Kill it (and its PyInstaller child) explicitly here so it does not
+            // linger after the app closes.
+            if let tauri::RunEvent::Exit = event {
+                app_handle.state::<AppState>().scraper_manager.shutdown_blocking();
+            }
+        });
 }

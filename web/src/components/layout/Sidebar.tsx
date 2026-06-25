@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { useAppStore } from "@/stores/app";
+import { usesOverlayTitlebar } from "@/lib/platform";
 import {
   Home,
   Search,
@@ -46,7 +47,9 @@ export function Sidebar() {
     <aside className="fixed left-0 top-0 bottom-0 z-50 flex flex-col py-6 transition-all duration-300 glass-fixed" style={{ width: compact ? 72 : 248 }}>
       <div
         data-tauri-drag-region
-        className={`flex flex-col items-center justify-center mb-10 pt-14 cursor-default select-none w-full bg-black/[0.001] transition-all duration-300 ${
+        className={`flex flex-col items-center justify-center mb-10 cursor-default select-none w-full bg-black/[0.001] transition-all duration-300 ${
+          usesOverlayTitlebar ? "pt-14" : "pt-6"
+        } ${
           compact ? "px-2" : "px-4 lg:px-6"
         }`}
       >

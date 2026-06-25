@@ -36,8 +36,6 @@ pub struct GeneralConfig {
     pub manga_provider: String,
     #[serde(default = "default_fallback_provider")]
     pub fallback_provider: String,
-    #[serde(default = "default_update_branch")]
-    pub update_branch: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -96,9 +94,6 @@ fn default_manga_provider() -> String {
 fn default_fallback_provider() -> String {
     "anineko".into()
 }
-fn default_update_branch() -> String {
-    "stable".into()
-}
 fn default_shader_profile() -> String {
     "balanced".into()
 }
@@ -119,6 +114,7 @@ pub struct CurrentPlayback {
     pub total_episodes: i64,
     pub last_position: i64,
     pub last_duration: i64,
+    pub paused: bool,
 }
 
 #[derive(Clone)]
@@ -134,6 +130,24 @@ pub struct AppStateInner {
     pub discord: crate::discord::DiscordClient,
     pub proxy_port: Arc<std::sync::Mutex<u16>>,
     pub user_list_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Last (media_id, episode_number, recorded_at) written by
+    /// record_playback_progress. One stop/next event triggers several
+    /// independent recorders (stop handler, shutdown handler, exit monitor);
+    /// this collapses them so only the first does the work.
+    pub last_progress_record: Arc<tokio::sync::Mutex<Option<(i64, i64, std::time::Instant)>>>,
+    /// Next episode's stream resolved ahead of time (near the end of the
+    /// current episode) so auto-next is instant instead of waiting on a scrape.
+    pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreloadedStream {
+    pub media_id: i64,
+    pub episode_number: i64,
+    pub provider: String,
+    pub raw_url: String,
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    pub at: std::time::Instant,
 }
 
 impl AppState {
@@ -217,6 +231,8 @@ impl AppState {
                 discord,
                 proxy_port: Arc::new(std::sync::Mutex::new(13370)),
                 user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
+                last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
+                preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
             }),
         };
 
@@ -262,7 +278,12 @@ fn find_bundled_binary(exe_dir: &std::path::Path) -> Option<String> {
     } else {
         exe_dir.to_path_buf()
     };
-    let bin = base_dir.join("scraper-bin").join("anicat-scraper");
+    let bin_name = if cfg!(target_os = "windows") {
+        "anicat-scraper.exe"
+    } else {
+        "anicat-scraper"
+    };
+    let bin = base_dir.join("scraper-bin").join(bin_name);
     if bin.exists() {
         log::info!("[scraper] using bundled binary: {}", bin.display());
         Some(bin.to_string_lossy().to_string())

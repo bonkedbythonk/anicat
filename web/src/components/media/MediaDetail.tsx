@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -254,6 +254,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   const autoskip = useSettingsStore((s) => s.autoskip);
   const setAutoskip = useSettingsStore((s) => s.setAutoskip);
+  const autoplay = useSettingsStore((s) => s.autoplay);
+  const setAutoplay = useSettingsStore((s) => s.setAutoplay);
   const shaderProfile = useSettingsStore((s) => s.shaderProfile);
   const setShaderProfile = useSettingsStore((s) => s.setShaderProfile);
 
@@ -262,6 +264,16 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     setAutoskip(newVal);
     try {
       await mediaApi.updateConfig({ general: { autoskip: newVal } });
+    } catch (err) {
+      console.error("Failed to update config on backend:", err);
+    }
+  };
+
+  const handleToggleAutoNext = async () => {
+    const newVal = !autoplay;
+    setAutoplay(newVal);
+    try {
+      await mediaApi.updateConfig({ general: { autoplay: newVal } });
     } catch (err) {
       console.error("Failed to update config on backend:", err);
     }
@@ -707,6 +719,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         >
                           <Sparkles size={14} className={shaderProfile !== 'off' ? 'text-accent' : ''} />
                           <span>Upscaling</span>
+                        </button>
+                        <button
+                          onClick={handleToggleAutoNext}
+                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${autoplay ? 'bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5' : 'bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60'}`}
+                        >
+                          <PlayCircle size={14} className={autoplay ? 'text-accent' : ''} />
+                          <span>Auto Next</span>
                         </button>
                       </div>
                     )}

@@ -288,11 +288,20 @@ class AllAnimeProvider:
             try:
                 resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=timeout)
                 if resp.status_code >= 500:
+                    # Log the body so a recurring 5xx is diagnosable (Cloudflare
+                    # block pages, JSON error bodies, etc.) rather than opaque.
+                    body = ""
+                    try:
+                        body = resp.text[:300]
+                    except Exception:
+                        pass
+                    log.warning(f"AllAnime API HTTP {resp.status_code} (attempt {attempt + 1}/{attempts}); body: {body!r}")
                     raise RuntimeError(f"HTTP {resp.status_code}")
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
                 last_exc = e
+                log.warning(f"AllAnime API request error (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}")
                 if attempt < attempts - 1:
                     await asyncio.sleep(0.6 * (attempt + 1))
         raise last_exc if last_exc else RuntimeError("AllAnime API request failed")

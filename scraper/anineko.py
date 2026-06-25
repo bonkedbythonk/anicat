@@ -554,9 +554,14 @@ class AniNekoProvider:
         ]
         for pat in patterns:
             for url in re.findall(pat, html):
+                # Label the server by its host (e.g. "Vivibebe") instead of the
+                # internal extractor name, which was leaking "regex" into the UI.
+                m = re.search(r"https?://([^/]+)", url if url.startswith("http") else "https:" + url)
+                host = m.group(1).split(":")[0] if m else ""
+                label = host.replace("www.", "").split(".")[0] if host else "source"
                 found.append(
                     StreamServer(
-                        name="regex",
+                        name=label.capitalize() or "Source",
                         url=url,
                         group="unknown",
                         source_type="regex",

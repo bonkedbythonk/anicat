@@ -2,9 +2,6 @@ local mp = mp
 local msg = require 'mp.msg'
 local options = require 'mp.options'
 
--- Path separator is \ on Windows, / everywhere else.
-local is_windows = package.config:sub(1, 1) == "\\"
-
 local opts = {
   skip_times = '',
   auto_next = 'no',
@@ -330,27 +327,16 @@ local function notify_backend(action, sync, manual)
   end
   msg.info("notify_backend called: action=" .. tostring(action) .. ", url=" .. url .. ", sync=" .. tostring(sync) .. ", manual=" .. tostring(manual))
   
-  -- On Windows, curl.exe is a console app that flashes a window when spawned
-  -- from a GUI process. PowerShell with -WindowStyle Hidden avoids this.
-  local cmd
-  if is_windows then
-    cmd = {
-      name = "subprocess",
-      args = {
-        "powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command",
-        string.format("try{Invoke-WebRequest -Uri '%s' -UseBasicParsing|Out-Null}catch{}", url),
-      },
-      capture_stdout = false,
-      capture_stderr = false,
-    }
-  else
-    cmd = {
-      name = "subprocess",
-      args = { "curl", "-s", url },
-      capture_stdout = false,
-      capture_stderr = false,
-    }
-  end
+  -- curl ships in System32 on modern Windows and in the base system on
+  -- macOS/Linux. The whole progress pipeline (resume position, watched
+  -- detection, AniList advancement) depends on these callbacks reaching the
+  -- backend, so keep this on the simple, reliable curl path everywhere.
+  local cmd = {
+    name = "subprocess",
+    args = { "curl", "-s", url },
+    capture_stdout = false,
+    capture_stderr = false
+  }
 
   if sync then
     mp.command_native(cmd)

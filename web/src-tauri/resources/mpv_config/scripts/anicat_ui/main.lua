@@ -226,14 +226,15 @@ local function skip_current_segment()
   end
 end
 
+-- Anime4K "Mode A (HQ)" — keep in sync with the shader_names list in
+-- commands/playback.rs (the launch-time args).
 local SHADERS = {
   "~~/shaders/Anime4K_Clamp_Highlights.glsl",
-  "~~/shaders/Anime4K_Restore_CNN_Soft_S.glsl",
-  "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl",
+  "~~/shaders/Anime4K_Restore_CNN_VL.glsl",
+  "~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl",
   "~~/shaders/Anime4K_AutoDownscalePre_x2.glsl",
   "~~/shaders/Anime4K_AutoDownscalePre_x4.glsl",
-  "~~/shaders/Anime4K_Thin_HQ.glsl",
-  "~~/shaders/Anime4K_Darken_HQ.glsl",
+  "~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl",
 }
 
 local function enable_standard_shaders()

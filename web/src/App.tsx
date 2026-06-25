@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
 import { initProxyPort } from "@/lib/proxy";
+import { usesOverlayTitlebar } from "@/lib/platform";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
@@ -79,6 +80,27 @@ export default function App() {
 
     window.addEventListener('wheel', onWheel, { passive: true });
     return () => window.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Mouse "back" button and Alt+Left = go back from the detail page (the
+  // Windows/Linux conventions; the trackpad swipe above is macOS-only).
+  useEffect(() => {
+    const back = () => {
+      const { selectedItem, closeDetail } = useAppStore.getState();
+      if (selectedItem) closeDetail();
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 3) { e.preventDefault(); back(); }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); back(); }
+    };
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   useEffect(() => {
@@ -199,17 +221,20 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-      {/* Titlebar drag region for macOS */}
-      <div
-        data-tauri-drag-region
-        className="fixed top-0 right-0 h-10 z-40 pointer-events-none select-none"
-        style={{ left: sidebarW }}
-      >
+      {/* Titlebar drag region — only macOS uses an overlay titlebar; Windows
+          and Linux have a native titlebar that already handles dragging. */}
+      {usesOverlayTitlebar && (
         <div
           data-tauri-drag-region
-          className="w-full h-full pointer-events-auto cursor-default"
-        />
-      </div>
+          className="fixed top-0 right-0 h-10 z-40 pointer-events-none select-none"
+          style={{ left: sidebarW }}
+        >
+          <div
+            data-tauri-drag-region
+            className="w-full h-full pointer-events-auto cursor-default"
+          />
+        </div>
+      )}
 
       <main className="flex-1 flex flex-col overflow-hidden relative" style={{ marginLeft: sidebarW }}>
         <AnimatePresence mode="wait">

@@ -757,16 +757,18 @@ pub async fn start_playback(
 
     if shader_profile != "off" {
         let shader_dir = std::path::Path::new(&config_dir).join("shaders");
-        // Anime4K "Mode A (HQ)" — the recommended high-quality chain for anime
-        // (restore + 2x CNN upscale at VL strength, then a medium refinement
-        // pass). Far stronger than the old _S variants.
+        // Anime4K official "Mode A (Fast)" — the recommended low-end-GPU preset
+        // (Restore + 2x CNN upscale at M, final S refinement). Mode A is the
+        // most popular general anime mode; tuned for the MacBook's thermals,
+        // where the VL/HQ variants pegged the GPU and overheated it.
+        // Source: github.com/bloc97/Anime4K (Template/GLSL_*_Low-end/input.conf)
         let shader_names = [
             "Anime4K_Clamp_Highlights.glsl",
-            "Anime4K_Restore_CNN_VL.glsl",
-            "Anime4K_Upscale_CNN_x2_VL.glsl",
+            "Anime4K_Restore_CNN_M.glsl",
+            "Anime4K_Upscale_CNN_x2_M.glsl",
             "Anime4K_AutoDownscalePre_x2.glsl",
             "Anime4K_AutoDownscalePre_x4.glsl",
-            "Anime4K_Upscale_CNN_x2_M.glsl",
+            "Anime4K_Upscale_CNN_x2_S.glsl",
         ];
         let shader_arg: Vec<String> = shader_names
             .iter()

@@ -164,7 +164,6 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
 
   const handleOpenLogs = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_logs_folder");
     } catch (err) {
       console.error("Failed to open logs:", err);

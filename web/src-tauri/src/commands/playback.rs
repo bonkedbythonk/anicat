@@ -757,7 +757,10 @@ pub async fn start_playback(
             .filter_map(|p| p.to_str().map(|s| s.to_string()))
             .collect();
         if !shader_arg.is_empty() {
-            cmd.arg(format!("--glsl-shaders={}", shader_arg.join(":")));
+            // mpv uses ";" as path-list separator on Windows (because ":" appears
+            // in drive letters), and ":" on macOS/Linux.
+            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+            cmd.arg(format!("--glsl-shaders={}", shader_arg.join(sep)));
         }
     }
 

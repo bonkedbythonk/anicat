@@ -52,6 +52,15 @@ struct ScraperProcess {
     last_used: Instant,
 }
 
+impl Drop for ScraperProcess {
+    fn drop(&mut self) {
+        // Kill the child when dropped — covers both the idle watchdog path and
+        // app exit. On Windows, child processes are not killed automatically
+        // when the parent exits, so without this they become zombies.
+        let _ = self.child.kill();
+    }
+}
+
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
     spawn_lock: tokio::sync::Mutex<()>,

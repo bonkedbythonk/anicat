@@ -159,7 +159,7 @@ export default function App() {
       case "schedule": return <ScheduleView onSelect={onSelect} />;
       case "notifications": return <NotificationsView onSelect={onSelect} />;
       case "profile": return <ProfileView onSelect={onSelect} />;
-      case "settings": return <SettingsView health={health} onUpdateStarted={() => {}} />;
+      case "settings": return <SettingsView health={health} />;
       case "downloads": return <DownloadsView />;
       default: return <HomeView onSelect={onSelect} />;
     }

@@ -137,6 +137,7 @@ pub fn run() {
             commands::health::open_in_browser,
             commands::health::check_update,
             commands::health::trigger_update,
+            commands::health::relaunch_app,
             commands::health::get_proxy_port,
             commands::auth::start_anilist_auth,
         ])

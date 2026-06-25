@@ -9,10 +9,9 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 
 interface SettingsViewProps {
   health: HealthStatus | null;
-  onUpdateStarted?: (message?: string) => void;
 }
 
-export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
+export function SettingsView({ health }: SettingsViewProps) {
   const apiConnected = useAppStore((s) => s.apiConnected);
   const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const authError = useAppStore((s) => s.authError);
@@ -194,9 +193,8 @@ export function SettingsView({ health, onUpdateStarted }: SettingsViewProps) {
         const res = await mediaApi.triggerUpdate();
         if (res.status === "success") {
           setStagedHasUpdate(false);
-          if (onUpdateStarted) {
-            onUpdateStarted(res.message);
-          }
+          setUpdateMessage({ text: "Update installed. Relaunching...", type: "success" });
+          setTimeout(() => invoke("relaunch_app").catch(console.error), 1500);
         } else {
           setUpdateMessage({ text: res.message, type: "error" });
         }

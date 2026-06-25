@@ -316,3 +316,10 @@ pub async fn trigger_update(url: String) -> Result<(), String> {
     log::info!("Update installed successfully to {}", dst);
     Ok(())
 }
+
+#[tauri::command]
+pub fn relaunch_app(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        app.restart();
+    });
+}

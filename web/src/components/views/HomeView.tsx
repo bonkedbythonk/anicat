@@ -7,6 +7,7 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAppStore } from "@/stores/app";
+import { isCaughtUp } from "@/lib/progress";
 
 interface HomeViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
@@ -26,28 +27,6 @@ const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
   { id: "newlyReleasing", title: "Newly Releasing", visible: true },
   { id: "seasonal", title: "Seasonal Highlights", visible: true },
 ];
-
-// Returns true if the user has watched all available episodes for a media item.
-function isCaughtUp(item: MediaItem): boolean {
-  const progress = item.user_status?.progress ?? 0;
-  const total = item.episodes;
-  // Check both snake_case (snakify'd) and raw camelCase from API
-  const nextAiringEp = (item as any).nextAiringEpisode?.episode ?? item.next_airing?.episode;
-  if (total && total > 0) {
-    if (progress >= total) return true;
-    // Total known and progress < total — but check if the next episode has aired yet
-    if (nextAiringEp && nextAiringEp > 0 && progress >= nextAiringEp - 1) return true;
-    return false;
-  }
-  // For airing anime with a confirmed next_airing schedule, check against aired count
-  if (nextAiringEp && nextAiringEp > 0) {
-    return progress >= nextAiringEp - 1;
-  }
-  // No total and no next-airing schedule — AniList data is incomplete (e.g. right
-  // after an episode drops, before next week's slot is registered). Assume NOT
-  // caught up so the show stays in Continue Watching rather than vanishing.
-  return false;
-}
 
 function MediaRowSkeleton({ title }: { title: string }) {
   return (

@@ -9,6 +9,7 @@
     "build:scraper": "python3 ../scripts/build_scraper.py",
     "build": "npm run build:scraper && tsc && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -41,6 +42,7 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.62.0",
     "vite": "^6.3.6",
-    "vite-plugin-webfont-dl": "^3.12.0"
+    "vite-plugin-webfont-dl": "^3.12.0",
+    "vitest": "^4.1.9"
   }
 }

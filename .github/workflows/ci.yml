@@ -34,6 +34,10 @@ jobs:
         working-directory: web
         run: npm run lint
 
+      - name: Unit tests
+        working-directory: web
+        run: npm test
+
   backend:
     name: Rust check
     runs-on: ubuntu-latest

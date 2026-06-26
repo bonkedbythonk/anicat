@@ -374,6 +374,7 @@ class AllAnimeProvider:
                 thumbnail
                 description
                 status
+                availableEpisodes
                 availableEpisodesDetail
             }
         }"""
@@ -386,13 +387,13 @@ class AllAnimeProvider:
             show = data.get("data", {}).get("show")
             if not show:
                 return None
-                
+
             title = show.get("englishName") or show.get("name")
-            
+
             eps_detail = show.get("availableEpisodesDetail", {}) or {}
             sub_eps = eps_detail.get("sub", []) or []
             dub_eps = eps_detail.get("dub", []) or []
-            
+
             all_ep_strings = sorted(list(set(sub_eps + dub_eps)), key=lambda x: float(x) if x else 0.0)
             episodes = []
             for ep_str in all_ep_strings:
@@ -404,6 +405,23 @@ class AllAnimeProvider:
                         episodes.append(Episode(number=ep_num))
                 except ValueError:
                     continue
+
+            # availableEpisodesDetail sometimes comes back empty even when the
+            # show has episodes (transient API quirk). Fall back to the simpler
+            # availableEpisodes count so we can at least build a numbered list.
+            if not episodes:
+                counts = show.get("availableEpisodes", {}) or {}
+                ep_count = max(
+                    counts.get("sub", 0) or 0,
+                    counts.get("dub", 0) or 0,
+                )
+                if ep_count > 0:
+                    log.warning(
+                        "allanime: availableEpisodesDetail empty for slug %s "
+                        "but availableEpisodes reports %d — synthesising list",
+                        slug, ep_count,
+                    )
+                    episodes = [Episode(number=n) for n in range(1, ep_count + 1)]
 
             return AnimeInfo(title=title, episodes=episodes)
         except Exception as e:

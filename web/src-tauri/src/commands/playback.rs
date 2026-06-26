@@ -32,7 +32,7 @@ async fn try_send_ipc(ipc_path: &str, commands: Vec<serde_json::Value>) -> Resul
             .await
             .map_err(|e| e.to_string())?;
         for cmd in commands {
-            let line = format!("{}\n", cmd.to_string());
+            let line = format!("{}\n", cmd);
             stream.write_all(line.as_bytes())
                 .await
                 .map_err(|e| e.to_string())?;
@@ -40,7 +40,7 @@ async fn try_send_ipc(ipc_path: &str, commands: Vec<serde_json::Value>) -> Resul
         let _ = stream.flush().await;
         let _ = stream.shutdown().await;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(windows)]
@@ -193,7 +193,7 @@ fn server_speed_rank(server: &crate::scraper::client::StreamServer) -> u8 {
     4
 }
 
-fn pick_best_server<'a>(servers: &'a [crate::scraper::client::StreamServer]) -> Option<&'a crate::scraper::client::StreamServer> {
+fn pick_best_server(servers: &[crate::scraper::client::StreamServer]) -> Option<&crate::scraper::client::StreamServer> {
     servers.iter().min_by_key(|s| server_speed_rank(s))
 }
 
@@ -213,8 +213,6 @@ fn get_stream_group(server: &crate::scraper::client::StreamServer) -> &str {
     let name = server.name.to_lowercase();
     if name.contains("dub") {
         "dub"
-    } else if name.contains("sub") {
-        "hard_sub"
     } else {
         "hard_sub"
     }
@@ -296,6 +294,7 @@ pub(crate) async fn resolve_stream_for_provider(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // playback context is passed field-by-field over IPC
 pub async fn start_playback(
     app: AppHandle,
     state: State<'_, AppState>,

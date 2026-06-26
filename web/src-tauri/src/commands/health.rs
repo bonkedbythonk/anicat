@@ -96,7 +96,7 @@ pub async fn get_logs(app: tauri::AppHandle, limit: Option<usize>) -> Result<Str
             let mut found_content = None;
             if let Ok(entries) = std::fs::read_dir(&log_dir) {
                 for entry in entries.flatten() {
-                    if entry.path().extension().map_or(false, |ext| ext == "log") {
+                    if entry.path().extension().is_some_and(|ext| ext == "log") {
                         if let Ok(c) = std::fs::read_to_string(entry.path()) {
                             found_content = Some(c);
                             break;

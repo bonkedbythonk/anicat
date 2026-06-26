@@ -63,7 +63,7 @@ impl AniListCache {
         drop(entries);
 
         let count = self.insert_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count % PRUNE_EVERY_N_INSERTS == 0 {
+        if count.is_multiple_of(PRUNE_EVERY_N_INSERTS) {
             self.prune();
         }
     }
@@ -175,7 +175,7 @@ fn update_media_in_value(
                 if let Some(p_val) = new_progress {
                     map.insert("progress".to_string(), serde_json::json!(p_val));
                 }
-                if let Some(ref status_str) = new_status {
+                if let Some(status_str) = new_status {
                     map.insert("status".to_string(), serde_json::json!(status_str.to_uppercase()));
                 }
                 if let Some(s_val) = new_score {
@@ -191,7 +191,7 @@ fn update_media_in_value(
             if is_media_item {
                 if let Some(entry) = map.get_mut("mediaListEntry") {
                     if entry.is_null() {
-                        if let Some(ref status_str) = new_status {
+                        if let Some(status_str) = new_status {
                             *entry = serde_json::json!({
                                 "status": status_str.to_uppercase(),
                                 "progress": new_progress.unwrap_or(0),
@@ -202,7 +202,7 @@ fn update_media_in_value(
                         if let Some(p_val) = new_progress {
                             entry_map.insert("progress".to_string(), serde_json::json!(p_val));
                         }
-                        if let Some(ref status_str) = new_status {
+                        if let Some(status_str) = new_status {
                             entry_map.insert("status".to_string(), serde_json::json!(status_str.to_uppercase()));
                         }
                         if let Some(s_val) = new_score {
@@ -212,7 +212,7 @@ fn update_media_in_value(
                 }
                 if let Some(user_status) = map.get_mut("user_status") {
                     if user_status.is_null() {
-                        if let Some(ref status_str) = new_status {
+                        if let Some(status_str) = new_status {
                             *user_status = serde_json::json!({
                                 "status": status_str.to_lowercase(),
                                 "progress": new_progress.unwrap_or(0),
@@ -223,7 +223,7 @@ fn update_media_in_value(
                         if let Some(p_val) = new_progress {
                             us_map.insert("progress".to_string(), serde_json::json!(p_val));
                         }
-                        if let Some(ref status_str) = new_status {
+                        if let Some(status_str) = new_status {
                             us_map.insert("status".to_string(), serde_json::json!(status_str.to_lowercase()));
                         }
                         if let Some(s_val) = new_score {

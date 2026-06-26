@@ -206,10 +206,8 @@ pub fn get_all_last_watched(
         .map_err(|e| e.to_string())?;
     
     let mut map = HashMap::new();
-    for r in rows {
-        if let Ok((id, time)) = r {
-            map.insert(id, time);
-        }
+    for (id, time) in rows.flatten() {
+        map.insert(id, time);
     }
     Ok(map)
 }

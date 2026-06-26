@@ -45,6 +45,7 @@ impl DiscordClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the Discord activity fields
     pub fn set_presence(&self, title: &str, episode: i64, episode_title: &str, total_episodes: i64, pos: i64, duration: i64, paused: bool) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(ref mut client) = *inner {

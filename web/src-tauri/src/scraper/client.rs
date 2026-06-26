@@ -407,11 +407,9 @@ async fn start_and_wait(
         std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if !line.trim().is_empty() {
-                        log::warn!("[scraper-py] {}", line);
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    log::warn!("[scraper-py] {}", line);
                 }
             }
         });

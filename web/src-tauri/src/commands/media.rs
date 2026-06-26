@@ -13,6 +13,7 @@ use crate::registry;
 use crate::state::AppState;
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // search filter params map 1:1 to the IPC call
 pub async fn search_media(
     state: State<'_, AppState>,
     query: String,
@@ -300,10 +301,8 @@ pub async fn get_episodes(
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         }) {
             let mut status_map = std::collections::HashMap::new();
-            for row in status_rows {
-                if let Ok((ep_num, status)) = row {
-                    status_map.insert(ep_num, status);
-                }
+            for (ep_num, status) in status_rows.flatten() {
+                status_map.insert(ep_num, status);
             }
             for ep in &mut episodes {
                 if let Some(status) = status_map.get(&(ep.number as i64)) {
@@ -752,7 +751,7 @@ async fn download_episode(
     cmd.arg(&raw_url);
 
     // Pass custom HTTP headers if present (e.g. Referer, User-Agent)
-    if let Some(ref server) = servers.first() {
+    if let Some(server) = servers.first() {
         if let Some(ref headers) = server.headers {
             for (key, val) in headers {
                 cmd.arg("--http-header").arg(format!("{}: {}", key, val));
@@ -1091,6 +1090,7 @@ fn normalize_title(title: &str) -> String {
         .to_lowercase()
 }
 
+#[allow(clippy::needless_range_loop)] // index-based DP table is clearest here
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let v1: Vec<char> = s1.chars().collect();
     let v2: Vec<char> = s2.chars().collect();

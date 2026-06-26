@@ -22,6 +22,7 @@ import { MediaDetail } from "@/components/media/MediaDetail";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { Onboarding } from "@/components/layout/Onboarding";
+import { KeyboardShortcutsOverlay } from "@/components/layout/KeyboardShortcutsOverlay";
 
 async function loadConfig() {
   try {
@@ -273,6 +274,8 @@ export default function App() {
       <AnimatePresence>
         {!onboardingSeen && <Onboarding onComplete={() => setOnboardingSeen(true)} />}
       </AnimatePresence>
+
+      <KeyboardShortcutsOverlay />
     </div>
   );
 }

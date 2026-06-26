@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -29,6 +29,10 @@ jobs:
       - name: TypeScript check
         working-directory: web
         run: npx tsc --noEmit
+
+      - name: ESLint
+        working-directory: web
+        run: npm run lint
 
   backend:
     name: Rust check
@@ -67,6 +71,6 @@ jobs:
           mkdir -p web/src-tauri/resources/lib
           touch web/src-tauri/resources/lib/.gitkeep
 
-      - name: cargo check
+      - name: cargo clippy
         working-directory: web/src-tauri
-        run: cargo check
+        run: cargo clippy --all-targets -- -D warnings

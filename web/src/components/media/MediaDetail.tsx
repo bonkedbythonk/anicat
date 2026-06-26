@@ -140,7 +140,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   const { data: fillerEpisodes = [] } = useQuery({
     queryKey: ["jikan-filler", fullItem?.id_mal],
-    queryFn: () => mediaApi.fetchJikanFiller(fullItem?.id_mal!),
+    queryFn: () => mediaApi.fetchJikanFiller(fullItem.id_mal as number),
     enabled: !!fullItem?.id_mal,
     staleTime: 24 * 60 * 60 * 1000,
   });

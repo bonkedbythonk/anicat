@@ -57,6 +57,10 @@ jobs:
           # Fix rpath in the copied mpv binary so it finds dylibs in @executable_path/../Resources/lib
           install_name_tool -add_rpath "@executable_path/../Resources/lib" web/src-tauri/resources/mpv 2>/dev/null || true
 
+          # Ensure all copied dylibs are readable by the Cargo build script
+          chmod 755 web/src-tauri/resources/lib/*.dylib 2>/dev/null || true
+          chmod 755 web/src-tauri/resources/mpv
+
           # Stub mpv.exe so Tauri's resource glob doesn't fail (macOS build only)
           touch web/src-tauri/resources/mpv.exe
 

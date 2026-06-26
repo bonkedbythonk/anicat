@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { X, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Book, FileText, ScrollText } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Book, FileText, ScrollText, BookX } from "lucide-react";
 import { API_BASE_ORIGIN, mediaApi } from "@/lib/api";
 
 declare global {
@@ -27,6 +27,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [readingMode, setReadingMode] = useState<ReadingMode>("single");
@@ -103,6 +104,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     mediaApi.getChapterPages(mediaId, chapterNumber)
       .then(data => {
         setPages(data.thumbnails || []);
@@ -121,7 +123,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
         setError("Failed to load chapter pages. Please try again.");
         setLoading(false);
       });
-  }, [mediaId, chapterNumber, initialPage]);
+  }, [mediaId, chapterNumber, initialPage, reloadKey]);
 
   // Pre-load next pages logic
   useEffect(() => {
@@ -273,9 +275,36 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           <p className="font-bold mb-1">Error</p>
           <p className="text-sm">{error}</p>
         </div>
-        <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-bold">
-          Close Reader
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setReloadKey(k => k + 1)} className="px-6 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors font-bold">
+            Try Again
+          </button>
+          <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-bold">
+            Close Reader
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Loaded successfully but the provider returned no pages — distinct from a
+  // hard error so the user knows the chapter is just unavailable, not broken.
+  if (pages.length === 0) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center p-6 text-center">
+        <BookX className="text-muted-foreground mb-4" size={48} />
+        <p className="font-bold text-white mb-1">No pages found</p>
+        <p className="text-sm text-gray-400 max-w-md mb-6">
+          This chapter came back empty — the source may not have it yet, or the provider may be unavailable. Try again in a moment.
+        </p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setReloadKey(k => k + 1)} className="px-6 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors font-bold">
+            Try Again
+          </button>
+          <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-bold">
+            Close Reader
+          </button>
+        </div>
       </div>
     );
   }

@@ -230,17 +230,12 @@ export function SettingsView({ health }: SettingsViewProps) {
   const updateField = (section: string, field: string, value: unknown) => {
     setConfig(prev => {
       if (!prev) return null;
-      const updated = {
+      return {
         ...prev,
         [section]: { ...prev[section], [field]: value }
       };
-      autoSave({
-        [section]: {
-          [field]: value
-        }
-      });
-      return updated;
     });
+    autoSave({ [section]: { [field]: value } });
   };
 
   const handleBackup = async () => {

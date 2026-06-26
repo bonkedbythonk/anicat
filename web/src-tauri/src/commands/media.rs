@@ -31,6 +31,7 @@ pub async fn search_media(
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("search".to_string(), if query.is_empty() { serde_json::json!(null) } else { serde_json::json!(query) });
     vars.insert("type".to_string(), serde_json::json!(media_type.unwrap_or_else(|| "ANIME".to_string())));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
     }
@@ -89,6 +90,7 @@ pub async fn get_trending(
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("type".to_string(), serde_json::json!(mtype));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
         .anilist_client
@@ -120,6 +122,7 @@ pub async fn get_seasonal(
     vars.insert("season".to_string(), serde_json::json!(s));
     vars.insert("seasonYear".to_string(), serde_json::json!(y));
     vars.insert("type".to_string(), serde_json::json!(mtype));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
         .anilist_client
@@ -145,6 +148,7 @@ pub async fn get_upcoming(
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("type".to_string(), serde_json::json!(mtype));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
         .anilist_client
@@ -184,6 +188,7 @@ pub async fn get_smart_playlist(
     let mut vars = HashMap::new();
     vars.insert("genre".to_string(), serde_json::json!(["Action"]));
     vars.insert("sort".to_string(), serde_json::json!(["SCORE_DESC"]));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
 
     let result: PageResponse<crate::anilist::types::MediaItem> = state
         .anilist_client

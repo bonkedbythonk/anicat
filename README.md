@@ -49,11 +49,11 @@ Download the latest `Anicat_*_x64-setup.exe` from the [Releases page](https://gi
 
 ## First-run Setup
 
-Anicat requires an AniList account to track progress and sync your library.
+On first launch, Anicat walks you through setup automatically:
 
-1. Open the app and go to **Settings → Account**.
-2. Click **Connect AniList** — this opens a browser window to authorize the app.
-3. Once authorized, your library loads automatically on the home screen.
+1. Pick a theme and configure basic preferences.
+2. Connect your AniList account — the app opens a browser window to authorize, then redirects back.
+3. Your library loads and the home screen populates.
 
 AniList is only used for tracking. Playback and the episode list do not require an account.
 
@@ -77,8 +77,9 @@ AniList is only used for tracking. Playback and the episode list do not require 
 <div align="center">
   <img src="assets/branding/dashboard.png" alt="Home screen" width="720">
   <br><br>
-  <!-- Add detail page screenshot: assets/branding/detail.png -->
-  <!-- Add manga reader screenshot: assets/branding/manga.png -->
+  <img src="assets/branding/detail.png" alt="Anime detail page" width="720">
+  <br><br>
+  <img src="assets/branding/manga.png" alt="Manga reader" width="720">
 </div>
 
 ---

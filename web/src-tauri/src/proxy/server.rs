@@ -647,6 +647,51 @@ async fn proxy_handler(
     let mut status = upstream.status();
     let upstream_headers = upstream.headers().clone();
 
+    let content_type = upstream_headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let is_playlist_meta = url.contains(".m3u8")
+        || content_type.contains("mpegurl")
+        || content_type.contains("mpegURL");
+
+    // Stream media segments straight through instead of buffering the whole body
+    // in RAM first. Segments (fMP4/TS audio+video) are the largest and most
+    // frequent items during playback, and they never carry the prepended-PNG
+    // obfuscation that the buffered path below has to detect and strip. This
+    // drops both peak memory and time-to-first-byte for the common case.
+    // Playlists and images still buffer so they can be rewritten/cleaned.
+    if !is_playlist_meta
+        && (content_type.starts_with("video/") || content_type.starts_with("audio/"))
+    {
+        let mut response = Response::builder().status(status);
+        for (key, value) in upstream_headers.iter() {
+            let key_lower = key.as_str().to_lowercase();
+            if matches!(
+                key_lower.as_str(),
+                "transfer-encoding"
+                    | "connection"
+                    | "keep-alive"
+                    | "trailer"
+                    | "upgrade"
+                    | "content-length"
+            ) {
+                continue;
+            }
+            if let Ok(hv) = HeaderValue::from_bytes(value.as_bytes()) {
+                response = response.header(key.as_str(), hv);
+            }
+        }
+        response = response
+            .header("access-control-allow-origin", "*")
+            .header("access-control-expose-headers", "*");
+        return response
+            .body(Body::from_stream(upstream.bytes_stream()))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
     let mut bytes = upstream
         .bytes()
         .await
@@ -656,15 +701,7 @@ async fn proxy_handler(
         })?
         .to_vec();
 
-    let content_type = upstream_headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    let is_playlist = url.contains(".m3u8")
-        || content_type.contains("mpegurl")
-        || content_type.contains("mpegURL")
-        || bytes.starts_with(b"#EXTM3U");
+    let is_playlist = is_playlist_meta || bytes.starts_with(b"#EXTM3U");
 
     let mut strip_headers = false;
     if is_playlist {

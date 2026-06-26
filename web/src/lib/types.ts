@@ -69,7 +69,8 @@ export interface MediaItem {
   };
   studios?: {
     nodes?: { name: string; isAnimationStudio?: boolean }[];
-  } | { name: string; isAnimationStudio: boolean }[];
+  };
+  season_year?: number;
   startDate?: { year?: number; month?: number; day?: number };
   endDate?: { year?: number; month?: number; day?: number };
   end_date?: string;
@@ -96,6 +97,19 @@ export interface MediaItem {
       node: MediaItem;
     }[];
   };
+  recommendations?: {
+    nodes?: {
+      mediaRecommendation?: MediaItem;
+      // flat shape returned after snakify
+      id?: number;
+      title?: MediaTitle;
+      coverImage?: MediaCoverImage;
+      cover_image?: MediaCoverImage;
+      type?: "ANIME" | "MANGA";
+      format?: string;
+    }[];
+  };
+  streaming_episodes?: { title?: string; thumbnail?: string }[];
   characters?: {
     edges?: {
       role: string;

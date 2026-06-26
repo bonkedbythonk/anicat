@@ -34,7 +34,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [authPending, setAuthPending] = useState(false);
 
   useEffect(() => {
-    const savedStyle = (localStorage.getItem("anicat_ui_style") as any) || "neon-abyss";
+    const savedStyle = (localStorage.getItem("anicat_ui_style") as "neon-abyss" | "sakura-zen" | "retro-manga" | null) || "neon-abyss";
     setUiStyle(savedStyle);
   }, []);
 
@@ -43,14 +43,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       if (cfg?.general?.downloads_path) {
         setDownloadsPath(cfg.general.downloads_path);
       }
-      if (cfg?.stream?.shader_profile) {
-        setGpuUpscaling(cfg.stream.shader_profile as any);
+      if (cfg?.stream?.shader_profile === "on" || cfg?.stream?.shader_profile === "off") {
+        setGpuUpscaling(cfg.stream.shader_profile);
       }
-      if (cfg?.general?.time_format) {
-        setTimeFormat(cfg.general.time_format as any);
+      if (cfg?.general?.time_format === "12h" || cfg?.general?.time_format === "24h") {
+        setTimeFormat(cfg.general.time_format);
       }
-      if (cfg?.stream?.translation_type) {
-        setTranslationType(cfg.stream.translation_type as any);
+      if (cfg?.stream?.translation_type === "sub" || cfg?.stream?.translation_type === "dub") {
+        setTranslationType(cfg.stream.translation_type);
       }
     }).catch(() => {});
   }, []);
@@ -86,7 +86,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       setAuthError(null);
       try {
         await mediaApi.updateConfig({ api: { anilist_token: token } });
-        const healthData = await invoke<any>("check_health");
+        const healthData = await invoke<{
+          authenticated: boolean;
+          connected: boolean;
+          offline: boolean;
+          auth_error: string | null;
+          token_present: boolean;
+          viewer_name: string | null;
+        }>("check_health");
         
         if (healthData.authenticated && healthData.viewer_name) {
           setConnectedUser(healthData.viewer_name);
@@ -349,14 +356,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                   <span>Visual Theme Skin</span>
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { key: "neon-abyss", label: "Neon Abyss" },
-                    { key: "sakura-zen", label: "Sakura Zen" },
-                    { key: "retro-manga", label: "Retro Manga" }
-                  ].map((t) => (
+                  {([
+                    { key: "neon-abyss" as const, label: "Neon Abyss" },
+                    { key: "sakura-zen" as const, label: "Sakura Zen" },
+                    { key: "retro-manga" as const, label: "Retro Manga" }
+                  ]).map((t) => (
                     <button
                       key={t.key}
-                      onClick={() => handleUiStyleChange(t.key as any)}
+                      onClick={() => handleUiStyleChange(t.key)}
                       className={`py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                         uiStyle === t.key
                           ? "bg-accent text-white shadow-lg shadow-accent/20"

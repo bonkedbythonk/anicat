@@ -13,23 +13,23 @@ if (import.meta.env.DEV) {
     const originalWarn = console.warn;
     const originalError = console.error;
 
-    function formatArgs(args: any[]): string {
+    function formatArgs(args: unknown[]): string {
       return args
         .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
         .join(" ");
     }
 
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       originalLog(...args);
       invoke("log_frontend", { level: "info", message: formatArgs(args) }).catch(() => {});
     };
 
-    console.warn = (...args: any[]) => {
+    console.warn = (...args: unknown[]) => {
       originalWarn(...args);
       invoke("log_frontend", { level: "warn", message: formatArgs(args) }).catch(() => {});
     };
 
-    console.error = (...args: any[]) => {
+    console.error = (...args: unknown[]) => {
       originalError(...args);
       invoke("log_frontend", { level: "error", message: formatArgs(args) }).catch(() => {});
     };

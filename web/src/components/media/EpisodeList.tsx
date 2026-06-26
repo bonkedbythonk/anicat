@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { mediaApi, type Episode } from "@/lib/api";
+import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
 import { useSettingsStore } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
 
@@ -130,7 +130,7 @@ export function EpisodeList({
     return "default";
   };
 
-  const getStreamGroupFromServer = (s: any) => {
+  const getStreamGroupFromServer = (s: StreamServer) => {
     if (s.group) {
       if (s.group === "sub") return "hard_sub";
       return s.group;
@@ -149,7 +149,7 @@ export function EpisodeList({
     return null;
   };
 
-  const serverSpeedRank = (server: any) => {
+  const serverSpeedRank = (server: StreamServer) => {
     const url = (server.url || "").toLowerCase();
     if (url.includes("tools.fast4speed.rsvp")) return 0;
     if (url.includes("wixstatic.com") || url.includes("wixmp.com")) return 1;
@@ -158,7 +158,7 @@ export function EpisodeList({
     return 4;
   };
 
-  const getSortedStreams = (streams: any[]) => {
+  const getSortedStreams = (streams: StreamServer[]) => {
     if (!streams) return [];
     
     let filtered = [...streams];
@@ -240,11 +240,11 @@ export function EpisodeList({
     setResolvedStreams([]);
 
     try {
-      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider) as { streams?: any[] };
+      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider) as { streams?: StreamServer[] };
       setResolvedStreams(data.streams || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to load stream servers:", err);
-      setStreamsError(err?.message || "Failed to load stream servers.");
+      setStreamsError((err as Error)?.message || "Failed to load stream servers.");
     } finally {
       setLoadingStreamsEp(null);
     }

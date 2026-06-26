@@ -160,7 +160,7 @@ export async function fetchAniZipTitles(anilistId: number): Promise<Record<numbe
     if (!episodes) return {};
     const map: Record<number, string> = {};
     for (const [num, ep] of Object.entries(episodes)) {
-      const epData = ep as any;
+      const epData = ep as { title?: { en?: string; ja?: string } };
       const title = epData?.title?.en || epData?.title?.ja || "";
       if (title && !title.startsWith("Episode ") && !title.startsWith("EPISODE ")) {
         map[Number(num)] = title;
@@ -251,6 +251,7 @@ interface ViewerData {
   about?: string;
   avatar?: { large?: string; medium?: string };
   bannerImage?: string;
+  siteUrl?: string;
   options?: { displayAdultContent?: boolean };
   statistics?: {
     anime?: {
@@ -258,7 +259,18 @@ interface ViewerData {
       meanScore: number;
       minutesWatched: number;
       episodesWatched: number;
+      genres?: { genre: string; count: number }[];
     };
+    manga?: {
+      count: number;
+      meanScore: number;
+      chaptersRead: number;
+      volumesRead: number;
+    };
+  };
+  favourites?: {
+    anime?: { nodes?: MediaItem[] };
+    manga?: { nodes?: MediaItem[] };
   };
 }
 
@@ -271,6 +283,7 @@ interface ListEntry {
   repeat: number;
   private: boolean;
   notes?: string;
+  updatedAt?: number;
   startedAt?: { year?: number; month?: number; day?: number };
   completedAt?: { year?: number; month?: number; day?: number };
   media: MediaItem;
@@ -335,8 +348,7 @@ export async function removeMediaEntry(
 export async function getNotifications(page?: number): Promise<{
   Page: { notifications: Notification[]; pageInfo: PageInfo | null };
 }> {
-  const raw = await invoke<any>("get_notifications", { page });
-  return raw;
+  return invoke("get_notifications", { page });
 }
 
 // ── Playback ──────────────────────────────────────────────
@@ -453,9 +465,9 @@ export const mediaApi = {
       } as Record<string, string>)[status?.toLowerCase() ?? ""] ?? status?.toUpperCase() ?? "CURRENT";
 
       const result = await getUserLists(undefined, anilistStatus, type);
-      const lists = (result as any)?.MediaListCollection?.lists ?? [];
-      const entries = lists.flatMap((l: any) => l.entries ?? []);
-      const media = entries.map((entry: any) => ({
+      const lists = result?.MediaListCollection?.lists ?? [];
+      const entries = lists.flatMap((l) => l.entries ?? []);
+      const media = entries.map((entry) => ({
         ...entry.media,
         user_status: {
           id: entry.id,
@@ -583,9 +595,14 @@ export const mediaApi = {
     return result;
   },
   getSchedule: async (daysBack = 1, daysAhead = 7, page = 1, perPage = 50, mediaIds?: number[]) => {
-    const raw = await invoke<any>("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
+    const raw = await invoke<{
+      Page: {
+        airingSchedules: { episode: number; airingAt: number; media: MediaItem }[];
+        pageInfo?: PageInfo | null;
+      } | null;
+    }>("get_airing_schedule", { daysBack, daysAhead, page, perPage, mediaIds: mediaIds || [] });
     const schedules = raw?.Page?.airingSchedules ?? [];
-    const media = schedules.map((s: any) => ({
+    const media = schedules.map((s) => ({
       ...s.media,
       next_airing: { episode: s.episode, airing_at: new Date(s.airingAt * 1000).toISOString() },
     }));
@@ -596,8 +613,8 @@ export const mediaApi = {
   clearPlaybackStatus: async () => {},
    getProfile: async () => {
      try {
-       const raw = await invoke("get_user_profile");
-       const viewer = (raw as any)?.Viewer;
+       const raw = await invoke<{ Viewer: ViewerData | null }>("get_user_profile");
+       const viewer = raw?.Viewer;
        if (!viewer) return null;
        const animeStats = viewer.statistics?.anime;
        const mangaStats = viewer.statistics?.manga;
@@ -776,7 +793,7 @@ export type UserProfile = {
   manga_count?: number;
   volumes_read?: number;
   statistics?: unknown;
-  genres?: string[];
+  genres?: { genre: string; count: number; minutesWatched?: number }[];
   favorite_anime?: MediaItem[];
   favorite_manga?: MediaItem[];
 };

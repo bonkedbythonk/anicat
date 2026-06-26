@@ -1,23 +1,26 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
+import { getConfig, type HealthStatus } from "@/lib/api";
 import { initProxyPort } from "@/lib/proxy";
 import { usesOverlayTitlebar, isWindows } from "@/lib/platform";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
 import { HomeView } from "@/components/views/HomeView";
-import { MangaView } from "@/components/views/MangaView";
 import { SearchView } from "@/components/views/SearchView";
 import { ListsView } from "@/components/views/ListsView";
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { NotificationsView } from "@/components/views/NotificationsView";
 import { ProfileView } from "@/components/views/ProfileView";
-import { SettingsView } from "@/components/views/SettingsView";
-import { DownloadsView } from "@/components/views/DownloadsView";
+
+// Heavy views code-split — loaded only when first navigated to
+const MangaView = lazy(() => import("@/components/views/MangaView").then(m => ({ default: m.MangaView })));
+const SettingsView = lazy(() => import("@/components/views/SettingsView").then(m => ({ default: m.SettingsView })));
+const DownloadsView = lazy(() => import("@/components/views/DownloadsView").then(m => ({ default: m.DownloadsView })));
 import { MediaDetail } from "@/components/media/MediaDetail";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
@@ -26,7 +29,7 @@ import { KeyboardShortcutsOverlay } from "@/components/layout/KeyboardShortcutsO
 
 async function loadConfig() {
   try {
-    const config = await invoke<Record<string, unknown>>("get_config");
+    const config = await getConfig();
     useSettingsStore.getState().loadFromConfig(config);
   } catch {
     // Config will use defaults
@@ -45,7 +48,7 @@ export default function App() {
 
   const sidebarW = sidebarCompact ? 72 : 248;
 
-  const [health, setHealth] = useState<any>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const [onboardingSeen, setOnboardingSeen] = useState(true);
 
   // Two-finger swipe left on trackpad = go back from detail page
@@ -265,7 +268,9 @@ export default function App() {
               transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
               className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10"
             >
-              {renderView()}
+              <Suspense fallback={null}>
+                {renderView()}
+              </Suspense>
             </motion.div>
           )}
         </AnimatePresence>

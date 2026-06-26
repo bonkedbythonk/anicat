@@ -40,7 +40,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   // Two-step delete confirm (replaces window.confirm which is broken in Tauri WebView)
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
-  const [selectedCharacter, setSelectedCharacter] = useState<any>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
 
   const { data: config = null } = useQuery({
@@ -116,19 +116,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
 
   // Relations + Recommendations — from MEDIA_DETAIL_QUERY (item prop)
   const relations = useMemo(() =>
-    (fullItem as any)?.relations?.edges || (item as any).relations?.edges || [],
+    fullItem?.relations?.edges || item.relations?.edges || [],
   [fullItem, item]);
   const recommendations = useMemo(() =>
-    (fullItem as any)?.recommendations?.nodes || (item as any).recommendations?.nodes || [],
+    fullItem?.recommendations?.nodes || item.recommendations?.nodes || [],
   [fullItem, item]);
 
   // Surface the chronological chain (prequel/sequel) prominently so "what do I
   // watch before/after this" is answerable without opening the Related tab.
   // Prefer a TV-format entry so a side OVA/movie doesn't take the slot.
   const pickRel = (type: string) => {
-    const matches = relations.filter((r: any) => r.relationType === type && r.node);
+    const matches = relations.filter((r: { relationType: string; node?: MediaItem }) => r.relationType === type && r.node);
     if (!matches.length) return null;
-    return (matches.find((r: any) => r.node.format === 'TV') || matches[0]).node;
+    return (matches.find((r: { relationType: string; node?: MediaItem }) => r.node?.format === 'TV') || matches[0]).node;
   };
   const prequel = useMemo(() => pickRel('PREQUEL'), [relations]);
   const sequel = useMemo(() => pickRel('SEQUEL'), [relations]);
@@ -139,17 +139,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   });
 
   const { data: fillerEpisodes = [] } = useQuery({
-    queryKey: ["jikan-filler", (fullItem as any)?.id_mal],
-    queryFn: () => mediaApi.fetchJikanFiller((fullItem as any)?.id_mal),
-    enabled: !!((fullItem as any)?.id_mal),
+    queryKey: ["jikan-filler", fullItem?.id_mal],
+    queryFn: () => mediaApi.fetchJikanFiller(fullItem?.id_mal!),
+    enabled: !!fullItem?.id_mal,
     staleTime: 24 * 60 * 60 * 1000,
   });
 
   const episodeTitleMap = useMemo(() => {
     const map: Record<number, string> = {};
-    const eps = (fullItem as any)?.streaming_episodes;
+    const eps = fullItem?.streaming_episodes;
     if (Array.isArray(eps)) {
-      eps.forEach((ep: any, idx: number) => {
+      eps.forEach((ep, idx: number) => {
         if (!ep?.title) return;
         const epNumMatch = ep.title.match(/^Episode\s+(\d+)/i);
         if (epNumMatch && parseInt(epNumMatch[1]) !== idx + 1) return;
@@ -171,16 +171,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     queryKey: ["media-characters", item.id],
     queryFn: async () => {
       const res = await mediaApi.getCharacters(item.id);
-      const r = res as any;
+      const r = res as { Media?: { characters?: { edges?: unknown[] } }; media?: { characters?: { edges?: unknown[] } }; characters?: { edges?: unknown[] }; edges?: unknown[] };
       const edges = r?.Media?.characters?.edges
           || r?.media?.characters?.edges
           || r?.characters?.edges
           || r?.edges
           || [];
       // Flatten: each edge {role, node: {id, name, image}, voiceActors} -> {id, name, image, role, voiceActors}
-      return edges.map((edge: any) => ({
-        id: edge.node?.id ?? edge.id,
-        name: edge.node?.name ?? edge.name,
+      type RawEdge = { role?: string; id?: number; name?: { full: string }; image?: { large?: string }; node?: { id?: number; name?: { full: string }; image?: { large?: string } }; voiceActors?: Character["voiceActors"] };
+      return (edges as RawEdge[]).map((edge): Character => ({
+        id: (edge.node?.id ?? edge.id) ?? 0,
+        name: (edge.node?.name ?? edge.name) ?? { full: "" },
         image: edge.node?.image ?? edge.image,
         role: edge.role ?? "",
         voiceActors: edge.voiceActors ?? [],
@@ -435,16 +436,16 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               </div>
               <h1 className="text-3xl lg:text-4xl xl:text-5xl font-extrabold text-white leading-tight drop-shadow-xl">{title}</h1>
               <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-                {(fullItem as any).studios?.nodes?.[0]?.name && (
+                {fullItem.studios?.nodes?.[0]?.name && (
                   <>
                     <Building2 size={13} className="shrink-0" />
-                    <span className="text-white/70 font-medium">{(fullItem as any).studios.nodes[0].name}</span>
+                    <span className="text-white/70 font-medium">{fullItem.studios.nodes[0].name}</span>
                     <span className="text-white/20 select-none">·</span>
                   </>
                 )}
-                {((fullItem as any).season_year || fullItem.startDate?.year) && (
+                {(fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year) && (
                   <>
-                    <span>{(fullItem as any).season_year || fullItem.startDate?.year}</span>
+                    <span>{fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year}</span>
                     {(fullItem.episodes || fullItem.chapters) && <span className="text-white/20 select-none">·</span>}
                   </>
                 )}
@@ -459,10 +460,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                     <span className="text-xs text-muted-foreground">score</span>
                   </div>
                 ) : null}
-                {(fullItem as any).popularity > 0 && (
+                {(fullItem.popularity ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Users size={13} />
-                    <span className="text-sm">{((fullItem as any).popularity as number).toLocaleString()} users</span>
+                    <span className="text-sm">{fullItem.popularity!.toLocaleString()} users</span>
                   </div>
                 )}
               </div>
@@ -661,11 +662,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 { rel: prequel, label: 'Previous', side: 'prev' as const },
                 { rel: sequel, label: 'Next', side: 'next' as const },
               ].filter((s) => s.rel).map(({ rel, label, side }) => {
-                const cover = (rel as any).cover_image?.large || (rel as any).coverImage?.large;
+                const cover = rel?.cover_image?.large || rel?.coverImage?.large;
                 return (
                   <button
                     key={side}
-                    onClick={() => selectItem(rel)}
+                    onClick={() => rel && selectItem(rel)}
                     className={`group flex items-center gap-3 p-2.5 bg-foreground/[0.03] border border-white/[0.06] rounded-2xl hover:bg-foreground/[0.06] hover:border-accent/30 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
                   >
                     {side === 'prev'
@@ -674,8 +675,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                     {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] font-black text-accent uppercase tracking-widest">{label} Season</div>
-                      <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel.title?.english || rel.title?.romaji}</div>
-                      {(rel as any).format && <div className="text-[10px] text-muted-foreground mt-0.5">{(rel as any).format}</div>}
+                      <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
+                      {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
                     </div>
                   </button>
                 );
@@ -689,7 +690,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               {(['episodes', 'characters', 'seasons', 'more'] as const).map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab as any)}
+                  onClick={() => setActiveTab(tab)}
                   className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${activeTab === tab ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                 >
                   {tab === 'episodes' ? (isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -783,7 +784,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       {loadingChars ? (
                         <div className="col-span-4 py-20 flex justify-center"><Loader2 className="animate-spin text-accent" size={24} /></div>
                       ) : characters.length > 0 ? (
-                        characters.map((char: any) => (
+                        characters.map((char: Character) => (
                           <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 bg-foreground/[0.02] border border-border rounded-2xl hover:bg-foreground/[0.04] transition-colors group character-card text-left">
                             {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
                             <div className="min-w-0">
@@ -801,8 +802,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 {activeTab === 'seasons' && (
                   <motion.div key="seasons" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
                     {(() => {
-                      const seasonRels = relations.filter((r: any) => ['PREQUEL','SEQUEL','PARENT','SIDE_STORY','SUMMARY','ADAPTATION'].includes(r.relationType));
-                      const otherRels = relations.filter((r: any) => !['PREQUEL','SEQUEL','PARENT','SIDE_STORY','SUMMARY','ADAPTATION'].includes(r.relationType));
+                      type RelEdge = { relationType: string; node?: MediaItem };
+                      const seasonRels = relations.filter((r: RelEdge) => ['PREQUEL','SEQUEL','PARENT','SIDE_STORY','SUMMARY','ADAPTATION'].includes(r.relationType));
+                      const otherRels = relations.filter((r: RelEdge) => !['PREQUEL','SEQUEL','PARENT','SIDE_STORY','SUMMARY','ADAPTATION'].includes(r.relationType));
                       if (!seasonRels.length && !otherRels.length) return <div className="py-20 text-center text-muted-foreground text-xs font-bold">No related content.</div>;
                       return (
                         <div className="space-y-6">
@@ -810,11 +812,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             <div className="space-y-3">
                               <p className="text-xs font-semibold text-foreground">Seasons & Adaptations</p>
                               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                                {seasonRels.map((rel: any) => {
+                                {seasonRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
                                     <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left">
-                                      {((m as any).cover_image?.large || m.coverImage?.large) && <img src={proxyImage((m as any).cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
+                                      {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
                                         {rel.relationType && <div className="text-[9px] font-bold text-accent/80 mt-0.5">{rel.relationType.replace(/_/g, ' ')}</div>}
@@ -830,11 +832,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                             <div className="space-y-3">
                               <p className="text-xs font-semibold text-foreground">Other Relations</p>
                               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                                {otherRels.map((rel: any) => {
+                                {otherRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
                                     <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left">
-                                      {((m as any).cover_image?.large || m.coverImage?.large) && <img src={proxyImage((m as any).cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
+                                      {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
                                         {rel.relationType && <div className="text-[9px] font-bold text-accent/80 mt-0.5">{rel.relationType.replace(/_/g, ' ')}</div>}
@@ -857,14 +859,14 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       <div className="space-y-4">
                         <p className="text-xs font-semibold text-foreground">Recommendations</p>
                         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-                          {recommendations.map((rec: any) => {
+                          {(recommendations as { mediaRecommendation?: MediaItem; cover_image?: { large?: string }; coverImage?: { large?: string }; rating?: number }[]).map((rec) => {
                             const m = rec.mediaRecommendation; if (!m) return null;
                             return (
                               <button key={m.id} onClick={() => selectItem(m)} className="group space-y-2 text-left relative">
                                 <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
-                                  <img src={proxyImage((rec as any).cover_image?.large || m.coverImage?.large)} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                  <img src={proxyImage(rec.cover_image?.large || m.coverImage?.large)} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                                 </div>
-                                {rec.rating > 0 && <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-white text-[9px] font-bold">{rec.rating}%</span>}
+                                {(rec.rating ?? 0) > 0 && <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-white text-[9px] font-bold">{rec.rating}%</span>}
                                 <div className="text-[11px] font-bold text-muted-foreground line-clamp-2 group-hover:text-foreground transition-colors">{m.title?.english || m.title?.romaji}</div>
                               </button>
                             );
@@ -886,17 +888,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       {selectedCharacter && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={() => setSelectedCharacter(null)}>
           <div className="absolute inset-0 bg-black/60" />
-          <div className="relative max-w-md w-[90%] bg-background border border-border rounded-2xl p-6 shadow-2xl" onClick={(e: any) => e.stopPropagation()}>
+          <div className="relative max-w-md w-[90%] bg-background border border-border rounded-2xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setSelectedCharacter(null)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
             <div className="flex items-start space-x-4">
               {selectedCharacter.image?.large && <img src={selectedCharacter.image.large} alt={selectedCharacter.name?.full} className="w-20 h-20 rounded-xl object-cover shadow-lg shrink-0" />}
               <div className="min-w-0 space-y-1">
                 <div className="text-base font-bold text-foreground">{selectedCharacter.name?.full}</div>
                 <div className="text-[11px] text-muted-foreground capitalize">{selectedCharacter.role?.replace(/_/g, ' ')?.toLowerCase()}</div>
-                {selectedCharacter.voiceActors?.length > 0 && (
+                {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
                   <div className="pt-2 space-y-1.5">
                     <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Voice Actors</div>
-                    {selectedCharacter.voiceActors.map((va: any) => (
+                    {selectedCharacter.voiceActors?.map((va) => (
                       <div key={va.id} className="flex items-center space-x-2">
                         {va.image?.large && <img src={va.image.large} alt={va.name?.full} className="w-6 h-6 rounded-full object-cover" />}
                         <span className="text-xs text-foreground">{va.name?.full}</span>

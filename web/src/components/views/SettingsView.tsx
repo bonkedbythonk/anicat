@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
@@ -26,7 +26,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   useEffect(() => {
     const tab = useAppStore.getState().settingsDefaultTab;
     if (tab === "account" || tab === "maintenance") {
-      setActiveTab(tab as any);
+      setActiveTab(tab);
       useAppStore.getState().setSettingsDefaultTab(null);
     }
   }, []);
@@ -39,7 +39,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   const [releaseUrl, setReleaseUrl] = useState<string>("");
   const [authPending, setAuthPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [homeRows, setHomeRows] = useState<any[] | null>(() => {
+  const [homeRows, setHomeRows] = useState<{ id: string; visible: boolean }[] | null>(() => {
     try {
       const saved = typeof window !== "undefined" ? localStorage.getItem("anicat_home_rows") : null;
       return saved ? JSON.parse(saved) : null;
@@ -47,8 +47,8 @@ export function SettingsView({ health }: SettingsViewProps) {
   });
   const toggleHomeRow = (id: string) => {
     const rowDefs = ["airingToday", "continue", "newForYou", "smartPlaylist", "trending", "newlyReleasing", "seasonal"];
-    const current = homeRows || rowDefs.map(id => ({ id, visible: true }));
-    const next = current.map((r: any) => r.id === id ? { ...r, visible: !r.visible } : r);
+    const current = homeRows || rowDefs.map(rowId => ({ id: rowId, visible: true }));
+    const next = current.map((r) => r.id === id ? { ...r, visible: !r.visible } : r);
     setHomeRows(next);
     localStorage.setItem("anicat_home_rows", JSON.stringify(next));
     window.dispatchEvent(new Event("anicat_home_rows_changed"));
@@ -460,7 +460,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     { id: "seasonal", label: "Seasonal Highlights" },
                   ];
                   return rowDefs.map(r => {
-                    const row = (homeRows || rowDefs.map(x => ({ id: x.id, visible: true }))).find((x: any) => x.id === r.id);
+                    const row = (homeRows || rowDefs.map(x => ({ id: x.id, visible: true }))).find((x) => x.id === r.id);
                     const visible = row ? row.visible : true;
                     return (
                       <label key={r.id} className="flex items-center justify-between px-3 py-3 rounded-xl hover:bg-white/[0.015] transition-colors cursor-pointer group">
@@ -857,7 +857,7 @@ export function SettingsView({ health }: SettingsViewProps) {
               <CardSection title="Provider Debug" description="Test stream provider responses for a given anime and episode.">
                 <div className="space-y-3">
                   <input ref={debugSearchRef} type="text" placeholder="Search anime (e.g. Code Geass)..." className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
-                    onKeyDown={async (e: any) => {
+                    onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
                       if (e.key !== 'Enter') return;
                       const q = debugSearchRef.current?.value;
                       if (!q) return;
@@ -895,8 +895,8 @@ export function SettingsView({ health }: SettingsViewProps) {
                         })
                           .then((data) => {
                             const raw = JSON.stringify(data, null, 2);
-                            const finalStreams = (data?.final_streams as any[]) || [];
-                            const debugPasses = (data?.debug_passes as any[]) || [];
+                            const finalStreams = (data?.final_streams as Record<string, unknown>[]) || [];
+                            const debugPasses = (data?.debug_passes as { pass: string; error?: string }[]) || [];
                             const errors = (data?.errors as string[]) || [];
                             const pageTitle = data?.page_title || "";
                             const epNum = data?.episode ?? 0;
@@ -910,7 +910,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                               lines.push(`⚠️ ${errors.length} error(s): ${errors[0]}`);
                             }
                             if (debugPasses.length > 0) {
-                              const fails = debugPasses.filter((p: any) => p.pass === "error" || p.pass !== "pass");
+                              const fails = debugPasses.filter((p) => p.pass === "error" || p.pass !== "pass");
                               if (fails.length > 0) {
                                 lines.push(`⚠️ ${fails.length} scraper pass(es) failed: ${fails[0]?.error || "unknown"}`);
                               }

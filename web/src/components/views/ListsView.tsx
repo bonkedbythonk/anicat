@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentType } from "react";
 import { Loader2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Heart, Repeat } from "lucide-react";
 import { MediaCard } from "@/components/media/MediaCard";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
@@ -10,7 +10,7 @@ import { useAppStore } from "@/stores/app";
 
 type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped" | "repeating";
 
-const LIST_TABS: { key: WatchStatus; label: string; icon: any }[] = [
+const LIST_TABS: { key: WatchStatus; label: string; icon: ComponentType<{ size?: number; className?: string }> }[] = [
   { key: "watching", label: "Reading/Watching", icon: Monitor },
   { key: "repeating", label: "Rereading/Rewatching", icon: Repeat },
   { key: "completed", label: "Completed", icon: CheckCircle2 },

@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { useAppStore } from "@/stores/app";
+import type { ViewType } from "@/lib/types";
 
 const VIEW_KEYS = [
   "home", "search", "lists", "schedule",
   "notifications", "profile", "settings", "downloads",
 ] as const;
 
-const LETTER_SHORTCUTS: Record<string, string> = {
+const LETTER_SHORTCUTS: Record<string, ViewType> = {
   "h": "home",
   "/": "search",
   "l": "lists",
@@ -42,7 +43,7 @@ export function useKeyboardShortcuts() {
       // Prevent browser find for '/' key
       if (e.key === "/") {
         e.preventDefault();
-        setCurrentView("search" as any);
+        setCurrentView("search");
         return;
       }
 
@@ -58,7 +59,7 @@ export function useKeyboardShortcuts() {
       const shortcut = e.key.toLowerCase();
       if (LETTER_SHORTCUTS[shortcut] && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        setCurrentView(LETTER_SHORTCUTS[shortcut] as any);
+        setCurrentView(LETTER_SHORTCUTS[shortcut]);
       }
     }
 

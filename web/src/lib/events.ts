@@ -62,10 +62,10 @@ export function updateProgressInQueries(qc: QueryClient, mediaId: number, progre
     const data = q.state.data;
     if (!data) continue;
 
-    const visited = new Set();
+    const visited = new Set<object>();
     let mutated = false;
 
-    const updateObject = (obj: any): any => {
+    const updateObject = (obj: unknown): unknown => {
       if (!obj || typeof obj !== "object") return obj;
       if (visited.has(obj)) return obj;
       visited.add(obj);
@@ -74,12 +74,14 @@ export function updateProgressInQueries(qc: QueryClient, mediaId: number, progre
         return obj.map(item => updateObject(item));
       }
 
+      const record = obj as Record<string, unknown>;
+
       // Check if this is a media item with the matching ID
-      if (obj.id === mediaId && (obj.title || obj.coverImage || obj.cover_image)) {
+      if (record.id === mediaId && (record.title || record.coverImage || record.cover_image)) {
         mutated = true;
-        const entry = obj.media_list_entry || obj.mediaListEntry || obj.user_status;
-        const rawStatus = status || entry?.status || "watching";
-        
+        const entry = (record.media_list_entry || record.mediaListEntry || record.user_status) as Record<string, unknown> | undefined;
+        const rawStatus = status || (entry?.status as string) || "watching";
+
         const updatedEntry = entry ? {
           ...entry,
           progress,
@@ -94,13 +96,13 @@ export function updateProgressInQueries(qc: QueryClient, mediaId: number, progre
         };
 
         const userStatus = {
-          ...obj.user_status,
+          ...(record.user_status as Record<string, unknown>),
           progress,
           status: rawStatus.toLowerCase(),
         };
 
         return {
-          ...obj,
+          ...record,
           media_list_entry: updatedEntry,
           mediaListEntry: updatedEntry,
           user_status: userStatus,
@@ -108,21 +110,22 @@ export function updateProgressInQueries(qc: QueryClient, mediaId: number, progre
       }
 
       // Check if this is a media list entry with a media object matching mediaId
-      if (obj.media && obj.media.id === mediaId) {
+      const recordMedia = record.media as Record<string, unknown> | undefined;
+      if (recordMedia && recordMedia.id === mediaId) {
         mutated = true;
-        const rawStatus = status || obj.status || "CURRENT";
+        const rawStatus = status || (record.status as string) || "CURRENT";
         return {
-          ...obj,
+          ...record,
           progress,
           status: rawStatus.toUpperCase(),
-          media: updateObject(obj.media),
+          media: updateObject(record.media),
         };
       }
 
       // Otherwise recurse into all fields
-      const newObj: any = {};
+      const newObj: Record<string, unknown> = {};
       let localMutated = false;
-      for (const [k, v] of Object.entries(obj)) {
+      for (const [k, v] of Object.entries(record)) {
         const updated = updateObject(v);
         newObj[k] = updated;
         if (updated !== v) localMutated = true;
@@ -145,10 +148,10 @@ export function removeMediaFromQueries(qc: QueryClient, mediaId: number) {
     const data = q.state.data;
     if (!data) continue;
 
-    const visited = new Set();
+    const visited = new Set<object>();
     let mutated = false;
 
-    const removeObject = (obj: any): any => {
+    const removeObject = (obj: unknown): unknown => {
       if (!obj || typeof obj !== "object") return obj;
       if (visited.has(obj)) return obj;
       visited.add(obj);
@@ -156,11 +159,13 @@ export function removeMediaFromQueries(qc: QueryClient, mediaId: number) {
       if (Array.isArray(obj)) {
         const filtered = obj.filter(item => {
           if (item && typeof item === "object") {
-            if (item.id === mediaId && (item.title || item.coverImage || item.cover_image)) {
+            const r = item as Record<string, unknown>;
+            if (r.id === mediaId && (r.title || r.coverImage || r.cover_image)) {
               mutated = true;
               return false;
             }
-            if (item.media && item.media.id === mediaId) {
+            const m = r.media as Record<string, unknown> | undefined;
+            if (m && m.id === mediaId) {
               mutated = true;
               return false;
             }
@@ -170,18 +175,19 @@ export function removeMediaFromQueries(qc: QueryClient, mediaId: number) {
         return filtered.map(item => removeObject(item));
       }
 
-      if (obj.id === mediaId && (obj.title || obj.coverImage || obj.cover_image)) {
+      const record = obj as Record<string, unknown>;
+      if (record.id === mediaId && (record.title || record.coverImage || record.cover_image)) {
         mutated = true;
         return {
-          ...obj,
+          ...record,
           media_list_entry: null,
           mediaListEntry: null,
           user_status: null,
         };
       }
 
-      const newObj: any = {};
-      for (const [k, v] of Object.entries(obj)) {
+      const newObj: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(record)) {
         newObj[k] = removeObject(v);
       }
       return newObj;

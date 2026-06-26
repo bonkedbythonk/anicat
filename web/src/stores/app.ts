@@ -1,6 +1,28 @@
 import { create } from "zustand";
 import type { MediaItem, Episode, ViewType } from "@/lib/types";
 
+interface AppConfig {
+  general?: {
+    provider?: string;
+    autoplay?: boolean;
+    autoskip?: boolean;
+    anime_preview?: boolean;
+    preferred_title_language?: string;
+    downloads_path?: string;
+    notifications?: boolean;
+  };
+  stream?: {
+    player_type?: string;
+    preferred_quality?: string;
+    data_saver?: boolean;
+    shader_profile?: string;
+    translation_type?: string;
+  };
+  api?: {
+    anilist_token?: string | null;
+  };
+}
+
 interface PlaybackState {
   item: MediaItem | null;
   episode: Episode | null;
@@ -174,7 +196,7 @@ interface SettingsState {
   setAnilistToken: (t: string | null) => void;
   setTranslationType: (v: "sub" | "dub") => void;
   setShaderProfile: (v: string) => void;
-  loadFromConfig: (config: Record<string, unknown>) => void;
+  loadFromConfig: (config: AppConfig) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -206,31 +228,18 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
   loadFromConfig: (config) =>
     set({
-      playerType:
-        ((config as any)?.stream?.player_type as "embedded" | "external") ||
-        "embedded",
-      defaultProvider:
-        ((config as any)?.general?.provider as string) ||
-        "allanime",
-      autoplay: ((config as any)?.general?.autoplay as boolean) ?? true,
-      autoskip: ((config as any)?.general?.autoskip as boolean) ?? false,
-      animePreview:
-        ((config as any)?.general?.anime_preview as boolean) ?? true,
-      preferredQuality:
-        ((config as any)?.stream?.preferred_quality as string) || "1080p",
-      preferredTitleLanguage:
-        ((config as any)?.general?.preferred_title_language as string) ||
-        "romaji",
-      downloadsPath:
-        ((config as any)?.general?.downloads_path as string) || "",
-      dataSaver: ((config as any)?.stream?.data_saver as boolean) ?? false,
-      notifications:
-        ((config as any)?.general?.notifications as boolean) ?? true,
-      anilistToken:
-        ((config as any)?.api?.anilist_token as string) || null,
-      translationType:
-        ((config as any)?.stream?.translation_type as "sub" | "dub") || "sub",
-      shaderProfile:
-        ((config as any)?.stream?.shader_profile as string) || "balanced",
+      playerType: (config?.stream?.player_type as "embedded" | "external") || "embedded",
+      defaultProvider: config?.general?.provider || "allanime",
+      autoplay: config?.general?.autoplay ?? true,
+      autoskip: config?.general?.autoskip ?? false,
+      animePreview: config?.general?.anime_preview ?? true,
+      preferredQuality: config?.stream?.preferred_quality || "1080p",
+      preferredTitleLanguage: config?.general?.preferred_title_language || "romaji",
+      downloadsPath: config?.general?.downloads_path || "",
+      dataSaver: config?.stream?.data_saver ?? false,
+      notifications: config?.general?.notifications ?? true,
+      anilistToken: config?.api?.anilist_token || null,
+      translationType: (config?.stream?.translation_type as "sub" | "dub") || "sub",
+      shaderProfile: config?.stream?.shader_profile || "balanced",
     }),
 }));

@@ -219,6 +219,10 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     let resetTimer: ReturnType<typeof setTimeout>;
 
     const onWheel = (e: WheelEvent) => {
+      // Always stop propagation so App.tsx's window-level back gesture
+      // never accumulates deltaX while the manga reader is open.
+      e.stopPropagation();
+
       accX += e.deltaX;
       accY += Math.abs(e.deltaY);
       clearTimeout(resetTimer);
@@ -226,8 +230,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
 
       // Require horizontal dominance so vertical scroll doesn't misfire
       if (Math.abs(accX) < 40 || Math.abs(accX) < accY * 1.5) return;
-
-      e.stopPropagation();
       const direction = accX > 0 ? "forward" : "back";
       accX = 0;
       accY = 0;

@@ -115,7 +115,6 @@ export function NotificationsView({ onSelect }: NotificationsViewProps) {
               onClick={() => notif.media && onSelect(notif.media)}
               className="flex items-center space-x-4 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all cursor-pointer group"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img 
                 src={proxyImage(notif.media?.coverImage?.large)} 
                 alt="cover" 

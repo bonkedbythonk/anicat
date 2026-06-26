@@ -16,17 +16,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"],
-  "exclude": [
-    "src/**/*.old.*",
-    "src/**/*.old",
-    "src/**/*.old/**",
-    "src/app",
-    "src/components/*.old/**",
-    "src/components/media.old",
-    "src/components/views.old",
-    "src/components/layout.old",
-    "src/components/modals.old",
-    "src/components/shared.old"
-  ]
+  "include": ["src"]
 }

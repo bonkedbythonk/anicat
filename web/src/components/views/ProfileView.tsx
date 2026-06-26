@@ -60,7 +60,6 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
       {/* 1. Header Banner & Profile Card */}
       <div className="relative rounded-3xl overflow-hidden bg-surface border border-white/[0.06] shadow-2xl">
         {profile.banner_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={proxyImage(profile.banner_url)} alt="Banner" className="w-full h-48 lg:h-72 object-cover brightness-[0.6]" />
         ) : (
           <div className="w-full h-48 lg:h-72 bg-gradient-to-r from-accent to-secondary opacity-30" />
@@ -69,7 +68,6 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
         <div className="px-6 lg:px-8 pb-8 relative -mt-16 lg:-mt-20">
           <div className="flex flex-col md:flex-row md:items-end space-y-4 md:space-y-0 md:space-x-6">
             {profile.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={profile.avatar_url} alt="Avatar" className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl object-cover border-4 border-surface shadow-2xl" />
             ) : (
               <div className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl bg-white/10 border-4 border-surface flex items-center justify-center">

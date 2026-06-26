@@ -344,7 +344,6 @@ const Hero = memo(function Hero({
       <div ref={containerRef} className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden group -mx-6 lg:mx-0 lg:rounded-2xl hero-card-container forced-dark-container">
         {/* Background */}
         <div className="absolute inset-0 bg-background">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={proxyImage(item.banner_image || item.cover_image?.large || item.cover_image?.medium)}
             alt={title}

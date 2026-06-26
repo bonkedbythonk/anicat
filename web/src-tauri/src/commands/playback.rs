@@ -147,8 +147,19 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
             .to_string()
     };
 
-    // Prefer a system-installed mpv if present (Homebrew on macOS; winget,
-    // scoop, or choco on Windows), falling back to the bundled binary below.
+    // Prefer a system-installed mpv if present. Production macOS apps launched
+    // from Finder do not inherit the shell PATH, so /opt/homebrew/bin is not
+    // in it — check known install locations first before falling back to which.
+    #[cfg(target_os = "macos")]
+    {
+        let known = ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv", "/usr/bin/mpv"];
+        for p in &known {
+            if std::path::Path::new(p).exists() {
+                log::info!("Found system mpv at: {}", p);
+                return Ok((p.to_string(), config_dir, String::new()));
+            }
+        }
+    }
     let mpv_query = if cfg!(target_os = "windows") { "mpv.exe" } else { "mpv" };
     if let Some(path) = crate::util::find_on_path(mpv_query) {
         log::info!("Found system mpv at: {}", path);

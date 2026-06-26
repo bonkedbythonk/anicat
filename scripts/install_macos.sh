@@ -11,27 +11,8 @@ INSTALL_PATH="/Applications/$APP_NAME"
 
 
 echo "Step 1: Finding the latest version..."
-UPDATE_BRANCH="${UPDATE_BRANCH:-stable}"
-if [ "${1:-}" = "nightly" ]; then
-    UPDATE_BRANCH="nightly"
-fi
-CONFIG_FILE="$HOME/Library/Application Support/anicat/config.toml"
-if [ ! -f "$CONFIG_FILE" ]; then
-    CONFIG_FILE="$HOME/.config/anicat/config.toml"
-fi
-
-if [ -f "$CONFIG_FILE" ] && [ "$UPDATE_BRANCH" != "nightly" ]; then
-    if grep -q 'update_branch = "nightly"' "$CONFIG_FILE"; then
-        UPDATE_BRANCH="nightly"
-    fi
-fi
-
-if [ "$UPDATE_BRANCH" = "nightly" ]; then
-    # Fetch the release tagged "nightly"
-    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases/tags/nightly" 2>/dev/null)
-else
-    # Fetch the latest non-prerelease release (first in the list that isn't a prerelease)
-    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases" | python3 -c "
+# Fetch the latest non-prerelease release (first in the list that isn't a prerelease)
+LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -42,7 +23,6 @@ try:
                 break
 except: pass
 " 2>/dev/null)
-fi
 
 DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -o "https://github.com/bonkedbythonk/anicat/releases/download/[^\"]*\.dmg" | head -n 1)
 
@@ -51,11 +31,6 @@ if [ -z "$DOWNLOAD_URL" ]; then
     echo "Try again in a few minutes, or download manually from:"
     echo "  https://github.com/bonkedbythonk/anicat/releases"
     exit 1
-fi
-
-# Auto-detect nightly
-if echo "$DOWNLOAD_URL" | grep -q "nightly"; then
-    UPDATE_BRANCH="nightly"
 fi
 
 TMP_DMG="/tmp/anicat_latest.dmg"
@@ -99,25 +74,6 @@ rm -f "$TMP_DMG"
 
 # Remove quarantine flag recursively from the entire app bundle
 xattr -r -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
-
-# Write nightly config if needed
-if [ "$UPDATE_BRANCH" = "nightly" ]; then
-    CONFIG_DIR="$HOME/Library/Application Support/anicat"
-    CONFIG_FILE="$CONFIG_DIR/config.toml"
-    mkdir -p "$CONFIG_DIR"
-    if [ -f "$CONFIG_FILE" ]; then
-        if grep -q '^update_branch' "$CONFIG_FILE"; then
-            sed -i '' 's/^update_branch = .*/update_branch = "nightly"/' "$CONFIG_FILE"
-        else
-            echo 'update_branch = "nightly"' >> "$CONFIG_FILE"
-        fi
-    else
-        cat > "$CONFIG_FILE" <<'TOML'
-[general]
-update_branch = "nightly"
-TOML
-    fi
-fi
 
 # Start Anicat
 echo "Step 4: Opening Anicat..."

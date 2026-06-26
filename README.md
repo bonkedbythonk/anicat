@@ -3,7 +3,7 @@
   <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
@@ -12,16 +12,19 @@
 
 ---
 
-Anicat is a native macOS desktop app for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a Svelte/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
+Anicat is a native desktop app (macOS and Windows) for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a React/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
 
 ---
 
 ## Quick Install
 
-Paste in Terminal:
+**macOS** — paste in Terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
+
+**Windows** — download the latest `Anicat_*_x64-setup.exe` from the
+[Releases page](https://github.com/bonkedbythonk/anicat/releases/latest) and run it.
 
 ---
 
@@ -35,14 +38,6 @@ curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts
 - **Discovery** — Home dashboard with configurable rows (trending, seasonal, airing today, continue watching, smart picks). Search with filters. Notification feed from AniList.
 - **Discord Rich Presence** — Shows what you're watching in your Discord status.
 - **Skins** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga (Bangers + Japanese sans-serif).
-- **Nightly Builds** — Early-access features. Switch via Settings → Update Branch.
-
-## Branches
-
-| Branch | Use |
-|--------|-----|
-| `master` | Stable releases. Tested, reviewed, ready for daily use. |
-| `nightly` | Latest features and fixes. May be less stable. |
 
 ## Building from Source
 
@@ -67,7 +62,7 @@ npm run tauri dev
 | [AniList](https://anilist.co) | Library, tracking, search, profile |
 | [mpv](https://mpv.io) | External media player (recommended) |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Episode downloading |
-| [Python 3](https://python.org) | Required for CLI/TUI mode & building from source |
+| [Python 3](https://python.org) | Runs the scraper sidecar; required when building from source |
 
 ## Legal
 

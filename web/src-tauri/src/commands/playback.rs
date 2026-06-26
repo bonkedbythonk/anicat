@@ -486,7 +486,7 @@ pub async fn start_playback(
                             use tauri::Emitter;
                             let _ = app.emit("show_notification", serde_json::json!({
                                 "message": format!(
-                                    "{} unavailable — playing from {}",
+                                    "Couldn't reach {} — playing from {}",
                                     provider_label(&provider_name),
                                     provider_label(&fallback_provider),
                                 )

@@ -284,7 +284,7 @@ pub async fn get_episodes(
                     Ok(info) if !info.episodes.is_empty() => {
                         use tauri::Emitter;
                         let _ = app.emit("show_notification", serde_json::json!({
-                            "message": format!("{} unavailable — loaded episodes from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
+                            "message": format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
                         }));
                         episodes = info.episodes;
                     }

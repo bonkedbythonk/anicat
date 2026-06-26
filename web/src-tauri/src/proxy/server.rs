@@ -563,6 +563,38 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url, proxy_port: u1
     new_playlist
 }
 
+/// Domains the proxy is allowed to fetch from. Entries with a dot are matched
+/// as domain suffixes (`anilist.co` matches `s4.anilist.co`); bare tokens
+/// (`anilistcdn`) are matched against individual host labels, which covers
+/// CDN subdomains without matching unrelated hosts.
+const ALLOWED_DOMAINS: &[&str] = &[
+    "anilist.co", "anilistcdn",
+    "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
+    "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
+    "gravatar.com",
+    "allanime.day", "allanimecdn", "youtu-chan.com",
+    "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
+    "filemoon.sx", "filemoon.art", "filemoon.top",
+    "repackager.wixmp.com",
+];
+
+fn host_is_allowed(url: &str) -> bool {
+    let host = match reqwest::Url::parse(url) {
+        Ok(u) => match u.host_str() {
+            Some(h) => h.to_lowercase(),
+            None => return false,
+        },
+        Err(_) => return false,
+    };
+    ALLOWED_DOMAINS.iter().any(|d| {
+        if d.contains('.') {
+            host == *d || host.ends_with(&format!(".{d}"))
+        } else {
+            host.split('.').any(|label| label.contains(d))
+        }
+    })
+}
+
 async fn proxy_handler(
     State(state): State<ProxyState>,
     Query(params): Query<ProxyQuery>,
@@ -570,19 +602,11 @@ async fn proxy_handler(
 ) -> Result<Response, StatusCode> {
     let url = &params.url;
 
-    // Restrict proxy to known media domains only (SSRF prevention)
-    let allowed_domains = [
-        "anilist.co", "anilistcdn",
-        "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
-        "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
-        "gravatar.com",
-        "allanime.day", "allanimecdn", "youtu-chan.com",
-        "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
-        "filemoon.sx", "filemoon.art", "filemoon.top",
-        "repackager.wixmp.com",
-    ];
-    let is_allowed = allowed_domains.iter().any(|d| url.contains(d));
-    if !is_allowed {
+    // Restrict proxy to known media domains only (SSRF prevention). Matching is
+    // done against the parsed *host*, never the raw URL string — a substring
+    // match on the whole URL is bypassable with e.g.
+    // `http://169.254.169.254/?x=anilist.co`.
+    if !host_is_allowed(url) {
         log::warn!("Proxy blocked request to disallowed domain: {}", url);
         return Err(StatusCode::FORBIDDEN);
     }
@@ -698,4 +722,31 @@ async fn proxy_handler(
     response
         .body(Body::from(bytes))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_is_allowed;
+
+    #[test]
+    fn allows_known_media_hosts() {
+        assert!(host_is_allowed("https://s4.anilist.co/file/anilistcdn/x.jpg"));
+        assert!(host_is_allowed("https://allanime.day/apivtwo/x.m3u8"));
+        assert!(host_is_allowed("https://api.allanime.day/api"));
+        assert!(host_is_allowed("https://mangakatana.com/page.jpg"));
+        assert!(host_is_allowed("https://repackager.wixmp.com/video.mp4"));
+        // bare CDN token matched as a host label
+        assert!(host_is_allowed("https://allanimecdn.b-cdn.net/seg1.ts"));
+    }
+
+    #[test]
+    fn blocks_ssrf_bypass_attempts() {
+        // token in the query string must not grant access
+        assert!(!host_is_allowed("http://169.254.169.254/latest/meta-data/?x=anilist.co"));
+        assert!(!host_is_allowed("http://evil.com/?x=allanime.day"));
+        // suffix-spoofing: allowed domain as a prefix label of a hostile host
+        assert!(!host_is_allowed("http://anilist.co.evil.com/x"));
+        assert!(!host_is_allowed("http://localhost:8080/admin"));
+        assert!(!host_is_allowed("not a url"));
+    }
 }

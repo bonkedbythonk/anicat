@@ -208,9 +208,12 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleNext, handlePrev, onClose, readingDirection]);
 
-  // Trackpad horizontal swipe → flip pages (single/double mode only)
+  // Trackpad horizontal swipe → flip pages (single/double mode only).
+  // Attached to the container element (not window) so stopPropagation
+  // prevents App.tsx's window-level "swipe back" handler from also firing.
   useEffect(() => {
-    if (readingMode === "vertical") return;
+    const container = containerRef.current;
+    if (!container || readingMode === "vertical") return;
     let accX = 0;
     let accY = 0;
     let resetTimer: ReturnType<typeof setTimeout>;
@@ -224,6 +227,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       // Require horizontal dominance so vertical scroll doesn't misfire
       if (Math.abs(accX) < 40 || Math.abs(accX) < accY * 1.5) return;
 
+      e.stopPropagation();
       const direction = accX > 0 ? "forward" : "back";
       accX = 0;
       accY = 0;
@@ -235,9 +239,9 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       }
     };
 
-    window.addEventListener("wheel", onWheel, { passive: true });
+    container.addEventListener("wheel", onWheel, { passive: true });
     return () => {
-      window.removeEventListener("wheel", onWheel);
+      container.removeEventListener("wheel", onWheel);
       clearTimeout(resetTimer);
     };
   }, [readingMode, readingDirection, handleNext, handlePrev]);

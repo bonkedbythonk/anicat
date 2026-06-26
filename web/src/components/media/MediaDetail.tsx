@@ -477,11 +477,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
             </div>
           </div>
 
-          {/* Two-column layout: left = metadata/synopsis, right = episode list */}
-          <div className="mt-8 grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-x-10 items-start">
-          <div> {/* left column */}
           {/* Action bar */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="mt-8 flex items-center gap-3 flex-wrap">
             {(() => {
               const currentProgress = actualProgress;
               const total = fullItem.episodes || fullItem.chapters || 0;
@@ -686,12 +683,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               })}
             </div>
           )}
-          </div> {/* end left column */}
 
-          {/* Right column — episode list, sticks to top while left scrolls */}
-          <div className="hidden xl:block xl:sticky xl:top-6">
           {/* Tabs */}
-          <div className="space-y-6">
+          <div className="mt-10 space-y-6">
             <div className="flex border-b border-white/[0.06] pb-0 relative">
               {(['episodes', 'characters', 'seasons', 'more'] as const).map((tab) => (
                 <button
@@ -887,8 +881,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               </AnimatePresence>
             </div>
           </div>
-          </div> {/* end right column */}
-          </div> {/* end grid */}
         </div>
       </div>
 

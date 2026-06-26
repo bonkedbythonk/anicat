@@ -227,7 +227,7 @@ export default function App() {
                 <line x1="12" x2="12" y1="15" y2="3" />
               </svg>
             </div>
-            <span className="max-w-xs truncate">{notification.message}</span>
+            <span className="max-w-sm leading-snug">{notification.message}</span>
           </motion.div>
         )}
       </AnimatePresence>

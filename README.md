@@ -3,66 +3,123 @@
   <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
 
   <p>
+    <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
-  <img src="assets/branding/dashboard.png" alt="Anicat Desktop" width="720">
+  <img src="assets/branding/dashboard.png" alt="Anicat home screen" width="720">
 </div>
 
 ---
 
-Anicat is a native desktop app (macOS and Windows) for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a React/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
+Anicat is a native desktop app for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a React/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
 
 ---
 
-## Quick Install
+## Table of Contents
 
-**macOS** — paste in Terminal:
+- [Install](#install)
+- [First-run Setup](#first-run-setup)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Building from Source](#building-from-source)
+- [Dependencies](#dependencies)
+- [Legal](#legal)
+
+---
+
+## Install
+
+### macOS
+
+Download the latest `.dmg` from the [Releases page](https://github.com/bonkedbythonk/anicat/releases/latest), or paste in Terminal:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
-**Windows** — download the latest `Anicat_*_x64-setup.exe` from the
-[Releases page](https://github.com/bonkedbythonk/anicat/releases/latest) and run it.
+> **Gatekeeper warning** — the DMG is unsigned. Right-click the app and choose **Open** the first time, then click Open again in the dialog. After that it launches normally.
+
+### Windows
+
+Download the latest `Anicat_*_x64-setup.exe` from the [Releases page](https://github.com/bonkedbythonk/anicat/releases/latest) and run it. Windows SmartScreen may warn about an unknown publisher — click **More info → Run anyway**.
+
+---
+
+## First-run Setup
+
+Anicat requires an AniList account to track progress and sync your library.
+
+1. Open the app and go to **Settings → Account**.
+2. Click **Connect AniList** — this opens a browser window to authorize the app.
+3. Once authorized, your library loads automatically on the home screen.
+
+AniList is only used for tracking. Playback and the episode list do not require an account.
 
 ---
 
 ## Features
 
-- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip, or embedded HLS player. Multi-provider fallback, sub/dub server selection, HLS proxy.
-- **Manga Reader** — Read chapters with three viewing modes (single, double, vertical scroll), RTL/LTR support, keyboard navigation, and AniList progress sync.
-- **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes auto-register on mpv close. Inline editing in the detail drawer.
-- **Download Queue** — Background downloader via yt-dlp with real-time progress. Browse and play offline library.
-- **Schedule** — 7-day airing calendar with live countdowns. Filter to your watching list.
-- **Discovery** — Home dashboard with configurable rows (trending, seasonal, airing today, continue watching, smart picks). Search with filters. Notification feed from AniList.
-- **Discord Rich Presence** — Shows what you're watching in your Discord status.
-- **Skins** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga (Bangers + Japanese sans-serif).
+- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip), or embedded HLS player. Multi-provider fallback, sub/dub selection, resume position.
+- **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, and AniList progress sync.
+- **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
+- **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
+- **Schedule** — 7-day airing calendar with live countdowns, filtered to your watching list.
+- **Discovery** — Configurable home rows (trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
+- **Discord Rich Presence** — Shows what you are watching in your Discord status.
+- **Themes** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga.
+
+---
+
+## Screenshots
+
+<div align="center">
+  <img src="assets/branding/dashboard.png" alt="Home screen" width="720">
+  <br><br>
+  <!-- Add detail page screenshot: assets/branding/detail.png -->
+  <!-- Add manga reader screenshot: assets/branding/manga.png -->
+</div>
+
+---
 
 ## Building from Source
 
 **Prerequisites:**
-- Rust (stable toolchain)
-- Node.js
-- [uv](https://docs.astral.sh/uv/) — manages the Python scraper sidecar in `scraper/`
-- `mpv` — `brew install mpv`
-- System deps for [Tauri v2](https://v2.tauri.app/start/prerequisites/)
+
+- [Rust](https://rustup.rs/) stable toolchain
+- [Node.js](https://nodejs.org/) 18+
+- [uv](https://docs.astral.sh/uv/) — Python environment manager for the scraper sidecar
+- `mpv` — `brew install mpv` (macOS) or download from [mpv.io](https://mpv.io) (Windows)
+- Tauri v2 system dependencies — see [Prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
-cd anicat/web
+cd anicat
+
+# Install Python scraper dependencies
+uv sync --dev --all-extras
+
+# Install frontend dependencies and run in dev mode
+cd web
 npm install
 npm run tauri dev
 ```
 
+The dev build uses the Python scraper source files directly. The production build (`npm run tauri build`) freezes them into a standalone binary via PyInstaller.
+
+---
+
 ## Dependencies
 
 | Dependency | Purpose |
-|-----------|---------|
-| [AniList](https://anilist.co) | Library, tracking, search, profile |
-| [mpv](https://mpv.io) | External media player (recommended) |
+|---|---|
+| [AniList](https://anilist.co) | Library, tracking, search, profile data |
+| [mpv](https://mpv.io) | External media player |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Episode downloading |
-| [Python 3](https://python.org) | Runs the scraper sidecar; required when building from source |
+| [Python 3](https://python.org) | Scraper sidecar runtime (build only) |
+
+---
 
 ## Legal
 

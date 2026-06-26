@@ -14,6 +14,27 @@ static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync:
 /// stops offering a resume — there is exactly one watched threshold.
 const WATCHED_THRESHOLD_PCT: f64 = 85.0;
 
+/// True once playback has passed the watched threshold for an episode of the
+/// given duration. Below it — or with an unknown (non-positive) duration — the
+/// episode is not counted as watched and AniList progress does not advance.
+fn is_watched(stop_time: i64, duration: i64) -> bool {
+    duration > 0 && (stop_time as f64 / duration as f64) * 100.0 >= WATCHED_THRESHOLD_PCT
+}
+
+/// Resume position for an episode, in seconds. Returns 0 (start from the
+/// beginning) when the episode is already watched, when the recorded position
+/// is trivially small, or when the duration is unknown — so a finished episode
+/// never drops the user back near the end and a brief sample never starts in
+/// the middle.
+fn resume_position(stop_time: i64, duration: i64) -> i64 {
+    const MIN_RESUME_SECONDS: i64 = 30;
+    if duration <= 0 || stop_time < MIN_RESUME_SECONDS || is_watched(stop_time, duration) {
+        0
+    } else {
+        stop_time
+    }
+}
+
 fn get_ipc_path() -> String {
     if cfg!(target_os = "windows") {
         r"\\.\pipe\anicat-mpv".to_string()
@@ -333,21 +354,12 @@ pub async fn start_playback(
     let db = state.open_db()?;
 
     let resume_seconds = {
-        // An episode past the watched threshold is finished — don't drop the
-        // user back near the end of something they already completed. Also
-        // ignore trivially small positions so a brief sample doesn't start the
-        // episode in the middle.
-        const MIN_RESUME_SECONDS: i64 = 30;
         let mut sec = 0;
         if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, media_id) {
             if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
-                let duration = entry.duration;
-                if duration > 0 {
-                    let pct = (entry.stop_time as f64 / duration as f64) * 100.0;
-                    if pct < WATCHED_THRESHOLD_PCT && entry.stop_time >= MIN_RESUME_SECONDS {
-                        sec = entry.stop_time;
-                        log::info!("Found resume position: {}s (duration: {}s, {:.1}%)", sec, duration, pct);
-                    }
+                sec = resume_position(entry.stop_time, entry.duration);
+                if sec > 0 {
+                    log::info!("Found resume position: {}s (duration: {}s)", sec, entry.duration);
                 }
             }
         }
@@ -1106,11 +1118,10 @@ pub async fn record_playback_progress(
     );
 
     if duration > 0 {
-        let percentage = (stop_time as f64 / duration as f64) * 100.0;
         // Completion is the ONLY automatic way AniList progress advances: you
         // played the episode past the watched threshold. Navigation (next/prev)
         // records the real position but never forces this.
-        if percentage >= WATCHED_THRESHOLD_PCT {
+        if is_watched(stop_time, duration) {
             // Serialize automatic writes with manual list edits and with each
             // other, so the many concurrent recorders fired by one stop/next
             // event (player_stop, shutdown handler, process-exit monitor) can't
@@ -1198,4 +1209,33 @@ pub async fn get_all_last_watched(
 ) -> Result<HashMap<i64, String>, String> {
     let db = state.open_db()?;
     crate::registry::service::get_all_last_watched(&db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_watched, resume_position};
+
+    #[test]
+    fn watched_only_past_threshold() {
+        // 85% threshold on a 100s episode.
+        assert!(!is_watched(84, 100));
+        assert!(is_watched(85, 100));
+        assert!(is_watched(100, 100));
+        // Unknown duration is never "watched".
+        assert!(!is_watched(9999, 0));
+        assert!(!is_watched(50, -1));
+    }
+
+    #[test]
+    fn resume_skips_finished_and_trivial_positions() {
+        // Mid-episode past the 30s floor resumes where you stopped.
+        assert_eq!(resume_position(600, 1400), 600);
+        // Under the floor starts from the beginning.
+        assert_eq!(resume_position(12, 1400), 0);
+        assert_eq!(resume_position(30, 1400), 30);
+        // A finished episode (>= threshold) never resumes near the end.
+        assert_eq!(resume_position(1300, 1400), 0);
+        // Unknown duration cannot resume.
+        assert_eq!(resume_position(500, 0), 0);
+    }
 }

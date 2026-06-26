@@ -1339,6 +1339,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
     async fn test_synonym_fallbacks() {
         let _ = env_logger::builder().is_test(true).try_init();
         let state = AppState::new();

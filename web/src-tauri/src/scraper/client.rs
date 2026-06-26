@@ -450,6 +450,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
     async fn test_search() {
         let _ = env_logger::builder().is_test(true).try_init();
         let http_client = reqwest::Client::new();

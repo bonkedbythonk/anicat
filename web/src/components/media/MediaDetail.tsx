@@ -95,7 +95,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     isLoading: loadingEps,
   } = useQuery({
     queryKey: ["media-episodes", item.id, isManga ? "mangakatana" : selectedProvider],
-    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || undefined),
+    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || undefined, fullItem?.episodes ?? item.episodes ?? undefined),
     enabled: !!selectedProvider || isManga,
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];

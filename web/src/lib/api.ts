@@ -205,8 +205,9 @@ export async function getEpisodes(
   mediaId: number,
   provider?: string,
   title?: string,
+  episodeCount?: number,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider: provider || "allanime", title: title || null });
+  return invoke("get_episodes", { mediaId, provider: provider || "allanime", title: title || null, episodeCount: episodeCount ?? null });
 }
 
 export async function getChapterPages(

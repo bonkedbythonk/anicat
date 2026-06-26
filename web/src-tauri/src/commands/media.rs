@@ -207,6 +207,7 @@ pub async fn get_episodes(
     media_id: i64,
     provider: Option<String>,
     title: Option<String>,
+    episode_count: Option<i64>,
 ) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
     let fallback = {
@@ -279,22 +280,44 @@ pub async fn get_episodes(
     // or an empty list), resolve and scrape the fallback provider instead of
     // showing a dead episode list. Only for anime — manga has one provider.
     if episodes.is_empty() && !is_manga {
-        let has_fallback = !fallback.is_empty() && fallback != "none" && fallback != provider_name;
-        if has_fallback {
-            log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
-            let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
-                .or(resolve_and_save_provider_slug(&state, media_id, &fallback, false, None).await.ok().flatten());
-            if let Some(slug) = fb_slug {
-                match state.scraper_manager.get_anime(&slug, &fallback).await {
-                    Ok(info) if !info.episodes.is_empty() => {
-                        use tauri::Emitter;
-                        let _ = app.emit("show_notification", serde_json::json!({
-                            "message": format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
-                        }));
-                        episodes = info.episodes;
+        // First try: synthesise from the AniList episode count the frontend
+        // already knows. This covers cases where the scraper's show() query
+        // returns empty availableEpisodesDetail/availableEpisodes even though
+        // streams resolve correctly (the stream query uses a different endpoint).
+        if let Some(count) = episode_count.filter(|&n| n > 0) {
+            log::info!(
+                "get_episodes: '{}' returned no episodes but AniList count is {}; synthesising list",
+                provider_name, count
+            );
+            episodes = (1..=count)
+                .map(|n| crate::scraper::client::Episode {
+                    number: n as i32,
+                    title: None,
+                    image: None,
+                    download_status: None,
+                })
+                .collect();
+        }
+
+        // Second try: ask the fallback provider if we still have nothing.
+        if episodes.is_empty() {
+            let has_fallback = !fallback.is_empty() && fallback != "none" && fallback != provider_name;
+            if has_fallback {
+                log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
+                let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
+                    .or(resolve_and_save_provider_slug(&state, media_id, &fallback, false, None).await.ok().flatten());
+                if let Some(slug) = fb_slug {
+                    match state.scraper_manager.get_anime(&slug, &fallback).await {
+                        Ok(info) if !info.episodes.is_empty() => {
+                            use tauri::Emitter;
+                            let _ = app.emit("show_notification", serde_json::json!({
+                                "message": format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
+                            }));
+                            episodes = info.episodes;
+                        }
+                        Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
+                        Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
                     }
-                    Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
-                    Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
                 }
             }
         }

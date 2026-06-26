@@ -615,75 +615,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
             </div>
           </div>
 
-          <div className="mt-8 border-t border-white/[0.05]" />
-
-          {/* Synopsis */}
-          {fullItem.description && (
-            <div className="mt-6 space-y-3">
-              <h3 className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Synopsis</h3>
-              <motion.div
-                className="relative overflow-hidden"
-                animate={{ maxHeight: isExpanded ? 2000 : 120 }}
-                initial={false}
-                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-              >
-                <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
-                {!isExpanded && synopsisOverflows && (
-                  <div className="absolute bottom-0 left-0 right-0 h-12 pointer-events-none" style={{ background: 'linear-gradient(to bottom, transparent, rgba(5,5,5,0.97))' }} />
-                )}
-              </motion.div>
-              {synopsisOverflows && (
-                <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
-                  <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
-                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Next Episode Banner */}
-          {!isManga && fullItem.next_airing && (
-            <div className="mt-6 bg-accent/5 border border-accent/10 rounded-2xl p-5 flex items-center space-x-4 next-episode-banner">
-              <div className="p-3 bg-accent/10 rounded-xl text-accent shadow-inner"><Calendar size={20} /></div>
-              <div>
-                <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
-                <div className="text-base text-foreground font-bold">
-                  Episode {fullItem.next_airing.episode}{' '}
-                  <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Season chain: previous / next */}
-          {(prequel || sequel) && (
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { rel: prequel, label: 'Previous', side: 'prev' as const },
-                { rel: sequel, label: 'Next', side: 'next' as const },
-              ].filter((s) => s.rel).map(({ rel, label, side }) => {
-                const cover = rel?.cover_image?.large || rel?.coverImage?.large;
-                return (
-                  <button
-                    key={side}
-                    onClick={() => rel && selectItem(rel)}
-                    className={`group flex items-center gap-3 p-2.5 bg-foreground/[0.03] border border-white/[0.06] rounded-2xl hover:bg-foreground/[0.06] hover:border-accent/30 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
-                  >
-                    {side === 'prev'
-                      ? <ChevronLeft size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
-                      : <ChevronRight size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />}
-                    {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[10px] font-black text-accent uppercase tracking-widest">{label} Season</div>
-                      <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
-                      {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Tabs */}
           <div className="mt-10 space-y-6">
             <div className="flex border-b border-white/[0.06] pb-0 relative">
@@ -881,6 +812,75 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               </AnimatePresence>
             </div>
           </div>
+
+          <div className="mt-8 border-t border-white/[0.05]" />
+
+          {/* Synopsis */}
+          {fullItem.description && (
+            <div className="mt-6 space-y-3">
+              <h3 className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Synopsis</h3>
+              <motion.div
+                className="relative overflow-hidden"
+                animate={{ maxHeight: isExpanded ? 2000 : 120 }}
+                initial={false}
+                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+              >
+                <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
+                {!isExpanded && synopsisOverflows && (
+                  <div className="absolute bottom-0 left-0 right-0 h-12 pointer-events-none" style={{ background: 'linear-gradient(to bottom, transparent, rgba(5,5,5,0.97))' }} />
+                )}
+              </motion.div>
+              {synopsisOverflows && (
+                <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
+                  <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
+                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Next Episode Banner */}
+          {!isManga && fullItem.next_airing && (
+            <div className="mt-6 bg-accent/5 border border-accent/10 rounded-2xl p-5 flex items-center space-x-4 next-episode-banner">
+              <div className="p-3 bg-accent/10 rounded-xl text-accent shadow-inner"><Calendar size={20} /></div>
+              <div>
+                <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
+                <div className="text-base text-foreground font-bold">
+                  Episode {fullItem.next_airing.episode}{' '}
+                  <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Season chain: previous / next */}
+          {(prequel || sequel) && (
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { rel: prequel, label: 'Previous', side: 'prev' as const },
+                { rel: sequel, label: 'Next', side: 'next' as const },
+              ].filter((s) => s.rel).map(({ rel, label, side }) => {
+                const cover = rel?.cover_image?.large || rel?.coverImage?.large;
+                return (
+                  <button
+                    key={side}
+                    onClick={() => rel && selectItem(rel)}
+                    className={`group flex items-center gap-3 p-2.5 bg-foreground/[0.03] border border-white/[0.06] rounded-2xl hover:bg-foreground/[0.06] hover:border-accent/30 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
+                  >
+                    {side === 'prev'
+                      ? <ChevronLeft size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
+                      : <ChevronRight size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />}
+                    {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-black text-accent uppercase tracking-widest">{label} Season</div>
+                      <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
+                      {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

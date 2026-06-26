@@ -208,6 +208,40 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleNext, handlePrev, onClose, readingDirection]);
 
+  // Trackpad horizontal swipe → flip pages (single/double mode only)
+  useEffect(() => {
+    if (readingMode === "vertical") return;
+    let accX = 0;
+    let accY = 0;
+    let resetTimer: ReturnType<typeof setTimeout>;
+
+    const onWheel = (e: WheelEvent) => {
+      accX += e.deltaX;
+      accY += Math.abs(e.deltaY);
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => { accX = 0; accY = 0; }, 180);
+
+      // Require horizontal dominance so vertical scroll doesn't misfire
+      if (Math.abs(accX) < 40 || Math.abs(accX) < accY * 1.5) return;
+
+      const direction = accX > 0 ? "forward" : "back";
+      accX = 0;
+      accY = 0;
+
+      if (readingDirection === "rtl") {
+        if (direction === "forward") handlePrev(); else handleNext();
+      } else {
+        if (direction === "forward") handleNext(); else handlePrev();
+      }
+    };
+
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      clearTimeout(resetTimer);
+    };
+  }, [readingMode, readingDirection, handleNext, handlePrev]);
+
   const toggleFullscreen = async () => {
     try {
       if (window.__TAURI_INTERNALS__) {

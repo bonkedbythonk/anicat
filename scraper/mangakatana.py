@@ -4,6 +4,8 @@ from curl_cffi import requests
 from selectolax.parser import HTMLParser
 from urllib.parse import quote_plus
 
+from diagnostics import warn_empty
+
 BASE_URL = "https://mangakatana.com"
 
 class MangaKatanaProvider:
@@ -41,7 +43,8 @@ class MangaKatanaProvider:
             print(f"[MANGAKATANA] Search error: {e}")
             return []
 
-    def _parse_single_result(self, html: str, url: str) -> List[dict]:
+    @staticmethod
+    def _parse_single_result(html: str, url: str) -> List[dict]:
         try:
             tree = HTMLParser(html)
             title_el = tree.css_first("h1")
@@ -55,23 +58,28 @@ class MangaKatanaProvider:
             print(f"[MANGAKATANA] Parse single result error: {e}")
             return [{"id": url, "title": "Unknown", "cover_image": ""}]
 
-    def _parse_search_results(self, html: str) -> List[dict]:
+    @staticmethod
+    def _parse_search_results(html: str) -> List[dict]:
         try:
             tree = HTMLParser(html)
+            items = tree.css("#book_list .item")
+            if not items:
+                warn_empty("mangakatana", "#book_list .item", "search results")
+                return []
             results = []
-            for item in tree.css("#book_list .item"):
+            for item in items:
                 title_el = item.css_first(".title a")
                 if not title_el:
                     continue
-                
+
                 manga_url = title_el.attributes.get("href", "")
                 title = title_el.text(strip=True)
                 if manga_url and not manga_url.startswith("http"):
                     manga_url = f"{BASE_URL}{manga_url}"
-                
+
                 cover_el = item.css_first("img")
                 cover_image = cover_el.attributes.get("src", "") if cover_el else ""
-                
+
                 results.append({
                     "id": manga_url,
                     "title": title,
@@ -88,47 +96,54 @@ class MangaKatanaProvider:
             if resp.status_code != 200:
                 return None
             
-            html = resp.text
-            tree = HTMLParser(html)
-            
-            title_el = tree.css_first("h1.heading") or tree.css_first("h1")
-            title = title_el.text(strip=True) if title_el else "Unknown"
-            
-            cover_el = tree.css_first(".cover img") or tree.css_first(".media img")
-            cover_image = cover_el.attributes.get("src", "") if cover_el else ""
-            
-            chapters = []
-            for ch_el in tree.css(".chapters .chapter a"):
-                ch_url = ch_el.attributes.get("href", "")
-                ch_title = ch_el.text(strip=True)
-                if ch_url and not ch_url.startswith("http"):
-                    ch_url = f"{BASE_URL}{ch_url}"
-                if ch_url and ch_title:
-                    num_match = re.search(r"Chapter\s+(\d+\.?\d*)", ch_title)
-                    num = num_match.group(1) if num_match else "0"
-                    
-                    try:
-                        num_val = int(float(num))
-                    except ValueError:
-                        num_val = 0
-                    
-                    chapters.append({
-                        "number": num_val,
-                        "title": ch_title,
-                        "url": ch_url
-                    })
-            
-            # Reverse chapters to be in ascending order (newest is first in MangaKatana)
-            chapters.reverse()
-            
-            return {
-                "title": title,
-                "cover_image": cover_image,
-                "chapters": chapters
-            }
+            return self._parse_manga_page(resp.text)
         except Exception as e:
             print(f"[MANGAKATANA] Get manga error: {e}")
             return None
+
+    @staticmethod
+    def _parse_manga_page(html: str) -> dict:
+        tree = HTMLParser(html)
+
+        title_el = tree.css_first("h1.heading") or tree.css_first("h1")
+        title = title_el.text(strip=True) if title_el else "Unknown"
+
+        cover_el = tree.css_first(".cover img") or tree.css_first(".media img")
+        cover_image = cover_el.attributes.get("src", "") if cover_el else ""
+
+        chapter_links = tree.css(".chapters .chapter a")
+        if not chapter_links:
+            warn_empty("mangakatana", ".chapters .chapter a", f"detail page '{title}'")
+
+        chapters = []
+        for ch_el in chapter_links:
+            ch_url = ch_el.attributes.get("href", "")
+            ch_title = ch_el.text(strip=True)
+            if ch_url and not ch_url.startswith("http"):
+                ch_url = f"{BASE_URL}{ch_url}"
+            if ch_url and ch_title:
+                num_match = re.search(r"Chapter\s+(\d+\.?\d*)", ch_title)
+                num = num_match.group(1) if num_match else "0"
+
+                try:
+                    num_val = int(float(num))
+                except ValueError:
+                    num_val = 0
+
+                chapters.append({
+                    "number": num_val,
+                    "title": ch_title,
+                    "url": ch_url
+                })
+
+        # Reverse chapters to be in ascending order (newest is first in MangaKatana)
+        chapters.reverse()
+
+        return {
+            "title": title,
+            "cover_image": cover_image,
+            "chapters": chapters
+        }
 
     async def get_pages(self, chapter_url: str) -> Optional[dict]:
         try:

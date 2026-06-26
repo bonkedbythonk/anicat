@@ -21,6 +21,8 @@ from typing import Optional, List, Tuple
 from curl_cffi import requests
 from selectolax.parser import HTMLParser
 
+from diagnostics import warn_empty
+
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://anineko.to"
@@ -431,10 +433,14 @@ class AniNekoProvider:
 
     # ── Parsers ────────────────────────────────────────
 
-    def _parse_search(self, html: str) -> list[AnimeRef]:
+    @staticmethod
+    def _parse_search(html: str) -> list[AnimeRef]:
         tree = HTMLParser(html)
+        cards = tree.css("article.nv-anime-card")
+        if not cards:
+            warn_empty("anineko", "article.nv-anime-card", "search results")
         results = []
-        for card in tree.css("article.nv-anime-card"):
+        for card in cards:
             thumb = card.css_first("a.nv-anime-thumb")
             href = thumb.attributes.get("href", "") if thumb else ""
             if not href or not href.startswith("/watch/"):
@@ -453,7 +459,8 @@ class AniNekoProvider:
             results.append(AnimeRef(id=slug, title=title))
         return results
 
-    def _parse_anime(self, html: str) -> Optional[AnimeInfo]:
+    @staticmethod
+    def _parse_anime(html: str) -> Optional[AnimeInfo]:
         tree = HTMLParser(html)
         title = ""
         h1 = tree.css_first("h1")
@@ -466,8 +473,12 @@ class AniNekoProvider:
         if not title:
             return None
 
+        ep_cards = tree.css("article.nv-info-episode-item")
+        if not ep_cards:
+            warn_empty("anineko", "article.nv-info-episode-item", f"detail page '{title}'")
+
         episodes = []
-        for ep_card in tree.css("article.nv-info-episode-item"):
+        for ep_card in ep_cards:
             ep_link = ep_card.css_first("a.nv-info-episode-main")
             if not ep_link:
                 continue

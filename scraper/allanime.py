@@ -11,6 +11,8 @@ from Crypto.Cipher import AES
 from Crypto.Util import Counter
 from curl_cffi.requests import AsyncSession
 
+from diagnostics import warn_empty
+
 log = logging.getLogger(__name__)
 
 AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
@@ -342,19 +344,25 @@ class AllAnimeProvider:
             }
             
             data = await self._post_api(payload)
-            shows = data.get("data", {}).get("shows", {}).get("edges", [])
-            
-            results = []
-            for show in shows:
-                show_id = show.get("_id")
-                title = show.get("englishName") or show.get("name", "").replace('\\"', '"')
-                if not show_id or not title:
-                    continue
-                results.append(AnimeRef(id=show_id, title=title))
-            return results
+            return self._extract_search_results(data)
         except Exception as e:
             log.error(f"AllAnime search failed: {e}")
             return []
+
+    @staticmethod
+    def _extract_search_results(data: dict) -> list[AnimeRef]:
+        shows = data.get("data", {}).get("shows", {}).get("edges", [])
+        if not shows:
+            warn_empty("allanime", "data.shows.edges", "search results")
+            return []
+        results = []
+        for show in shows:
+            show_id = show.get("_id")
+            title = show.get("englishName") or show.get("name", "").replace('\\"', '"')
+            if not show_id or not title:
+                continue
+            results.append(AnimeRef(id=show_id, title=title))
+        return results
 
     async def get(self, slug: str) -> Optional[AnimeInfo]:
         query = """query ($showId: String!) {

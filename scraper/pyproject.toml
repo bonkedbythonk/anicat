@@ -12,3 +12,12 @@ dependencies = [
     "nodriver>=0.40",
     "pycryptodome>=3.20.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

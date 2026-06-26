@@ -1,0 +1,89 @@
+name: macOS Build
+
+# Manual trigger or on a version tag.
+# Produces an unsigned DMG for testing — no notarization (Apple Developer ID not set up).
+# Users opening the DMG for the first time must right-click and choose Open to bypass Gatekeeper.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri -> target
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      # Install mpv and collect its dylibs so the bundled app works standalone.
+      - name: Install and bundle mpv
+        run: |
+          brew install mpv
+          MPV_BIN=$(which mpv)
+          echo "mpv binary: $MPV_BIN"
+
+          mkdir -p web/src-tauri/resources/lib
+
+          # Copy the binary itself
+          cp "$MPV_BIN" web/src-tauri/resources/mpv
+
+          # Collect direct dylib dependencies (skip system frameworks and libSystem)
+          for lib in $(otool -L "$MPV_BIN" | awk '{print $1}' | grep -v ':' | grep -E '/(usr/local|opt/homebrew)' | grep -v '/usr/lib' | grep -v '/System'); do
+            [ -f "$lib" ] && cp "$lib" web/src-tauri/resources/lib/ || true
+          done
+
+          # Fix rpath in the copied mpv binary so it finds dylibs in @executable_path/../Resources/lib
+          install_name_tool -add_rpath "@executable_path/../Resources/lib" web/src-tauri/resources/mpv 2>/dev/null || true
+
+          # Stub mpv.exe so Tauri's resource glob doesn't fail (macOS build only)
+          touch web/src-tauri/resources/mpv.exe
+
+      - name: Install frontend deps
+        working-directory: web
+        run: npm ci
+
+      # Runs beforeBuildCommand (npm run build -> scraper freeze via uv + tsc + vite)
+      # then bundles as unsigned DMG.
+      - name: Build app
+        working-directory: web
+        run: npm run tauri build -- --bundles dmg
+        env:
+          # Skip macOS code-signing — no Apple Developer ID configured in CI.
+          APPLE_SIGNING_IDENTITY: "-"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anicat-macos-dmg
+          path: web/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      # On a version tag, attach the DMG to the GitHub release.
+      - name: Attach DMG to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: web/src-tauri/target/release/bundle/dmg/*.dmg
+          fail_on_unmatched_files: true

@@ -1,6 +1,6 @@
 
-import { useMemo, useRef, useState, useCallback, useEffect } from "react";
-import { Loader2, Clock, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
+import { Fragment, useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { Loader2, Clock, User, LayoutDashboard, X, Eye, EyeOff, GripVertical } from "lucide-react";
 import { Hero } from "@/components/media/Hero";
 import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -27,6 +27,29 @@ const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
   { id: "newlyReleasing", title: "Newly Releasing", visible: true },
   { id: "seasonal", title: "Seasonal Highlights", visible: true },
 ];
+
+// Load saved row config, reconciled with DEFAULT_ROWS: keeps the saved order
+// and visibility, drops rows that no longer exist, and appends any newly-added
+// default rows at the end so a stale localStorage entry never hides a new row.
+function loadRowConfig(): typeof DEFAULT_ROWS {
+  if (typeof window === "undefined") return DEFAULT_ROWS;
+  const saved = localStorage.getItem("anicat_home_rows");
+  if (!saved) return DEFAULT_ROWS;
+  try {
+    const parsed = JSON.parse(saved) as typeof DEFAULT_ROWS;
+    const byId = new Map(DEFAULT_ROWS.map(r => [r.id, r]));
+    const merged = parsed
+      .filter(r => byId.has(r.id))
+      .map(r => ({ ...byId.get(r.id)!, visible: r.visible }));
+    const seen = new Set(merged.map(r => r.id));
+    for (const def of DEFAULT_ROWS) {
+      if (!seen.has(def.id)) merged.push(def);
+    }
+    return merged;
+  } catch {
+    return DEFAULT_ROWS;
+  }
+}
 
 function MediaRowSkeleton({ title }: { title: string }) {
   return (
@@ -133,30 +156,27 @@ export function HomeView({ onSelect }: HomeViewProps) {
     refetchInterval: 60_000,
   });
 
-  // UX-22: Customizable row visibility
-  const [rowConfig, setRowConfig] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("anicat_home_rows");
-      if (saved) {
-        try { return JSON.parse(saved) as typeof DEFAULT_ROWS; } catch {}
-      }
-    }
-    return DEFAULT_ROWS;
-  });
-  const isRowVisible = (id: RowId) => rowConfig.find(r => r.id === id)?.visible ?? true;
-  const toggleRow = (id: RowId) => {
-    const next = rowConfig.map(r => r.id === id ? { ...r, visible: !r.visible } : r);
+  // UX-22: Customizable row visibility + order
+  const [rowConfig, setRowConfig] = useState(() => loadRowConfig());
+
+  const persistRows = (next: typeof DEFAULT_ROWS) => {
     setRowConfig(next);
     localStorage.setItem("anicat_home_rows", JSON.stringify(next));
   };
+  const toggleRow = (id: RowId) => {
+    persistRows(rowConfig.map(r => r.id === id ? { ...r, visible: !r.visible } : r));
+  };
+  const moveRow = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= rowConfig.length || to >= rowConfig.length) return;
+    const next = [...rowConfig];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    persistRows(next);
+  };
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    const handler = () => {
-      const saved = localStorage.getItem("anicat_home_rows");
-      if (saved) {
-        try { setRowConfig(JSON.parse(saved)); } catch {}
-      }
-    };
+    const handler = () => setRowConfig(loadRowConfig());
     window.addEventListener("anicat_home_rows_changed", handler);
     return () => window.removeEventListener("anicat_home_rows_changed", handler);
   }, []);
@@ -276,6 +296,57 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
 
 
+  // Render a single home row by id. Returning null means the row has nothing to
+  // show (not authenticated, still loading with no data, or empty result).
+  const renderRow = (id: RowId) => {
+    switch (id) {
+      case "airingToday":
+        if (!isAuthenticated) return null;
+        if (airingTodayQuery.isLoading) return <MediaRowSkeleton title="Airing Today" />;
+        if (!airingTodayQuery.data?.media?.length) return null;
+        return <MediaRow title="Airing Today" items={airingTodayQuery.data.media} onSelect={onSelect} />;
+      case "continue":
+        if (!isAuthenticated || continueWatchingList.length === 0) return null;
+        return (
+          <MediaRow
+            title="Continue Watching"
+            items={continueWatchingList}
+            secondaryItems={smartPicks.length > 0 ? smartPicks : undefined}
+            secondaryLabel="Smart Picks"
+            onSelect={onSelect}
+          />
+        );
+      case "newForYou":
+        if (!isAuthenticated) return null;
+        if (recentReleasesQuery.isLoading) return <MediaRowSkeleton title="New for You" />;
+        if (!recentReleasesQuery.data?.length) return null;
+        return <MediaRow title="New for You" items={recentReleasesQuery.data} onSelect={onSelect} />;
+      case "watching":
+        if (!isAuthenticated || watchingMedia.length === 0) return null;
+        return <MediaRow title="Currently Watching" items={watchingMedia} onSelect={onSelect} />;
+      case "planning":
+        if (!isAuthenticated || !planningQuery.data?.media?.length) return null;
+        return <MediaRow title="Planning" items={planningQuery.data.media} onSelect={onSelect} />;
+      case "smartPlaylist":
+        if (!isAuthenticated || smartPicks.length === 0) return null;
+        return <MediaRow title="Smart Picks" items={smartPicks} onSelect={onSelect} />;
+      case "trending":
+        if (trendingQuery.isLoading) return <MediaRowSkeleton title="Trending Now" />;
+        if (!trendingQuery.data?.media?.length) return null;
+        return <MediaRow title="Trending Now" items={trendingQuery.data.media} onSelect={onSelect} />;
+      case "newlyReleasing":
+        if (newlyReleasingQuery.isLoading) return <MediaRowSkeleton title="Newly Releasing" />;
+        if (!newlyReleasingQuery.data?.media?.length) return null;
+        return <MediaRow title="Newly Releasing" items={newlyReleasingQuery.data.media} onSelect={onSelect} />;
+      case "seasonal":
+        if (seasonalQuery.isLoading) return <MediaRowSkeleton title="Seasonal Highlights" />;
+        if (!seasonalQuery.data?.media?.length) return null;
+        return <MediaRow title="Seasonal Highlights" items={seasonalQuery.data.media} onSelect={onSelect} />;
+      default:
+        return null;
+    }
+  };
+
   // Global loading only until critical data is loaded
   if (trendingQuery.isLoading && seasonalQuery.isLoading) {
     return (
@@ -325,104 +396,50 @@ export function HomeView({ onSelect }: HomeViewProps) {
         </div>
       )}
 
-      {/* UX-13: Airing Today row with countdown badges */}
-      {isAuthenticated && isRowVisible("airingToday") && (
-        airingTodayQuery.isLoading ? (
-          <MediaRowSkeleton title="Airing Today" />
-        ) : (
-          airingTodayQuery.data?.media && airingTodayQuery.data.media.length > 0 && (
-            <MediaRow
-              title="Airing Today"
-              items={airingTodayQuery.data.media}
-              onSelect={onSelect}
-            />
-          )
-        )
-      )}
-
-      {isAuthenticated && isRowVisible("continue") && continueWatchingList.length > 0 && (
-        <MediaRow
-          title="Continue Watching"
-          items={continueWatchingList}
-          secondaryItems={smartPicks.length > 0 ? smartPicks : undefined}
-          secondaryLabel="Smart Picks"
-          onSelect={onSelect}
-        />
-      )}
-
-      {isAuthenticated && isRowVisible("newForYou") && (
-        recentReleasesQuery.isLoading ? (
-          <MediaRowSkeleton title="New for You" />
-        ) : (
-          recentReleasesQuery.data && recentReleasesQuery.data.length > 0 && (
-            <MediaRow title="New for You" items={recentReleasesQuery.data} onSelect={onSelect} />
-          )
-        )
-      )}
-
-      {isAuthenticated && isRowVisible("watching") && watchingMedia.length > 0 && (
-        <MediaRow title="Currently Watching" items={watchingMedia} onSelect={onSelect} />
-      )}
-
-      {isAuthenticated && isRowVisible("planning") && planningQuery.data?.media && planningQuery.data.media.length > 0 && (
-        <MediaRow title="Planning" items={planningQuery.data.media} onSelect={onSelect} />
-      )}
-
-      {isAuthenticated && isRowVisible("smartPlaylist") && smartPicks.length > 0 && (
-        <MediaRow title="Smart Picks" items={smartPicks} onSelect={onSelect} />
-      )}
-
-      {isRowVisible("trending") && (
-        trendingQuery.isLoading ? (
-          <MediaRowSkeleton title="Trending Now" />
-        ) : (
-          trendingQuery.data?.media && trendingQuery.data.media.length > 0 && (
-            <MediaRow title="Trending Now" items={trendingQuery.data.media} onSelect={onSelect} />
-          )
-        )
-      )}
-
-      {isRowVisible("newlyReleasing") && (
-        newlyReleasingQuery.isLoading ? (
-          <MediaRowSkeleton title="Newly Releasing" />
-        ) : (
-          newlyReleasingQuery.data?.media && newlyReleasingQuery.data.media.length > 0 && (
-            <MediaRow title="Newly Releasing" items={newlyReleasingQuery.data.media} onSelect={onSelect} />
-          )
-        )
-      )}
-
-      {isRowVisible("seasonal") && (
-        seasonalQuery.isLoading ? (
-          <MediaRowSkeleton title="Seasonal Highlights" />
-        ) : (
-          seasonalQuery.data?.media && seasonalQuery.data.media.length > 0 && (
-            <MediaRow title="Seasonal Highlights" items={seasonalQuery.data.media} onSelect={onSelect} />
-          )
-        )
-      )}
+      {/* Rows render in the user's saved order; hidden rows are skipped. */}
+      {rowConfig.filter(r => r.visible).map(r => (
+        <Fragment key={r.id}>{renderRow(r.id)}</Fragment>
+      ))}
 
       {/* Layout editor */}
       <div className="flex flex-col items-center gap-4 pt-4">
         {showLayoutEditor && (
-          <div className="w-full max-w-md rounded-2xl bg-white/[0.04] border border-white/[0.08] p-5 space-y-1">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Visible rows</p>
-            {rowConfig.map((row) => (
-              <button
-                key={row.id}
-                onClick={() => toggleRow(row.id)}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/[0.05] transition-colors group"
-              >
-                <span className={`text-sm font-medium transition-colors ${row.visible ? "text-foreground" : "text-muted-foreground"}`}>
-                  {row.title}
-                </span>
-                {row.visible ? (
-                  <Eye size={15} className="text-accent shrink-0" />
-                ) : (
-                  <EyeOff size={15} className="text-muted-foreground/50 shrink-0" />
-                )}
-              </button>
-            ))}
+          <div className="w-full max-w-md rounded-2xl bg-white/[0.04] border border-white/[0.08] p-5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Rows</p>
+            <p className="text-[11px] text-muted-foreground/70 mb-3">Drag to reorder, tap the eye to show or hide.</p>
+            <div className="space-y-1">
+              {rowConfig.map((row, index) => (
+                <div
+                  key={row.id}
+                  draggable
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => { if (dragIndex !== null) moveRow(dragIndex, index); setDragIndex(null); }}
+                  onDragEnd={() => setDragIndex(null)}
+                  className={`flex items-center gap-2 px-2 py-2 rounded-xl border transition-all ${
+                    dragIndex === index
+                      ? "opacity-40 border-accent/40 bg-white/[0.04]"
+                      : "border-transparent hover:bg-white/[0.05]"
+                  }`}
+                >
+                  <GripVertical size={15} className="text-muted-foreground/40 shrink-0 cursor-grab active:cursor-grabbing" />
+                  <span className={`flex-1 text-sm font-medium select-none transition-colors ${row.visible ? "text-foreground" : "text-muted-foreground/60"}`}>
+                    {row.title}
+                  </span>
+                  <button
+                    onClick={() => toggleRow(row.id)}
+                    aria-label={row.visible ? `Hide ${row.title}` : `Show ${row.title}`}
+                    className="p-1.5 rounded-lg hover:bg-white/[0.08] transition-colors shrink-0"
+                  >
+                    {row.visible ? (
+                      <Eye size={15} className="text-accent" />
+                    ) : (
+                      <EyeOff size={15} className="text-muted-foreground/50" />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

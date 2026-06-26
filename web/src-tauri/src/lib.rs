@@ -13,40 +13,20 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Truncate log files on startup so they are fresh
-    if let Some(home) = dirs::home_dir() {
-        #[cfg(target_os = "macos")]
-        {
-            let log_dir = home.join("Library/Logs/com.anicat.app");
-            for name in &["Anicat.log", "anicat.log"] {
-                let log_file = log_dir.join(name);
-                if log_file.exists() {
-                    let _ = std::fs::write(&log_file, "");
-                }
-            }
-        }
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(appdata) = dirs::data_dir() {
-                let log_dir = appdata.join("com.anicat.app").join("logs");
-                for name in &["Anicat.log", "anicat.log"] {
-                    let log_file = log_dir.join(name);
-                    if log_file.exists() {
-                        let _ = std::fs::write(&log_file, "");
-                    }
-                }
-            }
-        }
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(cache) = dirs::cache_dir() {
-                let log_dir = cache.join("com.anicat.app").join("logs");
-                for name in &["Anicat.log", "anicat.log"] {
-                    let log_file = log_dir.join(name);
-                    if log_file.exists() {
-                        let _ = std::fs::write(&log_file, "");
-                    }
-                }
+    // Truncate log files on startup so they are fresh. The log directory is
+    // platform-specific, so resolve it per OS (each branch owns its base dir).
+    #[cfg(target_os = "macos")]
+    let log_dir = dirs::home_dir().map(|home| home.join("Library/Logs/com.anicat.app"));
+    #[cfg(target_os = "windows")]
+    let log_dir = dirs::data_dir().map(|appdata| appdata.join("com.anicat.app").join("logs"));
+    #[cfg(target_os = "linux")]
+    let log_dir = dirs::cache_dir().map(|cache| cache.join("com.anicat.app").join("logs"));
+
+    if let Some(log_dir) = log_dir {
+        for name in &["Anicat.log", "anicat.log"] {
+            let log_file = log_dir.join(name);
+            if log_file.exists() {
+                let _ = std::fs::write(&log_file, "");
             }
         }
     }

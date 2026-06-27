@@ -48,7 +48,13 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
                 if e.contains("authentication invalid") || e.contains("Invalid token") {
                     state.anilist_client.set_token(None);
                 }
-                (false, None, Some(e))
+                // Normalise the prefixed downtime message for the frontend.
+                let display = if let Some(msg) = e.strip_prefix("anilist_down:") {
+                    format!("anilist_down:{}", msg)
+                } else {
+                    e
+                };
+                (false, None, Some(display))
             }
         }
     } else {

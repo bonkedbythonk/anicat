@@ -133,6 +133,13 @@ impl AniListClient {
                 *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
                 return Err("AniList HTTP 429: Too Many Requests — cooling down 60s".to_string());
             }
+            // Extract the human-readable message from the GraphQL error body
+            // (AniList returns JSON even for 4xx, e.g. downtime 403).
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(msg) = val["errors"][0]["message"].as_str() {
+                    return Err(format!("anilist_down:{}", msg));
+                }
+            }
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
 

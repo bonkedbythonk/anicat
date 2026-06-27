@@ -735,7 +735,13 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <div className="flex justify-between"><span className="text-gray-500">Backend connected</span><span className={apiConnected ? "text-green-400" : "text-red-400"}>{apiConnected ? "yes" : "no"}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">AniList validated</span><span className={apiAuthenticated ? "text-green-400" : "text-red-400"}>{apiAuthenticated ? "yes" : "no"}</span></div>
                   {authError && (
-                    <div className="flex justify-between"><span className="text-gray-500">Error</span><span className="text-red-400 truncate ml-2 text-[10px]">{authError}</span></div>
+                    authError.startsWith("anilist_down:") ? (
+                      <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-[10px] leading-snug">
+                        AniList is temporarily down: {authError.slice("anilist_down:".length)}
+                      </div>
+                    ) : (
+                      <div className="flex justify-between"><span className="text-gray-500">Error</span><span className="text-red-400 ml-2 text-[10px] leading-snug break-all">{authError}</span></div>
+                    )
                   )}
                   {health?.viewer_name && (
                     <div className="flex justify-between"><span className="text-gray-500">Signed in as</span><span className="text-accent">{health.viewer_name}</span></div>

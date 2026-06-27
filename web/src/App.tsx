@@ -177,6 +177,9 @@ export default function App() {
 
   const notification = useAppStore((s) => s.notification);
   const setNotification = useAppStore((s) => s.setNotification);
+  const authError = useAppStore((s) => s.authError);
+  const anilistDown = authError?.startsWith("anilist_down:") ?? false;
+  const anilistDownMessage = anilistDown ? authError!.slice("anilist_down:".length) : null;
 
   useEffect(() => {
     const unlisten = listen<{ message: string }>("show_notification", (event) => {
@@ -247,6 +250,18 @@ export default function App() {
       )}
 
       <main className="flex-1 flex flex-col overflow-hidden relative" style={{ marginLeft: sidebarW }}>
+        <AnimatePresence>
+          {anilistDown && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="z-50 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-300 text-xs text-center leading-snug shrink-0"
+            >
+              AniList is temporarily down — tracking and library sync are paused. {anilistDownMessage}
+            </motion.div>
+          )}
+        </AnimatePresence>
         <AnimatePresence mode="wait">
           {selectedItem ? (
             <motion.div

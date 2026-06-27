@@ -181,6 +181,22 @@ export default function App() {
   const anilistDown = authError?.startsWith("anilist_down:") ?? false;
   const anilistDownMessage = anilistDown ? authError!.slice("anilist_down:".length) : null;
 
+  // When AniList is down, stop all query retries so stale cached data stays
+  // visible instead of queries thrashing and showing error states.
+  useEffect(() => {
+    const qc = getQueryClient();
+    if (!qc) return;
+    if (anilistDown) {
+      qc.setDefaultOptions({
+        queries: { staleTime: Infinity, retry: 0, refetchOnMount: false, refetchOnWindowFocus: false },
+      });
+    } else {
+      qc.setDefaultOptions({
+        queries: { staleTime: 5 * 60 * 1000, gcTime: 24 * 60 * 60 * 1000, retry: 1, refetchOnWindowFocus: false },
+      });
+    }
+  }, [anilistDown]);
+
   useEffect(() => {
     const unlisten = listen<{ message: string }>("show_notification", (event) => {
       setNotification({ message: event.payload.message, type: "info" });

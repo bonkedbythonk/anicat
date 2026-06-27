@@ -119,6 +119,25 @@ local function match_skip_type(title)
   return nil
 end
 
+-- Merge chapter-derived skips into AniSkip times. Chapter heuristics only
+-- fill in types that AniSkip has no data for — AniSkip timestamps win when
+-- both cover the same type (e.g. a chapter called "intro" shouldn't override
+-- the AniSkip op timing for the actual opening animation).
+local function merge_skips(aniskip_list, chapter_list)
+  local result = {}
+  local aniskip_types = {}
+  for _, s in ipairs(aniskip_list) do
+    result[#result + 1] = s
+    aniskip_types[s.type] = true
+  end
+  for _, cs in ipairs(chapter_list) do
+    if not aniskip_types[cs.type] then
+      result[#result + 1] = cs
+    end
+  end
+  return result
+end
+
 local function parse_chapters_for_skips()
   local skips = {}
   local chapters = mp.get_property_native('chapter-list')
@@ -518,19 +537,7 @@ mp.register_event('file-loaded', function()
   state.duration = mp.get_property_number('duration') or 0
   
   local skips = parse_skip_times(get_skip_times_opt())
-  local chapter_skips = parse_chapters_for_skips()
-  for _, cs in ipairs(chapter_skips) do
-    local duplicate = false
-    for _, s in ipairs(skips) do
-      if math.abs(s.start - cs.start) < 2.0 then
-        duplicate = true
-        break
-      end
-    end
-    if not duplicate then
-      skips[#skips + 1] = cs
-    end
-  end
+  skips = merge_skips(skips, parse_chapters_for_skips())
 
   state.skips = skips
   msg.info("file-loaded: total skip segments = " .. #skips)

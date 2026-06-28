@@ -56,8 +56,10 @@ def main():
     if not os.path.isdir(built_dir):
         raise FileNotFoundError(f"Could not find compiled directory at {built_dir}")
 
-    if os.path.exists(dest_dir):
+    if os.path.isdir(dest_dir):
         shutil.rmtree(dest_dir)
+    elif os.path.exists(dest_dir):
+        os.remove(dest_dir)
 
     print(f"Moving compiled directory to {dest_dir}")
     shutil.move(built_dir, dest_dir)

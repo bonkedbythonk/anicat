@@ -35,6 +35,7 @@ def main():
         "--hidden-import", "selectolax",
         "--collect-all", "curl_cffi",
         "--collect-all", "selectolax",
+        "--exclude-module", "setuptools",
         "main.py"
     ]
 

@@ -893,14 +893,15 @@ pub async fn start_playback(
             (cfg.general.autoskip, cfg.general.autoplay)
         };
         let mut script_opts_parts = Vec::new();
-        if !skip_times_arg.is_empty() {
-            script_opts_parts.push(format!("anicat_ui-skip_times={}", skip_times_arg.replace(",", "%2C")));
-        }
+        // Always include skip_times (empty if AniSkip hasn't arrived yet) so
+        // the Lua observer doesn't fall back to the previous episode's stale
+        // launch-time opts.skip_times value.
+        script_opts_parts.push(format!("anicat_ui-skip_times={}", skip_times_arg.replace(",", "%2C")));
         script_opts_parts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
         script_opts_parts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
         script_opts_parts.push(format!("anicat_ui-current_episode={}", episode_number));
         script_opts_parts.push(format!("anicat_ui-total_episodes={}", total_eps));
-        
+
         commands.push(serde_json::json!({
             "command": ["set_property", "script-opts", script_opts_parts.join(",")]
         }));
@@ -935,11 +936,33 @@ pub async fn start_playback(
 
         let ipc_path = get_ipc_path();
         log::info!("Connecting to running MPV at {} via IPC...", ipc_path);
-        if try_send_ipc(&ipc_path, commands).await.is_ok() {
-            log::info!("Successfully sent stream URL to running MPV via IPC!");
+        // Retry a few times — mpv may be briefly busy loading the stream.
+        let mut ipc_ok = false;
+        for attempt in 0..5 {
+            if try_send_ipc(&ipc_path, commands.clone()).await.is_ok() {
+                log::info!("Sent stream to running MPV via IPC (attempt {})", attempt + 1);
+                ipc_ok = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        if ipc_ok {
             reused = true;
         } else {
-            log::warn!("Failed to communicate with MPV over IPC, will restart player");
+            log::warn!("Failed to communicate with MPV over IPC after retries, will restart player");
+            // Save progress for the current episode before killing mpv so the
+            // position isn't lost when we respawn.
+            let (last_pos, last_dur, cur_media, cur_ep, cur_total) = {
+                let guard = state.current_playback.lock().await;
+                if let Some(ref pb) = *guard {
+                    (pb.last_position, pb.last_duration, pb.media_id, pb.episode_number, pb.total_episodes)
+                } else {
+                    (0, 0, 0, 0, 0)
+                }
+            };
+            if last_pos > 0 && cur_media > 0 {
+                let _ = record_playback_progress(&state, cur_media, cur_ep, last_pos, last_dur, cur_total).await;
+            }
         }
     }
 

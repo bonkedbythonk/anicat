@@ -29,7 +29,7 @@ def main():
         "pyinstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
+        "--onedir",
         "--name", binary_name,
         "--hidden-import", "curl_cffi",
         "--hidden-import", "selectolax",
@@ -37,26 +37,31 @@ def main():
         "--collect-all", "selectolax",
         "main.py"
     ]
-    
+
     if use_uv:
         cmd = ["uv", "run"] + pyinstaller_cmd
     else:
         cmd = pyinstaller_cmd
-        
+
     print("Compiling Python scraper to a standalone binary...")
     run_cmd(cmd, cwd=scraper_dir)
-    
-    # Locate built binary
-    ext = ".exe" if platform.system() == "Windows" else ""
-    built_bin = os.path.join(scraper_dir, "dist", f"{binary_name}{ext}")
-    dest_bin = os.path.join(target_dir, f"{binary_name}{ext}")
-    
-    if not os.path.exists(built_bin):
-        raise FileNotFoundError(f"Could not find compiled binary at {built_bin}")
-        
-    print(f"Moving compiled binary to {dest_bin}")
-    shutil.move(built_bin, dest_bin)
-    print("Scraper binary compilation and bundling complete!")
+
+    # --onedir produces dist/anicat-scraper/ (a directory).
+    # Copy the whole directory into scraper-bin/ so the layout is:
+    #   scraper-bin/anicat-scraper/anicat-scraper  (the executable)
+    #   scraper-bin/anicat-scraper/_internal/...   (Python runtime + libs)
+    built_dir = os.path.join(scraper_dir, "dist", binary_name)
+    dest_dir = os.path.join(target_dir, binary_name)
+
+    if not os.path.isdir(built_dir):
+        raise FileNotFoundError(f"Could not find compiled directory at {built_dir}")
+
+    if os.path.exists(dest_dir):
+        shutil.rmtree(dest_dir)
+
+    print(f"Moving compiled directory to {dest_dir}")
+    shutil.move(built_dir, dest_dir)
+    print("Scraper compilation and bundling complete!")
 
 if __name__ == "__main__":
     main()

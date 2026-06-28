@@ -283,13 +283,19 @@ fn find_bundled_binary(exe_dir: &std::path::Path) -> Option<String> {
     } else {
         "anicat-scraper"
     };
-    let bin = base_dir.join("scraper-bin").join(bin_name);
-    if bin.exists() {
-        log::info!("[scraper] using bundled binary: {}", bin.display());
-        Some(bin.to_string_lossy().to_string())
-    } else {
-        None
+    // --onedir layout: scraper-bin/anicat-scraper/anicat-scraper
+    let onedir_bin = base_dir.join("scraper-bin").join("anicat-scraper").join(bin_name);
+    if onedir_bin.exists() {
+        log::info!("[scraper] using bundled binary (onedir): {}", onedir_bin.display());
+        return Some(onedir_bin.to_string_lossy().to_string());
     }
+    // Legacy --onefile layout: scraper-bin/anicat-scraper
+    let onefile_bin = base_dir.join("scraper-bin").join(bin_name);
+    if onefile_bin.exists() {
+        log::info!("[scraper] using bundled binary (onefile): {}", onefile_bin.display());
+        return Some(onefile_bin.to_string_lossy().to_string());
+    }
+    None
 }
 
 fn resolve_scraper_paths() -> (String, String) {

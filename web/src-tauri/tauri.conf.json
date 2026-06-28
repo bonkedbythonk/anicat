@@ -60,7 +60,8 @@
       "resources/mpv_config/**/*",
       "resources/lib/*",
       "resources/lib/**/*",
-      "resources/scraper-bin/*"
+      "resources/scraper-bin/*",
+      "resources/scraper-bin/**/*"
     ]
   }
 }

@@ -138,6 +138,12 @@ pub struct AppStateInner {
     /// Next episode's stream resolved ahead of time (near the end of the
     /// current episode) so auto-next is instant instead of waiting on a scrape.
     pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
+    /// Incremented on every start_playback. Background tasks (notably the
+    /// AniSkip resolver, which keeps retrying IPC for a few seconds) capture
+    /// the value at spawn and bail if it no longer matches — otherwise a task
+    /// from the previous episode clobbers the current episode's script-opts
+    /// (current_episode, skip_times), breaking next/prev and AniSkip.
+    pub playback_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +239,7 @@ impl AppState {
                 user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
                 last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+                playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             }),
         };
 

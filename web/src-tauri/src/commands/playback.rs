@@ -346,6 +346,15 @@ pub async fn start_playback(
     let cover_image_str = cover_image.clone().unwrap_or_default();
     let total_eps = total_episodes.unwrap_or(0);
 
+    // New playback generation. Background tasks spawned below (the AniSkip
+    // resolver) capture this and abort if a later start_playback supersedes
+    // them, so a previous episode's slow IPC retry can't overwrite the current
+    // episode's script-opts.
+    let playback_gen = state
+        .playback_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+
     {
         let mut guard = state.current_playback.lock().await;
         *guard = Some(crate::state::CurrentPlayback {
@@ -571,6 +580,11 @@ pub async fn start_playback(
     let state_clone = (*state).clone();
     let title_clone = title_str.clone();
     tokio::spawn(async move {
+        // Bail if a newer episode has started while this resolver was queued —
+        // its script-opts push would otherwise stomp the current episode.
+        if state_clone.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+            return;
+        }
         let mal_id = {
             let mut vars = HashMap::new();
             vars.insert("id".to_string(), serde_json::json!(media_id));
@@ -678,26 +692,27 @@ pub async fn start_playback(
         }
 
         if !bg_skip_times_arg.is_empty() {
-            let (autoskip, autoplay) = {
-                let cfg = state_clone.config.read().await;
-                (cfg.general.autoskip, cfg.general.autoplay)
-            };
-            let mut script_opts = Vec::new();
+            // Update ONLY the skip_times key via change-list append, never a
+            // full script-opts replacement. The episode number, autoskip and
+            // auto_next were already set correctly by the launch/reuse path;
+            // re-sending them from this late, episode-specific task is how a
+            // stale resolver used to corrupt current_episode.
             let encoded = bg_skip_times_arg.replace(",", "%2C");
-            script_opts.push(format!("anicat_ui-skip_times={}", encoded));
-            script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
-            script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
-            script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
-            script_opts.push(format!("anicat_ui-total_episodes={}", total_eps));
-            let script_opts_str = script_opts.join(",");
 
             let ipc_path = get_ipc_path();
             let cmd = serde_json::json!({
-                "command": ["set_property", "script-opts", script_opts_str]
+                "command": ["change-list", "script-opts", "append", format!("anicat_ui-skip_times={}", encoded)]
             });
             
-            // Retry sending over IPC in case MPV is still launching
+            // Retry sending over IPC in case MPV is still launching. Re-check
+            // the generation each iteration: if the user moved on to another
+            // episode, stop — pushing now would overwrite that episode's
+            // current_episode / skip_times.
             for i in 0..15 {
+                if state_clone.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+                    log::info!("[aniskip] Skip-times push superseded by a newer episode; aborting");
+                    return;
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 if try_send_ipc(&ipc_path, vec![cmd.clone()]).await.is_ok() {
                     log::info!("[aniskip] Dynamically loaded skip times via IPC on attempt {}", i + 1);

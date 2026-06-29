@@ -319,7 +319,10 @@ end
 
 local function set_auto_next(val)
   opts.auto_next = val
-  mp.commandv("change-list", "script-opts", "set", "anicat_ui-auto_next=" .. val)
+  -- "append" updates just this key. "set" would replace the entire script-opts
+  -- map, wiping current_episode/total_episodes/skip_times and breaking the
+  -- next/prev guards that read them.
+  mp.commandv("change-list", "script-opts", "append", "anicat_ui-auto_next=" .. val)
   render(true)
 end
 

@@ -211,6 +211,10 @@ local function check_active_skip()
   if pos then
     state.position = pos
   end
+  local dur = mp.get_property_number('duration')
+  if dur and dur > 0 then
+    state.duration = dur
+  end
   local active = get_active_skip(state.position)
   if active ~= state.active_skip then
     state.active_skip = active

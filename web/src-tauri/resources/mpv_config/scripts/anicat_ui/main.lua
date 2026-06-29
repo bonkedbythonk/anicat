@@ -211,7 +211,7 @@ local function check_active_skip()
   if pos then
     state.position = pos
   end
-  local active = get_active_skip(pos)
+  local active = get_active_skip(state.position)
   if active ~= state.active_skip then
     state.active_skip = active
     if active and not active.notified then

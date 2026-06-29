@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Loader2, Globe, Monitor, Activity, Clock, Calendar } from "lucide-react";
 import { LazyCard } from "@/components/media/LazyCard";
-import { mediaApi, type MediaItem } from "@/lib/api";
+import { mediaApi, getUserLists, type MediaItem } from "@/lib/api";
 
 interface ScheduleViewProps {
   onSelect: (item: MediaItem) => void;
@@ -36,8 +36,14 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
       try {
         let mediaIds: number[] | undefined = undefined;
         if (watchingOnly) {
-          const watching = await mediaApi.getUserList("watching", "ANIME");
-          mediaIds = ((watching.media || []) as MediaItem[]).map(m => m.id);
+          // Use getUserLists directly so we get ALL watching entries, not just
+          // the first 50 that the paginated getUserList wrapper returns.
+          const collection = await getUserLists(undefined, "CURRENT", "ANIME");
+          const lists = collection?.MediaListCollection?.lists ?? [];
+          const entries = lists.flatMap((l: { entries?: { media?: { id?: number } }[] }) => l.entries ?? []);
+          mediaIds = entries
+            .map((e: { media?: { id?: number } }) => e.media?.id)
+            .filter((id): id is number => typeof id === "number");
           if (mediaIds.length === 0) {
             setItems([]);
             setLoading(false);
@@ -165,6 +171,9 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
                   {dayItems.map(item => (
                     <div key={item.id} className="space-y-2">
                       <LazyCard item={item} onSelect={onSelect} />
+                      <p className="text-sm font-bold text-white leading-tight line-clamp-2 px-0.5">
+                        {item.title?.english || item.title?.romaji || item.title?.native || ""}
+                      </p>
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center space-x-1.5 text-accent">
                           <Activity size={12} className="animate-pulse" />

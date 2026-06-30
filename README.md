@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="assets/branding/logo.png" alt="Anicat" width="140">
   <h1>Anicat</h1>
   <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
 
@@ -61,14 +62,17 @@ AniList is only used for tracking. Playback and the episode list do not require 
 
 ## Features
 
-- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip), or embedded HLS player. Multi-provider fallback, sub/dub selection, resume position.
+- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip), or embedded HLS player. AllAnime and AniNeko providers with automatic fallback between them, sub/dub selection, resume position, auto-next with a binge countdown.
+- **Trailers** — Plays a title's trailer through mpv (not an embedded YouTube player) directly from the detail page.
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
 - **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
 - **Schedule** — 7-day airing calendar with live countdowns, filtered to your watching list.
-- **Discovery** — Configurable home rows (trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
+- **Discovery** — Customizable home layout (show/hide rows: trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
 - **Discord Rich Presence** — Shows what you are watching in your Discord status.
 - **Themes** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga.
+- **Keyboard-driven** — Shortcuts for navigating every view, with a built-in cheat sheet (`?`).
+- **Self-updating** — Checks for new releases and installs updates in place, no manual reinstall.
 
 ---
 

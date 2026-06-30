@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "resources": [
+      "resources/mpv",
+      "resources/mpv.exe",
+      "resources/mpv_config/*",
+      "resources/mpv_config/**/*",
+      "resources/lib/*",
+      "resources/lib/**/*",
+      "resources/scraper-bin/anicat-scraper/anicat-scraper.exe",
+      "resources/scraper-bin/anicat-scraper/_internal/**/*"
+    ]
+  }
+}

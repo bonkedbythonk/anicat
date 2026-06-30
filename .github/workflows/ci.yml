@@ -66,14 +66,18 @@ jobs:
           workspaces: web/src-tauri -> target
 
       # Tauri's build script validates that bundled resource paths exist.
-      # resources/mpv, resources/mpv.exe, and resources/lib/ are gitignored
-      # (macOS/Windows binaries built at package time); stub them for CI.
+      # resources/mpv, resources/mpv.exe, resources/lib/, and the PyInstaller
+      # --onedir scraper output under resources/scraper-bin/ are all
+      # gitignored (built at package time); stub them for CI.
       - name: Stub resource paths
         run: |
           touch web/src-tauri/resources/mpv
           touch web/src-tauri/resources/mpv.exe
           mkdir -p web/src-tauri/resources/lib
           touch web/src-tauri/resources/lib/.gitkeep
+          mkdir -p web/src-tauri/resources/scraper-bin/anicat-scraper/_internal
+          touch web/src-tauri/resources/scraper-bin/anicat-scraper/anicat-scraper
+          touch web/src-tauri/resources/scraper-bin/anicat-scraper/_internal/.gitkeep
 
       - name: cargo clippy
         working-directory: web/src-tauri

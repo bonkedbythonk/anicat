@@ -102,6 +102,7 @@ pub fn run() {
             commands::user::get_user_profile,
             commands::user::save_media_list_entry,
             commands::user::delete_media_list_entry,
+            commands::user::toggle_favourite,
             commands::user::get_notifications,
             commands::user::mark_notifications_read,
             commands::user::get_airing_schedule,

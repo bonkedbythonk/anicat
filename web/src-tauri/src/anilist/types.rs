@@ -80,6 +80,8 @@ pub struct MediaItem {
     pub mean_score: Option<i32>,
     pub popularity: Option<i32>,
     pub favourites: Option<i32>,
+    #[serde(rename = "isFavourite")]
+    pub is_favourite: Option<bool>,
     pub trending: Option<i32>,
     pub studios: Option<MediaStudioConnection>,
     #[serde(rename = "startDate")]

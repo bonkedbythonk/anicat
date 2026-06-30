@@ -24,6 +24,7 @@ query ($id: Int, $type: MediaType) {
     meanScore
     popularity
     favourites
+    isFavourite
     trending
     studios { nodes { name } }
     startDate { year month day }
@@ -159,6 +160,7 @@ query {
     id name about bannerImage siteUrl
     avatar { large medium }
     options { displayAdultContent }
+    mediaListOptions { scoreFormat }
     statistics {
       anime { count episodesWatched minutesWatched meanScore genres(limit: 10, sort: COUNT_DESC) { genre count } }
       manga { count chaptersRead volumesRead meanScore genres(limit: 10, sort: COUNT_DESC) { genre count } }
@@ -221,6 +223,15 @@ mutation ($mediaId: Int, $status: MediaListStatus, $score: Float, $progress: Int
 pub const DELETE_MEDIA_LIST_ENTRY_MUTATION: &str = r#"
 mutation ($id: Int) {
   DeleteMediaListEntry(id: $id) { deleted }
+}
+"#;
+
+pub const TOGGLE_FAVOURITE_MUTATION: &str = r#"
+mutation ($animeId: Int, $mangaId: Int) {
+  ToggleFavourite(animeId: $animeId, mangaId: $mangaId) {
+    anime { nodes { id } }
+    manga { nodes { id } }
+  }
 }
 "#;
 

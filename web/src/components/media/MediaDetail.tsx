@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -13,6 +13,16 @@ import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { EpisodeList } from "./EpisodeList";
 import MangaReader from "./MangaReader";
+
+// AniList score formats — the raw score value lives on a different scale
+// depending on which one the viewer's account uses.
+const SCORE_FORMAT_MAX: Record<string, number> = {
+  POINT_100: 100,
+  POINT_10: 10,
+  POINT_10_DECIMAL: 10,
+  POINT_5: 5,
+  POINT_3: 3,
+};
 
 interface MediaDetailProps {
   item: MediaItem;
@@ -105,6 +115,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   // Extracted hooks
   const ambientColor = useAmbientColor(banner);
   const progressEditor = useProgressEditor();
+  const scoreEditor = useProgressEditor();
 
   // Tab data loaded via React Query — cached, deduped, refetched on tab switch.
   // Secondary tabs (characters, reviews, recommendations) are lazy-loaded
@@ -156,6 +167,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     queryKey: ["anizip-titles", item.id],
     queryFn: () => mediaApi.fetchAniZipTitles(item.id),
     staleTime: 24 * 60 * 60 * 1000,
+  });
+
+  // AniList scores your account in whichever format you picked under Settings
+  // > List > Scoring System — the raw `score` value on a list entry is in that
+  // format, not always out of 100 (1-3 for smileys, 1-5 for stars, etc.), so
+  // the editor and display below need to know it to not write garbage values.
+  const { data: scoreFormat = "POINT_100" } = useQuery({
+    queryKey: ["viewer-score-format"],
+    queryFn: async () => {
+      const res = await mediaApi.getUserProfile();
+      return res?.Viewer?.mediaListOptions?.scoreFormat || "POINT_100";
+    },
+    staleTime: 60 * 60 * 1000,
   });
 
   const { data: fillerEpisodes = [] } = useQuery({
@@ -357,6 +381,51 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       .catch((err) => console.error("Failed to update progress:", err));
   };
 
+  const handleUpdateScore = async (newScore: number) => {
+    const clamped = Math.max(0, Math.min(SCORE_FORMAT_MAX[scoreFormat] ?? 100, newScore));
+    scoreEditor.cancelEditing();
+    // Optimistic patch so the new score shows immediately instead of waiting
+    // on the refetch — same pattern as updateProgressInQueries, just scoped
+    // to the one query that actually displays score (no home row shows it).
+    queryClient.setQueryData(["media-detail", item.id], (old: MediaItem | undefined) => {
+      if (!old) return old;
+      return {
+        ...old,
+        media_list_entry: { ...(old.media_list_entry || {}), score: clamped },
+      };
+    });
+    mediaApi.saveMediaListEntry(item.id, { score: clamped })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["media-detail", item.id], refetchType: 'all' });
+        queryClient.invalidateQueries({ queryKey: ["lists"] });
+        dispatchRefresh();
+      })
+      .catch((err) => console.error("Failed to update score:", err));
+  };
+
+  const [isTogglingFavourite, setIsTogglingFavourite] = useState(false);
+  const handleToggleFavourite = async () => {
+    if (isTogglingFavourite) return;
+    setIsTogglingFavourite(true);
+    const next = !fullItem?.is_favourite;
+    queryClient.setQueryData(["media-detail", item.id], (old: MediaItem | undefined) => {
+      if (!old) return old;
+      return { ...old, is_favourite: next };
+    });
+    try {
+      await mediaApi.toggleFavourite(item.id, isManga);
+    } catch (err) {
+      console.error("Failed to toggle favourite:", err);
+      // Roll back the optimistic flip on failure.
+      queryClient.setQueryData(["media-detail", item.id], (old: MediaItem | undefined) => {
+        if (!old) return old;
+        return { ...old, is_favourite: !next };
+      });
+    } finally {
+      setIsTogglingFavourite(false);
+    }
+  };
+
   const handleRemoveFromList = async (bypassConfirm: boolean | React.MouseEvent = false) => {
     const shouldBypass = bypassConfirm === true;
     if (!shouldBypass && !deleteConfirmPending) {
@@ -556,6 +625,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               </button>
             )}
 
+            <button
+              onClick={handleToggleFavourite}
+              disabled={isTogglingFavourite}
+              title={fullItem?.is_favourite ? "Remove from AniList favourites" : "Add to AniList favourites"}
+              className={`p-3.5 rounded-2xl border transition-all active:scale-95 disabled:opacity-50 ${
+                fullItem?.is_favourite
+                  ? "bg-pink-500/15 hover:bg-pink-500/25 text-pink-500 border-pink-500/25"
+                  : "bg-foreground/5 hover:bg-foreground/10 text-foreground border-border"
+              }`}
+            >
+              <Heart size={18} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
+            </button>
+
             <div className="relative">
               <select
                 value={(() => { const s = fullItem.user_status?.status?.toLowerCase(); return s === 'current' ? 'watching' : (s || 'none'); })()}
@@ -652,11 +734,62 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
               <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
                 {actualScore != null && actualScore > 0 ? 'Your Score' : 'Avg Score'}
               </span>
-              <span className="text-xl font-black text-foreground tabular-nums">
-                {actualScore != null && actualScore > 0
-                  ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-sm">/ 100</span></>
-                  : <>{fullItem.average_score ? `${fullItem.average_score}%` : '-'}</>}
-              </span>
+              {scoreFormat === 'POINT_5' || scoreFormat === 'POINT_3' ? (
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-0.5">
+                    {Array.from({ length: SCORE_FORMAT_MAX[scoreFormat] }, (_, i) => i + 1).map((n) => {
+                      if (scoreFormat === 'POINT_5') {
+                        const active = (actualScore || 0) >= n;
+                        return (
+                          <button key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
+                            <Star size={18} className={active ? 'text-accent' : 'text-muted-foreground/30'} fill={active ? 'currentColor' : 'none'} />
+                          </button>
+                        );
+                      }
+                      const Icon = n === 1 ? Frown : n === 2 ? Meh : Smile;
+                      const selected = (actualScore || 0) === n;
+                      return (
+                        <button key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
+                          <Icon size={20} className={selected ? 'text-accent' : 'text-muted-foreground/30'} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(!actualScore || actualScore === 0) && !!fullItem.average_score && (
+                    <span className="text-[11px] text-muted-foreground/60">avg {fullItem.average_score}%</span>
+                  )}
+                </div>
+              ) : scoreEditor.isEditing ? (
+                <div className="flex items-center space-x-2 mt-0.5">
+                  <input
+                    autoFocus
+                    type="number"
+                    min={0}
+                    max={SCORE_FORMAT_MAX[scoreFormat] ?? 100}
+                    step={scoreFormat === 'POINT_10_DECIMAL' ? 0.1 : 1}
+                    value={scoreEditor.editValue}
+                    onChange={(e) => scoreEditor.setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleUpdateScore(parseFloat(scoreEditor.editValue) || 0);
+                      if (e.key === 'Escape') scoreEditor.cancelEditing();
+                    }}
+                    className="w-16 bg-foreground/5 border border-border rounded-lg px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
+                  />
+                  <button onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1.5 bg-accent text-white rounded-lg hover:bg-accent-light transition-colors"><Check size={14} /></button>
+                  <button onClick={() => scoreEditor.cancelEditing()} className="p-1.5 bg-foreground/5 text-muted-foreground rounded-lg hover:bg-foreground/10 transition-colors"><X size={14} /></button>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2 group/score">
+                  <span className="text-xl font-black text-foreground tabular-nums">
+                    {actualScore != null && actualScore > 0
+                      ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-sm">/ {SCORE_FORMAT_MAX[scoreFormat] ?? 100}</span></>
+                      : <>{fullItem.average_score ? `${fullItem.average_score}%` : '-'}</>}
+                  </span>
+                  <button onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1.5 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-lg transition-all opacity-0 group-hover/score:opacity-100">
+                    <Edit2 size={12} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

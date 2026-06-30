@@ -45,6 +45,7 @@ export interface MediaItem {
   meanScore?: number;
   popularity?: number;
   favourites?: number;
+  is_favourite?: boolean;
   trending?: number;
   user_status?: {
     id?: number;

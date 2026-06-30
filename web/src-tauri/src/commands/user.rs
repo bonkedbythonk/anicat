@@ -161,6 +161,28 @@ pub async fn save_media_list_entry(
 }
 
 #[tauri::command]
+pub async fn toggle_favourite(
+    state: State<'_, AppState>,
+    media_id: i64,
+    is_manga: bool,
+) -> Result<Value, String> {
+    let mut vars = HashMap::new();
+    if is_manga {
+        vars.insert("mangaId".to_string(), serde_json::json!(media_id));
+    } else {
+        vars.insert("animeId".to_string(), serde_json::json!(media_id));
+    }
+
+    let result: Value = state
+        .anilist_client
+        .execute(queries::TOGGLE_FAVOURITE_MUTATION, vars)
+        .await?;
+
+    state.cache.invalidate("get_user_profile");
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn delete_media_list_entry(
     state: State<'_, AppState>,
     entry_id: i64,

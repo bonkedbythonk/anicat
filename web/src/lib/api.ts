@@ -22,6 +22,7 @@ function snakify(item: Record<string, unknown>): Record<string, unknown> {
     startDate: "start_date",
     endDate: "end_date",
     mediaListEntry: "media_list_entry",
+    isFavourite: "is_favourite",
   };
   for (const [camel, snake] of Object.entries(camelToSnake)) {
     if (camel in item && !(snake in item)) {
@@ -262,6 +263,7 @@ interface ViewerData {
   bannerImage?: string;
   siteUrl?: string;
   options?: { displayAdultContent?: boolean };
+  mediaListOptions?: { scoreFormat?: string };
   statistics?: {
     anime?: {
       count: number;
@@ -352,6 +354,10 @@ export async function removeMediaEntry(
   entryId: number,
 ): Promise<{ DeleteMediaListEntry: { deleted: boolean } | null }> {
   return invoke("delete_media_list_entry", { entryId });
+}
+
+export async function toggleFavourite(mediaId: number, isManga: boolean): Promise<void> {
+  return invoke("toggle_favourite", { mediaId, isManga });
 }
 
 export async function getNotifications(page?: number): Promise<{
@@ -509,6 +515,7 @@ export const mediaApi = {
   },
   saveMediaListEntry: updateMediaEntry,
   deleteMediaListEntry: removeMediaEntry,
+  toggleFavourite,
   startPlayback,
   stopPlayback,
   trackPlayback: stopPlayback,

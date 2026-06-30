@@ -57,7 +57,7 @@ export function Sidebar() {
           src="/anicat_logo.png"
           alt="Anicat Logo"
           className={`opacity-95 hover:opacity-100 transition-all duration-300 object-contain pointer-events-none anicat-logo ${
-            compact ? "w-8 h-8" : "w-24 lg:w-32"
+            compact ? "w-8 h-8" : "w-24 lg:w-32 max-h-20 lg:max-h-24"
           }`}
         />
         {import.meta.env.DEV && !compact && (

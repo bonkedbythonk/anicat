@@ -2,44 +2,29 @@
 set -e
 
 # This script performs a full production build of Anicat and packages it as a .dmg for macOS.
-# 1. Builds the Python scraper as a standalone PyInstaller binary
-# 2. Builds the Vite frontend
+# 1. Configures the bundled mpv player
+# 2. Builds the Vite frontend (which also builds the Python scraper, see below)
 # 3. Bundles everything into a macOS Application and DMG using Tauri
+#
+# The scraper binary is NOT built here directly — `npx tauri build` below runs
+# `beforeBuildCommand` (`npm run build` -> `build:scraper && tsc && vite build`),
+# which invokes scripts/build_scraper.py. That script is the single source of
+# truth for the PyInstaller invocation (--onedir, with stale-output cleanup);
+# duplicating it here previously used --onefile and a bare `mv`, which broke
+# as soon as a previous --onedir build had already left a directory at the
+# destination path.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "🏗️ Starting Full Production Build of Anicat..."
 
-# 1. Build Python scraper binary via PyInstaller
-echo "📡 Step 1: Building Standalone Python Scraper..."
-cd "$PROJECT_ROOT/scraper"
-uv run pyinstaller --onefile --name anicat-scraper \
-  --hidden-import curl_cffi \
-  --hidden-import selectolax \
-  --hidden-import Crypto \
-  --hidden-import nodriver \
-  --hidden-import fastapi \
-  --hidden-import uvicorn \
-  --hidden-import starlette \
-  --collect-all curl_cffi \
-  --collect-all selectolax \
-  --collect-all pycryptodome \
-  --collect-all nodriver \
-  --collect-all fastapi \
-  --collect-all uvicorn \
-  --collect-all starlette \
-  main.py
-mkdir -p "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin"
-mv dist/anicat-scraper "$PROJECT_ROOT/web/src-tauri/resources/scraper-bin/"
-cd "$PROJECT_ROOT"
-
-# 2. Setup Portable Companion Player
-echo "🎬 Step 2: Configuring Portable Companion Player..."
+# 1. Setup Portable Companion Player
+echo "🎬 Step 1: Configuring Portable Companion Player..."
 bash "$SCRIPT_DIR/setup_bundled_player.sh"
 
-# 3. Build Frontend & Tauri App
-echo "💻 Step 3: Building Frontend and Bundling App..."
+# 2. Build Frontend & Tauri App
+echo "💻 Step 2: Building Frontend and Bundling App..."
 cd "$PROJECT_ROOT/web"
 
 # Ensure dependencies are installed

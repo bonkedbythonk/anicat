@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, lazy, Suspense } from "react";
+import { useEffect, useCallback, useRef, useState, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -50,6 +50,27 @@ export default function App() {
 
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [onboardingSeen, setOnboardingSeen] = useState(true);
+
+  // The view container unmounts/remounts whenever the detail page opens or
+  // closes (selectedItem flips the AnimatePresence branch), which would
+  // otherwise reset scroll to the top every time you back out of a detail
+  // page. Persist scroll offset per view across that remount.
+  const scrollPositions = useRef<Record<string, number>>({});
+  const restoreScroll = useCallback(
+    (el: HTMLDivElement | null) => {
+      // .scroll-container has CSS scroll-behavior: smooth, which would turn
+      // this restore into a visible scroll animation on every remount.
+      // behavior: "auto" explicitly overrides that for an instant jump.
+      if (el) el.scrollTo({ top: scrollPositions.current[currentView] || 0, behavior: "auto" });
+    },
+    [currentView]
+  );
+  const saveScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      scrollPositions.current[currentView] = e.currentTarget.scrollTop;
+    },
+    [currentView]
+  );
 
   // Two-finger swipe left on trackpad = go back from detail page
   useEffect(() => {
@@ -293,6 +314,8 @@ export default function App() {
           ) : (
             <motion.div
               key={currentView}
+              ref={restoreScroll}
+              onScroll={saveScroll}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}

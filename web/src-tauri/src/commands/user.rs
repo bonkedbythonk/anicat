@@ -60,6 +60,10 @@ pub async fn get_user_list(
                 vars.insert("userName".to_string(), serde_json::json!(name));
             }
             vars.insert("type".to_string(), serde_json::json!(resolved_type));
+            // Most recently updated entry first within each status — for
+            // "watching" that's whatever you last made progress on, for
+            // "completed" that's whatever you most recently finished.
+            vars.insert("sort".to_string(), serde_json::json!(["UPDATED_TIME_DESC"]));
 
             let result: Value = state
                 .anilist_client

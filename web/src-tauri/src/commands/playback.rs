@@ -225,15 +225,46 @@ fn server_speed_rank(server: &crate::scraper::client::StreamServer) -> u8 {
     4
 }
 
+/// There is no lower-quality preference worth keeping around — 1080p is
+/// always the target when it's available, full stop.
+const TARGET_QUALITY: u32 = 1080;
+
+/// Numeric resolution parsed from a server's quality label ("1080p" -> 1080),
+/// or 0 when the label isn't a resolution (e.g. "hls", "mp4", "unknown").
+fn resolution_rank(server: &crate::scraper::client::StreamServer) -> u32 {
+    server.quality.as_deref()
+        .and_then(|q| q.trim_end_matches(['p', 'P']).parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// Sort key: known-fast CDNs first (server_speed_rank), then highest
+/// resolution within the same tier — previously ties were broken by
+/// whatever order the scraper happened to return, which could silently
+/// pick a 360p wixmp variant over a 1080p one from the same source.
+fn quality_sort_key(server: &crate::scraper::client::StreamServer) -> (u8, std::cmp::Reverse<u32>) {
+    (server_speed_rank(server), std::cmp::Reverse(resolution_rank(server)))
+}
+
+/// Picks the fastest 1080p server across every CDN if one exists at all;
+/// otherwise falls back to the fastest CDN, preferring the highest
+/// resolution it has on offer.
 fn pick_best_server(servers: &[crate::scraper::client::StreamServer]) -> Option<&crate::scraper::client::StreamServer> {
-    servers.iter().min_by_key(|s| server_speed_rank(s))
+    servers.iter()
+        .filter(|s| resolution_rank(s) == TARGET_QUALITY)
+        .min_by_key(|s| server_speed_rank(s))
+        .or_else(|| servers.iter().min_by_key(|s| quality_sort_key(s)))
 }
 
 fn pick_best_server_in_group<'a>(servers: &'a [crate::scraper::client::StreamServer], groups: &[&str]) -> Option<&'a crate::scraper::client::StreamServer> {
-    servers.iter().filter(|s| {
+    let in_group: Vec<&crate::scraper::client::StreamServer> = servers.iter().filter(|s| {
         let g = get_stream_group(s);
         groups.contains(&g)
-    }).min_by_key(|s| server_speed_rank(s))
+    }).collect();
+    in_group.iter()
+        .filter(|s| resolution_rank(s) == TARGET_QUALITY)
+        .min_by_key(|s| server_speed_rank(s))
+        .copied()
+        .or_else(|| in_group.iter().min_by_key(|s| quality_sort_key(s)).copied())
 }
 fn get_stream_group(server: &crate::scraper::client::StreamServer) -> &str {
     if let Some(ref group) = server.group {
@@ -298,23 +329,22 @@ pub(crate) async fn resolve_stream_for_provider(
         .get_streams(&slug, episode_number as i32, provider_name)
         .await?;
 
+    let translation_type = {
+        let cfg = state.config.read().await;
+        cfg.stream.translation_type.clone()
+    };
+
     let selected_server = if let Some(ref s_name) = server {
         servers.iter().find(|s| s.name == *s_name)
             .or_else(|| pick_best_server(&servers))
+    } else if translation_type == "dub" {
+        pick_best_server_in_group(&servers, &["dub"])
+            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"]))
+            .or_else(|| pick_best_server(&servers))
     } else {
-        let translation_type = {
-            let cfg = state.config.read().await;
-            cfg.stream.translation_type.clone()
-        };
-        if translation_type == "dub" {
-            pick_best_server_in_group(&servers, &["dub"])
-                .or_else(|| pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"]))
-                .or_else(|| pick_best_server(&servers))
-        } else {
-            pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"])
-                .or_else(|| pick_best_server_in_group(&servers, &["dub"]))
-                .or_else(|| pick_best_server(&servers))
-        }
+        pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"])
+            .or_else(|| pick_best_server_in_group(&servers, &["dub"]))
+            .or_else(|| pick_best_server(&servers))
     };
 
     let raw_stream_url = selected_server.map(|s| s.url.clone()).unwrap_or_default();
@@ -323,6 +353,52 @@ pub(crate) async fn resolve_stream_for_provider(
         return Err(format!("No stream URL found on {}", provider_name));
     }
     Ok((raw_stream_url, headers))
+}
+
+/// Resolve and cache a stream ahead of time so the eventual `start_playback`
+/// call for the same media/episode/provider is instant. Used both by the
+/// in-player "near the end of an episode" preload and by the detail page,
+/// which preloads the Continue episode as soon as it's known — by the time
+/// the user presses play, mpv has nothing left to wait on.
+#[tauri::command]
+pub async fn preload_episode(
+    state: State<'_, AppState>,
+    media_id: i64,
+    episode_number: i64,
+    provider: Option<String>,
+    title: Option<String>,
+) -> Result<(), String> {
+    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+
+    // Already preloaded (or being worked on) for this exact target — skip.
+    {
+        let slot = state.preloaded_stream.lock().await;
+        if let Some(ref p) = *slot {
+            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name {
+                return Ok(());
+            }
+        }
+    }
+
+    let state_inner = state.inner().clone();
+    tokio::spawn(async move {
+        match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title).await {
+            Ok((raw_url, headers)) => {
+                let mut slot = state_inner.preloaded_stream.lock().await;
+                *slot = Some(crate::state::PreloadedStream {
+                    media_id,
+                    episode_number,
+                    provider: provider_name.clone(),
+                    raw_url,
+                    headers,
+                    at: std::time::Instant::now(),
+                });
+                log::info!("Preloaded stream for media {} ep {} ({})", media_id, episode_number, provider_name);
+            }
+            Err(e) => log::warn!("preload_episode: media {} ep {} ({}) failed: {}", media_id, episode_number, provider_name, e),
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -1258,6 +1334,110 @@ pub async fn get_all_last_watched(
 ) -> Result<HashMap<i64, String>, String> {
     let db = state.open_db()?;
     crate::registry::service::get_all_last_watched(&db)
+}
+
+// Separate from CURRENT_MPV: a trailer is a standalone, untracked playback
+// session (no episode progress, no AniList sync, no skip/auto-next), so it
+// must not interfere with the regular episode-playback process slot.
+static CURRENT_TRAILER_MPV: std::sync::Mutex<Option<tokio::process::Child>> =
+    std::sync::Mutex::new(None);
+
+fn find_yt_dlp_path() -> Option<String> {
+    if let Some(path) = crate::util::find_on_path("yt-dlp") {
+        return Some(path);
+    }
+    let candidates = [
+        "/opt/homebrew/bin/yt-dlp".to_string(),
+        "/usr/local/bin/yt-dlp".to_string(),
+        format!("{}/.local/bin/yt-dlp", std::env::var("HOME").unwrap_or_default()),
+    ];
+    candidates.into_iter().find(|p| std::path::Path::new(p).exists())
+}
+
+/// Resolve a YouTube trailer to a direct stream URL via yt-dlp and play it in
+/// mpv. Trailers are short, low-stakes, and play through the same player as
+/// everything else in the app rather than an embedded YouTube iframe (no
+/// YouTube branding/UI, no CSP frame-src surface, consistent controls).
+#[tauri::command]
+pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), String> {
+    let yt_dlp = find_yt_dlp_path().ok_or_else(|| {
+        "yt-dlp not found. Install it (e.g. \"brew install yt-dlp\") to play trailers in-app."
+            .to_string()
+    })?;
+
+    let youtube_url = format!("https://www.youtube.com/watch?v={}", trailer_id);
+    log::info!("[trailer] Resolving stream URL via yt-dlp for {}", youtube_url);
+
+    let mut resolve_cmd = tokio::process::Command::new(&yt_dlp);
+    crate::util::suppress_console_tokio(&mut resolve_cmd);
+    resolve_cmd.args(["-f", "best[ext=mp4]/best", "-g", &youtube_url]);
+    let output = resolve_cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[trailer] yt-dlp failed: {}", stderr);
+        let reason = stderr.lines().last().unwrap_or("unknown error");
+        return Err(format!("Could not resolve trailer stream: {}", reason));
+    }
+
+    let stream_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stream_url.is_empty() {
+        return Err("yt-dlp returned no stream URL".to_string());
+    }
+
+    let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
+
+    {
+        let child = {
+            if let Ok(mut guard) = CURRENT_TRAILER_MPV.lock() {
+                guard.take()
+            } else {
+                None
+            }
+        };
+        if let Some(mut c) = child {
+            log::info!("[trailer] Killing previous trailer mpv instance");
+            let _ = c.kill().await;
+        }
+    }
+
+    let mut cmd = tokio::process::Command::new(&mpv_bin);
+    crate::util::suppress_console_tokio(&mut cmd);
+    cmd.arg(format!("--config-dir={}", config_dir));
+    // Trailers don't carry an episode/progress session, so the anicat_ui
+    // script's IPC callbacks (which assume one exists) have nothing to talk
+    // to — suppress script autoloading for this one launch.
+    cmd.arg("--scripts=");
+    cmd.arg("--force-window=yes");
+    cmd.arg("--title=Trailer");
+    cmd.arg(&stream_url);
+
+    if cfg!(target_os = "macos") && !lib_dir.is_empty() {
+        cmd.env("DYLD_LIBRARY_PATH", &lib_dir);
+        let icd_path = std::path::Path::new(&lib_dir).join("vk_icd.json");
+        cmd.env("VK_ICD_FILENAMES", icd_path);
+    }
+    if cfg!(target_os = "linux") {
+        cmd.env("LD_LIBRARY_PATH", &lib_dir);
+    }
+    if cfg!(target_os = "windows") && !lib_dir.is_empty() {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{};{}", lib_dir, existing));
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to launch mpv: {}", e))?;
+    log::info!("[trailer] Launched mpv for trailer playback");
+
+    if let Ok(mut guard) = CURRENT_TRAILER_MPV.lock() {
+        *guard = Some(child);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

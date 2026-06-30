@@ -59,7 +59,6 @@ export async function getConfig(): Promise<{
   };
   stream: {
     player_type: string;
-    preferred_quality: string;
     data_saver: boolean;
     shader_profile?: string;
     translation_type?: string;
@@ -225,6 +224,15 @@ export async function resolveStream(
   return invoke("resolve_stream", { mediaId, episodeNumber, provider });
 }
 
+export async function preloadEpisode(
+  mediaId: number,
+  episodeNumber: number,
+  provider?: string,
+  title?: string,
+): Promise<void> {
+  return invoke("preload_episode", { mediaId, episodeNumber, provider, title });
+}
+
 export async function searchProvider(
   query: string,
   provider?: string,
@@ -382,6 +390,10 @@ export async function getAllLastWatched(): Promise<Record<number, string>> {
   return invoke("get_all_last_watched");
 }
 
+export async function playTrailer(trailerId: string): Promise<void> {
+  return invoke("play_trailer", { trailerId });
+}
+
 // ── Health ────────────────────────────────────────────────
 
 export async function getHealth(): Promise<{
@@ -449,6 +461,7 @@ export const mediaApi = {
   getEpisodes,
   getChapterPages,
   resolveStream,
+  preloadEpisode,
   searchProvider,
   mapProviderSlug,
   clearProviderCache,
@@ -499,6 +512,7 @@ export const mediaApi = {
   startPlayback,
   stopPlayback,
   trackPlayback: stopPlayback,
+  playTrailer,
   getWatchHistory,
   checkHealth: getHealth,
   getAppVersion,

@@ -42,8 +42,6 @@ pub struct GeneralConfig {
 pub struct StreamConfig {
     #[serde(default = "default_player_type")]
     pub player_type: String,
-    #[serde(default = "default_quality")]
-    pub preferred_quality: String,
     #[serde(default = "default_false")]
     pub data_saver: bool,
     #[serde(default = "default_shader_profile")]
@@ -78,9 +76,6 @@ fn default_title_language() -> String {
 }
 fn default_player_type() -> String {
     "external".into()
-}
-fn default_quality() -> String {
-    "1080p".into()
 }
 fn default_time_format() -> String {
     "12h".into()

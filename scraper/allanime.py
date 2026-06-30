@@ -103,45 +103,46 @@ async def get_mp4upload_links(session, page_url: str) -> list:
     return all_links
 
 
-async def get_filemoon_links(session, provider_path: str) -> list:
+def _is_filemoon_payload(data: dict) -> bool:
+    return bool(data) and 'iv' in data and 'payload' in data and 'key_parts' in data
+
+
+def _parse_filemoon_payload(fm_data: dict) -> list:
+    """Decrypt a filemoon-style clock.json response (AES-128-CTR, key split
+    across two base64url parts) into a list of {resolution, url} links."""
     all_links = []
-    fetch_url = provider_path if provider_path.startswith('http') else f"https://{ALLANIME_BASE}{provider_path}"
     try:
-        resp = await session.get(fetch_url, timeout=1)
-        if resp.status_code == 200:
-            fm_data = resp.json()
-            if fm_data and 'iv' in fm_data and 'payload' in fm_data and 'key_parts' in fm_data:
-                kp1_bytes = b64url_decode(fm_data['key_parts'][0])
-                kp2_bytes = b64url_decode(fm_data['key_parts'][1])
-                key_bytes = kp1_bytes + kp2_bytes
-                
-                iv_bytes = b64url_decode(fm_data['iv'])
-                counter_block = iv_bytes + b'\x00' * (16 - len(iv_bytes))
-                counter_block = bytearray(counter_block)
-                counter_block[15] = 2
-                
-                payload_bytes = b64url_decode(fm_data['payload'])
-                ct_len = len(payload_bytes) - 16
-                ciphertext = payload_bytes[:ct_len]
-                
-                initial_value = int.from_bytes(counter_block, byteorder='big')
-                ctr = Counter.new(128, initial_value=initial_value)
-                cipher = AES.new(key_bytes, AES.MODE_CTR, counter=ctr)
-                decrypted = cipher.decrypt(ciphertext)
-                plain = decrypted.decode('utf-8')
-                
-                parts = re.sub(r'[{}\[\]]', '\n', plain).split('\n')
-                for part in parts:
-                    m1 = re.search(r'"url":"([^"]*)".*"height":(\d+)', part)
-                    m2 = re.search(r'"height":(\d+).*"url":"([^"]*)"', part)
-                    if m1:
-                        url = m1.group(1).replace(r'\u0026', '&').replace(r'\u003D', '=')
-                        all_links.append({'resolution': m1.group(2) + 'p', 'url': url})
-                    elif m2:
-                        url = m2.group(2).replace(r'\u0026', '&').replace(r'\u003D', '=')
-                        all_links.append({'resolution': m2.group(1) + 'p', 'url': url})
+        kp1_bytes = b64url_decode(fm_data['key_parts'][0])
+        kp2_bytes = b64url_decode(fm_data['key_parts'][1])
+        key_bytes = kp1_bytes + kp2_bytes
+
+        iv_bytes = b64url_decode(fm_data['iv'])
+        counter_block = iv_bytes + b'\x00' * (16 - len(iv_bytes))
+        counter_block = bytearray(counter_block)
+        counter_block[15] = 2
+
+        payload_bytes = b64url_decode(fm_data['payload'])
+        ct_len = len(payload_bytes) - 16
+        ciphertext = payload_bytes[:ct_len]
+
+        initial_value = int.from_bytes(counter_block, byteorder='big')
+        ctr = Counter.new(128, initial_value=initial_value)
+        cipher = AES.new(key_bytes, AES.MODE_CTR, counter=ctr)
+        decrypted = cipher.decrypt(ciphertext)
+        plain = decrypted.decode('utf-8')
+
+        parts = re.sub(r'[{}\[\]]', '\n', plain).split('\n')
+        for part in parts:
+            m1 = re.search(r'"url":"([^"]*)".*"height":(\d+)', part)
+            m2 = re.search(r'"height":(\d+).*"url":"([^"]*)"', part)
+            if m1:
+                url = m1.group(1).replace(r'\u0026', '&').replace(r'\u003D', '=')
+                all_links.append({'resolution': m1.group(2) + 'p', 'url': url})
+            elif m2:
+                url = m2.group(2).replace(r'\u0026', '&').replace(r'\u003D', '=')
+                all_links.append({'resolution': m2.group(1) + 'p', 'url': url})
     except Exception as e:
-        log.warning(f"filemoon extract failed: {e}")
+        log.warning(f"filemoon decrypt failed: {e}")
     return all_links
 
 
@@ -171,6 +172,11 @@ async def get_links(session, provider_path: str) -> list:
         if resp.status_code != 200:
             return all_links
         provider_data = resp.json()
+        if _is_filemoon_payload(provider_data):
+            # Some clock.json sources return an AES-encrypted payload instead
+            # of the plain {links/hls} shape — without this branch these
+            # sources silently resolved to zero links.
+            return _parse_filemoon_payload(provider_data)
         if 'links' in provider_data and isinstance(provider_data['links'], list):
             for link in provider_data['links']:
                 url = link.get('link')

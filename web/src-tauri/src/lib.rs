@@ -107,6 +107,8 @@ pub fn run() {
             commands::user::get_airing_schedule,
             commands::playback::start_playback,
             commands::playback::stop_playback,
+            commands::playback::play_trailer,
+            commands::playback::preload_episode,
             commands::playback::get_watched_episodes,
             commands::playback::get_all_last_watched,
             commands::health::check_health,

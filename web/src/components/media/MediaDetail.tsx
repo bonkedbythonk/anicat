@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -41,7 +41,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  const [isResolvingTrailer, setIsResolvingTrailer] = useState(false);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
+  const setNotification = useAppStore((s) => s.setNotification);
 
   const { data: config = null } = useQuery({
     queryKey: ["media-config", item.id],
@@ -81,6 +83,24 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const fullItem = fullItemData ?? item;
 
   const banner = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large;
+
+  const trailer = fullItem?.trailer || item?.trailer;
+  const hasTrailer = !!(trailer?.id && trailer.site?.toLowerCase() === "youtube");
+
+  // Plays through mpv (via yt-dlp) instead of an embedded YouTube iframe —
+  // no third-party UI/branding, consistent controls with the rest of the app.
+  const handlePlayTrailer = async () => {
+    if (!trailer?.id || isResolvingTrailer) return;
+    setIsResolvingTrailer(true);
+    try {
+      await mediaApi.playTrailer(trailer.id);
+    } catch (err) {
+      setNotification({ message: err instanceof Error ? err.message : String(err), type: "error" });
+      setTimeout(() => setNotification(null), 5000);
+    } finally {
+      setIsResolvingTrailer(false);
+    }
+  };
 
   // Extracted hooks
   const ambientColor = useAmbientColor(banner);
@@ -205,6 +225,20 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     if (!synopsisRef.current) return;
     setSynopsisOverflows(synopsisRef.current.scrollHeight > 120);
   }, [fullItem.description]);
+
+  // Resolve the Continue/Start episode's stream as soon as we know which one
+  // it is, so by the time the user presses play, mpv has nothing left to wait
+  // on — start_playback finds it already sitting in the preload slot.
+  useEffect(() => {
+    if (isManga || !selectedProvider) return;
+    const continueEpisode = actualProgress + 1;
+    mediaApi.preloadEpisode(
+      item.id,
+      continueEpisode,
+      selectedProvider,
+      item.title?.english || item.title?.romaji || item.title?.native || undefined,
+    ).catch(() => {});
+  }, [isManga, selectedProvider, actualProgress, item.id]);
 
   const isProcessingAction = useRef(false);
 
@@ -510,6 +544,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                 </button>
               );
             })()}
+
+            {hasTrailer && (
+              <button
+                onClick={handlePlayTrailer}
+                disabled={isResolvingTrailer}
+                className="flex items-center gap-2 px-5 py-3.5 bg-foreground/5 hover:bg-foreground/10 border border-border text-foreground rounded-2xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+              >
+                {isResolvingTrailer ? <Loader2 size={18} className="animate-spin" /> : <Film size={18} />}
+                <span>Trailer</span>
+              </button>
+            )}
 
             <div className="relative">
               <select

@@ -13,7 +13,6 @@ interface AppConfig {
   };
   stream?: {
     player_type?: string;
-    preferred_quality?: string;
     data_saver?: boolean;
     shader_profile?: string;
     translation_type?: string;
@@ -192,7 +191,6 @@ interface SettingsState {
   autoplay: boolean;
   autoskip: boolean;
   animePreview: boolean;
-  preferredQuality: string;
   preferredTitleLanguage: string;
   downloadsPath: string;
   anilistToken: string | null;
@@ -205,7 +203,6 @@ interface SettingsState {
   setAutoplay: (v: boolean) => void;
   setAutoskip: (v: boolean) => void;
   setAnimePreview: (v: boolean) => void;
-  setPreferredQuality: (q: string) => void;
   setPreferredTitleLanguage: (l: string) => void;
   setDataSaver: (v: boolean) => void;
   setNotifications: (v: boolean) => void;
@@ -221,7 +218,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   autoplay: true,
   autoskip: false,
   animePreview: true,
-  preferredQuality: "1080p",
   preferredTitleLanguage: "romaji",
   downloadsPath: "",
   anilistToken: null,
@@ -234,7 +230,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAutoplay: (autoplay) => set({ autoplay }),
   setAutoskip: (autoskip) => set({ autoskip }),
   setAnimePreview: (animePreview) => set({ animePreview }),
-  setPreferredQuality: (preferredQuality) => set({ preferredQuality }),
   setPreferredTitleLanguage: (preferredTitleLanguage) =>
     set({ preferredTitleLanguage }),
   setDataSaver: (dataSaver) => set({ dataSaver }),
@@ -249,7 +244,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       autoplay: config?.general?.autoplay ?? true,
       autoskip: config?.general?.autoskip ?? false,
       animePreview: config?.general?.anime_preview ?? true,
-      preferredQuality: config?.stream?.preferred_quality || "1080p",
       preferredTitleLanguage: config?.general?.preferred_title_language || "romaji",
       downloadsPath: config?.general?.downloads_path || "",
       dataSaver: config?.stream?.data_saver ?? false,

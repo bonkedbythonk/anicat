@@ -39,20 +39,6 @@ export function SettingsView({ health }: SettingsViewProps) {
   const [releaseUrl, setReleaseUrl] = useState<string>("");
   const [authPending, setAuthPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [homeRows, setHomeRows] = useState<{ id: string; visible: boolean }[] | null>(() => {
-    try {
-      const saved = typeof window !== "undefined" ? localStorage.getItem("anicat_home_rows") : null;
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
-  const toggleHomeRow = (id: string) => {
-    const rowDefs = ["airingToday", "continue", "newForYou", "smartPlaylist", "trending", "newlyReleasing", "seasonal"];
-    const current = homeRows || rowDefs.map(rowId => ({ id: rowId, visible: true }));
-    const next = current.map((r) => r.id === id ? { ...r, visible: !r.visible } : r);
-    setHomeRows(next);
-    localStorage.setItem("anicat_home_rows", JSON.stringify(next));
-    window.dispatchEvent(new Event("anicat_home_rows_changed"));
-  };
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
   const [uiStyle, setUiStyle] = useState<UiStyle>("neon-abyss");
@@ -441,35 +427,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <option value="24h">24-hour</option>
                   </select>
                 </SettingField>
-              </CardSection>
-
-              <CardSection title="Homepage Layout" description="Show or hide sections on the homepage.">
-                {(() => {
-                  const rowDefs = [
-                    { id: "airingToday", label: "Airing Today" },
-                    { id: "continue", label: "Continue Watching" },
-                    { id: "newForYou", label: "New for You" },
-                    { id: "smartPlaylist", label: "Smart Playlist" },
-                    { id: "trending", label: "Trending Now" },
-                    { id: "newlyReleasing", label: "Newly Releasing" },
-                    { id: "seasonal", label: "Seasonal Highlights" },
-                  ];
-                  return rowDefs.map(r => {
-                    const row = (homeRows || rowDefs.map(x => ({ id: x.id, visible: true }))).find((x) => x.id === r.id);
-                    const visible = row ? row.visible : true;
-                    return (
-                      <label key={r.id} className="flex items-center justify-between px-3 py-3 rounded-xl hover:bg-white/[0.015] transition-colors cursor-pointer group">
-                        <div className="text-sm font-semibold text-white group-hover:text-accent transition-colors">{r.label}</div>
-                        <input
-                          type="checkbox"
-                          checked={visible}
-                          onChange={() => toggleHomeRow(r.id)}
-                          className="accent-accent rounded cursor-pointer w-4 h-4"
-                        />
-                      </label>
-                    );
-                  });
-                })()}
               </CardSection>
 
               <CardSection title="Advanced" description="Rarely need to change these after initial setup.">

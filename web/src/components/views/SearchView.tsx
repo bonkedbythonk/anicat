@@ -16,8 +16,6 @@ export function SearchView({ onSelect }: SearchViewProps) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
-  const [suggestions, setSuggestions] = useState<MediaItem[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
   const queryClient = useQueryClient();
@@ -120,29 +118,11 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
   const loading = Boolean(debouncedQuery) && loadingResults;
 
-
-
-  useEffect(() => {
-    const trimmedQuery = query.trim();
-
-    if (trimmedQuery.length < 2) {
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setLoadingSuggestions(true);
-      try {
-        const data = await mediaApi.search(trimmedQuery, type, 1, filters);
-        setSuggestions((data.media || []).slice(0, 6));
-      } catch {
-        setSuggestions([]);
-      } finally {
-        setLoadingSuggestions(false);
-      }
-    }, 200);
-
-    return () => clearTimeout(timer);
-  }, [query, type, filters]);
+  // Suggestions reuse the same paginated search results instead of firing a
+  // second, independently-debounced AniList query — the two were issuing
+  // duplicate requests per keystroke and tripping AniList's rate limiter.
+  const suggestions = useMemo(() => results.slice(0, 6), [results]);
+  const loadingSuggestions = loadingResults;
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -168,7 +148,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
           )}
         </div>
 
-        {query.trim().length >= 2 && suggestions.length > 0 && (
+        {debouncedQuery.trim().length >= 2 && suggestions.length > 0 && (
           <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 shadow-2xl shadow-black/20">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-gray-500">Suggestions</p>

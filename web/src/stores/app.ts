@@ -80,7 +80,18 @@ interface AppState {
   // Notifications
   notification: { message: string; type: "info" | "error" } | null;
   setNotification: (n: { message: string; type: "info" | "error" } | null) => void;
+
+  // My Lists tab/type — lifted out of ListsView because it unmounts whenever
+  // the detail page opens (a sibling branch in App.tsx's AnimatePresence
+  // ternary), which would otherwise reset the selected tab back to Watching
+  // every time you open an item and come back.
+  listsActiveTab: WatchStatus;
+  setListsActiveTab: (tab: WatchStatus) => void;
+  listsType: "ANIME" | "MANGA";
+  setListsType: (type: "ANIME" | "MANGA") => void;
 }
+
+export type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped" | "repeating";
 
 export const useAppStore = create<AppState>((set) => ({
   currentView: "home",
@@ -136,6 +147,11 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.setItem("anicat_sidebar_compact", String(next));
       return { sidebarCompact: next };
     }),
+
+  listsActiveTab: "watching",
+  setListsActiveTab: (listsActiveTab) => set({ listsActiveTab }),
+  listsType: "ANIME",
+  setListsType: (listsType) => set({ listsType }),
 
   settingsDefaultTab: null,
   setSettingsDefaultTab: (settingsDefaultTab) => set({ settingsDefaultTab }),

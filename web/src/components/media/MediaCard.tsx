@@ -25,17 +25,15 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
 
   const handleMouseEnter = useCallback(() => {
     prefetchTimerRef.current = setTimeout(() => {
+      // Prefetch only the AniList detail — it's a single cached GraphQL call
+      // and makes opening the card feel instant. Do NOT prefetch episodes
+      // here: that spins up the Python scraper and hits the streaming
+      // provider for every card the user hovers, which wastes the provider's
+      // (and AniList's) rate budget on titles that are never opened. Episodes
+      // resolve when the detail page actually mounts.
       queryClient.prefetchQuery({
         queryKey: ["media-detail", item.id],
         queryFn: () => mediaApi.getDetails(item.id),
-      });
-      queryClient.prefetchQuery({
-        queryKey: ["media-episodes", item.id, item.type === "MANGA" ? "mangakatana" : "allanime"],
-        queryFn: () => mediaApi.getEpisodes(
-          item.id,
-          item.type === "MANGA" ? "mangakatana" : "allanime",
-          item.title.english || item.title.romaji || item.title.native || undefined
-        ),
       });
     }, 300);
   }, [item.id, queryClient]);

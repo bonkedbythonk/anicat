@@ -6,6 +6,7 @@ import { MediaRow } from "@/components/media/MediaRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 
@@ -286,6 +287,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
 
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
+  const closeLayoutEditor = useCallback(() => setShowLayoutEditor(false), []);
+  const layoutModalRef = useModalDismiss<HTMLDivElement>(showLayoutEditor, closeLayoutEditor);
 
 
   // Render a single home row by id. Returning null means the row has nothing to
@@ -409,13 +412,18 @@ export function HomeView({ onSelect }: HomeViewProps) {
             onClick={() => setShowLayoutEditor(false)}
           >
             <div
-              className="w-full max-w-md rounded-2xl bg-[#111114] border border-white/[0.1] shadow-2xl p-6 max-h-[85vh] overflow-y-auto"
+              ref={layoutModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="customize-home-title"
+              tabIndex={-1}
+              className="w-full max-w-md rounded-2xl bg-[#111114] border border-white/[0.1] shadow-2xl p-6 max-h-[85vh] overflow-y-auto outline-none"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-2">
                   <LayoutDashboard size={18} className="text-accent" />
-                  <h2 className="text-base font-bold text-foreground">Customize home</h2>
+                  <h2 id="customize-home-title" className="text-base font-bold text-foreground">Customize home</h2>
                 </div>
                 <button
                   onClick={() => setShowLayoutEditor(false)}

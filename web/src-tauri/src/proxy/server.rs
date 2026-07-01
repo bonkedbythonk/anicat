@@ -563,16 +563,17 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url, proxy_port: u1
     new_playlist
 }
 
-/// Domains the proxy is allowed to fetch from. Entries with a dot are matched
-/// as domain suffixes (`anilist.co` matches `s4.anilist.co`); bare tokens
-/// (`anilistcdn`) are matched against individual host labels, which covers
-/// CDN subdomains without matching unrelated hosts.
+/// Domains the proxy is allowed to fetch from. Every entry is a full domain
+/// matched as an exact host or a dotted suffix (`anilist.co` matches
+/// `s4.anilist.co`). CDN hosts must be listed as their full domain
+/// (`allanimecdn.b-cdn.net`), never a bare label — a bare-label `contains`
+/// match let `allanimecdn.evil.com` through.
 const ALLOWED_DOMAINS: &[&str] = &[
-    "anilist.co", "anilistcdn",
+    "anilist.co",
     "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
     "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
     "gravatar.com",
-    "allanime.day", "allanimecdn", "youtu-chan.com",
+    "allanime.day", "allanimecdn.b-cdn.net", "youtu-chan.com",
     "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
     "filemoon.sx", "filemoon.art", "filemoon.top",
     "repackager.wixmp.com",
@@ -586,13 +587,7 @@ fn host_is_allowed(url: &str) -> bool {
         },
         Err(_) => return false,
     };
-    ALLOWED_DOMAINS.iter().any(|d| {
-        if d.contains('.') {
-            host == *d || host.ends_with(&format!(".{d}"))
-        } else {
-            host.split('.').any(|label| label.contains(d))
-        }
-    })
+    ALLOWED_DOMAINS.iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
 
 async fn proxy_handler(
@@ -785,5 +780,9 @@ mod tests {
         assert!(!host_is_allowed("http://anilist.co.evil.com/x"));
         assert!(!host_is_allowed("http://localhost:8080/admin"));
         assert!(!host_is_allowed("not a url"));
+        // bare-label spoofing: a hostile host reusing a CDN label as its own
+        // first label must not pass now that matching is suffix-only.
+        assert!(!host_is_allowed("http://allanimecdn.evil.com/x"));
+        assert!(!host_is_allowed("http://anilistcdn.evil.com/x"));
     }
 }

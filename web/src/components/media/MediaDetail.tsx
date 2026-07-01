@@ -55,6 +55,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
   const setNotification = useAppStore((s) => s.setNotification);
 
+  // Surface a failed action to the user instead of only logging it — an
+  // optimistic UI update can otherwise silently diverge from AniList.
+  const notifyError = (msg: string) => {
+    setNotification({ message: msg, type: "error" });
+    setTimeout(() => setNotification(null), 5000);
+  };
+
   const { data: config = null } = useQuery({
     queryKey: ["media-config", item.id],
     queryFn: async () => {
@@ -378,7 +385,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
         queryClient.invalidateQueries({ queryKey: ["manga-data"], refetchType: 'all' });
         dispatchRefresh();
       })
-      .catch((err) => console.error("Failed to update progress:", err));
+      .catch((err) => { console.error("Failed to update progress:", err); notifyError("Couldn't update progress on AniList."); });
   };
 
   const handleUpdateScore = async (newScore: number) => {
@@ -400,7 +407,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
         queryClient.invalidateQueries({ queryKey: ["lists"] });
         dispatchRefresh();
       })
-      .catch((err) => console.error("Failed to update score:", err));
+      .catch((err) => { console.error("Failed to update score:", err); notifyError("Couldn't update your score on AniList."); });
   };
 
   const [isTogglingFavourite, setIsTogglingFavourite] = useState(false);
@@ -416,6 +423,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       await mediaApi.toggleFavourite(item.id, isManga);
     } catch (err) {
       console.error("Failed to toggle favourite:", err);
+      notifyError(next ? "Couldn't add to AniList favourites." : "Couldn't remove from AniList favourites.");
       // Roll back the optimistic flip on failure.
       queryClient.setQueryData(["media-detail", item.id], (old: MediaItem | undefined) => {
         if (!old) return old;
@@ -474,6 +482,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
       })
       .catch((error) => {
         console.error("Failed to remove from list:", error);
+        notifyError("Couldn't remove this from your AniList list.");
         // Rollback: restore snapshots
         for (const [keyStr, snapshot] of snapshots) {
           qc.setQueryData(JSON.parse(keyStr) as unknown[], snapshot);
@@ -656,7 +665,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                         queryClient.invalidateQueries({ queryKey: ['home-repeating'], refetchType: 'all' });
                         dispatchRefresh();
                       })
-                      .catch((err) => console.error('Failed to update status:', err))
+                      .catch((err) => { console.error('Failed to update status:', err); notifyError("Couldn't update your list status on AniList."); })
                       .finally(() => setIsUpdatingStatus(false));
                   }
                 }}

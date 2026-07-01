@@ -45,12 +45,48 @@ export function SettingsView({ health }: SettingsViewProps) {
   const [logoutState, setLogoutState] = useState<"idle" | "confirming" | "loggingOut">("idle");
   const [registryState, setRegistryState] = useState<"idle" | "confirming" | "wiping" | "done">("idle");
   const [resetOnboardingState, setResetOnboardingState] = useState<"idle" | "confirming">("idle");
-  const [debugOutput, setDebugOutput] = useState("Press Test to run.");
-  const [debugName, setDebugName] = useState("");
-  const debugSearchRef = useRef<HTMLInputElement>(null);
-  const debugMediaIdRef = useRef<HTMLInputElement>(null);
+  const [debugBusy, setDebugBusy] = useState(false);
+  const [debugResult, setDebugResult] = useState<{ ok: boolean; summary: string; raw: string } | null>(null);
+  const debugNameRef = useRef<HTMLInputElement>(null);
   const debugEpisodeRef = useRef<HTMLInputElement>(null);
   const debugProviderRef = useRef<HTMLSelectElement>(null);
+
+  // Provider test: resolve the first search match, ask the backend to fetch
+  // streams for the given episode, and report a clean pass/fail. The full raw
+  // response is kept only behind a copy button for bug reports.
+  const runProviderTest = useCallback(async () => {
+    const name = debugNameRef.current?.value?.trim();
+    const ep = parseInt(debugEpisodeRef.current?.value || "1", 10) || 1;
+    const provider = debugProviderRef.current?.value || "allanime";
+    if (!name) return;
+    setDebugBusy(true);
+    setDebugResult(null);
+    try {
+      const res = await mediaApi.search(name, "ANIME", 1);
+      const first = res?.media?.[0];
+      if (!first?.id) {
+        setDebugResult({ ok: false, summary: `No anime found for "${name}".`, raw: "" });
+        return;
+      }
+      const title = first.title?.english || first.title?.romaji || name;
+      const data = await invoke<Record<string, unknown>>("debug_provider_streams", {
+        mediaId: first.id,
+        episodeNumber: ep,
+        provider,
+      });
+      const streams = (data?.final_streams as unknown[]) || [];
+      const errors = (data?.errors as string[]) || [];
+      const ok = streams.length > 0;
+      const summary = ok
+        ? `${streams.length} stream${streams.length === 1 ? "" : "s"} found for ${title} episode ${ep} on ${provider}.`
+        : `No streams found for ${title} episode ${ep} on ${provider}.${errors.length ? ` First error: ${errors[0]}` : ""}`;
+      setDebugResult({ ok, summary, raw: JSON.stringify(data, null, 2) });
+    } catch (err) {
+      setDebugResult({ ok: false, summary: "Test failed: " + String(err), raw: "" });
+    } finally {
+      setDebugBusy(false);
+    }
+  }, []);
 
   const hasUpdate = Boolean(health?.update_available || stagedHasUpdate);
 
@@ -811,93 +847,46 @@ export function SettingsView({ health }: SettingsViewProps) {
                 </div>
               </CardSection>
 
-              {/* Provider Debug */}
-              <CardSection title="Provider Debug" description="Test stream provider responses for a given anime and episode.">
+              {/* Provider Test */}
+              <CardSection title="Provider Test" description="Check whether a provider can fetch streams for an episode.">
                 <div className="space-y-3">
-                  <input ref={debugSearchRef} type="text" placeholder="Search anime (e.g. Code Geass)..." className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
-                    onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
-                      if (e.key !== 'Enter') return;
-                      const q = debugSearchRef.current?.value;
-                      if (!q) return;
-                      try {
-                        const res = await mediaApi.search(q, "ANIME", 1);
-                        const first = res?.media?.[0];
-                        if (first?.id && debugMediaIdRef.current) {
-                          debugMediaIdRef.current.value = String(first.id);
-                          setDebugName(first.title?.english || first.title?.romaji || '');
-                        }
-                      } catch {}
-                    }}
-                  />
-                  {debugName && (
-                    <div className="text-xs text-gray-500 px-1 font-medium">{debugName}</div>
-                  )}
-                  <div className="flex items-center space-x-2">
-                    <input ref={debugMediaIdRef} type="number" placeholder="Anime ID" className="w-[92px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
-                    <input ref={debugEpisodeRef} type="number" placeholder="Episode #" defaultValue="1" className="w-[100px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
-                    <select ref={debugProviderRef} defaultValue="allanime" className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={debugNameRef}
+                      type="text"
+                      placeholder="Anime name"
+                      onKeyDown={(e) => { if (e.key === "Enter") runProviderTest(); }}
+                      className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
+                    />
+                    <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
+                    <select ref={debugProviderRef} defaultValue="allanime" aria-label="Provider" className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
                       <option value="allanime" className="bg-[#121212]">AllAnime</option>
                       <option value="anineko" className="bg-[#121212]">AniNeko</option>
                     </select>
                     <button
-                      onClick={() => {
-                        const mediaId = debugMediaIdRef.current?.value;
-                        const ep = debugEpisodeRef.current?.value;
-                        const provider = debugProviderRef.current?.value;
-                        if (!mediaId || !ep) return;
-                        setDebugOutput("Loading...");
-                        invoke<Record<string, unknown>>("debug_provider_streams", {
-                          mediaId: parseInt(mediaId, 10),
-                          episodeNumber: parseInt(ep, 10),
-                          provider,
-                        })
-                          .then((data) => {
-                            const raw = JSON.stringify(data, null, 2);
-                            const finalStreams = (data?.final_streams as Record<string, unknown>[]) || [];
-                            const debugPasses = (data?.debug_passes as { pass: string; error?: string }[]) || [];
-                            const errors = (data?.errors as string[]) || [];
-                            const pageTitle = data?.page_title || "";
-                            const epNum = data?.episode ?? 0;
-                            const lines: string[] = [];
-                            if (finalStreams.length > 0) {
-                              lines.push(`✅ ${finalStreams.length} stream(s) found`);
-                            } else {
-                              lines.push("❌ No streams found");
-                            }
-                            if (errors.length > 0) {
-                              lines.push(`⚠️ ${errors.length} error(s): ${errors[0]}`);
-                            }
-                            if (debugPasses.length > 0) {
-                              const fails = debugPasses.filter((p) => p.pass === "error" || p.pass !== "pass");
-                              if (fails.length > 0) {
-                                lines.push(`⚠️ ${fails.length} scraper pass(es) failed: ${fails[0]?.error || "unknown"}`);
-                              }
-                            }
-                            if (pageTitle) lines.push(`📄 Page: ${pageTitle}`);
-                            lines.push(`🔢 Episode: ${epNum}`);
-                            if (data?.slug) lines.push(`🔗 Slug: ${data.slug}`);
-                            const summary = lines.join("\n");
-                            setDebugOutput(summary + "\n\n── Raw JSON ──\n" + raw);
-                          })
-                          .catch((err: unknown) => { setDebugOutput("Error: " + String(err)); });
-                      }}
-                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent-light text-white font-bold text-sm shadow-lg shadow-accent/20 transition-all active:scale-[0.98]"
+                      onClick={runProviderTest}
+                      disabled={debugBusy}
+                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent-light text-white font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                     >
+                      {debugBusy ? <Loader2 size={16} className="animate-spin" /> : null}
                       Test
                     </button>
                   </div>
-                  <div className="relative">
-                    <pre className="w-full h-48 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-300 overflow-y-auto border border-white/5 whitespace-pre-wrap break-all">{debugOutput}</pre>
-                    {debugOutput && (
-                      <button
-                        onClick={() => navigator.clipboard.writeText(debugOutput)}
-                        className="absolute top-2 right-2 p-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-gray-400 hover:text-white transition-all"
-                        title="Copy output"
-                      >
-                        <Copy size={14} />
-                      </button>
-                    )}
-                  </div>
+                  {debugResult && (
+                    <div className={`flex items-start gap-2 rounded-xl p-3 text-sm border ${debugResult.ok ? "bg-green-500/10 border-green-500/20 text-green-300" : "bg-red-500/10 border-red-500/20 text-red-300"}`}>
+                      {debugResult.ok ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <XCircle size={16} className="shrink-0 mt-0.5" />}
+                      <span className="flex-1 leading-relaxed">{debugResult.summary}</span>
+                      {debugResult.raw && (
+                        <button
+                          onClick={() => navigator.clipboard.writeText(debugResult.raw)}
+                          className="shrink-0 p-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-gray-400 hover:text-white transition-all"
+                          title="Copy raw response for a bug report"
+                        >
+                          <Copy size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </CardSection>
 

@@ -118,6 +118,10 @@ impl AniListClient {
             })?;
 
         let status = resp.status();
+        // Capture headers before consuming the body — the rate-limit headers
+        // (Retry-After, X-RateLimit-Remaining) live here and reqwest moves
+        // `resp` into `.text()`.
+        let headers = resp.headers().clone();
         let text = resp
             .text()
             .await
@@ -126,12 +130,20 @@ impl AniListClient {
                 format!("Failed to read response: {}", e)
             })?;
 
+        let header_secs = |name: &str| -> Option<u64> {
+            headers.get(name).and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<u64>().ok())
+        };
+
         if !status.is_success() {
             log::error!("AniList request failed with status {}: {}", status.as_u16(), text);
             if status.as_u16() == 429 {
+                // Honor the server's Retry-After when present instead of always
+                // guessing 60s — AniList sets it to the exact cooldown, so we
+                // resume as early as allowed rather than over-waiting.
+                let cooldown = header_secs("retry-after").unwrap_or(60).clamp(1, 300);
                 let mut rl = self.rate_limited_until.lock().unwrap();
-                *rl = Some(Instant::now() + std::time::Duration::from_secs(60));
-                return Err("AniList HTTP 429: Too Many Requests — cooling down 60s".to_string());
+                *rl = Some(Instant::now() + std::time::Duration::from_secs(cooldown));
+                return Err(format!("AniList HTTP 429: Too Many Requests — cooling down {}s", cooldown));
             }
             // Extract the human-readable message from the GraphQL error body
             // (AniList returns JSON even for 4xx, e.g. downtime 403).
@@ -144,6 +156,21 @@ impl AniListClient {
         }
 
         log::info!("AniList request succeeded (HTTP {})", status.as_u16());
+
+        // Proactive throttle: when the remaining budget for this window runs
+        // low, insert a short cooldown so the next requests spread out instead
+        // of sprinting into a 429. Cheap insurance on top of the client-side
+        // query cache — most requests report plenty of headroom and skip this.
+        if let Some(remaining) = header_secs("x-ratelimit-remaining") {
+            if remaining <= 3 {
+                let mut rl = self.rate_limited_until.lock().unwrap();
+                let backoff = Instant::now() + std::time::Duration::from_secs(2);
+                if rl.map(|until| until < backoff).unwrap_or(true) {
+                    *rl = Some(backoff);
+                }
+                log::warn!("AniList rate budget low ({} left) — spacing next request by 2s", remaining);
+            }
+        }
 
         let parsed: AnilistResponse<T> = serde_json::from_str(&text)
             .map_err(|e| {

@@ -455,7 +455,10 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
         let http_client = reqwest::Client::new();
         let python_path = "uv".to_string();
-        let scraper_script = "/Users/thomas/Documents/randomcode/personal/anicat/scraper/main.py".to_string();
+        let scraper_script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scraper/main.py")
+            .to_string_lossy()
+            .to_string();
 
         let manager = ScraperManager::new(http_client, python_path, scraper_script);
         let results = manager.search("The Ramparts of Ice", "allanime").await.unwrap();

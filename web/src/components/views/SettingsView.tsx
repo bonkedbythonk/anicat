@@ -215,8 +215,16 @@ export function SettingsView({ health }: SettingsViewProps) {
         const res = await mediaApi.triggerUpdate();
         if (res.status === "success") {
           setStagedHasUpdate(false);
-          setUpdateMessage({ text: "Update installed. Relaunching...", type: "success" });
-          setTimeout(() => invoke("relaunch_app").catch(console.error), 1500);
+          // On Windows the backend exits the app itself once the silent NSIS
+          // installer is launched (installers can't overwrite a running
+          // exe), and a silent install doesn't relaunch the app afterward —
+          // unlike macOS, there is nothing to reopen automatically here.
+          if (window.navigator.platform.includes("Win")) {
+            setUpdateMessage({ text: "Anicat is closing to finish installing the update. Reopen it in a moment.", type: "success" });
+          } else {
+            setUpdateMessage({ text: "Update installed. Relaunching...", type: "success" });
+            setTimeout(() => invoke("relaunch_app").catch(console.error), 1500);
+          }
         } else {
           setUpdateMessage({ text: res.message, type: "error" });
         }

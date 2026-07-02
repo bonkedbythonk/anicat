@@ -194,11 +194,17 @@ pub async fn check_update(
     let tag = data.get("tag_name").and_then(|v| v.as_str()).unwrap_or("");
     let latest_version = tag.trim_start_matches('v').to_string();
 
+    // Each platform's release asset has a different extension (see
+    // build_dmg.sh / windows-build.yml). This only ever matched .dmg, so on
+    // Windows it fell through to the release *page* URL below instead of a
+    // downloadable installer — trigger_update would then try to download that
+    // HTML page and hand it to hdiutil, which doesn't even exist on Windows.
+    let wanted_ext = if cfg!(target_os = "windows") { ".exe" } else { ".dmg" };
     let mut release_url = None;
     if let Some(assets) = data.get("assets").and_then(|a| a.as_array()) {
         for asset in assets {
             if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
-                if name.ends_with(".dmg") {
+                if name.ends_with(wanted_ext) {
                     if let Some(download_url) = asset.get("browser_download_url").and_then(|u| u.as_str()) {
                         release_url = Some(download_url.to_string());
                         break;
@@ -232,11 +238,37 @@ pub fn get_proxy_port(state: State<'_, AppState>) -> u16 {
 }
 
 #[tauri::command]
-pub async fn trigger_update(url: String) -> Result<(), String> {
-    if !url.contains("github.com/bonkedbythonk/anicat/releases") && !url.contains(".dmg") {
+pub async fn trigger_update(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    // Only the Windows branch below needs the AppHandle (to exit the app so
+    // the installer can overwrite the running exe); reference it here so it
+    // isn't flagged unused when compiling for macOS.
+    let _ = &app;
+    if !url.contains("github.com/bonkedbythonk/anicat/releases")
+        && !url.contains(".dmg")
+        && !url.contains(".exe")
+    {
         return Err("Invalid update URL".to_string());
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        trigger_update_macos(url).await
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        trigger_update_windows(app, url).await
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (app, url);
+        Err("Automatic updates aren't supported on this platform yet — download the latest release manually.".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn trigger_update_macos(url: String) -> Result<(), String> {
     let tmp_dir = std::env::temp_dir().join("anicat_update");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
     let dmg_path = tmp_dir.join("Anicat.dmg");
@@ -320,6 +352,43 @@ pub async fn trigger_update(url: String) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
     log::info!("Update installed successfully to {}", dst);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn trigger_update_windows(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let tmp_dir = std::env::temp_dir().join("anicat_update");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let installer_path = tmp_dir.join("Anicat-setup.exe");
+
+    log::info!("Downloading update from {}", url);
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Failed to download update: {}", e))?;
+    let bytes = resp.bytes()
+        .await
+        .map_err(|e| format!("Failed to read download: {}", e))?;
+    std::fs::write(&installer_path, &bytes).map_err(|e| e.to_string())?;
+    log::info!("Downloaded {} bytes to {:?}", bytes.len(), installer_path);
+
+    // Launch the NSIS installer silently and detached. Tauri's default NSIS
+    // bundler (used here with no custom nsis config — see tauri.conf.json)
+    // includes logic to detect and close an already-running instance of the
+    // target app during install, which is what lets this run from inside the
+    // very process being replaced. We don't wait on it: the installer may
+    // terminate this process before a blocking .output() call would return.
+    std::process::Command::new(&installer_path)
+        .arg("/S")
+        .spawn()
+        .map_err(|e| format!("Failed to launch installer: {}", e))?;
+    log::info!("Launched installer at {:?}, exiting for it to complete the install", installer_path);
+
+    // Give the installer a moment to start before exiting ourselves — an
+    // immediate exit can race the installer's own "close the running app"
+    // step. Unlike macOS, a silent NSIS install does not relaunch the app
+    // afterward, so the user needs to reopen it once the install finishes.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    app.exit(0);
     Ok(())
 }
 

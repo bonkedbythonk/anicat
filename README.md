@@ -34,13 +34,17 @@ Anicat is a native desktop app for AniList users who want to watch, read, and tr
 
 ### macOS
 
-Download the latest `.dmg` from the [Releases page](https://github.com/bonkedbythonk/anicat/releases/latest), or paste in Terminal:
+The DMG is unsigned, and modern macOS blocks unsigned apps outright ("Apple could not verify... this app may contain malware") with no right-click-to-open bypass — the install script below handles this for you, which is why it's the recommended path:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
-> **Gatekeeper warning** — the DMG is unsigned. Right-click the app and choose **Open** the first time, then click Open again in the dialog. After that it launches normally.
+If you'd rather download the `.dmg` manually from the [Releases page](https://github.com/bonkedbythonk/anicat/releases/latest), copy `Anicat.app` to `/Applications`, then clear the quarantine flag yourself in Terminal:
+
+```bash
+xattr -r -d com.apple.quarantine /Applications/Anicat.app
+```
 
 ### Windows
 

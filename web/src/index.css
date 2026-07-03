@@ -95,13 +95,11 @@ html.light {
   --glass-border: rgba(15, 23, 42, 0.08);
 }
 
-/* Logo */
+/* Logo — the blue cat wordmark reads on both themes, so no light-mode
+   inversion (inverting the blue mark turned it orange). */
 .anicat-logo {
   filter: none !important;
-  transition: filter 0.3s ease, opacity 0.2s ease !important;
-}
-html.light .anicat-logo {
-  filter: invert(1) !important;
+  transition: opacity 0.2s ease !important;
 }
 
 .detail-banner-gradient {

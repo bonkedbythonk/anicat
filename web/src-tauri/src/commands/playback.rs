@@ -127,6 +127,28 @@ pub struct PlaybackStart {
     pub stream_url: String,
 }
 
+/// Strip the Windows `\\?\` verbatim (extended-length) path prefix.
+///
+/// Tauri's `resource_dir()` returns verbatim paths on Windows. mpv opens
+/// fully-formed file arguments (`--glsl-shaders=\\?\C:\...\x.glsl`) fine, but
+/// it can't resolve anything *relative* to a `\\?\` config-dir: it appends
+/// sub-paths with '/' (`\\?\C:\...\mpv_config/mpv.conf`), and forward slashes
+/// are illegal inside the verbatim namespace, so every config lookup
+/// (mpv.conf, input.conf, scripts/) silently fails and mpv falls back to its
+/// built-in OSC and default keybindings — i.e. no anicat skin or shortcuts.
+fn strip_verbatim_prefix(p: String) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", rest);
+        }
+        if let Some(rest) = p.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    p
+}
+
 fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
@@ -146,6 +168,8 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
             .to_string_lossy()
             .to_string()
     };
+    // mpv can't use a `\\?\`-prefixed config-dir (see strip_verbatim_prefix).
+    let config_dir = strip_verbatim_prefix(config_dir);
 
     // Prefer a system-installed mpv if present. Production macOS apps launched
     // from Finder do not inherit the shell PATH, so /opt/homebrew/bin is not
@@ -197,7 +221,7 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     Ok((
         mpv_bin.to_string_lossy().to_string(),
         config_dir,
-        lib_dir.to_string_lossy().to_string(),
+        strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
     ))
 }
 

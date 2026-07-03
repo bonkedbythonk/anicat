@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
@@ -181,6 +182,27 @@ export function SettingsView({ health }: SettingsViewProps) {
       .catch(console.error)
       .finally(() => setLoading(false));
 
+  }, []);
+
+  // The ctrl+1 (upscaling) / ctrl+2 (auto-skip) mpv shortcuts persist their
+  // flip on the backend, but this page's own `config` snapshot was fetched
+  // once on mount — patch it live so the toggles here don't show stale state
+  // if Settings happens to be open while mpv is playing.
+  useEffect(() => {
+    const unlisten = listen<{ key: string; value: boolean | string }>("anicat_setting_toggled", (event) => {
+      const { key, value } = event.payload;
+      setConfig((prev) => {
+        if (!prev) return prev;
+        if (key === "autoskip") {
+          return { ...prev, general: { ...prev.general, autoskip: value } };
+        }
+        if (key === "shader_profile") {
+          return { ...prev, stream: { ...prev.stream, shader_profile: value } };
+        }
+        return prev;
+      });
+    });
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   const handleOpenLogs = async () => {
@@ -578,7 +600,7 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField
                   label="GPU Upscaling"
-                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Ctrl+1 in-player toggles temporarily without changing this setting."
+                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Ctrl+1 in-player toggles this too."
                 >
                   <button
                     onClick={() => updateField("stream", "shader_profile", (config.stream?.shader_profile || "on") === "off" ? "on" : "off")}

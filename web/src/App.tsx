@@ -231,9 +231,19 @@ export default function App() {
         invalidateProgressQueries(qc, event.payload.media_id);
       }
     });
+    // The ctrl+1 (upscaling) / ctrl+2 (auto-skip) mpv shortcuts persist their
+    // flip into config.toml on the backend, but the webview's own settings
+    // store (which drives the Settings toggles and the detail-page autoskip
+    // button) has no other way to find out — it isn't re-fetched mid-session.
+    const unlistenSetting = listen<{ key: string; value: boolean | string }>("anicat_setting_toggled", (event) => {
+      const { key, value } = event.payload;
+      if (key === "autoskip") useSettingsStore.getState().setAutoskip(Boolean(value));
+      if (key === "shader_profile") useSettingsStore.getState().setShaderProfile(String(value));
+    });
     return () => {
       unlisten.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
+      unlistenSetting.then((fn) => fn());
     };
   }, [setNotification]);
 

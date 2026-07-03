@@ -63,6 +63,8 @@ pub async fn start_proxy(
         .route("/player/prev", get(player_prev_handler))
         .route("/player/stop", get(player_stop_handler))
         .route("/player/toggle-translation", get(player_toggle_translation_handler))
+        .route("/player/toggle-upscale", get(player_toggle_upscale_handler))
+        .route("/player/toggle-autoskip", get(player_toggle_autoskip_handler))
         .route("/player/progress", get(player_progress_handler))
         .route("/player/pause", get(player_pause_handler))
         .route("/player/resume", get(player_resume_handler))
@@ -535,6 +537,51 @@ async fn player_toggle_translation_handler(
         });
     }
 
+    Ok("ok")
+}
+
+/// The mpv shortcuts (ctrl+1 upscaling, ctrl+2 auto-skip) were previously
+/// session-only — they changed mpv's live behavior but never touched the
+/// app's actual config, so Settings and the detail-page toggles would still
+/// show the old value. These handlers persist the flip into config.toml and
+/// push the new value into the frontend's settings store so every toggle in
+/// the app (not just mpv) reflects it immediately.
+async fn player_toggle_upscale_handler(
+    State(state): State<ProxyState>,
+) -> Result<&'static str, StatusCode> {
+    log::info!("Player requested upscaling toggle");
+    let new_val = {
+        let mut cfg = state.app_state.config.write().await;
+        let next = if cfg.stream.shader_profile == "off" { "on" } else { "off" };
+        cfg.stream.shader_profile = next.to_string();
+        next.to_string()
+    };
+    if let Err(e) = state.app_state.save_config().await {
+        log::error!("Failed to save config on upscale toggle: {}", e);
+    }
+    let enabled = new_val != "off";
+    notify_frontend(&state.app_handle, &format!("Upscaling {}.", if enabled { "enabled" } else { "disabled" }));
+    use tauri::Emitter;
+    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "shader_profile", "value": new_val }));
+    Ok("ok")
+}
+
+async fn player_toggle_autoskip_handler(
+    State(state): State<ProxyState>,
+) -> Result<&'static str, StatusCode> {
+    log::info!("Player requested auto-skip-intro toggle");
+    let new_val = {
+        let mut cfg = state.app_state.config.write().await;
+        let next = !cfg.general.autoskip;
+        cfg.general.autoskip = next;
+        next
+    };
+    if let Err(e) = state.app_state.save_config().await {
+        log::error!("Failed to save config on autoskip toggle: {}", e);
+    }
+    notify_frontend(&state.app_handle, &format!("Auto-skip intro {}.", if new_val { "enabled" } else { "disabled" }));
+    use tauri::Emitter;
+    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "autoskip", "value": new_val }));
     Ok("ok")
 }
 

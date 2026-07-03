@@ -271,7 +271,17 @@ local function disable_shaders()
   refresh_shaders_state()
 end
 
--- Ctrl+1: toggle upscaling on/off (session only, no config write)
+-- Forward declaration: notify_backend is defined further down (it needs
+-- `state`, which is already in scope by here, but its own definition sits
+-- after these toggle functions in file order). Lua resolves `local`
+-- upvalues lexically at closure-creation time, so without this the toggle
+-- functions below would silently capture a stale nil instead of the real
+-- function once notify_backend is assigned.
+local notify_backend
+
+-- Ctrl+1: toggle upscaling on/off. Also persists the flip into the app's
+-- actual config (via the backend) so Settings and the detail-page toggle
+-- reflect it too, not just mpv's current session.
 local function toggle_shaders()
   local current = mp.get_property('glsl-shaders') or ''
   if current == '' then
@@ -281,6 +291,7 @@ local function toggle_shaders()
     disable_shaders()
     mp.osd_message("Upscaling: Disabled", 2.0)
   end
+  notify_backend("toggle-upscale")
 end
 
 local function render(force)
@@ -357,9 +368,10 @@ local function toggle_autoskip()
     set_autoskip('yes')
     mp.osd_message('Auto-skip intro: On', 1.5)
   end
+  notify_backend("toggle-autoskip")
 end
 
-local function notify_backend(action, sync, manual)
+notify_backend = function(action, sync, manual)
   local pos = mp.get_property_number('time-pos')
   if not pos or pos <= 0 then
     pos = state.last_pos or state.position or 0

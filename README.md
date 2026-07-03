@@ -66,7 +66,7 @@ AniList is only used for tracking. Playback and the episode list do not require 
 
 ## Features
 
-- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip), or embedded HLS player. AllAnime and AniNeko providers with automatic fallback between them, sub/dub selection, resume position, auto-next with a binge countdown.
+- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip). AllAnime and AniNeko providers with automatic fallback between them, sub/dub selection, resume position, auto-next with a binge countdown.
 - **Trailers** — Plays a title's trailer through mpv (not an embedded YouTube player) directly from the detail page.
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.

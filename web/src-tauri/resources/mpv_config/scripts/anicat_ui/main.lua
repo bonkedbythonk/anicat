@@ -276,10 +276,10 @@ local function toggle_shaders()
   local current = mp.get_property('glsl-shaders') or ''
   if current == '' then
     enable_standard_shaders()
-    mp.osd_message("Upscaling: On  (temp — settings unchanged)", 2.0)
+    mp.osd_message("Upscaling: Enabled", 2.0)
   else
     disable_shaders()
-    mp.osd_message("Upscaling: Off  (temp — settings unchanged)", 2.0)
+    mp.osd_message("Upscaling: Disabled", 2.0)
   end
 end
 
@@ -338,6 +338,24 @@ local function toggle_auto_next()
   else
     set_auto_next('yes')
     mp.osd_message('Auto-play next: On', 1.5)
+  end
+end
+
+local function set_autoskip(val)
+  opts.autoskip = val
+  -- "append" like set_auto_next above so the rest of the script-opts map
+  -- (current_episode/total_episodes/skip_times) survives the update.
+  mp.commandv("change-list", "script-opts", "append", "anicat_ui-autoskip=" .. val)
+end
+
+local function toggle_autoskip()
+  local current = get_autoskip_opt()
+  if current == 'yes' then
+    set_autoskip('no')
+    mp.osd_message('Auto-skip intro: Off', 1.5)
+  else
+    set_autoskip('yes')
+    mp.osd_message('Auto-skip intro: On', 1.5)
   end
 end
 
@@ -485,6 +503,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
+  mp.register_script_message('anicat-toggle-autoskip', toggle_autoskip)
   mp.register_script_message('anicat-next-episode', play_next)
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)

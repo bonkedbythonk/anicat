@@ -388,7 +388,11 @@ const Hero = memo(function Hero({
                 )}
               </div>
               <h1
-                className="text-3xl lg:text-5xl xl:text-6xl font-black tracking-tight leading-[1.05] text-white animate-fade-in"
+                className={`font-black tracking-tight leading-[1.05] text-white animate-fade-in line-clamp-2 ${
+                  title.length > 40
+                    ? "text-2xl lg:text-3xl xl:text-4xl"
+                    : "text-3xl lg:text-5xl xl:text-6xl"
+                }`}
                 style={{ textShadow: "0 2px 24px rgba(0,0,0,0.9)" }}
               >
                 {title}

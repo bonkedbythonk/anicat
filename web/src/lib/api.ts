@@ -59,7 +59,6 @@ export async function getConfig(): Promise<{
     time_format?: string;
   };
   stream: {
-    player_type: string;
     data_saver: boolean;
     shader_profile?: string;
     translation_type?: string;

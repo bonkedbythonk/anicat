@@ -29,19 +29,15 @@ interface MediaDetailProps {
   onClose: () => void;
   initialAction?: "play";
   onRead?: (chapter: string) => void;
-  onPlayEpisode?: (episodeNum: string, provider?: string, server?: string) => void;
 }
 
 type DetailConfig = {
   general?: {
     provider?: string;
   };
-  stream?: {
-    player_type?: "embedded" | "external";
-  };
 };
 
-export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisode }: MediaDetailProps) {
+export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetailProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [synopsisOverflows, setSynopsisOverflows] = useState(false);
   const synopsisRef = useRef<HTMLParagraphElement>(null);
@@ -281,11 +277,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
     try {
       if (isManga) {
         const nextChapter = initialPlayEpisode ? Number(initialPlayEpisode) : (actualProgress + 1);
-        if (onPlayEpisode) {
-          onPlayEpisode(String(nextChapter));
-        } else {
-          setActiveChapter(String(nextChapter));
-        }
+        setActiveChapter(String(nextChapter));
       } else {
         if (!initialPlayEpisode && (!fullItem.status || fullItem.status === "FINISHED" || fullItem.status === "CANCELLED")) {
           if (fullItem.episodes && actualProgress >= fullItem.episodes) {
@@ -294,17 +286,12 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
           }
         }
         const nextEpisode = initialPlayEpisode ? Number(initialPlayEpisode) : (actualProgress + 1);
-        if (onPlayEpisode) {
-          onPlayEpisode(nextEpisode.toString(), selectedProvider);
-          onClose();
-        } else {
-          const coverImg = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || "";
-          const nextEpNum = nextEpisode;
-          const nextEpTitle = episodeTitleMap?.[nextEpNum] || "";
-          const totalEps = fullItem?.episodes || episodes?.length || 0;
-          await mediaApi.play(item.id, nextEpNum, selectedProvider, undefined, title, nextEpTitle, coverImg, totalEps);
-          dispatchRefresh();
-        }
+        const coverImg = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || "";
+        const nextEpNum = nextEpisode;
+        const nextEpTitle = episodeTitleMap?.[nextEpNum] || "";
+        const totalEps = fullItem?.episodes || episodes?.length || 0;
+        await mediaApi.play(item.id, nextEpNum, selectedProvider, undefined, title, nextEpTitle, coverImg, totalEps);
+        dispatchRefresh();
       }
     } catch (error) {
       console.error("Failed to play next:", error);
@@ -946,8 +933,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead, onPlayEpisod
                       progress={actualProgress}
                       isManga={isManga}
                       onRead={(chNum) => setActiveChapter(chNum)}
-                      onPlayEpisode={(epNum, prov, serv) => { if (onPlayEpisode) onPlayEpisode(epNum, prov || selectedProvider, serv); onClose(); }}
-                      playerType={config?.stream?.player_type as 'embedded' | 'external' | undefined}
                       selectedProvider={selectedProvider}
                       mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
                       coverImage={fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || ''}

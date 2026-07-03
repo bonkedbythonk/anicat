@@ -12,7 +12,6 @@ interface AppConfig {
     notifications?: boolean;
   };
   stream?: {
-    player_type?: string;
     data_saver?: boolean;
     shader_profile?: string;
     translation_type?: string;
@@ -186,7 +185,6 @@ export function clearPlayback() {
 }
 
 interface SettingsState {
-  playerType: "embedded" | "external";
   defaultProvider: string;
   autoplay: boolean;
   autoskip: boolean;
@@ -198,7 +196,6 @@ interface SettingsState {
   notifications: boolean;
   translationType: "sub" | "dub";
   shaderProfile: string;
-  setPlayerType: (t: "embedded" | "external") => void;
   setDefaultProvider: (p: string) => void;
   setAutoplay: (v: boolean) => void;
   setAutoskip: (v: boolean) => void;
@@ -213,7 +210,6 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  playerType: "external",
   defaultProvider: "allanime",
   autoplay: true,
   autoskip: false,
@@ -225,7 +221,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   notifications: true,
   translationType: "sub",
   shaderProfile: "balanced",
-  setPlayerType: (playerType) => set({ playerType }),
   setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
   setAutoplay: (autoplay) => set({ autoplay }),
   setAutoskip: (autoskip) => set({ autoskip }),
@@ -239,7 +234,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
   loadFromConfig: (config) =>
     set({
-      playerType: (config?.stream?.player_type as "embedded" | "external") || "embedded",
       defaultProvider: config?.general?.provider || "allanime",
       autoplay: config?.general?.autoplay ?? true,
       autoskip: config?.general?.autoskip ?? false,

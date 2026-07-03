@@ -13,8 +13,6 @@ interface EpisodeListProps {
   progress?: number;
   isManga?: boolean;
   onRead?: (chapterNum: string) => void;
-  onPlayEpisode?: (epNum: string, provider?: string, server?: string) => void;
-  playerType?: "embedded" | "external";
   onUnwatch?: (epNum: string) => void;
   onWatch?: (epNum: string) => void;
   nextAiringEpisode?: number;
@@ -34,8 +32,6 @@ export function EpisodeList({
   progress = 0,
   isManga = false,
   onRead,
-  onPlayEpisode,
-  playerType = "external",
   onUnwatch,
   onWatch,
   nextAiringEpisode,
@@ -209,12 +205,7 @@ export function EpisodeList({
       onRead(epNum);
       return;
     }
-    
-    if (playerType === "embedded" && onPlayEpisode) {
-      onPlayEpisode(epNum, selectedProvider);
-      return;
-    }
-    
+
     setPlayingEp(epNum);
     try {
       const ep = episodes.find((e) => String(e.number) === epNum);
@@ -253,17 +244,6 @@ export function EpisodeList({
   const handlePlaySpecificStream = async (epNum: string, serverName: string) => {
     const serverKey = `${epNum}-${serverName}`;
     setLoadingServer(serverKey);
-
-    if (playerType === "embedded" && onPlayEpisode) {
-      try {
-        onPlayEpisode(epNum, selectedProvider, serverName);
-      } catch (error) {
-        console.error("Failed to play stream:", error);
-      } finally {
-        setTimeout(() => setLoadingServer(null), 1500);
-      }
-      return;
-    }
 
     setPlayingEp(epNum);
     try {

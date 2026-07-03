@@ -58,9 +58,6 @@ pub async fn update_config(
                 }
                 "stream" => {
                     if let Some(stream) = value.as_object() {
-                        if let Some(v) = stream.get("player_type").and_then(|v| v.as_str()) {
-                            config.stream.player_type = v.to_string();
-                        }
                         if let Some(v) = stream.get("data_saver").and_then(|v| v.as_bool()) {
                             config.stream.data_saver = v;
                         }

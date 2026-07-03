@@ -40,8 +40,6 @@ pub struct GeneralConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StreamConfig {
-    #[serde(default = "default_player_type")]
-    pub player_type: String,
     #[serde(default = "default_false")]
     pub data_saver: bool,
     #[serde(default = "default_shader_profile")]
@@ -73,9 +71,6 @@ fn default_false() -> bool {
 }
 fn default_title_language() -> String {
     "romaji".into()
-}
-fn default_player_type() -> String {
-    "external".into()
 }
 fn default_time_format() -> String {
     "12h".into()

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Mobile PWA assets Tauri's `resources` array bundles into the app (see
 /// tauri.conf.json's `bundle.resources` entries for `mobile-dist/**/*`).
@@ -44,7 +44,7 @@ fn sync_mobile_dist() {
     copy_matching(&dist_dir, &mobile_dist_dir, "workbox-", ".js");
 }
 
-fn copy_dir_flat(src: &PathBuf, dest: &PathBuf) {
+fn copy_dir_flat(src: &Path, dest: &Path) {
     let Ok(entries) = fs::read_dir(src) else { return };
     for entry in entries.flatten() {
         let path = entry.path();

@@ -345,11 +345,13 @@ pub(crate) async fn resolve_stream_for_provider(
             .torrent
             .resolve(
                 &state.http_client,
-                media_id,
-                episode_number,
-                &titles,
-                allow_episodeless,
-                prefer_dub,
+                crate::torrent::ResolveTarget {
+                    media_id,
+                    episode: episode_number,
+                    titles: &titles,
+                    allow_episodeless,
+                    prefer_dub,
+                },
                 proxy_port,
             )
             .await?;

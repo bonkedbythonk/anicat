@@ -67,29 +67,6 @@ fn parse_range(headers: &HeaderMap, file_len: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn headers_with_range(v: &str) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(http::header::RANGE, v.parse().unwrap());
-        h
-    }
-
-    #[test]
-    fn range_parsing() {
-        let len = 1000;
-        assert_eq!(parse_range(&HeaderMap::new(), len), None);
-        assert_eq!(parse_range(&headers_with_range("bytes=0-499"), len), Some((0, 499)));
-        assert_eq!(parse_range(&headers_with_range("bytes=500-"), len), Some((500, 999)));
-        assert_eq!(parse_range(&headers_with_range("bytes=-100"), len), Some((900, 999)));
-        assert_eq!(parse_range(&headers_with_range("bytes=0-99999"), len), Some((0, 999)));
-        assert_eq!(parse_range(&headers_with_range("bytes=1000-"), len), None);
-        assert_eq!(parse_range(&headers_with_range("bytes=9-3"), len), None);
-    }
-}
-
 pub async fn torrent_stream_handler(
     State(state): State<ProxyState>,
     Query(q): Query<StreamQuery>,
@@ -158,3 +135,27 @@ pub async fn torrent_stream_handler(
     };
     builder.body(body).unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers_with_range(v: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(http::header::RANGE, v.parse().unwrap());
+        h
+    }
+
+    #[test]
+    fn range_parsing() {
+        let len = 1000;
+        assert_eq!(parse_range(&HeaderMap::new(), len), None);
+        assert_eq!(parse_range(&headers_with_range("bytes=0-499"), len), Some((0, 499)));
+        assert_eq!(parse_range(&headers_with_range("bytes=500-"), len), Some((500, 999)));
+        assert_eq!(parse_range(&headers_with_range("bytes=-100"), len), Some((900, 999)));
+        assert_eq!(parse_range(&headers_with_range("bytes=0-99999"), len), Some((0, 999)));
+        assert_eq!(parse_range(&headers_with_range("bytes=1000-"), len), None);
+        assert_eq!(parse_range(&headers_with_range("bytes=9-3"), len), None);
+    }
+}
+

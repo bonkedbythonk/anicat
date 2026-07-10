@@ -26,6 +26,22 @@ struct Resolved {
     file_id: usize,
 }
 
+/// What to find a torrent stream for. Grouped (rather than passed as five
+/// separate `resolve()` params) since they're all "what episode, searched
+/// how" — one cohesive unit distinct from the infra params (`client`,
+/// `proxy_port`) alongside it.
+pub struct ResolveTarget<'a> {
+    pub media_id: i64,
+    pub episode: i64,
+    /// Search candidates, best first (AniList romaji, english, synonyms — or
+    /// the user's manual override).
+    pub titles: &'a [String],
+    /// Movies/OVAs legitimately have no episode number in their release
+    /// names; allow an episodeless match for those.
+    pub allow_episodeless: bool,
+    pub prefer_dub: bool,
+}
+
 pub struct TorrentManager {
     session: tokio::sync::OnceCell<Arc<Session>>,
     cache_dir: PathBuf,
@@ -72,13 +88,10 @@ impl TorrentManager {
     pub async fn resolve(
         &self,
         client: &reqwest::Client,
-        media_id: i64,
-        episode: i64,
-        titles: &[String],
-        allow_episodeless: bool,
-        prefer_dub: bool,
+        target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, prefer_dub } = target;
         let session = self.session().await?;
 
         // Reuse a previous resolution if the torrent is still in the session.
@@ -272,10 +285,10 @@ impl TorrentManager {
         } else {
             let mut best: Option<(usize, u64)> = None;
             for (i, name, len) in &videos {
-                if search::filename_matches_episode(name, episode) {
-                    if best.map(|(_, l)| *len > l).unwrap_or(true) {
-                        best = Some((*i, *len));
-                    }
+                if search::filename_matches_episode(name, episode)
+                    && best.map(|(_, l)| *len > l).unwrap_or(true)
+                {
+                    best = Some((*i, *len));
                 }
             }
             best.map(|(i, _)| i)
@@ -408,6 +421,27 @@ fn cleanup_cache(dir: &std::path::Path) {
     }
 }
 
+fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
+    let mut size = 0u64;
+    let mut mtime = std::time::SystemTime::UNIX_EPOCH;
+    let meta_of = |p: &std::path::Path| p.metadata().ok();
+    if path.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(path) {
+            for e in rd.flatten() {
+                let (s, m) = dir_size_and_mtime(&e.path());
+                size += s;
+                if m > mtime {
+                    mtime = m;
+                }
+            }
+        }
+    } else if let Some(md) = meta_of(path) {
+        size = md.len();
+        mtime = md.modified().unwrap_or(mtime);
+    }
+    (size, mtime)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,7 +487,17 @@ mod tests {
         let mgr = TorrentManager::with_cache_dir(dir.clone());
         let titles = vec!["Sousou no Frieren".to_string()];
         let url = mgr
-            .resolve(&client(), 154587, 1, &titles, false, false, 13370)
+            .resolve(
+                &client(),
+                ResolveTarget {
+                    media_id: 154587,
+                    episode: 1,
+                    titles: &titles,
+                    allow_episodeless: false,
+                    prefer_dub: false,
+                },
+                13370,
+            )
             .await
             .expect("resolve failed");
         println!("stream url: {}", url);
@@ -486,25 +530,4 @@ mod tests {
         // resolution/codec noise must not read as an episode
         assert!(!filename_matches_episode("Show (BD 1080p HEVC x265 10bit).mkv", 1080));
     }
-}
-
-fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
-    let mut size = 0u64;
-    let mut mtime = std::time::SystemTime::UNIX_EPOCH;
-    let meta_of = |p: &std::path::Path| p.metadata().ok();
-    if path.is_dir() {
-        if let Ok(rd) = std::fs::read_dir(path) {
-            for e in rd.flatten() {
-                let (s, m) = dir_size_and_mtime(&e.path());
-                size += s;
-                if m > mtime {
-                    mtime = m;
-                }
-            }
-        }
-    } else if let Some(md) = meta_of(path) {
-        size = md.len();
-        mtime = md.modified().unwrap_or(mtime);
-    }
-    (size, mtime)
 }

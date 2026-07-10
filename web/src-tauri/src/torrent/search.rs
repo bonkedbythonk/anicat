@@ -104,7 +104,6 @@ fn strip_noise(name: &str) -> String {
             _ => {}
         }
     }
-    let mut s = s;
     for pat in [
         r"\d{3,4}[pP]", r"[xXhH]\.?26[45]", r"10.?[bB]it", r"8.?[bB]it",
         r"\b(19|20)\d{2}\b", r"[fF][lL][aA][cC]", r"[aA][aA][cC]2?\.?0?",

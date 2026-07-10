@@ -504,11 +504,34 @@ export function SettingsView({ health }: SettingsViewProps) {
                 >
                   <select
                     value={String(config.general?.time_format || "12h")}
-                    onChange={(e) => updateField("general", "time_format", e.target.value)}
+                    onChange={(e) => {
+                      const format = e.target.value;
+                      updateField("general", "time_format", format);
+                      // ScheduleView's airing times read this key directly
+                      // (localStorage, set during onboarding) rather than the
+                      // config this toggle actually writes — without also
+                      // updating it here, the Schedule tab's AM/PM display
+                      // never changed no matter what you picked.
+                      localStorage.setItem("anicat_time_format", format);
+                    }}
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="12h">12-hour (AM/PM)</option>
                     <option value="24h">24-hour</option>
+                  </select>
+                </SettingField>
+
+                <SettingField
+                  label="New Episode Notifications"
+                  description="Native macOS notification when a show you're watching airs a new episode, checked every 15 minutes."
+                >
+                  <select
+                    value={config.general?.notifications ?? true ? "true" : "false"}
+                    onChange={(e) => updateField("general", "notifications", e.target.value === "true")}
+                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                  >
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
                   </select>
                 </SettingField>
               </CardSection>

@@ -78,12 +78,21 @@ pub fn run() {
                 commands::media::start_download_worker(app_handle_clone, app_state_clone2).await;
             });
 
+            let app_handle_clone2 = app.handle().clone();
+            let app_state_clone3 = app_state.clone();
+            let handle3 = tauri::async_runtime::spawn(async move {
+                commands::notifications::start_airing_notification_worker(app_handle_clone2, app_state_clone3).await;
+            });
+
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = handle1.await {
                     log::error!("HLS proxy task panicked: {:?}", e);
                 }
                 if let Err(e) = handle2.await {
                     log::error!("Download worker task panicked: {:?}", e);
+                }
+                if let Err(e) = handle3.await {
+                    log::error!("Airing-notification worker task panicked: {:?}", e);
                 }
             });
 

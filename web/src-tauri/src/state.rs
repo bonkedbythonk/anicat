@@ -38,6 +38,19 @@ pub struct GeneralConfig {
     pub manga_provider: String,
     #[serde(default = "default_fallback_provider")]
     pub fallback_provider: String,
+    /// Native macOS notifications when a watched/planning show airs a new
+    /// episode. The frontend settings store already read this field
+    /// (defaulting true client-side) before it existed here — it was a
+    /// no-op toggle with nothing behind it.
+    #[serde(default = "default_true")]
+    pub notifications: bool,
+    /// Highest AniList notification id already surfaced as a native
+    /// notification. `None` means the airing-notification poller hasn't run
+    /// yet; on its first run it seeds this to the current max without
+    /// notifying (so enabling the feature, or a fresh install, doesn't dump
+    /// every historical airing as a notification burst).
+    #[serde(default)]
+    pub last_seen_notification_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

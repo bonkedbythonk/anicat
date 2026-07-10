@@ -21,9 +21,17 @@ fn sync_mobile_dist() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dist_dir = manifest_dir.join("..").join("dist");
     if !dist_dir.exists() {
-        // `npm run build` hasn't run yet — nothing to stage. The resulting
-        // empty/missing `mobile-dist` glob matches are fine; production
-        // builds always run `npm run build` first (see package.json).
+        // `npm run build` hasn't run yet (e.g. `cargo check`/`clippy` in CI,
+        // which never builds the frontend). tauri_build::build() validates
+        // tauri.conf.json's `mobile-dist/**/*` resource glob and treats zero
+        // matches as a hard error, not a no-op — so leaving the directory
+        // missing here fails the whole build, not just the mobile bundling.
+        // A placeholder keeps the glob non-empty; real `npm run build` +
+        // `tauri build` runs (package.json's `build` script) always populate
+        // this for real before it matters.
+        let mobile_dist_dir = manifest_dir.join("mobile-dist");
+        let _ = fs::create_dir_all(&mobile_dist_dir);
+        let _ = fs::write(mobile_dist_dir.join(".placeholder"), b"populated by npm run build");
         return;
     }
 

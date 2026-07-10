@@ -94,10 +94,23 @@ impl AniListClient {
             variables,
         };
 
+        // Per-request, not client-level: `self.client` is shared with the HLS
+        // proxy, which streams full episode bodies and legitimately runs far
+        // longer than any GraphQL call should. AniList responses are small
+        // JSON payloads, so a hang here means the connection stalled, not
+        // that a large transfer is still in progress — 20s bounds that
+        // cleanly. Without this, a degraded/hanging AniList leaves the
+        // request stuck on `.send()` forever (no error, nothing past
+        // "Sending request" in the log), and since requests are throttled to
+        // 3 concurrent via `request_lock`, a couple of hung ones never
+        // release their permits — every subsequent AniList call in the app
+        // (search, media pages, list sync, progress writes) then queues up
+        // behind them indefinitely.
         let mut req = self
             .client
             .post(ANILIST_URL)
             .json(&body)
+            .timeout(std::time::Duration::from_secs(20))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 

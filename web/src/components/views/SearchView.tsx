@@ -103,10 +103,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
     enabled: Boolean(debouncedQuery) || Object.values(filters).some(Boolean),
   });
 
-  // Debounce the search query (400ms) so usePaginatedList only fires after settling
+  // Debounce the search query (400ms) so usePaginatedList only fires after
+  // settling. Also require 2+ chars: single-letter queries return thousands
+  // of low-value matches and, more importantly, fire an AniList request for
+  // every brief pause while the user is still typing the first character.
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
+    if (trimmed.length < 2) {
       setDebouncedQuery("");
       return;
     }

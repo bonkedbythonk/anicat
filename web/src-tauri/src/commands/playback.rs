@@ -715,13 +715,7 @@ pub async fn start_playback(
             return;
         }
         let mal_id = {
-            let mut vars = HashMap::new();
-            vars.insert("id".to_string(), serde_json::json!(media_id));
-            vars.insert("type".to_string(), serde_json::json!("ANIME"));
-            let res: Result<crate::anilist::responses::MediaResponse, String> = state_clone
-                .anilist_client
-                .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-                .await;
+            let res = super::media::fetch_media_detail_cached(&state_clone, media_id, false).await;
             let mut found = None;
             if let Ok(r) = res {
                 if let Some(media) = r.media {
@@ -1365,13 +1359,7 @@ pub async fn record_playback_progress(
             // from Watching).
             let mut status = "CURRENT";
             if total_episodes > 0 && episode_number >= total_episodes {
-                let mut vars = HashMap::new();
-                vars.insert("id".to_string(), serde_json::json!(media_id));
-                vars.insert("type".to_string(), serde_json::json!("ANIME"));
-                let detail: Result<crate::anilist::responses::MediaResponse, String> = state
-                    .anilist_client
-                    .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-                    .await;
+                let detail = super::media::fetch_media_detail_cached(state, media_id, false).await;
                 match detail {
                     Ok(d) => {
                         let planned = d.media.as_ref().and_then(|m| m.episodes);

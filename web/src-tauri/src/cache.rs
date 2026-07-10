@@ -41,6 +41,15 @@ impl AniListCache {
             "get_airing_schedule" => Duration::from_secs(15 * 60),
             "get_user_profile" => Duration::from_secs(3600),
             "get_notifications" => Duration::from_secs(5 * 60),
+            // Media metadata (title, synonyms, episode count, MAL id) is
+            // effectively static; characters never change. Both are fetched
+            // repeatedly for the same id across a single open+watch flow.
+            "media_detail" => Duration::from_secs(60 * 60),
+            "get_media_characters" => Duration::from_secs(6 * 3600),
+            // Search results are stable within a session; the real churn is
+            // unique queries while typing, which no cache helps (debounce
+            // does). This mainly spares repeats/back-navigation.
+            "search_media" => Duration::from_secs(10 * 60),
             _ => Duration::from_secs(60),
         }
     }
@@ -352,5 +361,44 @@ fn remove_media_in_value(value: &mut Value, entry_id: i64) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newly_cached_commands_have_long_ttls() {
+        // A typo'd match arm would silently fall through to the 60s default,
+        // making these caches nearly useless. Assert they got real TTLs.
+        assert!(AniListCache::ttl("media_detail") >= Duration::from_secs(30 * 60));
+        assert!(AniListCache::ttl("get_media_characters") >= Duration::from_secs(3600));
+        assert!(AniListCache::ttl("search_media") >= Duration::from_secs(5 * 60));
+        // Unknown commands still fall back to the short default.
+        assert_eq!(AniListCache::ttl("something_else"), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn get_returns_value_within_ttl_and_key_is_param_sensitive() {
+        let cache = AniListCache::new();
+        let k1 = AniListCache::key("search_media", &[("q", "naruto"), ("page", "1")]);
+        let k2 = AniListCache::key("search_media", &[("q", "naruto"), ("page", "2")]);
+        cache.set(k1.clone(), serde_json::json!({"hit": 1}), "search_media");
+        assert_eq!(cache.get(&k1), Some(serde_json::json!({"hit": 1})));
+        // Different page => different key => cache miss (no cross-contamination).
+        assert_eq!(cache.get(&k2), None);
+    }
+
+    #[test]
+    fn expired_entry_is_not_returned() {
+        let cache = AniListCache::new();
+        let key = "x".to_string();
+        // Insert a manually-expired entry.
+        cache.entries.lock().unwrap().insert(
+            key.clone(),
+            (serde_json::json!(1), Instant::now() - Duration::from_secs(1)),
+        );
+        assert_eq!(cache.get(&key), None);
     }
 }

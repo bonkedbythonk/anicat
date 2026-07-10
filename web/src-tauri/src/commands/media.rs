@@ -26,11 +26,27 @@ pub async fn search_media(
 ) -> Result<Value, String> {
     log::info!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
     let _has_token = state.anilist_client.has_token();
+    let media_type = media_type.unwrap_or_else(|| "ANIME".to_string());
+
+    // Key on every parameter so different filters/pages don't collide. Spares
+    // repeat searches and back-navigation from re-hitting AniList (typing new
+    // queries still goes through — the frontend's 400ms debounce handles that).
+    let cache_key = AniListCache::key("search_media", &[
+        ("q", &query),
+        ("page", &page.unwrap_or(1).to_string()),
+        ("type", &media_type),
+        ("status", status.as_deref().unwrap_or("")),
+        ("genre", genre.as_deref().unwrap_or("")),
+        ("year", &year.map(|y| y.to_string()).unwrap_or_default()),
+        ("min", &min_score.map(|s| s.to_string()).unwrap_or_default()),
+    ]);
+    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("search".to_string(), if query.is_empty() { serde_json::json!(null) } else { serde_json::json!(query) });
-    vars.insert("type".to_string(), serde_json::json!(media_type.unwrap_or_else(|| "ANIME".to_string())));
+    vars.insert("type".to_string(), serde_json::json!(media_type));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
@@ -53,8 +69,7 @@ pub async fn search_media(
         .await?;
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
-    if let Some(_m) = val.get("Page").and_then(|p| p.get("media")).and_then(|m| m.as_array()) {
-    }
+    state.cache.set(cache_key, val.clone(), "search_media");
     Ok(val)
 }
 
@@ -165,6 +180,9 @@ pub async fn get_media_characters(
     state: State<'_, AppState>,
     media_id: i64,
 ) -> Result<Value, String> {
+    let key = AniListCache::key("get_media_characters", &[("id", &media_id.to_string())]);
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(media_id));
     vars.insert("page".to_string(), serde_json::json!(1));
@@ -175,7 +193,9 @@ pub async fn get_media_characters(
         .execute(queries::MEDIA_CHARACTERS_QUERY, vars)
         .await?;
 
-    serde_json::to_value(result).map_err(|e| e.to_string())
+    let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
+    state.cache.set(key, val.clone(), "get_media_characters");
+    Ok(val)
 }
 
 #[tauri::command]
@@ -1224,6 +1244,41 @@ fn calculate_similarity(target: &str, candidate: &str) -> f64 {
     1.0 - (lev as f64 / max_len)
 }
 
+/// Fetch a media's AniList detail, cached by (id, type). MEDIA_DETAIL_QUERY is
+/// executed from several backend paths for the same media during one
+/// open-and-watch flow — the detail page, the provider-slug resolver, the
+/// AniSkip MAL-id lookup, the completion check, and the torrent title
+/// gatherer. They all read stable metadata (title, synonyms, episode count,
+/// id_mal), so serving them from a shared cache collapses 4-5 identical
+/// AniList requests into one. (The mediaListEntry / progress in the response
+/// is *not* relied on by these internal callers; the UI's own
+/// `get_media_detail` command stays uncached so it always shows fresh
+/// progress.)
+pub(crate) async fn fetch_media_detail_cached(
+    state: &AppState,
+    media_id: i64,
+    is_manga: bool,
+) -> Result<crate::anilist::responses::MediaResponse, String> {
+    let media_type = if is_manga { "MANGA" } else { "ANIME" };
+    let key = AniListCache::key("media_detail", &[("id", &media_id.to_string()), ("type", media_type)]);
+    if let Some(cached) = state.cache.get(&key) {
+        if let Ok(parsed) = serde_json::from_value::<crate::anilist::responses::MediaResponse>(cached) {
+            return Ok(parsed);
+        }
+    }
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("id".to_string(), serde_json::json!(media_id));
+    vars.insert("type".to_string(), serde_json::json!(media_type));
+    let result: crate::anilist::responses::MediaResponse = state
+        .anilist_client
+        .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+        .await?;
+    if let Ok(v) = serde_json::to_value(&result) {
+        state.cache.set(key, v, "media_detail");
+    }
+    Ok(result)
+}
+
 pub async fn resolve_and_save_provider_slug(
     state: &AppState,
     media_id: i64,
@@ -1236,15 +1291,7 @@ pub async fn resolve_and_save_provider_slug(
     if provider_name == "nyaa" {
         return Ok(None);
     }
-    let mut vars = std::collections::HashMap::new();
-    vars.insert("id".to_string(), serde_json::json!(media_id));
-    vars.insert("type".to_string(), serde_json::json!(if is_manga { "MANGA" } else { "ANIME" }));
-
-    let detail_res: Result<crate::anilist::responses::MediaResponse, String> = state
-        .anilist_client
-        .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-        .await
-        .map_err(|e| e.to_string());
+    let detail_res = fetch_media_detail_cached(state, media_id, is_manga).await;
 
     let mut romaji_title = String::new();
     let mut english_title = String::new();

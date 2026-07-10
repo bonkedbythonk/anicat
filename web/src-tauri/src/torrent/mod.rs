@@ -328,13 +328,7 @@ pub(crate) async fn gather_media_info(
     }
 
     let mut episode_count = None;
-    let mut vars = std::collections::HashMap::new();
-    vars.insert("id".to_string(), serde_json::json!(media_id));
-    vars.insert("type".to_string(), serde_json::json!("ANIME"));
-    let detail_res: Result<crate::anilist::responses::MediaResponse, String> = state
-        .anilist_client
-        .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-        .await;
+    let detail_res = crate::commands::media::fetch_media_detail_cached(state, media_id, false).await;
     if let Ok(detail) = detail_res {
         if let Some(m) = detail.media {
             if let Some(t) = m.title {

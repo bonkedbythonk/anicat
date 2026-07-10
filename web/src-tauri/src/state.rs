@@ -229,6 +229,14 @@ impl AppState {
         // default-tls feature again, the implicit default would flip to
         // macOS SecureTransport, which can't complete a handshake with some
         // of the APIs we rely on (api.aniskip.com).
+        //
+        // Deliberately NO client-level `.timeout()` here: this client is also
+        // ProxyState's client, which streams full video/HLS bodies to mpv and
+        // the phone over `/proxy` — reqwest's client timeout bounds the whole
+        // request including body transfer, so it would cut off any stream
+        // that legitimately runs longer than the timeout (i.e. most
+        // episodes). AniListClient, which has the actual hang problem, gets
+        // its own bounded timeout instead — see anilist/client.rs.
         let http_client = reqwest::Client::builder()
             .user_agent("Anicat/5.0")
             .use_rustls_tls()

@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
-import { mediaApi, type HealthStatus, API_BASE_ORIGIN, dispatchRefresh } from "@/lib/api";
+import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy, Smartphone, Gauge } from "lucide-react";
+import { mediaApi, type HealthStatus, apiOrigin, dispatchRefresh } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import type { UiStyle } from "@/hooks/useTheme";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -58,7 +58,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   const runProviderTest = useCallback(async () => {
     const name = debugNameRef.current?.value?.trim();
     const ep = parseInt(debugEpisodeRef.current?.value || "1", 10) || 1;
-    const provider = debugProviderRef.current?.value || "allanime";
+    const provider = debugProviderRef.current?.value || "mkissa";
     if (!name) return;
     setDebugBusy(true);
     setDebugResult(null);
@@ -184,6 +184,18 @@ export function SettingsView({ health }: SettingsViewProps) {
 
   }, []);
 
+  // /mobile-api/lan-info is a plain HTTP endpoint (not a Tauri command), and
+  // it's unauthenticated by design — it just tells the desktop app what LAN
+  // IP to show the user, needed before any phone has a PIN token at all.
+  const [lanInfo, setLanInfo] = useState<{ lan_ip: string; port: number } | null>(null);
+  const [lanInfoFailed, setLanInfoFailed] = useState(false);
+  useEffect(() => {
+    fetch(`${apiOrigin()}/mobile-api/lan-info`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data) => setLanInfo(data))
+      .catch(() => setLanInfoFailed(true));
+  }, []);
+
   // The ctrl+1 (upscaling) / ctrl+2 (auto-skip) mpv shortcuts persist their
   // flip on the backend, but this page's own `config` snapshot was fetched
   // once on mount — patch it live so the toggles here don't show stale state
@@ -196,8 +208,14 @@ export function SettingsView({ health }: SettingsViewProps) {
         if (key === "autoskip") {
           return { ...prev, general: { ...prev.general, autoskip: value } };
         }
+        if (key === "autoplay") {
+          return { ...prev, general: { ...prev.general, autoplay: value } };
+        }
         if (key === "shader_profile") {
           return { ...prev, stream: { ...prev.stream, shader_profile: value } };
+        }
+        if (key === "interpolation") {
+          return { ...prev, stream: { ...prev.stream, interpolation: value } };
         }
         return prev;
       });
@@ -295,7 +313,7 @@ export function SettingsView({ health }: SettingsViewProps) {
     setBackupUrl(null);
     try {
       await mediaApi.triggerBackup();
-      setBackupUrl(`${API_BASE_ORIGIN}/api/registry/backup/download`);
+      setBackupUrl(`${apiOrigin()}/api/registry/backup/download`);
     } finally {
       setBackingUp(false);
     }
@@ -521,12 +539,13 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField label="Anime Provider" description="Primary streaming source.">
                   <select
-                    value={String(config.general?.provider || "allanime")}
+                    value={String(config.general?.provider || "mkissa")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
-                    <option value="allanime">AllAnime</option>
+                    <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
+                    <option value="nyaa">Torrents (1080p)</option>
                   </select>
                 </SettingField>
 
@@ -537,8 +556,9 @@ export function SettingsView({ health }: SettingsViewProps) {
                     className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="none">None</option>
-                    <option value="allanime">AllAnime</option>
+                    <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
+                    <option value="nyaa">Torrents (1080p)</option>
                   </select>
                 </SettingField>
 
@@ -562,6 +582,50 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <option value="jikan">Jikan (MyAnimeList - Fallback)</option>
                   </select>
                 </SettingField>
+              </CardSection>
+
+              <CardSection
+                title="Phone Access"
+                description="Watch anicat from your phone over the same Wi-Fi while this Mac is running. This is a light PIN gate to keep it from being entered by accident — not meant to withstand someone who isn't on your home network."
+              >
+                <SettingField label="Enable" description="Lets other devices on this Wi-Fi reach anicat. Off by default.">
+                  <button
+                    onClick={() => updateField("mobile", "lan_access_enabled", !config.mobile?.lan_access_enabled)}
+                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
+                      config.mobile?.lan_access_enabled
+                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
+                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <Smartphone size={16} />
+                    <span>{config.mobile?.lan_access_enabled ? "On" : "Off"}</span>
+                  </button>
+                </SettingField>
+
+                <SettingField label="PIN" description="4-8 digits. Whatever your phone types in must match this exactly.">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={String(config.mobile?.pin || "")}
+                    onChange={(e) => updateField("mobile", "pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
+                    placeholder="e.g. 4821"
+                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                  />
+                </SettingField>
+
+                {Boolean(config.mobile?.lan_access_enabled) && (
+                  <SettingField label="Open on your phone" description="Same Wi-Fi network, then enter the PIN above.">
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-black/30 border border-white/[0.08] rounded-xl p-3 text-xs font-mono text-accent select-all overflow-x-auto whitespace-nowrap">
+                        {lanInfo
+                          ? `http://${lanInfo.lan_ip}:${lanInfo.port}/mobile.html`
+                          : lanInfoFailed
+                            ? "Couldn't reach the backend. Restart Anicat and reopen Settings."
+                            : "Loading..."}
+                      </code>
+                    </div>
+                  </SettingField>
+                )}
               </CardSection>
             </div>
           )}
@@ -614,16 +678,45 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <span>{(config.stream?.shader_profile || "on") !== "off" ? "On" : "Off"}</span>
                   </button>
                 </SettingField>
+
+                <SettingField
+                  label="Smooth Motion"
+                  description="Frame interpolation — fills in extra frames for smoother panning, up to your display's refresh rate. Best left off for on-twos anime; may look soap-opera-y. Ctrl+3 in-player toggles this too."
+                >
+                  <button
+                    onClick={() => updateField("stream", "interpolation", (config.stream?.interpolation || "off") === "off" ? "on" : "off")}
+                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
+                      (config.stream?.interpolation || "off") !== "off"
+                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
+                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <Gauge size={16} />
+                    <span>{(config.stream?.interpolation || "off") !== "off" ? "On" : "Off"}</span>
+                  </button>
+                </SettingField>
               </CardSection>
 
               <CardSection title="Keyboard Shortcuts">
-                <div className="space-y-3 text-xs leading-relaxed">
+                <div className="space-y-4 text-xs leading-relaxed">
                   <p className="text-gray-400">When playing media in the external MPV window, you can use these shortcuts:</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling (temp)</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
-                    <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + A</kbd></div>
+                  <div>
+                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-bold mb-2">Settings — Ctrl + number</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-skip Intro</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 2</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Smooth Motion</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 3</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 4</kbd></div>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-bold mb-2">Actions — Shift + letter</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Reload Episode</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + R</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
+                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Nudge Skip Timing</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">[ / ]</kbd></div>
+                    </div>
                   </div>
                 </div>
               </CardSection>
@@ -889,8 +982,8 @@ export function SettingsView({ health }: SettingsViewProps) {
                       className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
                     />
                     <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
-                    <select ref={debugProviderRef} defaultValue="allanime" aria-label="Provider" className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
-                      <option value="allanime" className="bg-[#121212]">AllAnime</option>
+                    <select ref={debugProviderRef} defaultValue="mkissa" aria-label="Provider" className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
+                      <option value="mkissa" className="bg-[#121212]">Mkissa</option>
                       <option value="anineko" className="bg-[#121212]">AniNeko</option>
                     </select>
                     <button

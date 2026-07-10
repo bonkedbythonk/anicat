@@ -8,6 +8,20 @@
   scroll-behavior: smooth;
 }
 
+/* Mobile PWA only (scoped by the .mobile-shell ancestor class on
+   MobileApp's root div — desktop's App.tsx root never has it, so these
+   rules can never match there). The shared desktop view components have
+   hover states but no touch press feedback; this adds native-feeling
+   press-down feedback to them when they happen to render inside the
+   mobile shell, without editing those shared files. Purely additive. */
+.mobile-shell button:active,
+.mobile-shell a:active,
+.mobile-shell [class*="cursor-pointer"]:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+  transition: transform 100ms ease-out, opacity 100ms ease-out;
+}
+
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

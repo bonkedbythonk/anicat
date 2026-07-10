@@ -19,7 +19,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 axum = { version = "0.8", features = ["macros"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 toml = "0.8"
 log = "0.4"
@@ -33,6 +33,27 @@ thiserror = "2"
 dirs = "6"
 open = "5"
 discord-rich-presence = "0.2"
+sha2 = "0.10"
+# disable-upload: this is a personal streaming client, not a seedbox — we
+# download to watch and never upload. Also silences the bulk of the peer
+# churn that librqbit logs.
+# default-features off + rust-tls: librqbit's default "default-tls" feature
+# enables reqwest/default-tls (native-tls) crate-graph-wide, which flips
+# reqwest::Client::new() from rustls to macOS SecureTransport — and
+# api.aniskip.com's TLS handshake fails under SecureTransport, silently
+# breaking AniSkip for every provider. Keep the whole app on rustls.
+librqbit = { version = "8", default-features = false, features = ["disable-upload", "rust-tls"] }
+regex-lite = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
+# Installed with an off-by-default filter purely to capture librqbit/DHT's
+# `tracing` events, which otherwise fall back to the `log` facade and flood
+# the console via tauri-plugin-log. default-features off / no "tracing-log":
+# that feature makes try_init() also call tracing_log::LogTracer::init(),
+# which grabs the global `log` logger before tauri-plugin-log's own init runs
+# and panics ("attempted to set a logger after the logging system was already
+# initialized"). We only want tracing_subscriber consuming tracing events
+# directly — the log crate is entirely tauri-plugin-log's to own.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 
 [profile.dev]
 opt-level = 1

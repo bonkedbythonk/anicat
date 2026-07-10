@@ -14,6 +14,7 @@ interface AppConfig {
   stream?: {
     data_saver?: boolean;
     shader_profile?: string;
+    interpolation?: string;
     translation_type?: string;
   };
   api?: {
@@ -162,7 +163,7 @@ export const useAppStore = create<AppState>((set) => ({
 export const usePlaybackStore = create<PlaybackState>(() => ({
   item: null,
   episode: null,
-  provider: "allanime",
+  provider: "mkissa",
   server: null,
 }));
 
@@ -179,7 +180,7 @@ export function clearPlayback() {
   usePlaybackStore.setState({
     item: null,
     episode: null,
-    provider: "allanime",
+    provider: "mkissa",
     server: null,
   });
 }
@@ -196,6 +197,7 @@ interface SettingsState {
   notifications: boolean;
   translationType: "sub" | "dub";
   shaderProfile: string;
+  interpolation: string;
   setDefaultProvider: (p: string) => void;
   setAutoplay: (v: boolean) => void;
   setAutoskip: (v: boolean) => void;
@@ -206,11 +208,12 @@ interface SettingsState {
   setAnilistToken: (t: string | null) => void;
   setTranslationType: (v: "sub" | "dub") => void;
   setShaderProfile: (v: string) => void;
+  setInterpolation: (v: string) => void;
   loadFromConfig: (config: AppConfig) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  defaultProvider: "allanime",
+  defaultProvider: "mkissa",
   autoplay: true,
   autoskip: false,
   animePreview: true,
@@ -221,6 +224,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   notifications: true,
   translationType: "sub",
   shaderProfile: "balanced",
+  interpolation: "off",
   setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
   setAutoplay: (autoplay) => set({ autoplay }),
   setAutoskip: (autoskip) => set({ autoskip }),
@@ -232,9 +236,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAnilistToken: (anilistToken) => set({ anilistToken }),
   setTranslationType: (translationType) => set({ translationType }),
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
+  setInterpolation: (interpolation) => set({ interpolation }),
   loadFromConfig: (config) =>
     set({
-      defaultProvider: config?.general?.provider || "allanime",
+      defaultProvider: config?.general?.provider || "mkissa",
       autoplay: config?.general?.autoplay ?? true,
       autoskip: config?.general?.autoskip ?? false,
       animePreview: config?.general?.anime_preview ?? true,
@@ -245,5 +250,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       anilistToken: config?.api?.anilist_token || null,
       translationType: (config?.stream?.translation_type as "sub" | "dub") || "sub",
       shaderProfile: config?.stream?.shader_profile || "balanced",
+      interpolation: config?.stream?.interpolation || "off",
     }),
 }));

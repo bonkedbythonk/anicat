@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile } from "lucide-react";
-import { mediaApi, type MediaItem, type Episode, type Character, type Review, API_BASE_ORIGIN } from "@/lib/api";
+import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
@@ -66,7 +66,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     },
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("allanime");
+  const [selectedProvider, setSelectedProvider] = useState<string>("mkissa");
 
   // Debug overlay state (DEV only)
 
@@ -239,11 +239,14 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
   const [hasTriggeredInitial, setHasTriggeredInitial] = useState(false);
 
-  // Handle initial action (e.g. from Hero "Play Now" button)
+  // Handle initial action (e.g. from Hero "Play Now" button) — the specific
+  // episode requested by whatever quick-play button opened this page only
+  // applies to this one automatic trigger, never to later manual clicks of
+  // the Continue button (see handlePlayNext).
   useEffect(() => {
     if (initialAction === "play" && !loading && config && !hasTriggeredInitial) {
       setHasTriggeredInitial(true);
-      handlePlayNext();
+      handlePlayNext(initialPlayEpisode ? Number(initialPlayEpisode) : undefined, config?.general?.provider as string);
     }
   }, [initialAction, loading, config, hasTriggeredInitial]);
 
@@ -269,28 +272,36 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
   const isProcessingAction = useRef(false);
 
-  const handlePlayNext = async () => {
+  // `overrideEpisode` is only ever passed by the one-time initial-action
+  // effect above (honoring whatever episode the Hero/quick-play button that
+  // opened this page requested). Manual clicks of the Continue button always
+  // omit it, so they fall through to the freshly computed `actualProgress +
+  // 1` — otherwise a stale `initialPlayEpisode` left over from how this page
+  // was originally opened would keep getting replayed on every later click,
+  // even after watching further episodes from within the same open session.
+  const handlePlayNext = async (overrideEpisode?: number, providerOverride?: string) => {
     if (isPlayingNext || isProcessingAction.current) return;
-    
+
     isProcessingAction.current = true;
     setIsPlayingNext(true);
     try {
       if (isManga) {
-        const nextChapter = initialPlayEpisode ? Number(initialPlayEpisode) : (actualProgress + 1);
+        const nextChapter = overrideEpisode ?? (actualProgress + 1);
         setActiveChapter(String(nextChapter));
       } else {
-        if (!initialPlayEpisode && (!fullItem.status || fullItem.status === "FINISHED" || fullItem.status === "CANCELLED")) {
+        if (!overrideEpisode && (!fullItem.status || fullItem.status === "FINISHED" || fullItem.status === "CANCELLED")) {
           if (fullItem.episodes && actualProgress >= fullItem.episodes) {
             // Already watched all episodes — nothing to play
             return;
           }
         }
-        const nextEpisode = initialPlayEpisode ? Number(initialPlayEpisode) : (actualProgress + 1);
+        const nextEpisode = overrideEpisode ?? (actualProgress + 1);
         const coverImg = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || "";
         const nextEpNum = nextEpisode;
         const nextEpTitle = episodeTitleMap?.[nextEpNum] || "";
         const totalEps = fullItem?.episodes || episodes?.length || 0;
-        await mediaApi.play(item.id, nextEpNum, selectedProvider, undefined, title, nextEpTitle, coverImg, totalEps);
+        const activeProvider = providerOverride || selectedProvider;
+        await mediaApi.play(item.id, nextEpNum, activeProvider, undefined, title, nextEpTitle, coverImg, totalEps);
         dispatchRefresh();
       }
     } catch (error) {
@@ -510,16 +521,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         </div>
 
         {/* Content */}
-        <div className="relative z-10 px-8 lg:px-14 pb-16">
-          {/* Cover + Title row: cover art overlaps the banner */}
-          <div className="flex gap-8 -mt-32">
+        <div className="relative z-10 px-4 sm:px-8 lg:px-14 pb-16">
+          {/* Cover + Title row: cover art overlaps the banner. Stacked and
+              centered below `sm` (640px) — this component has no phone-width
+              use on desktop, since the app window enforces an 800px minimum,
+              comfortably above `sm`, so that variant is unreachable there. */}
+          <div className="flex flex-col sm:flex-row items-center sm:items-stretch text-center sm:text-left gap-4 sm:gap-8 -mt-20 sm:-mt-32">
             <img
               src={proxyImage(fullItem?.cover_image?.large || item?.cover_image?.large || '')}
               alt={title}
-              className="w-44 h-60 rounded-2xl object-cover shadow-[0_20px_70px_rgba(0,0,0,0.8)] border border-white/[0.07] shrink-0 self-end"
+              className="w-32 h-44 sm:w-44 sm:h-60 rounded-2xl object-cover shadow-[0_20px_70px_rgba(0,0,0,0.8)] border border-white/[0.07] shrink-0 self-center sm:self-end"
             />
-            <div className="flex flex-col justify-end pb-2 space-y-3 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-col justify-end pb-2 space-y-3 min-w-0 w-full items-center sm:items-stretch">
+              <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
                 <span className="px-2 py-0.5 bg-accent rounded text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-accent/20">
                   {fullItem.format || (isManga ? 'MANGA' : 'ANIME')}
                 </span>
@@ -587,11 +601,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 .map(e => Number(e.number));
               const latestAvailable = episodes.length > 0 && filteredEps.length > 0 ? Math.max(...filteredEps) : total;
               const nextEpisode = actualProgress + 1;
-              const isFinished = total > 0 && currentProgress >= total;
+              // A still-RELEASING show can't be "Completed" even if AniList's
+              // reported `episodes` total happens to already match how many
+              // have aired so far (its eventual total, once known, is often
+              // set before the season finishes) — without this guard,
+              // watching everything currently out shows "Completed" instead
+              // of "Caught Up".
+              const isFinished = total > 0 && currentProgress >= total && fullItem.status !== 'RELEASING';
               const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
               return (
                 <button
-                  onClick={handlePlayNext}
+                  onClick={() => handlePlayNext()}
                   disabled={isPlayingNext || isCaughtUp}
                   className="flex items-center gap-3 px-8 py-3.5 bg-accent hover:bg-accent-light text-white font-extrabold text-sm rounded-2xl transition-all shadow-xl shadow-accent/25 active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground disabled:shadow-none"
                 >
@@ -909,8 +929,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         <p className="text-xs text-muted-foreground">Streaming source</p>
                         <div className="flex items-center gap-2">
                           <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="text-xs bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-foreground outline-none">
-                            <option value="allanime">AllAnime</option>
+                            <option value="mkissa">Mkissa</option>
                             <option value="anineko">AniNeko</option>
+                            <option value="nyaa">Torrents (1080p)</option>
                           </select>
                           <button
                             onClick={async () => {

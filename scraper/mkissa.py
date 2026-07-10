@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from curl_cffi.requests import AsyncSession
 
 from diagnostics import warn_empty
@@ -16,10 +17,20 @@ from diagnostics import warn_empty
 log = logging.getLogger(__name__)
 
 AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
-ALLANIME_REFR = "https://youtu-chan.com"
-ALLANIME_BASE = "allanime.day"
-ALLANIME_API = f"https://api.{ALLANIME_BASE}"
-ALLANIME_KEY = hashlib.sha256(b"Xot36i3lK3:v1").hexdigest()
+MKISSA_REFR = "https://mkissa.to"
+MKISSA_BASE = "allanime.day"
+MKISSA_API = f"https://api.{MKISSA_BASE}"
+MKISSA_KEY = hashlib.sha256(b"Xot36i3lK3:v1").hexdigest()
+
+# allanime.day's client-crypto (aaReq) constants, lifted from the site's JS
+# bundle (chunks/*.js: `const zr="13"` is the build id, `$n="..."` the XOR
+# mask). Both rotate every so often; when the API starts returning
+# AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH again, re-read them from the
+# current bundle. The mask is XORed against the fetched partB to derive the
+# AES key used for both signing the request token and decrypting the source
+# list, so it must match the build id in use.
+MKISSA_BUILD_ID = "13"
+MKISSA_MASK_HEX = "f5dc46e6f42968c5ed0eab602d6ae8f2107991006f02876947e64fcb75d53da6"
 
 # Persisted query hash for episode embeds (from ani-cli v4.14.0)
 EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
@@ -67,21 +78,20 @@ def b64url_decode(s: str) -> bytes:
     return base64.b64decode(b64)
 
 
-def decrypt(blob: str) -> Optional[str]:
+def decrypt(blob: str, key: bytes) -> Optional[str]:
     try:
         data = base64.b64decode(blob)
+        if data[0] != 1:
+            print(f"Decryption failed: unsupported version {data[0]}")
+            return None
         iv = data[1:13]
-        ct_len = len(data) - 13 - 16
-        ciphertext = data[13 : 13 + ct_len]
+        ciphertext = data[13:]
         
-        counter_block = iv + b'\x00\x00\x00\x02'
-        initial_value = int.from_bytes(counter_block, byteorder='big')
-        ctr = Counter.new(128, initial_value=initial_value)
-        cipher = AES.new(bytes.fromhex(ALLANIME_KEY), AES.MODE_CTR, counter=ctr)
-        decrypted = cipher.decrypt(ciphertext)
+        cipher = AESGCM(key)
+        decrypted = cipher.decrypt(iv, ciphertext, None)
         return decrypted.decode('utf-8')
     except Exception as e:
-        log.debug(f"Decryption failed: {e}")
+        log.warning(f"Decryption failed: {e}")
         return None
 
 
@@ -165,7 +175,7 @@ async def get_links(session, provider_path: str) -> list:
         return await get_mp4upload_links(session, provider_path)
 
     clock_timeout = 2 if '/clock.' in provider_path else 1
-    fetch_url = provider_path if provider_path.startswith('http') else f"https://{ALLANIME_BASE}{provider_path}"
+    fetch_url = provider_path if provider_path.startswith('http') else f"https://{MKISSA_BASE}{provider_path}"
     
     try:
         resp = await session.get(fetch_url, timeout=clock_timeout)
@@ -200,7 +210,7 @@ async def get_links(session, provider_path: str) -> list:
     return all_links
 
 
-def parse_source_lines(api_data: dict) -> list:
+def parse_source_lines(api_data: dict, key: bytes) -> list:
     resp_lines = []
     
     def unescape_source(s: str) -> str:
@@ -209,7 +219,7 @@ def parse_source_lines(api_data: dict) -> list:
     def extract_from_blob(blob: str):
         if not blob or len(blob) < 50:
             return
-        plain = decrypt(blob)
+        plain = decrypt(blob, key)
         if not plain:
             return
         
@@ -272,21 +282,71 @@ async def get_okru_links(session, embed_url: str) -> list:
     return all_links
 
 
-class AllAnimeProvider:
+class MkissaProvider:
     def __init__(self):
         self.session = AsyncSession(impersonate="chrome131")
         self.session.headers.update({
             "User-Agent": AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": ALLANIME_REFR,
-            "Origin": ALLANIME_REFR,
+            "Referer": MKISSA_REFR,
+            "Origin": MKISSA_REFR,
         })
+        self.auth_data = None
+
+    async def _ensure_authconfigs(self):
+        if self.auth_data:
+            return
+        try:
+            resp = await self.session.get(f"{MKISSA_REFR}/", timeout=5)
+            import re
+            m = re.search(r'\{[^{}]*"partB":"[^"]+"[^{}]*\}', resp.text)
+            if m:
+                self.auth_data = json.loads(m.group(0))
+            else:
+                log.warning("Could not find auth_data in HTML.")
+                self.auth_data = {}
+        except Exception as e:
+            log.warning(f"Failed to fetch auth configs from HTML: {e}")
+            self.auth_data = {}
+
+    def _get_crypto_token(self, query_hash: str) -> str:
+        import time
+        from hashlib import sha256
+        import json
+        
+        epoch = self.auth_data.get('epoch', 0)
+        partB = self.auth_data.get('partB', '')
+        cr = MKISSA_BUILD_ID
+
+        try:
+            Dn = bytes.fromhex(MKISSA_MASK_HEX)
+            partB_bytes = base64.b64decode(partB)
+            key = bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
+            
+            ts = int(time.time() * 1000 / 300000) * 300000
+            i_str = f"{epoch}:{cr}:{query_hash}:{ts}"
+            iv = sha256(i_str.encode()).digest()[:12]
+            
+            a = json.dumps({"v": 1, "ts": ts, "epoch": epoch, "buildId": cr, "qh": query_hash}, separators=(',', ':'))
+            
+            cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+            ciphertext, tag = cipher.encrypt_and_digest(a.encode())
+            s = ciphertext + tag
+            
+            c = bytearray(13 + len(s))
+            c[0] = 1
+            c[1:13] = iv
+            c[13:] = s
+            return base64.b64encode(c).decode()
+        except Exception as e:
+            log.error(f"Crypto token generation failed: {e}")
+            return ""
 
     async def _post_api(self, payload: dict, timeout: int = 8, attempts: int = 3) -> dict:
-        """POST to the AllAnime GraphQL API, retrying transient failures.
+        """POST to the Mkissa GraphQL API, retrying transient failures.
 
-        AllAnime intermittently returns 5xx or drops the connection. A single
+        Mkissa intermittently returns 5xx or drops the connection. A single
         failure here used to make the whole provider fall back to AniNeko, so
         retry a few times with a short backoff before giving up. Client errors
         (4xx) are not transient and are raised immediately.
@@ -294,7 +354,7 @@ class AllAnimeProvider:
         last_exc: Optional[Exception] = None
         for attempt in range(attempts):
             try:
-                resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=timeout)
+                resp = await self.session.post(f"{MKISSA_API}/api", json=payload, timeout=timeout)
                 if resp.status_code >= 500:
                     # Log the body so a recurring 5xx is diagnosable (Cloudflare
                     # block pages, JSON error bodies, etc.) rather than opaque.
@@ -303,19 +363,19 @@ class AllAnimeProvider:
                         body = resp.text[:300]
                     except Exception:
                         pass
-                    log.warning(f"AllAnime API HTTP {resp.status_code} (attempt {attempt + 1}/{attempts}); body: {body!r}")
+                    log.warning(f"Mkissa API HTTP {resp.status_code} (attempt {attempt + 1}/{attempts}); body: {body!r}")
                     raise RuntimeError(f"HTTP {resp.status_code}")
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
                 last_exc = e
-                log.warning(f"AllAnime API request error (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}")
+                log.warning(f"Mkissa API request error (attempt {attempt + 1}/{attempts}): {type(e).__name__}: {e}")
                 if attempt < attempts - 1:
                     await asyncio.sleep(0.6 * (attempt + 1))
-        raise last_exc if last_exc else RuntimeError("AllAnime API request failed")
+        raise last_exc if last_exc else RuntimeError("Mkissa API request failed")
 
     async def search(self, query: str) -> list[AnimeRef]:
-        # Clean query: AllAnime's GraphQL API fails when search queries contain apostrophes.
+        # Clean query: Mkissa's GraphQL API fails when search queries contain apostrophes.
         # We replace "'s" (case-insensitive) with an empty string and then remove remaining apostrophes.
         cleaned_query = re.sub(r"'s\b", "", query, flags=re.IGNORECASE)
         cleaned_query = cleaned_query.replace("'", "")
@@ -352,14 +412,14 @@ class AllAnimeProvider:
             data = await self._post_api(payload)
             return self._extract_search_results(data)
         except Exception as e:
-            log.error(f"AllAnime search failed: {e}")
+            log.error(f"Mkissa search failed: {e}")
             return []
 
     @staticmethod
     def _extract_search_results(data: dict) -> list[AnimeRef]:
         shows = data.get("data", {}).get("shows", {}).get("edges", [])
         if not shows:
-            warn_empty("allanime", "data.shows.edges", "search results")
+            warn_empty("mkissa", "data.shows.edges", "search results")
             return []
         results = []
         for show in shows:
@@ -423,7 +483,7 @@ class AllAnimeProvider:
                 )
                 if ep_count > 0:
                     log.warning(
-                        "allanime: availableEpisodesDetail empty for slug %s "
+                        "mkissa: availableEpisodesDetail empty for slug %s "
                         "but availableEpisodes reports %d — synthesising list",
                         slug, ep_count,
                     )
@@ -431,7 +491,7 @@ class AllAnimeProvider:
 
             return AnimeInfo(title=title, episodes=episodes)
         except Exception as e:
-            log.error(f"AllAnime get failed: {e}")
+            log.error(f"Mkissa get failed: {e}")
             return None
 
     async def streams(self, slug: str, episode: int, debug: bool = False) -> Tuple[List[StreamServer], List[dict]]:
@@ -476,7 +536,7 @@ class AllAnimeProvider:
 
                 headers = {}
                 if link.get('needsReferer') or 'tools.fast4speed.rsvp' in final_url:
-                    headers['Referer'] = ALLANIME_REFR
+                    headers['Referer'] = MKISSA_REFR
                 elif link.get('referer'):
                     headers['Referer'] = link['referer']
 
@@ -484,35 +544,38 @@ class AllAnimeProvider:
                     headers['Referer'] = "https://allanime.day/"
 
                 resolved_servers.append(StreamServer(
-                    name=f"AllAnime - {source_name} ({res}) - {mode.capitalize()}",
+                    name=f"Mkissa - {source_name} ({res}) - {mode.capitalize()}",
                     url=final_url,
                     quality=res,
                     is_m3u8=bool(".m3u8" in final_url or "master.m3u8" in final_url),
                     headers=headers if headers else None,
                     group="hard_sub" if mode == "sub" else mode,
-                    source_type="allanime"
+                    source_type="mkissa"
                 ))
             return resolved_servers
 
         async def fetch_mode(mode):
             api_data = None
             try:
-                query_vars = json.dumps({"showId": slug, "translationType": mode, "episodeString": ep_no})
-                query_ext = json.dumps({"persistedQuery": {"version": 1, "sha256Hash": EPISODE_QUERY_HASH}})
-                api_url = f"{ALLANIME_API}/api?variables={urllib.parse.quote(query_vars)}&extensions={urllib.parse.quote(query_ext)}"
+                await self._ensure_authconfigs()
+                crypto_token = self._get_crypto_token(EPISODE_QUERY_HASH)
+                
+                query_vars = json.dumps({"showId": slug, "translationType": mode, "episodeString": ep_no}, separators=(',', ':'))
+                query_ext = json.dumps({"persistedQuery": {"version": 1, "sha256Hash": EPISODE_QUERY_HASH}, "aaReq": crypto_token}, separators=(',', ':'))
+                api_url = f"{MKISSA_API}/api?variables={urllib.parse.quote(query_vars)}&extensions={urllib.parse.quote(query_ext)}"
 
                 get_resp = await self.session.get(api_url, headers={
                     'User-Agent': AGENT,
-                    'Referer': ALLANIME_REFR,
-                    'Origin': ALLANIME_REFR
+                    'Referer': MKISSA_REFR,
+                    'Origin': MKISSA_REFR,
+                    'x-build-id': MKISSA_BUILD_ID
                 }, timeout=3)
-
                 if get_resp.status_code == 200:
                     raw_text = get_resp.text
                     if raw_text and ('tobeparsed' in raw_text or '"_m"' in raw_text):
                         api_data = get_resp.json()
-            except Exception:
-                log.debug(f"AllAnime GET persisted query failed for {mode}")
+            except Exception as e:
+                log.warning(f"Mkissa GET persisted query failed for {mode}: {e}")
 
             if not api_data:
                 try:
@@ -524,16 +587,23 @@ class AllAnimeProvider:
                         },
                         "query": episode_embed_gql
                     }
-                    post_resp = await self.session.post(f"{ALLANIME_API}/api", json=payload, timeout=8)
+                    post_resp = await self.session.post(f"{MKISSA_API}/api", json=payload, timeout=8)
                     post_resp.raise_for_status()
                     api_data = post_resp.json()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"Mkissa POST failed for {mode}: {e}")
 
             if not api_data:
                 return []
 
-            resp_lines = parse_source_lines(api_data)
+            
+            partB = self.auth_data.get('partB')
+            partB_bytes = base64.b64decode(partB)
+            Dn = bytes.fromhex(MKISSA_MASK_HEX)
+            key = bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
+            
+            resp_lines = parse_source_lines(api_data, key)
+            
             if not resp_lines:
                 return []
 

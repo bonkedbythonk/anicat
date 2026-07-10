@@ -82,12 +82,20 @@ curl -L -o /tmp/anime4k.zip https://github.com/bloc97/Anime4K/releases/download/
 unzip -q -o /tmp/anime4k.zip "*.glsl" -d "$CONFIG_DIR/shaders/"
 
 echo "=== 6. Generating customized mpv.conf styled for AniCat ==="
+# Only a fallback: the real mpv.conf is committed at this path and is the
+# source of truth, so this heredoc normally never runs. Keep it in sync with
+# the committed file (audio-buffer / audio-stream-silence / hwdec choices are
+# load-bearing for the no-crackle fix) so a missing-file rebuild can't silently
+# ship the old crackly config.
 if [ ! -f "$CONFIG_DIR/mpv.conf" ]; then
 cat << 'EOF' > "$CONFIG_DIR/mpv.conf"
 # Video Quality Settings
 vo=gpu
-profile=high-quality
+# Hardware-decode on macOS (VideoToolbox) — keeps seeks cheap so they don't
+# stall the playloop and crackle the audio (hwdec=no was counterproductive).
 hwdec=auto-safe
+# Persist compiled shaders so the first Ctrl+1 upscaling toggle doesn't stall.
+gpu-shader-cache-dir=~~cache/
 
 # Complete Borderless Minimalism
 border=no
@@ -101,12 +109,27 @@ osd-bar=no
 keep-open=yes
 # Remember volume, position, and other settings between launches
 save-position-on-quit=no
+# Start in fullscreen by default
+fullscreen=yes
+# Prevents sub_margins conflict from watch-later restore
+watch-later-options-remove=sub-pos
+# Cache for smooth streaming on slow connections
+demuxer-max-bytes=128M
+demuxer-readahead-secs=15
+cache-pause=yes
 
 # Subtitles
 sub-auto=fuzzy
 sub-font="Outfit"
 sub-font-size=44
 sub-bold=yes
+
+# Audio — the no-crackle fix. Constant output rate (coreaudiod safety net),
+# a generous soft buffer to ride out pipeline stalls, and keeping the device
+# open across seeks so it doesn't pop on reopen.
+audio-samplerate=48000
+audio-buffer=1.0
+audio-stream-silence=yes
 EOF
 fi
 

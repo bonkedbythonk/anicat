@@ -1,8 +1,8 @@
-"""Parser-contract tests for the AllAnime provider (GraphQL JSON)."""
+"""Parser-contract tests for the Mkissa provider (GraphQL JSON)."""
 
 import logging
 
-from allanime import AllAnimeProvider
+from mkissa import MkissaProvider
 
 SEARCH_RESPONSE = {
     "data": {
@@ -19,7 +19,7 @@ SEARCH_RESPONSE = {
 
 
 def test_extract_search_results():
-    results = AllAnimeProvider._extract_search_results(SEARCH_RESPONSE)
+    results = MkissaProvider._extract_search_results(SEARCH_RESPONSE)
     ids = [r.id for r in results]
     # englishName preferred, name used when englishName is empty, entry without _id dropped.
     assert "abc123" in ids
@@ -33,13 +33,13 @@ def test_extract_search_results():
 
 def test_extract_search_results_empty_logs_warning(caplog):
     with caplog.at_level(logging.WARNING):
-        results = AllAnimeProvider._extract_search_results({"data": {"shows": {"edges": []}}})
+        results = MkissaProvider._extract_search_results({"data": {"shows": {"edges": []}}})
     assert results == []
     assert any("data.shows.edges" in r.message for r in caplog.records)
 
 
 def test_extract_search_results_malformed_payload_warns(caplog):
     with caplog.at_level(logging.WARNING):
-        results = AllAnimeProvider._extract_search_results({})
+        results = MkissaProvider._extract_search_results({})
     assert results == []
     assert any("data.shows.edges" in r.message for r in caplog.records)

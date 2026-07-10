@@ -28,9 +28,9 @@ def _load_provider(name: str) -> object:
     if name == "anineko":
         from anineko import AniNekoProvider
         PROVIDERS["anineko"] = AniNekoProvider()
-    elif name == "allanime":
-        from allanime import AllAnimeProvider
-        PROVIDERS["allanime"] = AllAnimeProvider()
+    elif name == "mkissa":
+        from mkissa import MkissaProvider
+        PROVIDERS["mkissa"] = MkissaProvider()
     elif name == "mangakatana":
         from mangakatana import MangaKatanaProvider
         PROVIDERS["mangakatana"] = MangaKatanaProvider()
@@ -113,7 +113,7 @@ async def get_streams(slug: str = Query(...), episode: int = Query(...), provide
 async def debug_streams(slug: str = Query(...), episode: int = Query(...), provider: str = Query("anineko")):
     _touch()
     prov = _load_provider(provider)
-    if provider == "allanime":
+    if provider == "mkissa":
         try:
             servers, debug_log = await prov.streams(slug, episode, debug=True)
             result = {
@@ -121,7 +121,7 @@ async def debug_streams(slug: str = Query(...), episode: int = Query(...), provi
                 "episode": episode,
                 "request_url": "https://api.allanime.day/api",
                 "final_url": "https://api.allanime.day/api",
-                "page_title": "AllAnime API debug",
+                "page_title": "Mkissa API debug",
                 "html_length": 0,
                 "html_snippet": "JSON API endpoint used",
                 "user_agent": prov.session.headers.get("User-Agent", ""),

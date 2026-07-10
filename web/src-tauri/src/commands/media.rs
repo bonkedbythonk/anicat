@@ -209,12 +209,32 @@ pub async fn get_episodes(
     title: Option<String>,
     episode_count: Option<i64>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
     };
     let is_manga = provider_name == "mangakatana";
+
+    // Torrents have no scrapeable episode list: synthesize one from the count
+    // the frontend already knows, or from AniList (aired-so-far for airing
+    // shows). Whether each episode actually has a torrent is decided at play
+    // time, with the regular provider fallback if it doesn't.
+    if provider_name == "nyaa" && !is_manga {
+        let count = match episode_count.filter(|&n| n > 0) {
+            Some(n) => Some(n),
+            None => crate::torrent::gather_media_info(&state, media_id, title.clone()).await.1,
+        };
+        let episodes: Vec<crate::scraper::client::Episode> = (1..=count.unwrap_or(0))
+            .map(|n| crate::scraper::client::Episode {
+                number: n as i32,
+                title: None,
+                image: None,
+                download_status: None,
+            })
+            .collect();
+        return serde_json::to_value(episodes).map_err(|e| e.to_string());
+    }
 
     let db = state.open_db().map_err(|e| e.to_string())?;
     let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
@@ -350,11 +370,26 @@ pub async fn resolve_stream(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
     };
+
+    if provider_name == "nyaa" {
+        let (url, _) = super::playback::resolve_stream_for_provider(
+            &state, media_id, episode_number as i64, "nyaa", &None, None,
+        )
+        .await?;
+        return Ok(serde_json::json!({ "streams": [{
+            "name": "Torrent (1080p)",
+            "url": url,
+            "quality": "1080p",
+            "isM3U8": false,
+            "headers": null,
+            "group": "hard_sub",
+        }] }));
+    }
 
     let db = state.open_db()?;
 
@@ -390,11 +425,22 @@ pub async fn search_provider(
     query: String,
     provider: Option<String>,
 ) -> Result<Vec<crate::scraper::AnimeRef>, String> {
-    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
     };
+
+    // Torrents have no show catalog to search. The re-match UI still works:
+    // echo the query back as the one result, and saving it stores the query
+    // as a manual search-title override for this media.
+    if provider_name == "nyaa" {
+        return Ok(vec![crate::scraper::AnimeRef {
+            id: query.clone(),
+            title: format!("Search torrents for \"{}\"", query),
+            year: None,
+        }]);
+    }
 
     let results = state.scraper_manager.search(&query, &provider_name).await?;
     if !results.is_empty() || fallback == provider_name {
@@ -432,7 +478,7 @@ pub async fn debug_provider_streams(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
@@ -652,8 +698,8 @@ async fn download_episode(
             return;
         }
     };
-    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "allanime") {
-        (s, "allanime")
+    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "mkissa") {
+        (s, "mkissa")
     } else if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "anineko") {
         (s, "anineko")
     } else {
@@ -1185,6 +1231,11 @@ pub async fn resolve_and_save_provider_slug(
     is_manga: bool,
     frontend_title: Option<String>,
 ) -> Result<Option<String>, String> {
+    // The torrent provider has no scraper catalog to search against; its
+    // "slug" is only ever a user-entered search-title override.
+    if provider_name == "nyaa" {
+        return Ok(None);
+    }
     let mut vars = std::collections::HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(media_id));
     vars.insert("type".to_string(), serde_json::json!(if is_manga { "MANGA" } else { "ANIME" }));
@@ -1390,11 +1441,11 @@ mod tests {
         assert!(slug_manga.is_some());
         assert!(slug_manga.unwrap().contains("kanan-sama-is-easy-as-hell"));
 
-        // Test Monthly Girls' Nozaki-kun on AllAnime
+        // Test Monthly Girls' Nozaki-kun on Mkissa
         let slug_anime = resolve_and_save_provider_slug(
             &state,
             20668,
-            "allanime",
+            "mkissa",
             false, // is_manga
             Some("Monthly Girls' Nozaki-kun".to_string()),
         )

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./transport";
 import type {
   MediaItem,
   Episode,
@@ -61,6 +61,7 @@ export async function getConfig(): Promise<{
   stream: {
     data_saver: boolean;
     shader_profile?: string;
+    interpolation?: string;
     translation_type?: string;
   };
   api: {
@@ -206,7 +207,7 @@ export async function getEpisodes(
   title?: string,
   episodeCount?: number,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider: provider || "allanime", title: title || null, episodeCount: episodeCount ?? null });
+  return invoke("get_episodes", { mediaId, provider: provider || "mkissa", title: title || null, episodeCount: episodeCount ?? null });
 }
 
 export async function getChapterPages(
@@ -435,7 +436,7 @@ export async function triggerUpdate(): Promise<void> {
 
 // ── Legacy mediaApi compatibility layer ──────────────────
 
-export const API_BASE_ORIGIN = "http://127.0.0.1:13370";
+export { apiOrigin } from "./proxy";
 
 export const mediaApi = {
   getConfig,

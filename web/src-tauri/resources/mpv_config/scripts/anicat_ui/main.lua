@@ -119,20 +119,20 @@ local function match_skip_type(title)
   return nil
 end
 
--- Merge chapter-derived skips into AniSkip times. Chapter heuristics only
--- fill in types that AniSkip has no data for — AniSkip timestamps win when
--- both cover the same type (e.g. a chapter called "intro" shouldn't override
--- the AniSkip op timing for the actual opening animation).
+-- Merge chapter-derived skips into AniSkip times.
+-- Chapter timestamps WIN when both cover the same type, because high-quality
+-- torrents have perfectly accurate OP/ED chapters, whereas AniSkip relies
+-- on official broadcast timings that might be misaligned on other files.
 local function merge_skips(aniskip_list, chapter_list)
   local result = {}
-  local aniskip_types = {}
-  for _, s in ipairs(aniskip_list) do
-    result[#result + 1] = s
-    aniskip_types[s.type] = true
-  end
+  local chapter_types = {}
   for _, cs in ipairs(chapter_list) do
-    if not aniskip_types[cs.type] then
-      result[#result + 1] = cs
+    result[#result + 1] = cs
+    chapter_types[cs.type] = true
+  end
+  for _, s in ipairs(aniskip_list) do
+    if not chapter_types[s.type] then
+      result[#result + 1] = s
     end
   end
   return result
@@ -294,6 +294,26 @@ local function toggle_shaders()
   notify_backend("toggle-upscale")
 end
 
+-- Ctrl+3: toggle smooth motion (frame interpolation up to the display refresh).
+-- Interpolation only works under display-sync, so flip video-sync alongside it;
+-- when off we return audio to its own clock (video-sync=audio) so nothing
+-- resamples the audio. Reads the live property to decide direction, like the
+-- shader toggle above. Also persisted into the app config via the backend.
+local function toggle_interpolation()
+  local on = mp.get_property_native('interpolation')
+  if on then
+    mp.set_property_native('interpolation', false)
+    mp.set_property('video-sync', 'audio')
+    mp.osd_message("Smooth Motion: Disabled", 2.0)
+  else
+    mp.set_property('video-sync', 'display-resample')
+    mp.set_property('tscale', 'oversample')
+    mp.set_property_native('interpolation', true)
+    mp.osd_message("Smooth Motion: Enabled", 2.0)
+  end
+  notify_backend("toggle-interpolation")
+end
+
 local function render(force)
   if not state.file_loaded then
     state.overlay:remove()
@@ -341,6 +361,9 @@ local function set_auto_next(val)
   render(true)
 end
 
+-- Ctrl+4: toggle auto-play-next. Persists into the real config (like the
+-- other Ctrl+number toggles above) so Settings reflects it too, instead of
+-- resetting to whatever Settings said every time an episode launches.
 local function toggle_auto_next()
   local current = get_auto_next_opt()
   if current == 'yes' then
@@ -350,6 +373,7 @@ local function toggle_auto_next()
     set_auto_next('yes')
     mp.osd_message('Auto-play next: On', 1.5)
   end
+  notify_backend("toggle-auto-next")
 end
 
 local function set_autoskip(val)
@@ -369,6 +393,20 @@ local function toggle_autoskip()
     mp.osd_message('Auto-skip intro: On', 1.5)
   end
   notify_backend("toggle-autoskip")
+end
+
+local function shift_skips(offset)
+  if not state.skips or #state.skips == 0 then
+    mp.osd_message("No skip times to shift", 1.5)
+    return
+  end
+  for _, skip in ipairs(state.skips) do
+    skip.start = skip.start + offset
+    skip.endt = skip.endt + offset
+    skip.notified = false
+  end
+  local sign = offset > 0 and "+" or ""
+  mp.osd_message(string.format("Skip timings shifted: %s%.1fs", sign, offset), 1.5)
 end
 
 notify_backend = function(action, sync, manual)
@@ -405,27 +443,12 @@ notify_backend = function(action, sync, manual)
   end
 end
 
--- "Up Next" countdown state, declared early so the navigation paths below can
--- cancel a running countdown before they act.
-local UP_NEXT_SECONDS = 5
-local up_next_timer = nil
 
-local function stop_up_next()
-  if up_next_timer then
-    up_next_timer:kill()
-    up_next_timer = nil
-  end
-  if mp.remove_key_binding then
-    pcall(mp.remove_key_binding, 'anicat-upnext-now')
-    pcall(mp.remove_key_binding, 'anicat-upnext-cancel')
-  end
-end
 
 local function play_next(sync, manual)
   if manual == nil then
     manual = true
   end
-  stop_up_next()
   local current_ep = get_current_episode_opt()
   local total_eps = get_total_episodes_opt()
   if total_eps > 0 and current_ep >= total_eps then
@@ -439,7 +462,6 @@ local function play_next(sync, manual)
 end
 
 local function play_prev(sync)
-  stop_up_next()
   local current_ep = get_current_episode_opt()
   if current_ep <= 1 then
     mp.osd_message('Already at the first episode.', 3.0)
@@ -456,54 +478,7 @@ local function toggle_translation()
   notify_backend("toggle-translation")
 end
 
--- "Up Next" countdown shown at the end of an episode before auto-advancing, so
--- the jump isn't abrupt and can be skipped or cancelled. Paired with the
--- backend stream preload, the actual load is instant once the countdown ends.
--- (UP_NEXT_SECONDS / up_next_timer / stop_up_next are declared above play_next.)
-local function advance_now()
-  stop_up_next()
-  play_next(nil, false)
-  -- Clear a stuck "Loading next episode" if nothing loads within 10s.
-  mp.add_timeout(10, function()
-    if state.next_triggered and not state.file_loaded then
-      state.next_triggered = false
-      mp.osd_message('No more episodes available.', 3.0)
-    end
-  end)
-end
 
-local function start_up_next_countdown()
-  local current_ep = get_current_episode_opt()
-  local total_eps = get_total_episodes_opt()
-  if total_eps > 0 and current_ep >= total_eps then
-    state.next_triggered = false
-    mp.osd_message('No more episodes available.', 3.0)
-    return
-  end
-  local next_ep = current_ep + 1
-  state.next_triggered = true
-
-  if mp.add_forced_key_binding then
-    mp.add_forced_key_binding('ENTER', 'anicat-upnext-now', advance_now)
-    mp.add_forced_key_binding('ESC', 'anicat-upnext-cancel', function()
-      stop_up_next()
-      state.next_triggered = false
-      mp.osd_message('Auto-play cancelled', 2.0)
-    end)
-  end
-
-  local remaining = UP_NEXT_SECONDS
-  local function tick()
-    if remaining <= 0 then
-      advance_now()
-      return
-    end
-    mp.osd_message(string.format('Up Next: Episode %d in %ds     [Enter] play now     [Esc] cancel', next_ep, remaining), 1.5)
-    remaining = remaining - 1
-  end
-  tick()
-  up_next_timer = mp.add_periodic_timer(1, tick)
-end
 
 local function register_script_messages()
   if not mp.register_script_message then
@@ -513,6 +488,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
+  mp.register_script_message('anicat-toggle-interpolation', toggle_interpolation)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
   mp.register_script_message('anicat-toggle-autoskip', toggle_autoskip)
@@ -520,13 +496,14 @@ local function register_script_messages()
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)
   mp.register_script_message('anicat-cancel-next', function()
-    stop_up_next()
     state.next_triggered = false
   end)
 
   -- Force bind the skip keys directly in the player
   if mp.add_forced_key_binding then
     mp.add_forced_key_binding('S', 'anicat-skip-shifts', skip_current_segment)
+    mp.add_forced_key_binding('[', 'anicat-skip-shift-back', function() shift_skips(-1) end)
+    mp.add_forced_key_binding(']', 'anicat-skip-shift-forward', function() shift_skips(1) end)
   end
 end
 
@@ -571,7 +548,6 @@ mp.register_event('file-loaded', function()
   state.first_play = true
   state.next_triggered = false
   state.preload_sent = false
-  stop_up_next()
   state.duration = mp.get_property_number('duration') or 0
   
   local skips = parse_skip_times(get_skip_times_opt())
@@ -637,9 +613,13 @@ end)
 
 mp.observe_property('eof-reached', 'bool', function(name, val)
   if val and get_auto_next_opt() == 'yes' and not state.next_triggered then
-    -- Show the Up Next countdown instead of jumping immediately; it handles the
-    -- last-episode case and the actual advance (with stuck-load recovery).
-    start_up_next_countdown()
+    play_next(nil, false)
+    mp.add_timeout(10, function()
+      if state.next_triggered and not state.file_loaded then
+        state.next_triggered = false
+        mp.osd_message('No more episodes available.', 3.0)
+      end
+    end)
   end
 end)
 

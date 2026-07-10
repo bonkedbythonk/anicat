@@ -8,5 +8,8 @@
 /resources/mpv.exe
 /resources/lib/
 
+# Mobile PWA assets staged from ../dist by build.rs before bundling
+/mobile-dist/
+
 # mpv UI assets (Anime4K shaders + ModernZ skin) are small portable text/lua
 # and are committed so every build — including CI — has upscaling and the skin.

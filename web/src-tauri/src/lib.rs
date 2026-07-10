@@ -6,6 +6,7 @@ mod proxy;
 mod registry;
 mod scraper;
 mod state;
+mod torrent;
 mod util;
 
 use state::AppState;
@@ -29,6 +30,20 @@ pub fn run() {
                 let _ = std::fs::write(&log_file, "");
             }
         }
+    }
+
+    // Install a tracing subscriber (off unless RUST_LOG says otherwise).
+    // librqbit and its DHT emit via `tracing`; with no subscriber present,
+    // `tracing` falls back to the `log` crate, and tauri-plugin-log then
+    // renders every transient peer/DHT error to the console. Owning the
+    // subscriber — even a silent one — stops that fallback entirely.
+    {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("off"));
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .try_init();
     }
 
     let app_state = AppState::new();

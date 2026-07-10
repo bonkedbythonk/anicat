@@ -10,7 +10,8 @@ import {
   ShieldAlert,
   Clock,
   Sparkles,
-  Palette
+  Palette,
+  Gauge
 } from "lucide-react";
 import { mediaApi, dispatchRefresh } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
@@ -28,8 +29,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
   const [uiStyle, setUiStyle] = useState<"neon-abyss" | "sakura-zen" | "retro-manga">("neon-abyss");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
-  const [downloadsPath, setDownloadsPath] = useState("");
   const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
+  const [interpolation, setInterpolation] = useState<"on" | "off">("off");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
   const [authPending, setAuthPending] = useState(false);
 
@@ -40,11 +41,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   useEffect(() => {
     mediaApi.getConfig().then((cfg) => {
-      if (cfg?.general?.downloads_path) {
-        setDownloadsPath(cfg.general.downloads_path);
-      }
       if (cfg?.stream?.shader_profile === "on" || cfg?.stream?.shader_profile === "off") {
         setGpuUpscaling(cfg.stream.shader_profile);
+      }
+      if (cfg?.stream?.interpolation === "on" || cfg?.stream?.interpolation === "off") {
+        setInterpolation(cfg.stream.interpolation);
       }
       if (cfg?.general?.time_format === "12h" || cfg?.general?.time_format === "24h") {
         setTimeFormat(cfg.general.time_format);
@@ -55,17 +56,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }).catch(() => {});
   }, []);
 
-  const handleDownloadsPathChange = async (val: string) => {
-    setDownloadsPath(val);
-    try {
-      await mediaApi.updateConfig({ general: { downloads_path: val } });
-    } catch {}
-  };
-
   const handleGpuUpscalingChange = async (val: "on" | "off") => {
     setGpuUpscaling(val);
     try {
       await mediaApi.updateConfig({ stream: { shader_profile: val } });
+    } catch {}
+  };
+
+  const handleInterpolationChange = async (val: "on" | "off") => {
+    setInterpolation(val);
+    try {
+      await mediaApi.updateConfig({ stream: { interpolation: val } });
     } catch {}
   };
 
@@ -445,19 +446,30 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 </div>
               </div>
 
-              {/* Download Directory */}
+              {/* Smooth Motion (Frame Interpolation) */}
               <div className="space-y-2.5">
                 <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
-                  <Download size={12} className="text-accent" />
-                  <span>Download Directory Location</span>
+                  <Gauge size={12} className="text-accent" />
+                  <span>Smooth Motion</span>
                 </label>
-                <input
-                  type="text"
-                  value={downloadsPath}
-                  onChange={(e) => handleDownloadsPathChange(e.target.value)}
-                  placeholder="e.g. /Users/username/Downloads/Anicat"
-                  className="w-full bg-white/[0.02] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700 text-white"
-                />
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Frame interpolation for smoother panning, up to your display's refresh rate. Best left off for on-twos anime — may look soap-opera-y.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["off", "on"] as const).map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => handleInterpolationChange(g)}
+                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                        interpolation === g
+                          ? "bg-accent text-white shadow-lg shadow-accent/20"
+                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {g === "off" ? "Off (Recommended)" : "On"}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -493,20 +505,24 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="space-y-4 text-xs">
               <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">1. Media Playback Controls</h3>
-                <p className="text-gray-400 leading-relaxed">When playing anime in the external MPV window, use these keyboard shortcuts for seamless control:</p>
+                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">1. Settings — Ctrl + number</h3>
+                <p className="text-gray-400 leading-relaxed">Toggle these live in the external MPV window during playback — they're saved back into your app settings too:</p>
                 <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + S</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + T</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-play</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + A</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 1</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-skip Intro</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 2</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Smooth Motion</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 3</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 4</kbd></div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">2. GPU Upscaling Shaders (Anime4K)</h3>
-                <p className="text-gray-400 leading-relaxed">You can dynamically toggle Anime4K high-quality upscaling shaders directly inside MPV during playback:</p>
+                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">2. Actions — Shift + letter</h3>
+                <p className="text-gray-400 leading-relaxed">One-off playback actions, same MPV window:</p>
                 <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Shaders</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 1</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Reload Episode</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + R</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + S</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + T</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Nudge Skip Timing</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">[ / ]</kbd></div>
                 </div>
               </div>
 

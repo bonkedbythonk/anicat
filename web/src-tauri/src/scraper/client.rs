@@ -461,7 +461,7 @@ mod tests {
             .to_string();
 
         let manager = ScraperManager::new(http_client, python_path, scraper_script);
-        let results = manager.search("The Ramparts of Ice", "allanime").await.unwrap();
+        let results = manager.search("The Ramparts of Ice", "mkissa").await.unwrap();
         println!("TEST_SEARCH_RESULTS: {:?}", results);
         assert!(!results.is_empty());
     }

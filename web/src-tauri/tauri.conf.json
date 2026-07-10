@@ -61,7 +61,9 @@
       "resources/lib/*",
       "resources/lib/**/*",
       "resources/scraper-bin/anicat-scraper/anicat-scraper",
-      "resources/scraper-bin/anicat-scraper/_internal/**/*"
+      "resources/scraper-bin/anicat-scraper/_internal/**/*",
+      "mobile-dist/*",
+      "mobile-dist/**/*"
     ]
   }
 }

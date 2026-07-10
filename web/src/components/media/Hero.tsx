@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { Play, Maximize, BookOpen, Loader2, Clock, Tv } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { proxyImage } from "@/lib/proxy";
-import { mediaApi, type MediaItem, API_BASE_ORIGIN } from "@/lib/api";
+import { mediaApi, type MediaItem } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 
 interface HeroProps {
@@ -431,7 +431,7 @@ const Hero = memo(function Hero({
               <button
                 onClick={handlePlay}
                 disabled={isAiringFuture || clicked}
-                className="flex items-center space-x-2 bg-white text-black hover:bg-white/90 px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-all shadow-lg"
+                className="flex shrink-0 items-center space-x-2 bg-white text-black hover:bg-white/90 px-4 sm:px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-all shadow-lg"
               >
                 {clicked ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -442,7 +442,7 @@ const Hero = memo(function Hero({
                 ) : (
                   <Play fill="currentColor" size={16} />
                 )}
-                <span>
+                <span className="whitespace-nowrap">
                   {clicked
                     ? "Loading..."
                     : isAiringFuture
@@ -460,10 +460,10 @@ const Hero = memo(function Hero({
 
               <button
                 onClick={() => onSelect?.(item)}
-                className="flex items-center space-x-2 bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-white px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 cursor-pointer transition-all"
+                className="flex shrink-0 items-center space-x-2 bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-white px-4 sm:px-6 py-2.5 rounded-lg font-bold text-sm active:scale-95 cursor-pointer transition-all"
               >
                 <Maximize size={16} />
-                <span>Details</span>
+                <span className="whitespace-nowrap">Details</span>
               </button>
             </div>
           </div>

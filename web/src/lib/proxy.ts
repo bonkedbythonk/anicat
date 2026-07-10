@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "./transport";
 
 const ANILIST_CDN = "s4.anilist.co";
 
@@ -8,6 +9,11 @@ let initialized = false;
 export async function initProxyPort(): Promise<void> {
   if (initialized) return;
   initialized = true;
+  // The mobile PWA is served by the same process that owns /proxy, so it
+  // never needs to know the port — apiOrigin() below just uses a relative
+  // URL. get_proxy_port is a desktop-only Tauri command with no mobile-api
+  // equivalent (there's nothing to look up on that side).
+  if (!isTauri()) return;
   try {
     proxyPort = await invoke<number>("get_proxy_port");
   } catch {
@@ -15,10 +21,18 @@ export async function initProxyPort(): Promise<void> {
   }
 }
 
+/** Origin to prefix proxy/API URLs with. Desktop's Tauri webview has its own
+ * origin (not the proxy server's), so it needs the absolute 127.0.0.1 form;
+ * the mobile PWA is served BY the proxy server itself, so a relative URL
+ * already resolves to whatever LAN IP the phone loaded the page from. */
+export function apiOrigin(): string {
+  return isTauri() ? `http://127.0.0.1:${proxyPort}` : "";
+}
+
 export function proxyImage(url: string | null | undefined): string {
   if (!url) return "";
   if (url.includes(ANILIST_CDN) || url.includes("anilistcdn")) {
-    return `http://127.0.0.1:${proxyPort}/proxy?url=${encodeURIComponent(url)}`;
+    return `${apiOrigin()}/proxy?url=${encodeURIComponent(url)}`;
   }
   return url;
 }

@@ -35,6 +35,10 @@ def main():
         "--hidden-import", "selectolax",
         "--collect-all", "curl_cffi",
         "--collect-all", "selectolax",
+        # mkissa.py imports cryptography (AESGCM) lazily via main.py; collect
+        # its OpenSSL backend binaries so the frozen build has them.
+        "--hidden-import", "cryptography",
+        "--collect-all", "cryptography",
         "--exclude-module", "setuptools",
         "main.py"
     ]

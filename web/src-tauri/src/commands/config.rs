@@ -64,6 +64,9 @@ pub async fn update_config(
                         if let Some(v) = stream.get("shader_profile").and_then(|v| v.as_str()) {
                             config.stream.shader_profile = v.to_string();
                         }
+                        if let Some(v) = stream.get("interpolation").and_then(|v| v.as_str()) {
+                            config.stream.interpolation = v.to_string();
+                        }
                         if let Some(v) = stream.get("translation_type").and_then(|v| v.as_str()) {
                             config.stream.translation_type = v.to_string();
                         }
@@ -90,6 +93,16 @@ pub async fn update_config(
                             let t = if token.is_empty() { None } else { Some(token.to_string()) };
                             config.api.anilist_token = t.clone();
                             state.anilist_client.set_token(t);
+                        }
+                    }
+                }
+                "mobile" => {
+                    if let Some(mobile) = value.as_object() {
+                        if let Some(v) = mobile.get("pin").and_then(|v| v.as_str()) {
+                            config.mobile.pin = if v.is_empty() { None } else { Some(v.to_string()) };
+                        }
+                        if let Some(v) = mobile.get("lan_access_enabled").and_then(|v| v.as_bool()) {
+                            config.mobile.lan_access_enabled = v;
                         }
                     }
                 }

@@ -68,7 +68,7 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
         <div className="px-6 lg:px-8 pb-8 relative -mt-16 lg:-mt-20">
           <div className="flex flex-col md:flex-row md:items-end space-y-4 md:space-y-0 md:space-x-6">
             {profile.avatar_url ? (
-              <img src={profile.avatar_url} alt="Avatar" className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl object-cover border-4 border-surface shadow-2xl" />
+              <img src={proxyImage(profile.avatar_url)} alt="Avatar" className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl object-cover border-4 border-surface shadow-2xl" />
             ) : (
               <div className="w-32 h-32 lg:w-40 lg:h-40 rounded-2xl bg-white/10 border-4 border-surface flex items-center justify-center">
                 <User size={48} className="text-white/50" />

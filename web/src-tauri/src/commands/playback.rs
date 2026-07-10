@@ -26,7 +26,7 @@ fn is_watched(stop_time: i64, duration: i64) -> bool {
 /// is trivially small, or when the duration is unknown — so a finished episode
 /// never drops the user back near the end and a brief sample never starts in
 /// the middle.
-fn resume_position(stop_time: i64, duration: i64) -> i64 {
+pub(crate) fn resume_position(stop_time: i64, duration: i64) -> i64 {
     const MIN_RESUME_SECONDS: i64 = 30;
     if duration <= 0 || stop_time < MIN_RESUME_SECONDS || is_watched(stop_time, duration) {
         0
@@ -308,9 +308,10 @@ fn get_stream_group(server: &crate::scraper::client::StreamServer) -> &str {
 /// Human-facing provider name for notifications.
 pub(crate) fn provider_label(provider: &str) -> &str {
     match provider {
-        "allanime" => "AllAnime",
+        "mkissa" => "Mkissa",
         "anineko" => "AniNeko",
         "mangakatana" => "MangaKatana",
+        "nyaa" => "Torrents",
         other => other,
     }
 }
@@ -327,6 +328,34 @@ pub(crate) async fn resolve_stream_for_provider(
     server: &Option<String>,
     title: Option<String>,
 ) -> Result<(String, Option<std::collections::HashMap<String, String>>), String> {
+    // Torrents don't go through the scraper: search Nyaa/SubsPlease, start
+    // the embedded torrent session, and hand mpv the local range-stream URL.
+    if provider_name == "nyaa" {
+        let prefer_dub = {
+            let cfg = state.config.read().await;
+            cfg.stream.translation_type == "dub"
+        };
+        let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
+        let (titles, episode_count) =
+            crate::torrent::gather_media_info(state, media_id, title).await;
+        // Movies/OVAs (single "episode") legitimately have no episode number
+        // in their release names.
+        let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
+        let url = state
+            .torrent
+            .resolve(
+                &state.http_client,
+                media_id,
+                episode_number,
+                &titles,
+                allow_episodeless,
+                prefer_dub,
+                proxy_port,
+            )
+            .await?;
+        return Ok((url, None));
+    }
+
     // Read any cached slug in a scoped block so the (non-Sync) DB connection is
     // dropped before the first await — otherwise this future is !Send.
     let cached_slug = {
@@ -392,7 +421,7 @@ pub async fn preload_episode(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<(), String> {
-    let provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
 
     // Already preloaded (or being worked on) for this exact target — skip.
     {
@@ -439,7 +468,7 @@ pub async fn start_playback(
     cover_image: Option<String>,
     total_episodes: Option<i64>,
 ) -> Result<PlaybackStart, String> {
-    let mut provider_name = provider.unwrap_or_else(|| "allanime".to_string());
+    let mut provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
 
     let title_str = title.clone().unwrap_or_default();
     let episode_title_str = episode_title.clone().unwrap_or_default();
@@ -715,7 +744,7 @@ pub async fn start_playback(
                             percent_encode(search_title)
                         );
                         log::info!("[aniskip] Jikan searching by title '{}' url={}", search_title, jikan_url);
-                        match reqwest::Client::new()
+                        match state_clone.http_client
                             .get(&jikan_url)
                             .timeout(std::time::Duration::from_secs(5))
                             .send()
@@ -742,7 +771,8 @@ pub async fn start_playback(
 
         let mut bg_skip_times_arg = String::new();
         if let Some(m_id) = mal_id {
-            let client = reqwest::Client::new();
+            // Shared client: explicitly rustls — see AppState::new.
+            let client = state_clone.http_client.clone();
             let url = format!(
                 "https://api.aniskip.com/v2/skip-times/{}/{}?types[]=op&types[]=ed&episodeLength=0",
                 m_id, episode_number
@@ -757,17 +787,19 @@ pub async fn start_playback(
                             #[serde(default)]
                             results: Vec<AniSkipTime>,
                         }
+                        // The API has served both camelCase and snake_case
+                        // over time; accept either.
                         #[derive(serde::Deserialize)]
                         struct AniSkipTime {
-                            #[serde(rename = "skipType")]
+                            #[serde(rename = "skipType", alias = "skip_type")]
                             skip_type: String,
                             interval: AniSkipInterval,
                         }
                         #[derive(serde::Deserialize)]
                         struct AniSkipInterval {
-                            #[serde(rename = "startTime")]
+                            #[serde(rename = "startTime", alias = "start_time")]
                             start_time: f64,
-                            #[serde(rename = "endTime")]
+                            #[serde(rename = "endTime", alias = "end_time")]
                             end_time: f64,
                         }
                         if let Ok(aniskip_res) = resp.json::<AniSkipResult>().await {
@@ -872,13 +904,10 @@ pub async fn start_playback(
         let encoded = skip_times_arg.replace(",", "%2C");
         script_opts.push(format!("anicat_ui-skip_times={}", encoded));
     }
-    let shader_profile = state
-        .config
-        .read()
-        .await
-        .stream
-        .shader_profile
-        .clone();
+    let (shader_profile, interpolation) = {
+        let cfg = state.config.read().await;
+        (cfg.stream.shader_profile.clone(), cfg.stream.interpolation.clone())
+    };
     script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
@@ -922,6 +951,38 @@ pub async fn start_playback(
             let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
             cmd.arg(format!("--glsl-shaders={}", shader_arg.join(sep)));
         }
+    }
+
+    // Smooth-motion / frame interpolation (Ctrl+3). Interpolates the source up
+    // to the display refresh. This requires display-sync (video-sync=audio,
+    // the default, does nothing with --interpolation), so it's only turned on
+    // when the setting is enabled — otherwise audio stays on its own clock.
+    // tscale=oversample is the lowest-artifact filter, best for anime's held
+    // frames. The Lua Ctrl+3 handler flips these same properties live.
+    if interpolation != "off" {
+        cmd.arg("--interpolation=yes");
+        cmd.arg("--video-sync=display-resample");
+        cmd.arg("--tscale=oversample");
+    }
+
+    // Torrent streams come off the local proxy from an in-progress download,
+    // so reads can block for seconds while a piece arrives. Tune mpv for that:
+    // never time the connection out (the default abort → retry loop is what
+    // spams the console and makes playback "just stop"), buffer aggressively,
+    // and pause to rebuffer instead of erroring on an underrun. ffmpeg's http
+    // demuxer chatter is silenced so a transient slow read isn't log noise.
+    let is_torrent_stream = stream_url.contains("/torrent-stream");
+    if is_torrent_stream {
+        cmd.arg("--network-timeout=0");
+        cmd.arg("--cache=yes");
+        cmd.arg("--cache-pause=yes");
+        cmd.arg("--cache-pause-initial=yes");
+        cmd.arg("--cache-pause-wait=3");
+        cmd.arg("--demuxer-max-bytes=1GiB");
+        cmd.arg("--demuxer-max-back-bytes=256MiB");
+        cmd.arg("--demuxer-readahead-secs=120");
+        cmd.arg("--force-seekable=yes");
+        cmd.arg("--msg-level=ffmpeg=fatal");
     }
 
     if let Some(ref headers) = stream_headers {
@@ -1218,6 +1279,10 @@ pub async fn start_playback(
                     "episode_number": monitor_episode,
                 }));
                 discord.clear_presence();
+                // Window closed: pause the torrent so it stops using the
+                // network in the background. Auto-next reuses (and unpauses)
+                // the next episode's torrent, so this doesn't disrupt it.
+                app_state_clone.torrent.pause_all().await;
                 {
                     let mut guard = app_state_clone.current_playback.lock().await;
                     *guard = None;
@@ -1290,11 +1355,41 @@ pub async fn record_playback_progress(
                 }
             }
 
-            let status = if total_episodes > 0 && episode_number >= total_episodes {
-                "COMPLETED"
-            } else {
-                "CURRENT"
-            };
+            // The frontend's total_episodes falls back to the *aired-so-far*
+            // list length when AniList doesn't publish a final count (common
+            // while a show is releasing), so reaching it only proves "watched
+            // the newest available episode" — not the series. Before writing
+            // COMPLETED, confirm against AniList's own planned episode count;
+            // unknown count or a failed lookup stays CURRENT (a wrong CURRENT
+            // is a one-click fix, a wrong COMPLETED silently drops the show
+            // from Watching).
+            let mut status = "CURRENT";
+            if total_episodes > 0 && episode_number >= total_episodes {
+                let mut vars = HashMap::new();
+                vars.insert("id".to_string(), serde_json::json!(media_id));
+                vars.insert("type".to_string(), serde_json::json!("ANIME"));
+                let detail: Result<crate::anilist::responses::MediaResponse, String> = state
+                    .anilist_client
+                    .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
+                    .await;
+                match detail {
+                    Ok(d) => {
+                        let planned = d.media.as_ref().and_then(|m| m.episodes);
+                        if planned.map(|n| episode_number >= n as i64).unwrap_or(false) {
+                            status = "COMPLETED";
+                        } else {
+                            log::info!(
+                                "Not completing media {}: watched ep {} but AniList planned total is {:?}",
+                                media_id, episode_number, planned
+                            );
+                        }
+                    }
+                    Err(e) => log::warn!(
+                        "Completion check for media {} failed ({}); keeping status CURRENT",
+                        media_id, e
+                    ),
+                }
+            }
 
             let mut vars = HashMap::new();
             vars.insert("mediaId".to_string(), serde_json::json!(media_id));
@@ -1329,6 +1424,10 @@ pub async fn stop_playback(
     duration: i64,
 ) -> Result<(), String> {
     kill_current_mpv().await;
+
+    // Stop the torrent download the moment playback ends (no-op unless the
+    // "nyaa" provider started a session). Files stay cached for instant resume.
+    state.torrent.pause_all().await;
 
     state.discord.clear_presence();
 

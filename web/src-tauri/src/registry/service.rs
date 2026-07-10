@@ -74,6 +74,22 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    // Migration (v3): rename provider key allanime → mkissa. Mkissa hits the
+    // same allanime.day GraphQL backend, so a show's cached _id slug is
+    // identical — reuse it instead of forcing every existing user to re-match.
+    // Runs for both fresh installs (no-op) and existing v2 databases, which
+    // the if/else-if above leaves untouched. Idempotent: once the "allanime"
+    // key is gone the LIKE filter matches nothing.
+    if version < 3 {
+        let _ = conn.execute(
+            "UPDATE media_records SET provider_mapping = REPLACE(provider_mapping, ?1, ?2)
+             WHERE provider_mapping LIKE ?3",
+            params!["\"allanime\"", "\"mkissa\"", "%\"allanime\"%"],
+        );
+        conn.pragma_update(None, "user_version", 3)
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 

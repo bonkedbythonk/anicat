@@ -10,6 +10,8 @@ pub struct AppConfig {
     pub stream: StreamConfig,
     #[serde(default)]
     pub api: ApiConfig,
+    #[serde(default)]
+    pub mobile: MobileConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -44,6 +46,8 @@ pub struct StreamConfig {
     pub data_saver: bool,
     #[serde(default = "default_shader_profile")]
     pub shader_profile: String,
+    #[serde(default = "default_interpolation")]
+    pub interpolation: String,
     #[serde(default = "default_translation_type")]
     pub translation_type: String,
 }
@@ -56,12 +60,25 @@ pub struct ApiConfig {
     pub anilist_username: Option<String>,
 }
 
+/// Settings for the LAN-facing mobile PWA. This is an anti-accidental-entry
+/// gate for a trusted home network, not a security boundary — the PIN is
+/// stored and compared in plaintext intentionally (hashing a 4-6 digit PIN
+/// would not meaningfully raise the bar, and it keeps the "show current PIN"
+/// round-trip in Settings trivial).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MobileConfig {
+    #[serde(default)]
+    pub pin: Option<String>,
+    #[serde(default = "default_false")]
+    pub lan_access_enabled: bool,
+}
+
 fn default_translation_type() -> String {
     "sub".into()
 }
 
 fn default_provider() -> String {
-    "allanime".into()
+    "mkissa".into()
 }
 fn default_true() -> bool {
     true
@@ -86,6 +103,9 @@ fn default_fallback_provider() -> String {
 }
 fn default_shader_profile() -> String {
     "balanced".into()
+}
+fn default_interpolation() -> String {
+    "off".into()
 }
 
 #[derive(Clone)]
@@ -134,6 +154,9 @@ pub struct AppStateInner {
     /// from the previous episode clobbers the current episode's script-opts
     /// (current_episode, skip_times), breaking next/prev and AniSkip.
     pub playback_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// Embedded torrent engine for the "nyaa" provider. Lazy: no torrent
+    /// session (DHT, listeners) exists until the first torrent playback.
+    pub torrent: Arc<crate::torrent::TorrentManager>,
 }
 
 #[derive(Debug, Clone)]
@@ -189,8 +212,13 @@ impl AppState {
             .ok();
         }
 
+        // Pin rustls explicitly: if a dependency ever enables reqwest's
+        // default-tls feature again, the implicit default would flip to
+        // macOS SecureTransport, which can't complete a handshake with some
+        // of the APIs we rely on (api.aniskip.com).
         let http_client = reqwest::Client::builder()
             .user_agent("Anicat/5.0")
+            .use_rustls_tls()
             .build()
             .unwrap_or_default();
 
@@ -230,6 +258,7 @@ impl AppState {
                 last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                torrent: Arc::new(crate::torrent::TorrentManager::new()),
             }),
         };
 
@@ -241,8 +270,16 @@ impl AppState {
             Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
             Err(_) => AppConfig::default(),
         };
-        if config.general.provider == "gogoanime" || config.general.provider == "anizone" || config.general.provider == "animepahe" {
-            config.general.provider = "allanime".into();
+        // allanime was renamed to mkissa (same allanime.day backend, new
+        // anti-scrape crypto). Old dead providers collapse onto it too.
+        if matches!(
+            config.general.provider.as_str(),
+            "gogoanime" | "anizone" | "animepahe" | "allanime"
+        ) {
+            config.general.provider = "mkissa".into();
+        }
+        if config.general.fallback_provider == "allanime" {
+            config.general.fallback_provider = "mkissa".into();
         }
         config
     }

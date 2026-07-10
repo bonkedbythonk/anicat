@@ -238,7 +238,9 @@ export default function App() {
     const unlistenSetting = listen<{ key: string; value: boolean | string }>("anicat_setting_toggled", (event) => {
       const { key, value } = event.payload;
       if (key === "autoskip") useSettingsStore.getState().setAutoskip(Boolean(value));
+      if (key === "autoplay") useSettingsStore.getState().setAutoplay(Boolean(value));
       if (key === "shader_profile") useSettingsStore.getState().setShaderProfile(String(value));
+      if (key === "interpolation") useSettingsStore.getState().setInterpolation(String(value));
     });
     return () => {
       unlisten.then((fn) => fn());

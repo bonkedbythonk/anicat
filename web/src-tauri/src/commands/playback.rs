@@ -394,10 +394,12 @@ pub(crate) async fn resolve_stream_for_provider(
             .or_else(|| pick_best_server(&servers))
     } else if translation_type == "dub" {
         pick_best_server_in_group(&servers, &["dub"])
-            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"]))
+            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub"]))
+            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"]))
             .or_else(|| pick_best_server(&servers))
     } else {
-        pick_best_server_in_group(&servers, &["hard_sub", "soft_sub"])
+        pick_best_server_in_group(&servers, &["hard_sub"])
+            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"]))
             .or_else(|| pick_best_server_in_group(&servers, &["dub"]))
             .or_else(|| pick_best_server(&servers))
     };

@@ -367,7 +367,11 @@ export function EpisodeList({
                 </div>
 
                 {!isUnaired ? (
-                  <div className="flex items-center space-x-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    {/* Always visible (not hover-gated like the actions below) —
+                        this is the only way to reach the multi-source picker, and
+                        it being hidden behind hover made it easy to never notice
+                        a provider had more than one stream to choose from. */}
                     {!isManga && (
                       <button
                         onClick={(e) => {
@@ -378,7 +382,7 @@ export function EpisodeList({
                         className={`flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90 ${
                           expandedEpStreams === epNum
                             ? "bg-accent/25 text-accent border border-accent/30"
-                            : "bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                            : "bg-foreground/[0.04] text-muted-foreground hover:bg-accent/15 hover:text-accent"
                         }`}
                       >
                         {loadingStreamsEp === epNum ? (
@@ -388,6 +392,7 @@ export function EpisodeList({
                         )}
                       </button>
                     )}
+                    <div className="flex items-center space-x-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -426,6 +431,7 @@ export function EpisodeList({
                          <Check size={16} />
                        </button>
                      )}
+                    </div>
                   </div>
                 ) : (
                   <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-foreground/[0.04] border border-border rounded-[10px] shrink-0">

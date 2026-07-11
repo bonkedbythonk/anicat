@@ -3,6 +3,7 @@ import json
 import hashlib
 import base64
 import logging
+import time
 import urllib.parse
 import asyncio
 from dataclasses import dataclass, field
@@ -21,16 +22,23 @@ MKISSA_REFR = "https://mkissa.to"
 MKISSA_BASE = "allanime.day"
 MKISSA_API = f"https://api.{MKISSA_BASE}"
 MKISSA_KEY = hashlib.sha256(b"Xot36i3lK3:v1").hexdigest()
+# Raw digest (not hex string) of the same legacy string — this is the actual
+# AES-GCM key the client uses to decrypt the sourceUrls blob (verified by
+# instrumenting crypto.subtle in a real browser session: the site tries the
+# partB^mask key first, that call throws, and it silently falls back to this
+# static key, which succeeds — independent of buildId/partB/epoch entirely).
+# So unlike the signing token below, this one doesn't rotate.
+MKISSA_RESPONSE_KEY = hashlib.sha256(b"Xot36i3lK3:v1").digest()
 
 # allanime.day's client-crypto (aaReq) constants, lifted from the site's JS
 # bundle (chunks/*.js: `const zr="13"` is the build id, `$n="..."` the XOR
 # mask). Both rotate every so often; when the API starts returning
 # AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH again, re-read them from the
 # current bundle. The mask is XORed against the fetched partB to derive the
-# AES key used for both signing the request token and decrypting the source
-# list, so it must match the build id in use.
-MKISSA_BUILD_ID = "13"
-MKISSA_MASK_HEX = "f5dc46e6f42968c5ed0eab602d6ae8f2107991006f02876947e64fcb75d53da6"
+# AES key used only for signing the request token (aaReq) — NOT for
+# decrypting the response; see MKISSA_RESPONSE_KEY above for that.
+MKISSA_BUILD_ID = "20"
+MKISSA_MASK_HEX = "52735823afe9a3eb96958a8b8981254d8b70d2ebc3ae1999960b1a7ab7fbbe5b"
 
 # Persisted query hash for episode embeds (from ani-cli v4.14.0)
 EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
@@ -295,8 +303,22 @@ class MkissaProvider:
         self.auth_data = None
 
     async def _ensure_authconfigs(self):
+        # The site's own auth blob carries its rotation schedule (epoch,
+        # switchAt in epoch-ms, graceMs) — its JS explicitly re-fetches once
+        # switchAt passes ("epoch switchAt passed — reset cache"). We only
+        # ever fetched once per scraper process before; on a long-running
+        # session (this normally self-heals via the ~60s idle sidecar
+        # restart, but doesn't during a long binge) the signing token would
+        # start using a stale epoch and every stream request would silently
+        # fail. Re-fetch once we're past switchAt, same as the site does.
         if self.auth_data:
-            return
+            switch_at = self.auth_data.get('switchAt')
+            try:
+                if switch_at is None or time.time() * 1000 < float(switch_at):
+                    return
+            except (ValueError, TypeError):
+                pass
+            log.info("mkissa: epoch switchAt passed, refreshing auth config")
         try:
             resp = await self.session.get(f"{MKISSA_REFR}/", timeout=5)
             import re
@@ -543,13 +565,27 @@ class MkissaProvider:
                 if 'wixmp' in final_url and 'Referer' not in headers:
                     headers['Referer'] = "https://allanime.day/"
 
+                # Sources like mp4upload, filemoon, and fast4speed serve
+                # raw video without burned-in subs even under the "sub"
+                # translation type.  Only wixmp/sharepoint/ok.ru streams
+                # carry actual hardsubs.  Tag the rest as "soft_sub" so
+                # the picker prefers real hardsub sources.
+                if mode == "sub":
+                    url_lc = final_url.lower()
+                    if any(h in url_lc for h in ('wixmp', 'wixstatic', 'sharepoint', 'okcdn', 'ok.ru')):
+                        group = "hard_sub"
+                    else:
+                        group = "soft_sub"
+                else:
+                    group = mode
+
                 resolved_servers.append(StreamServer(
                     name=f"Mkissa - {source_name} ({res}) - {mode.capitalize()}",
                     url=final_url,
                     quality=res,
                     is_m3u8=bool(".m3u8" in final_url or "master.m3u8" in final_url),
                     headers=headers if headers else None,
-                    group="hard_sub" if mode == "sub" else mode,
+                    group=group,
                     source_type="mkissa"
                 ))
             return resolved_servers
@@ -596,13 +632,7 @@ class MkissaProvider:
             if not api_data:
                 return []
 
-            
-            partB = self.auth_data.get('partB')
-            partB_bytes = base64.b64decode(partB)
-            Dn = bytes.fromhex(MKISSA_MASK_HEX)
-            key = bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
-            
-            resp_lines = parse_source_lines(api_data, key)
+            resp_lines = parse_source_lines(api_data, MKISSA_RESPONSE_KEY)
             
             if not resp_lines:
                 return []

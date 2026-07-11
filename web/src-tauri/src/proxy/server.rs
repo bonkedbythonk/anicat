@@ -809,14 +809,17 @@ async fn proxy_handler(
         req_builder = req_builder.header("range", range);
     }
 
-    if let Some(ua) = headers.get("user-agent") {
-        req_builder = req_builder.header("user-agent", ua);
+    // The upstream CDNs (especially ok.ru/okcdn.ru) often enforce that the
+    // User-Agent matches the one used to extract the stream URL (e.g. srcAg/GECKO).
+    // mpv sends 'mpv 0.41.0', which gets rejected with 400 Bad Request.
+    let ua = if url.contains("srcAg/GECKO") {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
+    } else if url.contains("srcAg/CHROME") {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
     } else {
-        req_builder = req_builder.header(
-            "user-agent",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
-        );
-    }
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+    };
+    req_builder = req_builder.header("user-agent", ua);
 
     // An explicit ?referer= (from the mobile playback path, carrying the
     // stream's own required Referer) wins over the per-host defaults below.

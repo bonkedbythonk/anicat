@@ -1,5 +1,5 @@
-
 import { useState, useEffect } from "react";
+import { useAppStore } from "@/stores/app";
 import { Loader2, Globe, Monitor, Activity, Clock, Calendar } from "lucide-react";
 import { LazyCard } from "@/components/media/LazyCard";
 import { mediaApi, getUserLists, type MediaItem } from "@/lib/api";
@@ -11,18 +11,8 @@ interface ScheduleViewProps {
 export function ScheduleView({ onSelect }: ScheduleViewProps) {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [watchingOnly, setWatchingOnly] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("anicat_schedule_watching_only");
-      return saved === null ? true : saved === "true";
-    }
-    return true;
-  });
-
-  const handleToggleWatchingOnly = (value: boolean) => {
-    setWatchingOnly(value);
-    localStorage.setItem("anicat_schedule_watching_only", String(value));
-  };
+  const watchingOnly = useAppStore(s => s.scheduleWatchingOnly);
+  const setWatchingOnly = useAppStore(s => s.setScheduleWatchingOnly);
 
   const parseAiringAt = (airingAt?: string) => {
     if (!airingAt) return 0;
@@ -100,7 +90,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
         
         <div className="flex bg-white/[0.04] p-1 rounded-xl border border-white/[0.06] w-fit h-fit self-start sm:self-auto">
           <button
-            onClick={() => handleToggleWatchingOnly(false)}
+            onClick={() => setWatchingOnly(false)}
             className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
               !watchingOnly ? "bg-accent text-white shadow-lg shadow-accent/20" : "text-gray-500 hover:text-white"
             }`}
@@ -109,7 +99,7 @@ export function ScheduleView({ onSelect }: ScheduleViewProps) {
             <span>Global</span>
           </button>
           <button
-            onClick={() => handleToggleWatchingOnly(true)}
+            onClick={() => setWatchingOnly(true)}
             className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
               watchingOnly ? "bg-accent text-white shadow-lg shadow-accent/20" : "text-gray-500 hover:text-white"
             }`}

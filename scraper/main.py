@@ -28,13 +28,15 @@ def _load_provider(name: str) -> object:
     if name == "anineko":
         from anineko import AniNekoProvider
         PROVIDERS["anineko"] = AniNekoProvider()
-    elif name == "mkissa":
+    elif name == "mkissa" or name == "allanime":
         from mkissa import MkissaProvider
-        PROVIDERS["mkissa"] = MkissaProvider()
+        prov = MkissaProvider()
+        PROVIDERS["mkissa"] = prov
+        PROVIDERS["allanime"] = prov
     elif name == "mangakatana":
         from mangakatana import MangaKatanaProvider
         PROVIDERS["mangakatana"] = MangaKatanaProvider()
-    return PROVIDERS[name]
+    return PROVIDERS.get(name)
 
 app = FastAPI(title="Anicat Scraper", docs_url=None, redoc_url=None)
 _last_used = time.monotonic()

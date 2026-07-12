@@ -131,6 +131,28 @@ pub fn set_provider_slug(
     Ok(())
 }
 
+/// Remove a single provider's slug for a media, leaving other providers'
+/// mappings (including manual nyaa search-title overrides) intact.
+pub fn clear_provider_slug(
+    conn: &rusqlite::Connection,
+    media_id: i64,
+    provider: &str,
+) -> Result<(), String> {
+    let Some(mut mapping) = get_full_mapping(conn, media_id) else {
+        return Ok(());
+    };
+    if mapping.remove(provider).is_none() {
+        return Ok(());
+    }
+    let mapping_json = serde_json::to_string(&mapping).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE media_records SET provider_mapping = ?2, updated_at = datetime('now') WHERE media_id = ?1",
+        params![media_id, mapping_json],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn clear_provider_cache(conn: &rusqlite::Connection, media_id: i64) -> Result<(), String> {
     conn.execute(
         "UPDATE media_records SET provider_mapping = '{}' WHERE media_id = ?1",

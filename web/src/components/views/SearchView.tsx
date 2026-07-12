@@ -1,5 +1,5 @@
-
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useAppStore } from "@/stores/app";
 import { Search, Loader2, SlidersHorizontal, Activity } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MediaCard } from "@/components/media/MediaCard";
@@ -13,11 +13,15 @@ interface SearchViewProps {
 }
 
 export function SearchView({ onSelect }: SearchViewProps) {
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
-  const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState<SearchFilters>({});
+  const query = useAppStore(s => s.searchQuery);
+  const setQuery = useAppStore(s => s.setSearchQuery);
+  const type = useAppStore(s => s.searchType);
+  const setType = useAppStore(s => s.setSearchType);
+  const filters = useAppStore(s => s.searchFilters);
+  const setFilters = useAppStore(s => s.setSearchFilters);
+
+  const [debouncedQuery, setDebouncedQuery] = useState(() => query.trim().length >= 2 ? query.trim() : "");
+  const [showFilters, setShowFilters] = useState(() => Object.keys(filters).length > 0);
   const queryClient = useQueryClient();
 
   // Cached discovery feed — refetches silently every 5 min, not on every mount
@@ -207,7 +211,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Genre</label>
               <select
                 value={filters.genre || ""}
-                onChange={(e) => setFilters(f => ({ ...f, genre: e.target.value || undefined }))}
+                onChange={(e) => setFilters({ ...filters, genre: e.target.value || undefined })}
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
               >
                 <option value="">Any Genre</option>
@@ -220,7 +224,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Year</label>
               <select
                 value={filters.year || ""}
-                onChange={(e) => setFilters(f => ({ ...f, year: e.target.value ? Number(e.target.value) : undefined }))}
+                onChange={(e) => setFilters({ ...filters, year: e.target.value ? Number(e.target.value) : undefined })}
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
               >
                 <option value="">Any Year</option>
@@ -233,7 +237,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Min Score</label>
               <select
                 value={filters.minScore || ""}
-                onChange={(e) => setFilters(f => ({ ...f, minScore: e.target.value ? Number(e.target.value) : undefined }))}
+                onChange={(e) => setFilters({ ...filters, minScore: e.target.value ? Number(e.target.value) : undefined })}
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
               >
                 <option value="">Any Score</option>
@@ -246,7 +250,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</label>
               <select
                 value={filters.status || ""}
-                onChange={(e) => setFilters(f => ({ ...f, status: e.target.value || undefined }))}
+                onChange={(e) => setFilters({ ...filters, status: e.target.value || undefined })}
                 className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
               >
                 <option value="">Any Status</option>

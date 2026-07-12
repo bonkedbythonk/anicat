@@ -257,26 +257,26 @@ pub async fn get_episodes(
     }
 
     let db = state.open_db().map_err(|e| e.to_string())?;
-    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
-        .or_else(|| {
-            if fallback != provider_name {
-                log::info!("get_episodes: no slug for '{}', trying fallback '{}'", provider_name, fallback);
-                registry::service::get_provider_slug(&db, media_id, &fallback)
-            } else {
-                None
-            }
-        });
+    // A saved slug is only meaningful on the provider it was resolved for.
+    let (slug, slug_provider) = match registry::service::get_provider_slug(&db, media_id, &provider_name) {
+        Some(s) => (Some(s), provider_name.clone()),
+        None if fallback != provider_name => {
+            log::info!("get_episodes: no slug for '{}', trying fallback '{}'", provider_name, fallback);
+            (registry::service::get_provider_slug(&db, media_id, &fallback), fallback.clone())
+        }
+        None => (None, provider_name.clone()),
+    };
 
-    let mut episodes = if let Some(slug) = slug {
+    let mut episodes = if let Some(ref slug) = slug {
         let res = if is_manga {
-            state.scraper_manager.get_manga(&slug).await.map(|info| info.episodes)
+            state.scraper_manager.get_manga(slug).await.map(|info| info.episodes)
         } else {
-            state.scraper_manager.get_anime(&slug, &provider_name).await.map(|info| info.episodes)
+            state.scraper_manager.get_anime(slug, &slug_provider).await.map(|info| info.episodes)
         };
         match res {
             Ok(eps) => eps,
             Err(e) => {
-                log::error!("Scraper auto-search error for media_id={}, provider={}, title={}: {}", media_id, provider_name, title.as_deref().unwrap_or(""), e);
+                log::error!("Scraper auto-search error for media_id={}, provider={}, title={}: {}", media_id, slug_provider, title.as_deref().unwrap_or(""), e);
                 let _ = registry::service::clear_provider_cache(&db, media_id);
                 use tauri::Emitter;
                 let _ = app.emit("show_notification", serde_json::json!({ "message": format!("Failed to load episodes: {}", e) }));
@@ -315,6 +315,40 @@ pub async fn get_episodes(
             vec![]
         }
     };
+
+    // Self-heal stale mis-matches: a saved slug whose episode count wildly
+    // contradicts AniList's total for a finished show was matched to the
+    // wrong franchise entry (e.g. a 2-episode specials entry saved for a
+    // 12-episode season) by an older matcher. Re-resolve once with the
+    // current season-aware matcher instead of trusting the mapping forever.
+    if !is_manga && slug.is_some() {
+        if let Some(expected) = episode_count.filter(|&n| n > 0) {
+            let got = episodes.len() as i64;
+            let suspect = got > 0 && (got * 2 <= expected || got >= expected * 2);
+            if suspect && media_is_finished(&state, media_id).await {
+                log::warn!(
+                    "get_episodes: saved '{}' slug '{}' has {} episodes but AniList expects {}; re-resolving",
+                    slug_provider, slug.as_deref().unwrap_or(""), got, expected
+                );
+                let _ = registry::service::clear_provider_slug(&db, media_id, &slug_provider);
+                match resolve_and_save_provider_slug(&state, media_id, &slug_provider, false, None).await {
+                    Ok(Some(new_slug)) if Some(&new_slug) != slug.as_ref() => {
+                        if let Ok(info) = state.scraper_manager.get_anime(&new_slug, &slug_provider).await {
+                            if !info.episodes.is_empty() {
+                                episodes = info.episodes;
+                            }
+                        }
+                    }
+                    // Same slug re-chosen: the provider genuinely lists this
+                    // count; resolve_and_save already restored the mapping.
+                    Ok(Some(_)) => {}
+                    // No confident match anymore: leave the mapping cleared and
+                    // let the synthesis/fallback below take over.
+                    _ => episodes = vec![],
+                }
+            }
+        }
+    }
 
     // Active fallback: if the primary provider yielded nothing (down, no match,
     // or an empty list), resolve and scrape the fallback provider instead of
@@ -1184,6 +1218,151 @@ fn normalize_title(title: &str) -> String {
         .to_lowercase()
 }
 
+/// Which entry of a franchise a title names. AniList and provider catalogs
+/// express this in incompatible ways ("Season 2", "2nd Season", a bare
+/// trailing "2", the double-integral in "Go-toubun no Hanayome ∬"), and
+/// `normalize_title` strips the non-alphanumeric markers entirely — so pure
+/// string similarity happily maps a season-2 or 2-episode-specials entry onto
+/// season 1. The variant is extracted before normalization and mismatching
+/// candidates are vetoed in `calculate_similarity`.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum TitleKind {
+    Tv,
+    Movie,
+    Special,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct TitleVariant {
+    season: u32,
+    part: u32,
+    kind: TitleKind,
+    /// Tilde/asterisk-style specials markers ("Quintuplets~" vs "Quintuplets*"
+    /// are different specials), kept to break ties normalization erases.
+    marker: Option<char>,
+}
+
+/// Fold unicode season/variant markers into plain ascii so one parser handles
+/// both AniList's typography and provider catalog titles.
+fn fold_title_markers(title: &str) -> String {
+    let mut folded = String::with_capacity(title.len() + 4);
+    for c in title.chars() {
+        match c {
+            '∬' | 'Ⅱ' | 'ⅱ' => folded.push_str(" 2"),
+            '∭' | 'Ⅲ' | 'ⅲ' => folded.push_str(" 3"),
+            'Ⅳ' | 'ⅳ' => folded.push_str(" 4"),
+            'Ⅴ' | 'ⅴ' => folded.push_str(" 5"),
+            '∽' | '〜' | '～' => folded.push('~'),
+            '＊' => folded.push('*'),
+            _ => folded.push(c),
+        }
+    }
+    folded
+}
+
+fn title_variant(title: &str) -> TitleVariant {
+    use std::sync::OnceLock;
+    static SEASON_RES: OnceLock<Vec<regex_lite::Regex>> = OnceLock::new();
+    static TRAILING_NUM_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    static TRAILING_ROMAN_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    static PART_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    static MOVIE_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    static SPECIAL_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+
+    let lower = fold_title_markers(title).to_lowercase();
+
+    // A lone trailing "~" or "*" is a specials marker ("Quintuplets~" vs
+    // "Quintuplets*"); paired tildes are just a wrapped subtitle
+    // ("Uma Musume ~Pretty Derby~") and say nothing about the variant.
+    let trimmed = lower.trim_end();
+    let marker = ['~', '*']
+        .into_iter()
+        .find(|&c| trimmed.ends_with(c) && lower.matches(c).count() == 1);
+
+    let season_res = SEASON_RES.get_or_init(|| {
+        [
+            r"\bseason[\s._-]*(\d{1,2})\b",
+            r"\b(\d{1,2})(?:st|nd|rd|th)[\s._-]*season\b",
+            r"\bs(\d{1,2})\b",
+        ]
+        .iter()
+        .map(|p| regex_lite::Regex::new(p).unwrap())
+        .collect()
+    });
+    let mut season = season_res
+        .iter()
+        .find_map(|re| re.captures(&lower))
+        .and_then(|c| c[1].parse::<u32>().ok());
+    if season.is_none() {
+        // A bare trailing number ("Quintuplets 2") or roman numeral
+        // ("Overlord III") is a season marker too; longer numbers
+        // ("Mob Psycho 100") are part of the name.
+        let num_re = TRAILING_NUM_RE
+            .get_or_init(|| regex_lite::Regex::new(r"\s(\d{1,2})\s*$").unwrap());
+        season = num_re.captures(&lower).and_then(|c| c[1].parse::<u32>().ok());
+    }
+    if season.is_none() {
+        let roman_re = TRAILING_ROMAN_RE
+            .get_or_init(|| regex_lite::Regex::new(r"\s(ix|iv|v?i{1,3}|x)\s*$").unwrap());
+        season = roman_re.captures(&lower).map(|c| match &c[1] {
+            "ii" => 2,
+            "iii" => 3,
+            "iv" => 4,
+            "v" => 5,
+            "vi" => 6,
+            "vii" => 7,
+            "viii" => 8,
+            "ix" => 9,
+            "x" => 10,
+            _ => 1,
+        });
+    }
+
+    let part_re = PART_RE
+        .get_or_init(|| regex_lite::Regex::new(r"\b(?:part|cour)[\s._-]*(\d{1,2})\b").unwrap());
+    let part = part_re
+        .captures(&lower)
+        .and_then(|c| c[1].parse::<u32>().ok())
+        .unwrap_or(1);
+
+    let movie_re = MOVIE_RE
+        .get_or_init(|| regex_lite::Regex::new(r"\bmovie\b|\beiga\b|\bgekijouban\b").unwrap());
+    let special_re = SPECIAL_RE
+        .get_or_init(|| regex_lite::Regex::new(r"\bspecials?\b|\bovas?\b|\bona\b").unwrap());
+    let kind = if movie_re.is_match(&lower) || lower.contains("映画") || lower.contains("劇場版") {
+        TitleKind::Movie
+    } else if special_re.is_match(&lower) || marker.is_some() {
+        TitleKind::Special
+    } else {
+        TitleKind::Tv
+    };
+
+    TitleVariant {
+        season: season.unwrap_or(1),
+        part,
+        kind,
+        marker,
+    }
+}
+
+/// Multiplier applied on top of string similarity. A candidate naming a
+/// different season/part/kind is vetoed outright (pushed below the 0.4
+/// match threshold no matter how similar the base strings are); a mere
+/// specials-marker difference ("~" vs "*") is only demoted so the right
+/// marker wins ties but a lone candidate can still match.
+fn variant_penalty(target: &TitleVariant, candidate: &TitleVariant) -> f64 {
+    if target.season != candidate.season
+        || target.part != candidate.part
+        || target.kind != candidate.kind
+    {
+        return 0.3;
+    }
+    if target.marker != candidate.marker {
+        return 0.8;
+    }
+    1.0
+}
+
 #[allow(clippy::needless_range_loop)] // index-based DP table is clearest here
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let v1: Vec<char> = s1.chars().collect();
@@ -1217,6 +1396,11 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 }
 
 fn calculate_similarity(target: &str, candidate: &str) -> f64 {
+    let penalty = variant_penalty(&title_variant(target), &title_variant(candidate));
+    base_similarity(target, candidate) * penalty
+}
+
+fn base_similarity(target: &str, candidate: &str) -> f64 {
     let target_norm = normalize_title(target);
     let candidate_norm = normalize_title(candidate);
 
@@ -1224,8 +1408,15 @@ fn calculate_similarity(target: &str, candidate: &str) -> f64 {
         return 0.0;
     }
 
+    if target.eq_ignore_ascii_case(candidate) {
+        return 1.2; // Absolute perfect match
+    }
+
     if target_norm == candidate_norm {
-        return 1.0;
+        // If they normalize to the same string (e.g. "Title" and "Title*"), 
+        // penalize the one that had extra characters stripped so the exact match wins.
+        let len_diff = (target.len() as i32 - candidate.len() as i32).abs() as f64;
+        return 1.0 - (len_diff * 0.01);
     }
 
     // Check if one is a substring of another
@@ -1277,6 +1468,17 @@ pub(crate) async fn fetch_media_detail_cached(
         state.cache.set(key, v, "media_detail");
     }
     Ok(result)
+}
+
+async fn media_is_finished(state: &AppState, media_id: i64) -> bool {
+    match fetch_media_detail_cached(state, media_id, false).await {
+        Ok(detail) => detail
+            .media
+            .and_then(|m| m.status)
+            .as_deref()
+            == Some("FINISHED"),
+        Err(_) => false,
+    }
 }
 
 pub async fn resolve_and_save_provider_slug(
@@ -1462,6 +1664,148 @@ mod tests {
         let matched = find_best_match(&targets, candidates, |r| &r.title);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().id, "123");
+    }
+
+    // Real mkissa search results for "The Quintessential Quintuplets".
+    fn quintuplets_candidates() -> Vec<DummyAnime> {
+        [
+            ("The Quintessential Quintuplets*", "specials2"),
+            ("The Quintessential Quintuplets Specials", "specials"),
+            ("The Quintessential Quintuplets Movie", "movie"),
+            ("The Quintessential Quintuplets 2", "s2"),
+            ("The Quintessential Quintuplets", "s1"),
+        ]
+        .iter()
+        .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
+        .collect()
+    }
+
+    #[test]
+    fn season_one_does_not_match_specials() {
+        // Season 1's targets normalize identically to the "*" specials entry,
+        // which used to win when it appeared first in the search results.
+        let targets = vec!["Go-toubun no Hanayome", "The Quintessential Quintuplets"];
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        assert_eq!(m.id, "s1");
+    }
+
+    #[test]
+    fn season_two_integral_marker_is_a_season() {
+        // Romaji-only targets: "∬" used to be stripped by normalization,
+        // making season 2 a near-exact (0.98) match for the season 1 entry.
+        // With the marker read as a season, nothing here is string-similar
+        // enough — no match beats a wrong-season match.
+        let targets = vec!["Go-toubun no Hanayome ∬", "5-toubun no Hanayome ∬"];
+        assert!(find_best_match(&targets, quintuplets_candidates(), |r| &r.title).is_none());
+
+        // With the English title present (as the real resolver always has),
+        // season 2 wins.
+        let targets = vec!["Go-toubun no Hanayome ∬", "The Quintessential Quintuplets 2"];
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        assert_eq!(m.id, "s2");
+    }
+
+    #[test]
+    fn wrong_season_is_vetoed_when_right_one_is_absent() {
+        let targets = vec!["Go-toubun no Hanayome ∬"];
+        let candidates = vec![DummyAnime {
+            title: "The Quintessential Quintuplets".to_string(),
+            id: "s1".to_string(),
+        }];
+        assert!(find_best_match(&targets, candidates, |r| &r.title).is_none());
+    }
+
+    #[test]
+    fn specials_marker_breaks_normalization_ties() {
+        // anineko names the two specials "…~" and "…*"; the "∽" target must
+        // pick the tilde entry, not season 1 or the other specials.
+        let targets = vec!["Go-toubun no Hanayome∽", "The Quintessential Quintuplets∽"];
+        let candidates: Vec<DummyAnime> = [
+            ("The Quintessential Quintuplets: The Movie", "movie"),
+            ("The Quintessential Quintuplets", "s1"),
+            ("The Quintessential Quintuplets 2", "s2"),
+            ("The Quintessential Quintuplets*", "specials2"),
+            ("The Quintessential Quintuplets~", "specials"),
+        ]
+        .iter()
+        .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
+        .collect();
+        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        assert_eq!(m.id, "specials");
+    }
+
+    #[test]
+    fn season_word_forms_agree() {
+        let targets = vec!["Golden Kamuy 2nd Season"];
+        let candidates: Vec<DummyAnime> = [
+            ("Golden Kamuy", "s1"),
+            ("Golden Kamuy Season 2", "s2"),
+        ]
+        .iter()
+        .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
+        .collect();
+        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        assert_eq!(m.id, "s2");
+    }
+
+    #[test]
+    fn trailing_long_numbers_are_not_seasons() {
+        let targets = vec!["Mob Psycho 100"];
+        let candidates: Vec<DummyAnime> = [
+            ("Mob Psycho 100 II", "s2"),
+            ("Mob Psycho 100", "s1"),
+        ]
+        .iter()
+        .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
+        .collect();
+        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        assert_eq!(m.id, "s1");
+    }
+
+    #[test]
+    fn wrapped_tilde_subtitle_is_not_a_specials_marker() {
+        let targets = vec!["Uma Musume: Pretty Derby"];
+        let candidates = vec![DummyAnime {
+            title: "Uma Musume ~Pretty Derby~".to_string(),
+            id: "s1".to_string(),
+        }];
+        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        assert_eq!(m.id, "s1");
+    }
+
+    #[test]
+    fn movie_target_prefers_movie_entry() {
+        let targets = vec!["Go-toubun no Hanayome Movie", "The Quintessential Quintuplets Movie"];
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        assert_eq!(m.id, "movie");
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
+    async fn quintuplets_seasons_resolve_to_distinct_entries() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let state = AppState::new();
+        let db = state.open_db().unwrap();
+
+        // S1 (12 eps), S2 (12 eps), Specials (2 eps) must map to three
+        // different mkissa catalog entries.
+        let ids = [103572_i64, 109261, 163327];
+        let mut slugs = vec![];
+        for id in ids {
+            let _ = registry::service::clear_provider_slug(&db, id, "mkissa");
+            let slug = resolve_and_save_provider_slug(&state, id, "mkissa", false, None)
+                .await
+                .unwrap();
+            println!("media {} -> {:?}", id, slug);
+            let _ = registry::service::clear_provider_slug(&db, id, "mkissa");
+            slugs.push(slug.expect("each entry should resolve"));
+        }
+        assert_eq!(
+            slugs.iter().collect::<std::collections::HashSet<_>>().len(),
+            slugs.len(),
+            "seasons collapsed onto the same provider entry: {:?}",
+            slugs
+        );
     }
 
     #[tokio::test]

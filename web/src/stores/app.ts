@@ -88,6 +88,25 @@ interface AppState {
   setListsActiveTab: (tab: WatchStatus) => void;
   listsType: "ANIME" | "MANGA";
   setListsType: (type: "ANIME" | "MANGA") => void;
+
+  // Search state — lifted out of SearchView because it unmounts whenever
+  // the detail page opens, which resets the search query and filters.
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  searchType: "ANIME" | "MANGA";
+  setSearchType: (type: "ANIME" | "MANGA") => void;
+  searchFilters: Record<string, any>;
+  setSearchFilters: (filters: Record<string, any>) => void;
+
+  // Other preserved view states
+  libraryType: "ANIME" | "MANGA";
+  setLibraryType: (type: "ANIME" | "MANGA") => void;
+  profileFavType: "ANIME" | "MANGA";
+  setProfileFavType: (type: "ANIME" | "MANGA") => void;
+  scheduleWatchingOnly: boolean;
+  setScheduleWatchingOnly: (val: boolean) => void;
+  downloadsTab: "library" | "queue";
+  setDownloadsTab: (tab: "library" | "queue") => void;
 }
 
 export type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped" | "repeating";
@@ -151,6 +170,22 @@ export const useAppStore = create<AppState>((set) => ({
   setListsActiveTab: (listsActiveTab) => set({ listsActiveTab }),
   listsType: "ANIME",
   setListsType: (listsType) => set({ listsType }),
+
+  searchQuery: "",
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  searchType: "ANIME",
+  setSearchType: (searchType) => set({ searchType }),
+  searchFilters: {},
+  setSearchFilters: (searchFilters) => set({ searchFilters }),
+
+  libraryType: "ANIME",
+  setLibraryType: (libraryType) => set({ libraryType }),
+  profileFavType: "ANIME",
+  setProfileFavType: (profileFavType) => set({ profileFavType }),
+  scheduleWatchingOnly: false,
+  setScheduleWatchingOnly: (scheduleWatchingOnly) => set({ scheduleWatchingOnly }),
+  downloadsTab: "library",
+  setDownloadsTab: (downloadsTab) => set({ downloadsTab }),
 
   settingsDefaultTab: null,
   setSettingsDefaultTab: (settingsDefaultTab) => set({ settingsDefaultTab }),

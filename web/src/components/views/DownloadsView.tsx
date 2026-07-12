@@ -1,5 +1,5 @@
-
 import { useState, useEffect, useCallback } from "react";
+import { useAppStore } from "@/stores/app";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Loader2, 
@@ -23,7 +23,8 @@ import { mediaApi, type QueueItem } from "@/lib/api";
 export function DownloadsView() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"library" | "queue">("library");
+  const activeTab = useAppStore(s => s.downloadsTab);
+  const setActiveTab = useAppStore(s => s.setDownloadsTab);
   const [selectedMediaId, setSelectedMediaId] = useState<number | null>(null);
   const [playingItem, setPlayingItem] = useState<{ mediaId: number; ep: number } | null>(null);
 

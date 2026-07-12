@@ -12,7 +12,8 @@ interface LibraryViewProps {
 }
 
 export function LibraryView({ onSelect }: LibraryViewProps) {
-  const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
+  const type = useAppStore(s => s.libraryType);
+  const setType = useAppStore(s => s.setLibraryType);
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const { items, loading, loadingMore, hasMore, loadMore } =

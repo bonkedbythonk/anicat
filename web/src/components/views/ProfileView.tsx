@@ -12,7 +12,8 @@ interface ProfileViewProps {
 }
 
 export function ProfileView({ onSelect }: ProfileViewProps) {
-  const [favType, setFavType] = useState<"ANIME" | "MANGA">("ANIME");
+  const favType = useAppStore(s => s.profileFavType);
+  const setFavType = useAppStore(s => s.setProfileFavType);
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const {

@@ -106,7 +106,7 @@ def decrypt(blob: str, key: bytes) -> Optional[str]:
 async def get_mp4upload_links(session, page_url: str) -> list:
     all_links = []
     try:
-        resp = await session.get(page_url, timeout=1)
+        resp = await session.get(page_url, timeout=5)
         if resp.status_code == 200:
             m = re.search(r'(?:src|file):\s*"([^"]+\.mp4[^"]*)"', resp.text, re.IGNORECASE)
             if m:

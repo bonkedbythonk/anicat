@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "anicat"
-version = "5.4.2"
+version = "5.4.3"
 dependencies = [
  "axum",
  "bytes",

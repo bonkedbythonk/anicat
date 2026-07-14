@@ -476,7 +476,9 @@ export const mediaApi = {
     try {
       const anilistStatus = ({
         watching: "CURRENT",
+        reading: "CURRENT",
         current: "CURRENT",
+        rereading: "REPEATING",
         completed: "COMPLETED",
         paused: "PAUSED",
         dropped: "DROPPED",

@@ -61,6 +61,9 @@ pub struct ProxyState {
     pub app_handle: Option<tauri::AppHandle>,
     pub app_state: crate::state::AppState,
     pub proxy_port: u16,
+    /// Per-IP failed-login counter shared by both login endpoints. Empty until
+    /// something fails; see `throttle` module.
+    pub login_throttle: super::throttle::LoginThrottle,
 }
 
 impl ProxyState {
@@ -116,6 +119,7 @@ pub async fn start_proxy(
         proxy_port: bound.port(),
         app_handle: app_handle.clone(),
         app_state,
+        login_throttle: super::throttle::LoginThrottle::new(),
     };
 
     // Player callback routes (called by mpv's Lua script today, and by the

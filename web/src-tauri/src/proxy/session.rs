@@ -13,12 +13,13 @@
 //! binary that would ever enable this mode).
 
 use axum::{
-    extract::{FromRequestParts, Request, State},
+    extract::{ConnectInfo, FromRequestParts, Request, State},
     http::{request::Parts, StatusCode},
     middleware::Next,
     response::Response,
     Json,
 };
+use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -45,15 +46,27 @@ pub struct LoginResponse {
 
 pub async fn login(
     State(state): State<ProxyState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<LoginBody>,
 ) -> Result<Json<LoginResponse>, StatusCode> {
+    let ip = addr.ip();
+    if state.login_throttle.check(ip).await.is_some() {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
     let db = state.app_state.open_db().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let user = crate::registry::service::get_user_by_name(&db, &body.display_name)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    if user.pin != body.pin {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Wrong name and wrong PIN are both a failed attempt — count them, and
+    // return the same UNAUTHORIZED for each so the response can't be used to
+    // probe which display names exist.
+    let user = match user {
+        Some(u) if u.pin == body.pin => u,
+        _ => {
+            state.login_throttle.record_failure(ip).await;
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
+    state.login_throttle.record_success(ip).await;
     Ok(Json(LoginResponse {
         token: user_token(user.id, &user.pin),
         user_id: user.id,

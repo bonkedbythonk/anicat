@@ -40,17 +40,33 @@ pub struct AuthResponse {
 
 pub async fn authenticate(
     State(state): State<ProxyState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<AuthBody>,
 ) -> Result<Json<AuthResponse>, StatusCode> {
+    let ip = addr.ip();
+    if state.login_throttle.check(ip).await.is_some() {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
     let cfg = state.app_state.config.read().await;
     if !cfg.mobile.lan_access_enabled {
         return Err(StatusCode::FORBIDDEN);
     }
-    match &cfg.mobile.pin {
+    let token = match &cfg.mobile.pin {
         Some(configured) if !configured.is_empty() && configured == &body.pin => {
-            Ok(Json(AuthResponse { token: pin_token(configured) }))
+            Some(pin_token(configured))
         }
-        _ => Err(StatusCode::UNAUTHORIZED),
+        _ => None,
+    };
+    drop(cfg);
+    match token {
+        Some(token) => {
+            state.login_throttle.record_success(ip).await;
+            Ok(Json(AuthResponse { token }))
+        }
+        None => {
+            state.login_throttle.record_failure(ip).await;
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
 }
 

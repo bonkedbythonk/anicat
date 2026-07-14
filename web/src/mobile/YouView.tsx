@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Play,
   FastForward,
-  Gauge,
   Languages,
   Server,
 } from "lucide-react";
@@ -41,8 +40,7 @@ function Row({
   return (
     <button
       onClick={onClick}
-      disabled={!onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 text-left ${onClick ? "active:bg-white/[0.06]" : ""} transition-colors ${
+      className={`w-full flex items-center gap-3 px-4 py-3 text-left ${onClick ? "active:bg-white/[0.06]" : "cursor-default"} transition-colors ${
         first ? "" : "border-t border-white/[0.05]"
       }`}
     >
@@ -84,7 +82,6 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: YouViewProps) {
   const autoplay = useSettingsStore((s) => s.autoplay);
   const autoskip = useSettingsStore((s) => s.autoskip);
-  const dataSaver = useSettingsStore((s) => s.dataSaver);
   const provider = useSettingsStore((s) => s.defaultProvider);
   const titleLanguage = useSettingsStore((s) => s.preferredTitleLanguage);
   const apiConnected = useAppStore((s) => s.apiConnected);
@@ -138,14 +135,21 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
           <span className="text-[14px] text-muted-foreground">{PROVIDER_LABELS[provider] || provider}</span>
           <ChevronRight size={16} className="text-muted-foreground shrink-0" />
         </Row>
-        <Row color="bg-[#30d158]" icon={FastForward} label="Auto-play next episode">
+        <Row
+          color="bg-[#30d158]"
+          icon={FastForward}
+          label="Auto-play next episode"
+          onClick={() => saveMobileSetting("autoplay", !autoplay)}
+        >
           <Toggle on={autoplay} onChange={(v) => saveMobileSetting("autoplay", v)} />
         </Row>
-        <Row color="bg-accent-light" icon={FastForward} label="Auto-skip intros & outros">
+        <Row
+          color="bg-accent-light"
+          icon={FastForward}
+          label="Auto-skip intros & outros"
+          onClick={() => saveMobileSetting("autoskip", !autoskip)}
+        >
           <Toggle on={autoskip} onChange={(v) => saveMobileSetting("autoskip", v)} />
-        </Row>
-        <Row color="bg-[#ff9f0a]" icon={Gauge} label="Data saver">
-          <Toggle on={dataSaver} onChange={(v) => saveMobileSetting("dataSaver", v)} />
         </Row>
       </div>
 

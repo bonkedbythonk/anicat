@@ -534,8 +534,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             />
             <div className="flex flex-col justify-end pb-2 space-y-3 min-w-0 w-full items-center sm:items-stretch">
               <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
-                <span className="px-2 py-0.5 bg-accent rounded text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-accent/20">
-                  {fullItem.format || (isManga ? 'MANGA' : 'ANIME')}
+                <span className="px-2 py-0.5 bg-accent rounded text-[11px] font-semibold text-white">
+                  {fullItem.format || (isManga ? 'Manga' : 'Anime')}
                 </span>
                 {fullItem.status === 'RELEASING' && (
                   <span className="flex items-center gap-1.5 px-2 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[10px] font-bold text-green-400">
@@ -547,7 +547,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   <span className="px-2 py-0.5 bg-white/[0.05] border border-white/[0.08] rounded text-[10px] font-bold text-gray-400">Finished</span>
                 )}
               </div>
-              <h1 className="text-3xl lg:text-4xl xl:text-5xl font-extrabold text-white leading-tight drop-shadow-xl">{title}</h1>
+              <h1 className="text-2xl lg:text-3xl xl:text-4xl font-bold text-white leading-tight">{title}</h1>
               <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
                 {fullItem.studios?.nodes?.[0]?.name && (
                   <>
@@ -613,7 +613,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 <button
                   onClick={() => handlePlayNext()}
                   disabled={isPlayingNext || isCaughtUp}
-                  className="flex items-center gap-3 px-8 py-3.5 bg-accent hover:bg-accent-light text-white font-extrabold text-sm rounded-2xl transition-all shadow-xl shadow-accent/25 active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground disabled:shadow-none"
+                  className="flex items-center gap-3 px-8 py-3.5 bg-accent hover:bg-accent-light text-white font-semibold text-sm rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
                 >
                   {isPlayingNext ? (
                     <Loader2 className="animate-spin" size={18} />
@@ -708,7 +708,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           {/* Progress + Score */}
           <div className="mt-6 flex items-center gap-6 px-1">
             <div>
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] mb-1">Progress</div>
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Progress</div>
               {progressEditor.isEditing ? (
                 <div className="flex items-center space-x-2">
                   <input
@@ -747,7 +747,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             </div>
             <div className="h-8 w-px bg-border" />
             <div className="flex flex-col">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
                 {actualScore != null && actualScore > 0 ? 'Your Score' : 'Avg Score'}
               </span>
               {scoreFormat === 'POINT_5' || scoreFormat === 'POINT_3' ? (
@@ -814,7 +814,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           {/* Synopsis */}
           {fullItem.description && (
             <div className="mt-6 space-y-3">
-              <h3 className="text-[10px] font-black text-accent uppercase tracking-[0.2em]">Synopsis</h3>
+              <h3 className="text-[11px] font-semibold text-accent uppercase tracking-wide">Synopsis</h3>
               <motion.div
                 className="relative overflow-hidden"
                 animate={{ maxHeight: isExpanded ? 2000 : 120 }}
@@ -840,7 +840,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             <div className="mt-6 bg-accent/5 border border-accent/10 rounded-2xl p-5 flex items-center space-x-4 next-episode-banner">
               <div className="p-3 bg-accent/10 rounded-xl text-accent shadow-inner"><Calendar size={20} /></div>
               <div>
-                <div className="text-[10px] font-bold text-accent uppercase tracking-widest">Next Episode</div>
+                <div className="text-[11px] font-semibold text-accent uppercase tracking-wide">Next Episode</div>
                 <div className="text-base text-foreground font-bold">
                   Episode {fullItem.next_airing.episode}{' '}
                   <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
@@ -868,7 +868,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                       : <ChevronRight size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />}
                     {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
                     <div className="min-w-0 flex-1">
-                      <div className="text-[10px] font-black text-accent uppercase tracking-widest">{label} Season</div>
+                      <div className="text-[11px] font-semibold text-accent uppercase tracking-wide">{label} Season</div>
                       <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
                       {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
                     </div>

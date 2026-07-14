@@ -368,7 +368,7 @@ const Hero = memo(function Hero({
             <div className="space-y-2">
               <div className="flex items-center flex-wrap gap-2">
                 {/* Dynamically Styled Priority Badge */}
-                <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-lg ${activeCcItem?.badgeColor}`}>
+                <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1.5 ${activeCcItem?.badgeColor}`}>
                   {activeCcItem?.type === "new_release" && <Tv size={11} />}
                   {activeCcItem?.type === "airing_today" && <Clock size={11} />}
                   <span>{activeCcItem?.reasonText}</span>
@@ -376,7 +376,7 @@ const Hero = memo(function Hero({
 
                 {/* Show countdown timer if airing soon */}
                 {activeCcItem?.type === "airing_today" && item.next_airing?.airing_at && isAiringFuture && (
-                  <span className="px-2 py-0.5 bg-black/40 text-amber-400 border border-amber-500/25 rounded-md text-[10px] font-black uppercase tracking-widest font-mono">
+                  <span className="px-2 py-0.5 bg-black/40 text-amber-400 border border-amber-500/25 rounded-md text-[11px] font-semibold tabular-nums">
                     <AiringCountdown airingAt={item.next_airing.airing_at} />
                   </span>
                 )}
@@ -388,12 +388,12 @@ const Hero = memo(function Hero({
                 )}
               </div>
               <h1
-                className={`font-black tracking-tight leading-[1.05] text-white animate-fade-in line-clamp-2 ${
+                className={`font-bold tracking-tight leading-[1.08] text-white animate-fade-in line-clamp-2 ${
                   title.length > 40
-                    ? "text-2xl lg:text-3xl xl:text-4xl"
-                    : "text-3xl lg:text-5xl xl:text-6xl"
+                    ? "text-xl lg:text-2xl xl:text-3xl"
+                    : "text-2xl lg:text-4xl xl:text-5xl"
                 }`}
-                style={{ textShadow: "0 2px 24px rgba(0,0,0,0.9)" }}
+                style={{ textShadow: "0 2px 16px rgba(0,0,0,0.7)" }}
               >
                 {title}
               </h1>
@@ -475,7 +475,7 @@ const Hero = memo(function Hero({
               className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide"
             >
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">
+                <span className="text-[11px] font-semibold text-gray-500">
                   Up Next
                 </span>
                 <span className="text-[10px] px-2 py-0.5 bg-accent/20 text-accent font-bold rounded-md">

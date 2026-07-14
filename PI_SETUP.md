@@ -43,14 +43,26 @@ compiled binary's glibc version compatible with what's actually on the Pi.
 From the repo root on your **Mac**:
 
 ```bash
+mkdir -p /tmp/anicat-docker-output
 docker run --rm --platform linux/arm64 \
-  -v "$PWD":/work -w /work/web/src-tauri \
+  -v "$PWD":/work:ro \
+  -v /tmp/anicat-docker-output:/output \
+  -w /build \
   rust:1-bookworm \
   bash -c "
+    set -e
     apt-get update && apt-get install -y --no-install-recommends \
       pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-      libjavascriptcoregtk-4.1-dev &&
-    cargo build --release --bin anicat-server
+      libjavascriptcoregtk-4.1-dev git &&
+    git clone /work /build &&
+    cd web/src-tauri &&
+    touch resources/mpv resources/mpv.exe &&
+    mkdir -p resources/lib && touch resources/lib/.gitkeep &&
+    mkdir -p resources/scraper-bin/anicat-scraper/_internal &&
+    touch resources/scraper-bin/anicat-scraper/anicat-scraper &&
+    touch resources/scraper-bin/anicat-scraper/_internal/.gitkeep &&
+    cargo build --release --bin anicat-server &&
+    cp target/release/anicat-server /output/
   "
 ```
 
@@ -60,16 +72,33 @@ shares code with links against them unconditionally on Linux. Because this
 is a real native-arm64 container (not a cross-compiler), `apt-get install`
 just works normally here — no cross-architecture package wrangling.
 
+Two things worth knowing about that command:
+- It clones your repo into a **fresh location inside the container**
+  (`git clone /work /build`) rather than building directly against your
+  bind-mounted working copy. Your Mac's `web/src-tauri/resources/` has
+  gitignored, locally-built artifacts for the *desktop* app (mpv binaries,
+  bundled libs — some of which are symlinks into your Homebrew install, e.g.
+  `resources/lib/Python`, which can never resolve inside any container).
+  Building from a clean clone sidesteps all of that, and also means this
+  matches exactly what happens when the Pi later does its own `git clone`.
+- The `touch`/`mkdir` lines **stub those same gitignored resource paths**
+  with empty placeholders — Tauri's build script validates that every
+  resource glob in `tauri.conf.json` has at least one match, even though
+  `anicat-server` doesn't bundle or use any of them (no mpv, no bundled
+  scraper binary — it uses the `uv`-managed source scraper instead). This is
+  the identical stubbing trick this repo's own CI already uses for the same
+  reason (see `.github/workflows/ci.yml`).
+
 This will take a while the first time (pulling the image, compiling the full
 dependency tree) — grab a coffee. Afterwards, the binary is at
-`web/src-tauri/target/release/anicat-server` on your Mac. Subsequent builds
-after pulling code changes reuse Cargo's incremental cache (as long as you
-keep reusing the same container image) and are much faster.
+`/tmp/anicat-docker-output/anicat-server` on your Mac. Subsequent builds
+after pulling code changes reuse Cargo's incremental cache inside the
+container's layer cache and are much faster, as long as you don't prune it.
 
 Copy it to the Pi:
 
 ```bash
-scp web/src-tauri/target/release/anicat-server pi@<pi-hostname>:/tmp/anicat-server
+scp /tmp/anicat-docker-output/anicat-server pi@<pi-hostname>:/tmp/anicat-server
 ```
 
 ## 2. Runtime packages on the Pi
@@ -273,20 +302,36 @@ needed for that part, only the first time you flip `multi_user` on.
 
 ## Updating later
 
-Rebuild happens on your **Mac**, same as the first build (step 1):
+Rebuild happens on your **Mac**, same command as the first build (step 1):
 
 ```bash
+mkdir -p /tmp/anicat-docker-output
 docker run --rm --platform linux/arm64 \
-  -v "$PWD":/work -w /work/web/src-tauri \
+  -v "$PWD":/work:ro \
+  -v /tmp/anicat-docker-output:/output \
+  -w /build \
   rust:1-bookworm \
   bash -c "
+    set -e
     apt-get update && apt-get install -y --no-install-recommends \
       pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-      libjavascriptcoregtk-4.1-dev &&
-    cargo build --release --bin anicat-server
+      libjavascriptcoregtk-4.1-dev git &&
+    git clone /work /build &&
+    cd web/src-tauri &&
+    touch resources/mpv resources/mpv.exe &&
+    mkdir -p resources/lib && touch resources/lib/.gitkeep &&
+    mkdir -p resources/scraper-bin/anicat-scraper/_internal &&
+    touch resources/scraper-bin/anicat-scraper/anicat-scraper &&
+    touch resources/scraper-bin/anicat-scraper/_internal/.gitkeep &&
+    cargo build --release --bin anicat-server &&
+    cp target/release/anicat-server /output/
   "
-scp web/src-tauri/target/release/anicat-server pi@<pi-hostname>:/tmp/anicat-server
+scp /tmp/anicat-docker-output/anicat-server pi@<pi-hostname>:/tmp/anicat-server
 ```
+
+(Since this clones fresh each time rather than reusing your working copy,
+make sure whatever you want deployed is actually committed first — an
+uncommitted local change won't be in the clone.)
 
 Then on the **Pi**:
 

@@ -83,14 +83,14 @@ const MediaRow = memo(function MediaRow({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <h2 className="text-lg font-bold text-white tracking-wide px-1">{title}</h2>
+      <h2 className="text-lg font-bold text-white tracking-tight px-1">{title}</h2>
 
       <div className="relative">
         {/* Left arrow */}
         <div className={`absolute left-0 top-0 bottom-6 w-12 z-40 flex items-center justify-start transition-opacity duration-300 ${isHovered && canScrollLeft ? 'opacity-100' : 'opacity-0'} pointer-events-none`}>
           <button
             onClick={() => scroll("left")}
-            className={`p-2 ml-1 rounded-full bg-black/80 text-white hover:bg-accent hover:text-white transition-colors border border-white/10 shadow-lg ${isHovered && canScrollLeft ? 'pointer-events-auto' : 'pointer-events-none'}`}
+            className={`p-2 ml-1 rounded-full bg-black/80 text-white hover:bg-white/20 transition-colors border border-white/10 shadow-lg ${isHovered && canScrollLeft ? 'pointer-events-auto' : 'pointer-events-none'}`}
           >
             <ChevronLeft size={20} />
           </button>
@@ -118,7 +118,7 @@ const MediaRow = memo(function MediaRow({
           {hasSecondary && (
             <div className="flex-none flex flex-col items-center justify-center gap-2 px-2 select-none">
               <div className="w-px flex-1 bg-white/[0.06]" />
-              <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.07] text-[9px] font-bold text-white/40 uppercase tracking-widest whitespace-nowrap">
+              <span className="px-2.5 py-1 rounded-full bg-white/[0.04] text-[11px] font-medium text-white/40 whitespace-nowrap">
                 {secondaryLabel}
               </span>
               <div className="w-px flex-1 bg-white/[0.06]" />
@@ -147,7 +147,7 @@ const MediaRow = memo(function MediaRow({
         <div className={`absolute right-0 top-0 bottom-6 w-12 z-40 flex items-center justify-end transition-opacity duration-300 ${isHovered && canScrollRight ? 'opacity-100' : 'opacity-0'} pointer-events-none`}>
           <button
             onClick={() => scroll("right")}
-            className={`p-2 mr-1 rounded-full bg-black/80 text-white hover:bg-accent hover:text-white transition-colors border border-white/10 shadow-lg ${isHovered && canScrollRight ? 'pointer-events-auto' : 'pointer-events-none'}`}
+            className={`p-2 mr-1 rounded-full bg-black/80 text-white hover:bg-white/20 transition-colors border border-white/10 shadow-lg ${isHovered && canScrollRight ? 'pointer-events-auto' : 'pointer-events-none'}`}
           >
             <ChevronRight size={20} />
           </button>

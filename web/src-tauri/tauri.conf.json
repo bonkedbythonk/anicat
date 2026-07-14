@@ -27,6 +27,7 @@
         "additionalBrowserArgs": "--disable-features=InputModeDefault",
         "windowEffects": {
           "effects": [
+            "sidebar",
             "mica"
           ],
           "state": "followsWindowActiveState"

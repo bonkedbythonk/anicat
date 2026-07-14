@@ -3,6 +3,7 @@ import { Fragment, useMemo, useRef, useState, useCallback, useEffect } from "rea
 import { Loader2, Clock, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
 import { Hero } from "@/components/media/Hero";
 import { MediaRow } from "@/components/media/MediaRow";
+import { EpisodeRow } from "@/components/media/EpisodeRow";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -303,13 +304,10 @@ export function HomeView({ onSelect }: HomeViewProps) {
       case "continue":
         if (!isAuthenticated || continueWatchingList.length === 0) return null;
         return (
-          <MediaRow
-            title="Continue Watching"
-            items={continueWatchingList}
-            secondaryItems={smartPicks.length > 0 ? smartPicks : undefined}
-            secondaryLabel="Smart Picks"
-            onSelect={onSelect}
-          />
+          <>
+            <EpisodeRow title="Continue Watching" items={continueWatchingList} onSelect={onSelect} />
+            {smartPicks.length > 0 && <MediaRow title="Smart Picks" items={smartPicks} onSelect={onSelect} />}
+          </>
         );
       case "newForYou":
         if (!isAuthenticated) return null;

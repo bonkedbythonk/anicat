@@ -85,7 +85,7 @@ export function Sidebar() {
               {isActive && (
                 <motion.div
                   layoutId={compact ? "nav-active-pill-compact" : "nav-active-pill-primary"}
-                  className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
+                  className="absolute inset-0 rounded-lg bg-white/[0.08]"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
               )}
@@ -94,13 +94,13 @@ export function Sidebar() {
                 className={`relative shrink-0 transition-colors ${
                   isActive
                     ? "text-accent"
-                    : "text-gray-500 dark:text-gray-400 group-hover:text-accent"
+                    : "text-gray-500 dark:text-gray-400 group-hover:text-gray-200"
                 }`}
               />
-              <span className={`relative items-center justify-between flex-1 text-[13px] font-semibold tracking-wide ${
+              <span className={`relative items-center justify-between flex-1 text-[13px] font-medium ${
                 compact ? "hidden" : "flex"
               }`}>
-                <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
+                <span className={isActive ? "text-white font-semibold" : "text-gray-400"}>
                   {item.label}
                 </span>
                 {item.shortcut && (
@@ -133,7 +133,7 @@ export function Sidebar() {
               {isActive && (
                 <motion.div
                   layoutId={compact ? "nav-active-pill-secondary-compact" : "nav-active-pill-secondary"}
-                  className="absolute inset-0 rounded-xl bg-gradient-to-r from-accent/15 to-accent-light/10 border border-accent/15"
+                  className="absolute inset-0 rounded-lg bg-white/[0.08]"
                   transition={{ type: "spring", stiffness: 380, damping: 35 }}
                 />
               )}
@@ -143,14 +143,14 @@ export function Sidebar() {
                   className={`transition-colors ${
                     isActive
                       ? "text-accent"
-                      : "text-gray-500 dark:text-gray-400 group-hover:text-accent"
+                      : "text-gray-500 dark:text-gray-400 group-hover:text-gray-200"
                   }`}
                 />
               </div>
-              <span className={`relative items-center justify-between flex-1 text-[13px] font-semibold tracking-wide ${
+              <span className={`relative items-center justify-between flex-1 text-[13px] font-medium ${
                 compact ? "hidden" : "flex"
               }`}>
-                <span className={isActive ? "text-accent font-bold" : "text-gray-400"}>
+                <span className={isActive ? "text-white font-semibold" : "text-gray-400"}>
                   {item.label}
                 </span>
                 {item.shortcut && (

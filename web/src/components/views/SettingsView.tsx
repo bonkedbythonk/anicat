@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy, Smartphone, Gauge } from "lucide-react";
+import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, apiOrigin, dispatchRefresh } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import type { UiStyle } from "@/hooks/useTheme";
@@ -347,7 +347,7 @@ export function SettingsView({ health }: SettingsViewProps) {
       )}
       {errorMessage && <ErrorBanner message={errorMessage} />}
       <div className="flex items-end justify-between">
-        <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-white">Settings</h1>
+        <h1 className="text-[28px] font-bold tracking-tight text-white">Settings</h1>
         <div className="flex items-center space-x-2">
           {saving && (
             <div className="flex items-center space-x-1.5 text-xs text-gray-500 font-medium">
@@ -372,9 +372,9 @@ export function SettingsView({ health }: SettingsViewProps) {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-semibold text-sm whitespace-nowrap transition-all justify-center lg:w-full lg:justify-start ${
+                className={`flex items-center gap-2.5 px-4 py-2 rounded-lg font-medium text-[13px] whitespace-nowrap transition-all justify-center lg:w-full lg:justify-start ${
                   activeTab === tab.id
-                    ? "bg-accent text-white shadow-lg shadow-accent/20"
+                    ? "bg-white/[0.08] text-white font-semibold"
                     : "text-gray-500 hover:text-white hover:bg-white/[0.04]"
                 }`}
               >
@@ -397,7 +397,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={theme}
                     onChange={(e) => handleThemeChange(e.target.value as "system" | "dark" | "light")}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="system">System Default</option>
                     <option value="dark">Dark</option>
@@ -514,7 +514,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                       // never changed no matter what you picked.
                       localStorage.setItem("anicat_time_format", format);
                     }}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="12h">12-hour (AM/PM)</option>
                     <option value="24h">24-hour</option>
@@ -525,27 +525,19 @@ export function SettingsView({ health }: SettingsViewProps) {
                   label="New Episode Notifications"
                   description="Native macOS notification when a show you're watching airs a new episode, checked every 15 minutes."
                 >
-                  <select
-                    value={config.general?.notifications ?? true ? "true" : "false"}
-                    onChange={(e) => updateField("general", "notifications", e.target.value === "true")}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </select>
+                  <SettingToggle
+                    on={Boolean(config.general?.notifications ?? true)}
+                    onChange={(v) => updateField("general", "notifications", v)}
+                  />
                 </SettingField>
               </CardSection>
 
               <CardSection title="Advanced" description="Rarely need to change these after initial setup.">
                 <SettingField label="Discord Rich Presence" description="Show current anime in your Discord status.">
-                  <select
-                    value={config.general?.discord ? "true" : "false"}
-                    onChange={(e) => updateField("general", "discord", e.target.value === "true")}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="false">Disabled</option>
-                    <option value="true">Enabled</option>
-                  </select>
+                  <SettingToggle
+                    on={Boolean(config.general?.discord)}
+                    onChange={(v) => updateField("general", "discord", v)}
+                  />
                 </SettingField>
 
                 <SettingField label="Download Location" description="Where downloaded episodes are saved.">
@@ -564,7 +556,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.provider || "mkissa")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
@@ -576,7 +568,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.fallback_provider || "anineko")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="none">None</option>
                     <option value="mkissa">Mkissa</option>
@@ -589,7 +581,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.manga_provider || "mangakatana")}
                     onChange={(e) => updateField("general", "manga_provider", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="mangakatana">MangaKatana</option>
                   </select>
@@ -599,7 +591,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.media_api || "anilist")}
                     onChange={(e) => updateField("general", "media_api", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="anilist">AniList</option>
                     <option value="jikan">Jikan (MyAnimeList - Fallback)</option>
@@ -612,17 +604,10 @@ export function SettingsView({ health }: SettingsViewProps) {
                 description="Watch anicat from your phone over the same Wi-Fi while this Mac is running. This is a light PIN gate to keep it from being entered by accident — not meant to withstand someone who isn't on your home network."
               >
                 <SettingField label="Enable" description="Lets other devices on this Wi-Fi reach anicat. Off by default.">
-                  <button
-                    onClick={() => updateField("mobile", "lan_access_enabled", !config.mobile?.lan_access_enabled)}
-                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
-                      config.mobile?.lan_access_enabled
-                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
-                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
-                    }`}
-                  >
-                    <Smartphone size={16} />
-                    <span>{config.mobile?.lan_access_enabled ? "On" : "Off"}</span>
-                  </button>
+                  <SettingToggle
+                    on={Boolean(config.mobile?.lan_access_enabled)}
+                    onChange={(v) => updateField("mobile", "lan_access_enabled", v)}
+                  />
                 </SettingField>
 
                 <SettingField label="PIN" description="4-8 digits. Whatever your phone types in must match this exactly.">
@@ -632,7 +617,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     value={String(config.mobile?.pin || "")}
                     onChange={(e) => updateField("mobile", "pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
                     placeholder="e.g. 4821"
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                    className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
                   />
                 </SettingField>
 
@@ -661,7 +646,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.stream?.translation_type || "sub")}
                     onChange={(e) => updateField("stream", "translation_type", e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
                   >
                     <option value="sub">Subtitled (Japanese)</option>
                     <option value="dub">Dubbed (English)</option>
@@ -672,51 +657,33 @@ export function SettingsView({ health }: SettingsViewProps) {
                   label="Auto-Skip Intros"
                   description="Automatically skip openings and endings using AniSkip. Press S in-player to skip manually when disabled."
                 >
-                  <select
-                    value={config.general?.autoskip ? "true" : "false"}
-                    onChange={(e) => {
-                      updateField("general", "autoskip", e.target.value === "true");
-                      useSettingsStore.getState().setAutoskip(e.target.value === "true");
+                  <SettingToggle
+                    on={Boolean(config.general?.autoskip)}
+                    onChange={(v) => {
+                      updateField("general", "autoskip", v);
+                      useSettingsStore.getState().setAutoskip(v);
                     }}
-                    className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
-                  >
-                    <option value="false">Disabled (Manual S)</option>
-                    <option value="true">Enabled (Automatic)</option>
-                  </select>
+                  />
                 </SettingField>
 
                 <SettingField
                   label="GPU Upscaling"
                   description="Anime4K — sharpens lines and adds depth with minimal battery impact. Ctrl+1 in-player toggles this too."
                 >
-                  <button
-                    onClick={() => updateField("stream", "shader_profile", (config.stream?.shader_profile || "on") === "off" ? "on" : "off")}
-                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
-                      (config.stream?.shader_profile || "on") !== "off"
-                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
-                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
-                    }`}
-                  >
-                    <Cpu size={16} />
-                    <span>{(config.stream?.shader_profile || "on") !== "off" ? "On" : "Off"}</span>
-                  </button>
+                  <SettingToggle
+                    on={(config.stream?.shader_profile || "on") !== "off"}
+                    onChange={(v) => updateField("stream", "shader_profile", v ? "on" : "off")}
+                  />
                 </SettingField>
 
                 <SettingField
                   label="Smooth Motion"
                   description="Frame interpolation — fills in extra frames for smoother panning, up to your display's refresh rate. Best left off for on-twos anime; may look soap-opera-y. Ctrl+3 in-player toggles this too."
                 >
-                  <button
-                    onClick={() => updateField("stream", "interpolation", (config.stream?.interpolation || "off") === "off" ? "on" : "off")}
-                    className={`flex items-center space-x-2 px-4 py-3.5 rounded-xl text-sm font-bold transition-all w-full ${
-                      (config.stream?.interpolation || "off") !== "off"
-                        ? "bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5"
-                        : "bg-white/[0.03] text-muted-foreground border border-white/[0.08] hover:bg-white/[0.06]"
-                    }`}
-                  >
-                    <Gauge size={16} />
-                    <span>{(config.stream?.interpolation || "off") !== "off" ? "On" : "Off"}</span>
-                  </button>
+                  <SettingToggle
+                    on={(config.stream?.interpolation || "off") !== "off"}
+                    onChange={(v) => updateField("stream", "interpolation", v ? "on" : "off")}
+                  />
                 </SettingField>
               </CardSection>
 
@@ -784,7 +751,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                           }
                         }}
                         placeholder="Paste redirect URL or token..."
-                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                        className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
                       />
                     </SettingField>
                     <div className="pt-2">
@@ -864,7 +831,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                           }
                         }}
                         placeholder="Paste redirect URL or token..."
-                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                        className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
                       />
                     </SettingField>
                   </>
@@ -1094,27 +1061,50 @@ export function SettingsView({ health }: SettingsViewProps) {
   );
 }
 
+/* System Settings grammar: the group label sits outside the card, the card
+   itself is a flat inset with hairline dividers between rows, and controls
+   are compact and right-aligned. */
 function CardSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-      <div className="px-6 pt-5 pb-4 border-b border-white/[0.05]">
-        <h3 className="text-lg font-bold text-white">{title}</h3>
-        {description && <p className="text-xs text-gray-500 mt-1">{description}</p>}
+    <section>
+      <div className="px-1 pb-2">
+        <h3 className="text-[13px] font-semibold text-gray-400">{title}</h3>
+        {description && <p className="text-xs text-gray-600 mt-0.5 max-w-xl leading-relaxed">{description}</p>}
       </div>
-      <div className="p-3 sm:p-4 space-y-1">{children}</div>
+      <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] divide-y divide-white/[0.05]">{children}</div>
     </section>
   );
 }
 
 function SettingField({ label, description, children, stack }: { label: string; description?: string; children: React.ReactNode; stack?: boolean }) {
   return (
-    <div className={`px-3 py-3.5 rounded-xl hover:bg-white/[0.015] transition-colors ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-4"}`}>
+    <div className={`px-4 py-3 ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-3"}`}>
       <div className="flex-1 min-w-0">
-        <label className="text-sm font-semibold text-white">{label}</label>
+        <label className="text-[13px] font-medium text-white">{label}</label>
         {description && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{description}</p>}
       </div>
-      <div className={stack ? "" : "w-full sm:w-64 shrink-0"}>{children}</div>
+      <div className={stack ? "" : "w-full sm:w-56 shrink-0 sm:text-right"}>{children}</div>
     </div>
+  );
+}
+
+function SettingToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={`relative inline-block h-[24px] w-[40px] shrink-0 rounded-full transition-colors duration-200 align-middle ${
+        on ? "bg-[#30d158]" : "bg-white/[0.16]"
+      } disabled:opacity-40`}
+    >
+      <span
+        className={`absolute top-[2px] h-[20px] w-[20px] rounded-full bg-white shadow transition-all duration-200 ${
+          on ? "left-[18px]" : "left-[2px]"
+        }`}
+      />
+    </button>
   );
 }
 

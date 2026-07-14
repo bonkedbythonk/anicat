@@ -79,7 +79,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
       onMouseLeave={handleMouseLeave}
       className="group cursor-pointer flex flex-col space-y-2.5 w-full text-left relative"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-surface card-glow border border-white/[0.04] group-hover:border-accent/25 group-hover:shadow-[0_12px_36px_rgba(0,0,0,0.7)]">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-surface card-glow border border-white/[0.06]">
         <img 
           src={item.cover_image?.large || item.cover_image?.medium} 
           alt={title} 
@@ -105,20 +105,6 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           </button>
         </div>
 
-        {/* UX-12: Recommendation reason pill */}
-        {item.playlist_reason && (
-          <div className="absolute top-3 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/60 border border-white/10 text-[9px] font-bold text-accent uppercase tracking-wider max-w-[90%] truncate">
-            {item.playlist_reason}
-          </div>
-        )}
-
-        {/* New episode badge */}
-        {hasNewEpisodes && (
-          <div className="absolute top-3 right-3 z-20 px-2.5 py-1 rounded-full bg-accent text-white text-[9px] font-bold uppercase tracking-wider shadow-lg">
-            New Ep
-          </div>
-        )}
-        
         {/* Progress bar */}
         {entry && totalCount > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-10">
@@ -130,43 +116,26 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         )}
       </div>
 
-      {/* Card info */}
-      <div className="space-y-2 px-0.5">
-        <h3 className="text-sm font-bold text-white leading-tight line-clamp-2 group-hover:text-accent transition-colors duration-100">
+      {/* Card info — one quiet metadata line instead of badge chips; the
+          art carries the card, richer metadata lives on the detail page. */}
+      <div className="space-y-1 px-0.5">
+        <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2">
           {title}
         </h3>
-
-        {/* Score + status row */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {item.average_score && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-bold">
-              <Star size={8} fill="currentColor" />
+        <p className="flex items-center gap-1.5 text-[11px] tabular-nums text-gray-500">
+          {item.average_score ? (
+            <span className="inline-flex items-center gap-0.5">
+              <Star size={9} fill="currentColor" className="text-gray-500" />
               {item.average_score}%
             </span>
-          )}
+          ) : null}
           {entry && (
-            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
-              isFinished
-                ? "bg-blue-500/10 border border-blue-500/20 text-blue-400"
-                : hasNewEpisodes
-                ? "bg-accent/10 border border-accent/20 text-accent"
-                : "bg-white/[0.05] border border-white/[0.06] text-gray-400"
-            }`}>
-              {isFinished ? "All eps out" : hasNewEpisodes ? `Ep ${progress + 1}` : `${progress}/${totalCount || "?"}`}
+            <span className={hasNewEpisodes ? "text-accent font-semibold" : ""}>
+              {hasNewEpisodes ? `Ep ${progress + 1} out` : `${progress}/${totalCount || "?"}`}
             </span>
           )}
-        </div>
-
-        {/* Genre pills */}
-        {item.genres && item.genres.length > 0 && (
-          <div className="flex gap-1 flex-wrap">
-            {item.genres.slice(0, 2).map((g) => (
-              <span key={g} className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-white/[0.04] border border-white/[0.05] text-gray-500 group-hover:text-gray-400">
-                {g}
-              </span>
-            ))}
-          </div>
-        )}
+          {!entry && item.playlist_reason && <span className="truncate">{item.playlist_reason}</span>}
+        </p>
       </div>
     </div>
   );

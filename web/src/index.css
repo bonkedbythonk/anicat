@@ -35,12 +35,14 @@
   --color-black: var(--dynamic-black);
   --color-muted-foreground: var(--text-muted);
 
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  --radius-2xl: 32px;
-  --radius-3xl: 40px;
+  /* macOS-native radius scale: small and consistent. Big friendly radii
+     were the v3 look; native surfaces sit between 6 and 16px. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
 }
 
 :root {
@@ -240,7 +242,9 @@ html, body, #root {
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    /* System face first: SF Pro on macOS is the single loudest "native"
+       signal. Inter stays as the non-Apple fallback. */
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -264,6 +268,19 @@ html, body, #root {
 [data-mica] .glass-fixed {
   background-color: rgba(12, 12, 14, 0.50);
   border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* macOS vibrancy: the window itself carries an NSVisualEffectView sidebar
+   material (tauri.conf.json windowEffects). Clear the opaque page layers so
+   it shows through the strip under the sidebar, and let the sidebar itself
+   be a tint over real desktop blur instead of CSS-blurring its own app. */
+[data-vibrancy] html, [data-vibrancy] body, [data-vibrancy] #root {
+  background: transparent !important;
+}
+[data-vibrancy] .glass-fixed {
+  background-color: rgba(16, 16, 18, 0.55);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* Sidebar — ONE backdrop-blur element, acceptable */
@@ -318,6 +335,25 @@ html.light .media-detail-drawer {
   transition: border-color 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
               box-shadow 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
               transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ── Native-materials pass (default "neon-abyss" skin only — the sakura-zen
+   and retro-manga skins define their own card/typography language and are
+   deliberately left alone). Native macOS hierarchy comes from size and
+   spacing at <=700 weight, and hover feedback is a raise, never a bloom. ── */
+html[data-style="neon-abyss"] .font-black,
+html:not([data-style]) .font-black {
+  font-weight: 700 !important;
+}
+html[data-style="neon-abyss"] .font-extrabold,
+html:not([data-style]) .font-extrabold {
+  font-weight: 700 !important;
+}
+html[data-style="neon-abyss"] .card-glow:hover,
+html:not([data-style]) .card-glow:hover {
+  border-color: var(--border-color) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+  transform: translateY(-2px);
 }
 
 .hero-gradient {

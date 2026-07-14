@@ -84,67 +84,29 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
         </div>
       </div>
 
-      {/* 2. Main statistics dashboard cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="group relative rounded-2xl bg-surface border border-white/[0.04] p-6 hover:border-accent/40 hover:bg-white/[0.02] transition-all duration-300">
-          <div className="flex items-start justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-500 tracking-wider uppercase">Watch Time</p>
-              <h3 className="text-2xl font-black text-white group-hover:text-accent transition-colors">
-                {formatMinutes(profile.minutes_watched)}
-              </h3>
-              <p className="text-xs text-gray-400">{profile.anime_count || 0} Anime tracked</p>
-            </div>
-            <div className="p-3 rounded-xl bg-violet-500/10 text-violet-400 group-hover:scale-110 transition-transform">
-              <Clock size={20} />
-            </div>
-          </div>
-        </div>
-
-        <div className="group relative rounded-2xl bg-surface border border-white/[0.04] p-6 hover:border-pink-500/40 hover:bg-white/[0.02] transition-all duration-300">
-          <div className="flex items-start justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-500 tracking-wider uppercase">Episodes Watched</p>
-              <h3 className="text-2xl font-black text-white group-hover:text-pink-400 transition-colors">
-                {profile.episodes_watched?.toLocaleString() || "0"}
-              </h3>
-              <p className="text-xs text-gray-400">Completed episodes</p>
-            </div>
-            <div className="p-3 rounded-xl bg-pink-500/10 text-pink-400 group-hover:scale-110 transition-transform">
-              <Tv size={20} />
+      {/* 2. Main statistics dashboard cards — one quiet style, accent only
+          on the icon; four different hue families read as a dashboard
+          template, not an app. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: "Watch time", value: formatMinutes(profile.minutes_watched), sub: `${profile.anime_count || 0} anime tracked`, icon: Clock },
+          { label: "Episodes watched", value: profile.episodes_watched?.toLocaleString() || "0", sub: "Completed episodes", icon: Tv },
+          { label: "Chapters read", value: profile.chapters_read?.toLocaleString() || "0", sub: `${profile.manga_count || 0} manga tracked`, icon: BookOpen },
+          { label: "Volumes read", value: profile.volumes_read?.toLocaleString() || "0", sub: "Completed volumes", icon: Bookmark },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-5">
+            <div className="flex items-start justify-between">
+              <div className="space-y-1.5 min-w-0">
+                <p className="text-xs font-medium text-gray-500">{stat.label}</p>
+                <h3 className="text-xl font-bold text-white tabular-nums truncate">{stat.value}</h3>
+                <p className="text-xs text-gray-500">{stat.sub}</p>
+              </div>
+              <div className="p-2.5 rounded-lg bg-accent/10 text-accent shrink-0">
+                <stat.icon size={18} />
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="group relative rounded-2xl bg-surface border border-white/[0.04] p-6 hover:border-cyan-500/40 hover:bg-white/[0.02] transition-all duration-300">
-          <div className="flex items-start justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-500 tracking-wider uppercase">Chapters Read</p>
-              <h3 className="text-2xl font-black text-white group-hover:text-cyan-400 transition-colors">
-                {profile.chapters_read?.toLocaleString() || "0"}
-              </h3>
-              <p className="text-xs text-gray-400">{profile.manga_count || 0} Manga tracked</p>
-            </div>
-            <div className="p-3 rounded-xl bg-cyan-500/10 text-cyan-400 group-hover:scale-110 transition-transform">
-              <BookOpen size={20} />
-            </div>
-          </div>
-        </div>
-
-        <div className="group relative rounded-2xl bg-surface border border-white/[0.04] p-6 hover:border-amber-500/40 hover:bg-white/[0.02] transition-all duration-300">
-          <div className="flex items-start justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-500 tracking-wider uppercase">Volumes Read</p>
-              <h3 className="text-2xl font-black text-white group-hover:text-amber-400 transition-colors">
-                {profile.volumes_read?.toLocaleString() || "0"}
-              </h3>
-              <p className="text-xs text-gray-400">Completed volumes</p>
-            </div>
-            <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 group-hover:scale-110 transition-transform">
-              <Bookmark size={20} />
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
 

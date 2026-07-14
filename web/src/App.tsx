@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
 import { getConfig, type HealthStatus } from "@/lib/api";
 import { initProxyPort } from "@/lib/proxy";
-import { usesOverlayTitlebar, isWindows } from "@/lib/platform";
+import { usesOverlayTitlebar, isWindows, isMacOS } from "@/lib/platform";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
@@ -141,6 +141,11 @@ export default function App() {
   useEffect(() => {
     if (isWindows) {
       document.documentElement.setAttribute("data-mica", "");
+    } else if (isMacOS) {
+      // The window carries an NSVisualEffectView sidebar material (see
+      // tauri.conf.json windowEffects); this flag lets CSS clear the layers
+      // that would otherwise paint over it.
+      document.documentElement.setAttribute("data-vibrancy", "");
     }
   }, []);
 
@@ -250,7 +255,7 @@ export default function App() {
   }, [setNotification]);
 
   return (
-    <div className={`flex h-screen w-screen overflow-hidden text-foreground relative ${isWindows ? "bg-black/[0.85]" : "bg-background"}`}>
+    <div className={`flex h-screen w-screen overflow-hidden text-foreground relative ${isWindows ? "bg-black/[0.85]" : isMacOS ? "bg-transparent" : "bg-background"}`}>
       <AmbientBackground />
       <Sidebar />
       <AnimatePresence>
@@ -298,7 +303,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 flex flex-col overflow-hidden relative" style={{ marginLeft: sidebarW }}>
+      <main className="flex-1 flex flex-col overflow-hidden relative bg-background" style={{ marginLeft: sidebarW }}>
         <AnimatePresence>
           {anilistDown && (
             <motion.div

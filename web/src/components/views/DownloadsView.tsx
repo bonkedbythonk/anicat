@@ -184,10 +184,8 @@ export function DownloadsView() {
     <div className="space-y-8 pb-12">
       {/* Page Title & Glow Header */}
       <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="absolute -left-10 -top-10 w-72 h-72 bg-accent/10 rounded-full blur-3xl pointer-events-none" />
-        
         <div className="space-y-1.5 relative z-10">
-          <h1 className="text-4xl lg:text-5xl font-black tracking-tight text-white bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground bg-clip-text text-transparent">
+          <h1 className="text-[28px] font-bold tracking-tight text-white">
             Offline Downloads
           </h1>
           <p className="text-sm text-muted-foreground max-w-xl font-medium">

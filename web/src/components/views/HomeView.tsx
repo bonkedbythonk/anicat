@@ -203,6 +203,22 @@ export function HomeView({ onSelect }: HomeViewProps) {
     staleTime: 30_000,
     refetchInterval: 60_000,
     queryFn: async () => {
+      // Fetch watching/repeating fresh here rather than trusting the
+      // watchingMedia/watchingIds closure above: invalidateProgressQueries
+      // (fired right after an episode is marked watched) invalidates this
+      // query and home-watching/home-repeating in the same synchronous
+      // burst, and TanStack Query refetches all of them roughly together —
+      // this queryFn would otherwise run with whatever watchingMedia the
+      // component last rendered with, i.e. progress from *before* the
+      // episode that was just watched, so the show would wrongly linger in
+      // "New for You" until the next 60s refetchInterval tick corrected it.
+      const [freshWatching, freshRepeating] = await Promise.all([
+        mediaApi.getUserList("watching", "ANIME"),
+        mediaApi.getUserList("repeating", "ANIME"),
+      ]);
+      const watchingMedia = [...(freshWatching?.media || []), ...(freshRepeating?.media || [])];
+      const watchingIds = watchingMedia.map((m) => m.id);
+
       const missedEpisodes = watchingMedia.filter((item) => {
         const progress = item.user_status?.progress || 0;
         const nextEp = item.next_airing?.episode;

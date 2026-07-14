@@ -5,6 +5,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 const TOKEN_KEY = "anicat_mobile_token";
+const USER_KEY = "anicat_mobile_user";
 
 export function isTauri(): boolean {
   return typeof window !== "undefined" && !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
@@ -21,6 +22,31 @@ export function setMobileToken(token: string): void {
 
 export function clearMobileToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_KEY);
+}
+
+export interface MobileUser {
+  userId: number;
+  displayName: string;
+}
+
+/** Only meaningful in multi-user mode — single-PIN mode never calls
+ * `setMobileUser`, so `getMobileUser()` stays `null` and callers that only
+ * care about "is a specific person logged in" (vs. the single shared PIN)
+ * naturally no-op. */
+export function getMobileUser(): MobileUser | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as MobileUser;
+  } catch {
+    return null;
+  }
+}
+
+export function setMobileUser(user: MobileUser): void {
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 function qs(params: Record<string, unknown>): string {

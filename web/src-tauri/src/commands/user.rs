@@ -14,6 +14,15 @@ pub async fn get_user_list(
     status: Option<String>,
     media_type: Option<String>,
 ) -> Result<Value, String> {
+    get_user_list_impl(state.inner(), user_name, status, media_type).await
+}
+
+pub async fn get_user_list_impl(
+    state: &AppState,
+    user_name: Option<String>,
+    status: Option<String>,
+    media_type: Option<String>,
+) -> Result<Value, String> {
     let resolved_type = media_type.clone().unwrap_or_else(|| "ANIME".to_string());
 
     // Acquire lock to prevent concurrent redundant fetches (coalescing)
@@ -111,6 +120,10 @@ pub async fn get_user_list(
 
 #[tauri::command]
 pub async fn get_user_profile(state: State<'_, AppState>) -> Result<Value, String> {
+    get_user_profile_impl(state.inner()).await
+}
+
+pub async fn get_user_profile_impl(state: &AppState) -> Result<Value, String> {
     let cache_key = "get_user_profile|default".to_string();
     if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
 
@@ -127,6 +140,14 @@ pub async fn get_user_profile(state: State<'_, AppState>) -> Result<Value, Strin
 #[tauri::command]
 pub async fn save_media_list_entry(
     state: State<'_, AppState>,
+    media_id: i64,
+    updates: Value,
+) -> Result<Value, String> {
+    save_media_list_entry_impl(state.inner(), media_id, updates).await
+}
+
+pub async fn save_media_list_entry_impl(
+    state: &AppState,
     media_id: i64,
     updates: Value,
 ) -> Result<Value, String> {
@@ -148,7 +169,7 @@ pub async fn save_media_list_entry(
         .anilist_client
         .execute(queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-    
+
     // In-place cache mutation to avoid CDN cache lag on subsequent requests
     let progress = updates.get("progress").and_then(|v| v.as_i64());
     let status = updates.get("status").and_then(|v| v.as_str());
@@ -163,6 +184,14 @@ pub async fn save_media_list_entry(
 #[tauri::command]
 pub async fn toggle_favourite(
     state: State<'_, AppState>,
+    media_id: i64,
+    is_manga: bool,
+) -> Result<Value, String> {
+    toggle_favourite_impl(state.inner(), media_id, is_manga).await
+}
+
+pub async fn toggle_favourite_impl(
+    state: &AppState,
     media_id: i64,
     is_manga: bool,
 ) -> Result<Value, String> {
@@ -187,6 +216,13 @@ pub async fn delete_media_list_entry(
     state: State<'_, AppState>,
     entry_id: i64,
 ) -> Result<Value, String> {
+    delete_media_list_entry_impl(state.inner(), entry_id).await
+}
+
+pub async fn delete_media_list_entry_impl(
+    state: &AppState,
+    entry_id: i64,
+) -> Result<Value, String> {
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(entry_id));
 
@@ -194,7 +230,7 @@ pub async fn delete_media_list_entry(
         .anilist_client
         .execute(queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars)
         .await?;
-    
+
     // In-place cache removal to avoid CDN cache lag on subsequent requests
     state.cache.remove_from_user_list_by_entry_id(entry_id);
     state.cache.invalidate("get_user_list");
@@ -205,6 +241,13 @@ pub async fn delete_media_list_entry(
 #[tauri::command]
 pub async fn get_notifications(
     state: State<'_, AppState>,
+    page: Option<i64>,
+) -> Result<Value, String> {
+    get_notifications_impl(state.inner(), page).await
+}
+
+pub async fn get_notifications_impl(
+    state: &AppState,
     page: Option<i64>,
 ) -> Result<Value, String> {
     let cache_key = AniListCache::key("get_notifications", &[("page", &page.unwrap_or(1).to_string())]);
@@ -228,6 +271,12 @@ pub async fn get_notifications(
 pub async fn mark_notifications_read(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    mark_notifications_read_impl(state.inner()).await
+}
+
+pub async fn mark_notifications_read_impl(
+    state: &AppState,
+) -> Result<Value, String> {
     let _has_token = state.anilist_client.has_token();
     let mut vars = HashMap::new();
     vars.insert("page".to_string(), serde_json::json!(1));
@@ -245,6 +294,17 @@ pub async fn mark_notifications_read(
 #[tauri::command]
 pub async fn get_airing_schedule(
     state: State<'_, AppState>,
+    days_back: Option<i64>,
+    days_ahead: Option<i64>,
+    media_ids: Option<Vec<i64>>,
+    page: Option<i64>,
+    per_page: Option<i64>,
+) -> Result<Value, String> {
+    get_airing_schedule_impl(state.inner(), days_back, days_ahead, media_ids, page, per_page).await
+}
+
+pub async fn get_airing_schedule_impl(
+    state: &AppState,
     days_back: Option<i64>,
     days_ahead: Option<i64>,
     media_ids: Option<Vec<i64>>,

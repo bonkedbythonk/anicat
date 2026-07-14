@@ -6,6 +6,12 @@ pub struct DiscordClient {
     inner: Arc<Mutex<Option<DiscordIpcClient>>>,
 }
 
+impl Default for DiscordClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiscordClient {
     pub fn new() -> Self {
         Self {

@@ -1,13 +1,13 @@
-mod anilist;
-mod cache;
-mod commands;
-mod discord;
-mod proxy;
-mod registry;
-mod scraper;
-mod state;
-mod torrent;
-mod util;
+pub mod anilist;
+pub mod cache;
+pub mod commands;
+pub mod discord;
+pub mod proxy;
+pub mod registry;
+pub mod scraper;
+pub mod state;
+pub mod torrent;
+pub mod util;
 
 use state::AppState;
 use tauri::Manager;
@@ -65,7 +65,7 @@ pub fn run() {
 
             let proxy_port_arc = app_state.inner.proxy_port.clone();
             let handle1 = tauri::async_runtime::spawn(async move {
-                let bound = proxy::server::start_proxy(client, app_handle, app_state_clone).await;
+                let bound = proxy::server::start_proxy(client, Some(app_handle), app_state_clone).await;
                 if let Ok(mut port) = proxy_port_arc.lock() {
                     *port = bound.port();
                 }
@@ -81,7 +81,7 @@ pub fn run() {
             let app_handle_clone2 = app.handle().clone();
             let app_state_clone3 = app_state.clone();
             let handle3 = tauri::async_runtime::spawn(async move {
-                commands::notifications::start_airing_notification_worker(app_handle_clone2, app_state_clone3).await;
+                commands::notifications::start_airing_notification_worker(Some(app_handle_clone2), app_state_clone3).await;
             });
 
             tauri::async_runtime::spawn(async move {

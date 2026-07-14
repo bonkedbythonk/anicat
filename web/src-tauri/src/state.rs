@@ -51,6 +51,14 @@ pub struct GeneralConfig {
     /// every historical airing as a notification burst).
     #[serde(default)]
     pub last_seen_notification_id: Option<i64>,
+    /// Switches the mobile-facing auth gate from the single shared PIN
+    /// (`MobileConfig.pin`, `mobile_auth::require_mobile_auth`) to per-user
+    /// login (`proxy::session::require_user_session`) once at least one
+    /// friend account has been added via `anicat-server add-user`. Off by
+    /// default so a desktop-only user who never adds anyone sees zero
+    /// behavior change.
+    #[serde(default = "default_false")]
+    pub multi_user: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -170,6 +178,46 @@ pub struct AppStateInner {
     /// Embedded torrent engine for the "nyaa" provider. Lazy: no torrent
     /// session (DHT, listeners) exists until the first torrent playback.
     pub torrent: Arc<crate::torrent::TorrentManager>,
+    /// Per-user AniList client/cache, lazily populated the first time
+    /// `AppState::scoped_for_user` sees a given `user_id`. Never touched for
+    /// `user_id == 0` (the desktop/single-user sentinel) — that path returns
+    /// the real global fields above directly instead of an entry here, since
+    /// user 0 isn't a distinct account, it's the existing single-tenant app.
+    pub user_anilist: Arc<tokio::sync::Mutex<std::collections::HashMap<i64, Arc<UserAniList>>>>,
+    /// Per-user playback session state, same lazy/sentinel-exempt rules as
+    /// `user_anilist` above. Exists so two friends watching different shows
+    /// concurrently don't clobber each other's resume position or "now
+    /// playing" state the way a single shared `current_playback` would.
+    pub user_playback: Arc<tokio::sync::Mutex<std::collections::HashMap<i64, Arc<UserPlaybackState>>>>,
+}
+
+/// A registered friend's own AniList session — isolated from the desktop
+/// owner's `anilist_client`/`cache` and from every other registered user's,
+/// so one person's list/cache data can never leak into another's response.
+pub struct UserAniList {
+    pub client: crate::anilist::AniListClient,
+    pub cache: crate::cache::AniListCache,
+}
+
+/// Mirrors the playback-session fields on `AppStateInner` (`current_playback`,
+/// `preloaded_stream`, `playback_generation`, `last_progress_record`), scoped
+/// to one registered user instead of being process-global.
+pub struct UserPlaybackState {
+    pub current_playback: Arc<tokio::sync::Mutex<Option<CurrentPlayback>>>,
+    pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
+    pub playback_generation: Arc<std::sync::atomic::AtomicU64>,
+    pub last_progress_record: Arc<tokio::sync::Mutex<Option<(i64, i64, std::time::Instant)>>>,
+}
+
+impl UserPlaybackState {
+    fn new() -> Self {
+        Self {
+            current_playback: Arc::new(tokio::sync::Mutex::new(None)),
+            preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+            playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +228,12 @@ pub struct PreloadedStream {
     pub raw_url: String,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub at: std::time::Instant,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AppState {
@@ -280,6 +334,8 @@ impl AppState {
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 torrent: Arc::new(crate::torrent::TorrentManager::new()),
+                user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                user_playback: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             }),
         };
 
@@ -317,6 +373,71 @@ impl AppState {
 
     pub fn open_db(&self) -> Result<rusqlite::Connection, String> {
         rusqlite::Connection::open(&self.inner.db_path).map_err(|e| e.to_string())
+    }
+
+    /// Returns an `AppState` scoped to `user_id`'s own AniList session and
+    /// playback state, so every existing `_impl` command function keeps
+    /// reading `state.anilist_client`/`state.cache`/`state.current_playback`
+    /// exactly as written — only the caller (mobile-api) needs to know about
+    /// users at all.
+    ///
+    /// `user_id == 0` is the desktop/single-user sentinel: it returns a
+    /// clone of `self` unchanged, sharing the real global AniList
+    /// client/cache/playback state (and thus staying in sync with the
+    /// desktop app's own session) rather than fabricating an isolated "user
+    /// 0" — there's no second identity to isolate from in single-user mode.
+    /// Every other `user_id` gets its own lazily-created, fully isolated
+    /// `UserAniList`/`UserPlaybackState`, refreshing the cached AniList
+    /// token/username if the caller passed a newer one (handles "just
+    /// connected/reconnected AniList" without a restart) and — since a
+    /// second identity now genuinely exists — a fresh, never-`.connect()`ed
+    /// `DiscordClient`, which is a correct, code-free way to disable rich
+    /// presence for multi-user viewers (there's no sensible single "now
+    /// playing" presence with N concurrent people, and no Discord IPC socket
+    /// to reach on a headless Pi regardless).
+    pub async fn scoped_for_user(
+        &self,
+        user_id: i64,
+        anilist_token: Option<String>,
+        anilist_username: Option<String>,
+    ) -> AppState {
+        if user_id == 0 {
+            return self.clone();
+        }
+
+        let user_anilist = {
+            let mut map = self.inner.user_anilist.lock().await;
+            let entry = map.entry(user_id).or_insert_with(|| {
+                let client = crate::anilist::AniListClient::new(self.inner.http_client.clone(), anilist_token.clone());
+                if let Some(ref name) = anilist_username {
+                    client.set_username(Some(name.clone()));
+                }
+                Arc::new(UserAniList { client, cache: crate::cache::AniListCache::new() })
+            });
+            if anilist_token.is_some() && anilist_token != entry.client.get_token() {
+                entry.client.set_token(anilist_token.clone());
+                entry.client.set_username(anilist_username.clone());
+            }
+            entry.clone()
+        };
+
+        let user_playback = {
+            let mut map = self.inner.user_playback.lock().await;
+            map.entry(user_id).or_insert_with(|| Arc::new(UserPlaybackState::new())).clone()
+        };
+
+        AppState {
+            inner: Arc::new(AppStateInner {
+                anilist_client: user_anilist.client.clone(),
+                cache: user_anilist.cache.clone(),
+                current_playback: user_playback.current_playback.clone(),
+                preloaded_stream: user_playback.preloaded_stream.clone(),
+                playback_generation: user_playback.playback_generation.clone(),
+                last_progress_record: user_playback.last_progress_record.clone(),
+                discord: crate::discord::DiscordClient::new(),
+                ..(*self.inner).clone()
+            }),
+        }
     }
 }
 
@@ -409,4 +530,98 @@ fn resolve_scraper_paths() -> (String, String) {
     });
 
     (python_path, script_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a bare-bones `AppState` with no filesystem/network side
+    /// effects — deliberately not `AppState::new()`, which reads/writes the
+    /// real user's config.toml and probes for a scraper interpreter on disk;
+    /// none of that is relevant to testing `scoped_for_user`'s isolation.
+    fn bare_app_state() -> AppState {
+        let http_client = reqwest::Client::new();
+        AppState {
+            inner: Arc::new(AppStateInner {
+                config: Arc::new(RwLock::new(AppConfig::default())),
+                config_path: String::new(),
+                db_path: ":memory:".to_string(),
+                anilist_client: crate::anilist::AniListClient::new(http_client.clone(), None),
+                http_client,
+                scraper_manager: Arc::new(crate::scraper::ScraperManager::new(reqwest::Client::new(), String::new(), String::new())),
+                cache: crate::cache::AniListCache::new(),
+                current_playback: Arc::new(tokio::sync::Mutex::new(None)),
+                discord: crate::discord::DiscordClient::new(),
+                proxy_port: Arc::new(std::sync::Mutex::new(0)),
+                user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
+                last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
+                preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+                playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                torrent: Arc::new(crate::torrent::TorrentManager::new()),
+                user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                user_playback: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn user_id_zero_returns_the_same_global_state() {
+        let global = bare_app_state();
+        let scoped = global.scoped_for_user(0, None, None).await;
+        // Same underlying playback mutex, not just equal values — proves 0
+        // shares identity with the real global state rather than getting an
+        // isolated (if empty) copy of its own.
+        assert!(Arc::ptr_eq(&global.inner.current_playback, &scoped.inner.current_playback));
+    }
+
+    #[tokio::test]
+    async fn distinct_users_get_isolated_playback_state() {
+        let global = bare_app_state();
+        let alice = global.scoped_for_user(1, None, None).await;
+        let bob = global.scoped_for_user(2, None, None).await;
+
+        assert!(!Arc::ptr_eq(&alice.inner.current_playback, &bob.inner.current_playback));
+        assert!(!Arc::ptr_eq(&alice.inner.current_playback, &global.inner.current_playback));
+
+        *alice.inner.current_playback.lock().await = Some(CurrentPlayback {
+            media_id: 111, episode_number: 1, provider: "mkissa".into(), title: "Alice's show".into(),
+            episode_title: String::new(), cover_image: String::new(), total_episodes: 12,
+            last_position: 42, last_duration: 1200, paused: false,
+        });
+        // Bob's slot, and the real global slot, must both still be empty —
+        // this is the exact bug class (two friends' "now playing" colliding
+        // on one shared field) the whole per-user scoping design exists to
+        // prevent.
+        assert!(bob.inner.current_playback.lock().await.is_none());
+        assert!(global.inner.current_playback.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn calling_scoped_for_user_twice_reuses_the_same_entry() {
+        let global = bare_app_state();
+        let first = global.scoped_for_user(7, None, None).await;
+        *first.inner.current_playback.lock().await = Some(CurrentPlayback {
+            media_id: 5, episode_number: 3, provider: "mkissa".into(), title: "x".into(),
+            episode_title: String::new(), cover_image: String::new(), total_episodes: 0,
+            last_position: 99, last_duration: 100, paused: false,
+        });
+        let second = global.scoped_for_user(7, None, None).await;
+        // Second call for the same user_id must land on the same session —
+        // not a fresh empty one — so progress reported by an earlier
+        // request in the same login is still there for a later one.
+        let pb = second.inner.current_playback.lock().await;
+        assert_eq!(pb.as_ref().map(|p| p.last_position), Some(99));
+    }
+
+    #[tokio::test]
+    async fn distinct_users_get_isolated_anilist_clients() {
+        let global = bare_app_state();
+        let alice = global.scoped_for_user(1, Some("alice-token".to_string()), Some("alice".to_string())).await;
+        let bob = global.scoped_for_user(2, Some("bob-token".to_string()), Some("bob".to_string())).await;
+
+        assert_eq!(alice.inner.anilist_client.get_username(), Some("alice".to_string()));
+        assert_eq!(bob.inner.anilist_client.get_username(), Some("bob".to_string()));
+        assert_eq!(global.inner.anilist_client.get_username(), None);
+    }
 }

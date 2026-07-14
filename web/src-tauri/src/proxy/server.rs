@@ -1,8 +1,9 @@
 use axum::{
     body::Body,
-    extract::{Query, State},
+    extract::{ConnectInfo, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     middleware,
+    middleware::Next,
     response::Response,
     routing::{get, post},
     Router,
@@ -10,7 +11,26 @@ use axum::{
 use std::net::SocketAddr;
 use tower_http::services::{ServeDir, ServeFile};
 
-use super::{mobile_api, mobile_auth};
+use super::{mobile_api, mobile_auth, session};
+
+/// Single entry point for both auth models — picks between the existing
+/// single-PIN gate and Stage 2's per-user session auth per request, based on
+/// the live `multi_user` config flag (an admin running `anicat-server
+/// add-user` can flip this without restarting the server, so it's read
+/// fresh each time rather than decided once at router-build time).
+async fn require_auth(
+    State(state): State<ProxyState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let multi_user = state.app_state.config.read().await.general.multi_user;
+    if multi_user {
+        session::require_user_session(State(state), req, next).await
+    } else {
+        mobile_auth::require_mobile_auth(State(state), ConnectInfo(addr), req, next).await
+    }
+}
 
 #[derive(serde::Deserialize)]
 struct ProxyQuery {
@@ -32,14 +52,43 @@ struct PlaybackParams {
 #[derive(Clone)]
 pub struct ProxyState {
     pub client: reqwest::Client,
-    pub app_handle: tauri::AppHandle,
+    /// `None` when running under the headless `anicat-server` binary — there
+    /// is no Tauri webview to push events to and no same-host mpv process,
+    /// so every AppHandle-dependent side effect below (desktop toasts,
+    /// setting-sync events, the mpv-launching next/prev/toggle handlers, and
+    /// `require_mobile_auth`'s loopback bypass) becomes a no-op rather than
+    /// a hard dependency.
+    pub app_handle: Option<tauri::AppHandle>,
     pub app_state: crate::state::AppState,
     pub proxy_port: u16,
 }
 
+impl ProxyState {
+    /// Builds an `AppState` scoped to the authenticated caller's own AniList
+    /// session and playback state. `user_id == 0` (single-user mode, or the
+    /// desktop sentinel `require_mobile_auth` always sets) short-circuits to
+    /// a plain clone of the real global state with no DB lookup — see
+    /// `AppState::scoped_for_user`. Shared by `mobile_api.rs`'s handlers and
+    /// the `/player/*` handlers below, since mobile's `<video>` element
+    /// reports progress through the latter, not mobile-api.
+    pub async fn scoped_for(&self, crate::proxy::session::AuthedUser(user_id): crate::proxy::session::AuthedUser) -> crate::state::AppState {
+        if user_id == 0 {
+            return self.app_state.clone();
+        }
+        let (token, username) = self
+            .app_state
+            .open_db()
+            .ok()
+            .and_then(|db| crate::registry::service::get_user_by_id(&db, user_id).ok().flatten())
+            .map(|u| (u.anilist_token, u.anilist_username))
+            .unwrap_or((None, None));
+        self.app_state.scoped_for_user(user_id, token, username).await
+    }
+}
+
 pub async fn start_proxy(
     client: reqwest::Client,
-    app_handle: tauri::AppHandle,
+    app_handle: Option<tauri::AppHandle>,
     app_state: crate::state::AppState,
 ) -> SocketAddr {
     // 0.0.0.0 so the proxy (and the new mobile-api/PWA routes) are reachable
@@ -88,9 +137,9 @@ pub async fn start_proxy(
         .route("/player/resume", get(player_resume_handler))
         .route("/player/preload", get(player_preload_handler))
         .nest("/mobile-api", mobile_api::routes())
-        .route_layer(middleware::from_fn_with_state(state.clone(), mobile_auth::require_mobile_auth));
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
-    let mobile_dist_path = resolve_mobile_dist_path(&app_handle);
+    let mobile_dist_path = resolve_mobile_dist_path(app_handle.as_ref());
     log::info!("Serving mobile PWA static files from {:?}", mobile_dist_path);
     let mobile_index = mobile_dist_path.join("mobile.html");
     let static_service = ServeDir::new(&mobile_dist_path).fallback(ServeFile::new(&mobile_index));
@@ -102,11 +151,15 @@ pub async fn start_proxy(
         // token, and it only exposes video bytes of torrents this app added.
         .route("/torrent-stream", get(crate::torrent::stream::torrent_stream_handler))
         .route("/health", get(health_handler))
-        // Unauthenticated on purpose: /auth is the login endpoint itself, and
-        // /lan-info is informational (what IP to type into the phone) needed
-        // before a client has a token at all.
+        // Unauthenticated on purpose: /auth and /session/login are the login
+        // endpoints themselves (single-PIN and per-user respectively), and
+        // /lan-info is informational (what IP to type into the phone, and
+        // which of the two login flows to show) needed before a client has
+        // a token at all.
         .route("/mobile-api/auth", post(mobile_auth::authenticate))
+        .route("/mobile-api/session/login", post(session::login))
         .route("/mobile-api/lan-info", get(mobile_auth::lan_info))
+        .route("/mobile-api/users/list-names", get(mobile_api::list_user_names))
         .merge(gated)
         // Fallback rather than a nested prefix: mobile.html and its manifest/
         // service-worker/asset references are root-relative (a standard Vite
@@ -145,23 +198,35 @@ pub async fn start_proxy(
 /// `npm run build` at least once. ServeDir doesn't require the directory to
 /// exist up front — it just 404s per request until a real build produces it
 /// — so this is safe to call before any build has happened.
-fn resolve_mobile_dist_path(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+///
+/// The headless `anicat-server` binary has no `AppHandle` to resolve a
+/// bundle resource dir from at all, so it points here via `ANICAT_MOBILE_DIST`
+/// instead (set by the systemd unit to wherever `npm run build`'s `dist/`
+/// was copied on the Pi) — checked first so it also lets a desktop build
+/// override the path for testing without touching this function further.
+fn resolve_mobile_dist_path(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("ANICAT_MOBILE_DIST") {
+        return std::path::PathBuf::from(dir);
+    }
     if cfg!(debug_assertions) {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         return manifest_dir.join("..").join("dist");
     }
     use tauri::Manager;
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let candidate = resource_dir.join("mobile-dist");
-        if candidate.join("mobile.html").exists() {
-            return candidate;
+    if let Some(app_handle) = app_handle {
+        if let Ok(resource_dir) = app_handle.path().resource_dir() {
+            let candidate = resource_dir.join("mobile-dist");
+            if candidate.join("mobile.html").exists() {
+                return candidate;
+            }
         }
     }
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("..").join("dist")
 }
 
-fn notify_frontend(app_handle: &tauri::AppHandle, message: &str) {
+fn notify_frontend(app_handle: &Option<tauri::AppHandle>, message: &str) {
+    let Some(app_handle) = app_handle else { return };
     use tauri::Emitter;
     let _ = app_handle.emit("show_notification", serde_json::json!({ "message": message }));
 }
@@ -194,8 +259,13 @@ async fn player_next_handler(
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
+                    // TODO(Stage 2 wiring): 0 is the single-user sentinel; this
+                    // handler is reachable by both desktop mpv and the mobile
+                    // <video> element's progress reporting, so it'll need the
+                    // real AuthedUser once multi-user session auth lands here.
                     if let Err(e) = crate::commands::playback::record_playback_progress(
                         &app_state_clone,
+                        0,
                         media_id,
                         ep_num,
                         pos,
@@ -225,17 +295,19 @@ async fn player_next_handler(
             next_ep,
             play_info.provider
         );
-        let app_handle = state.app_handle.clone();
+        // mpv-launching next/prev only make sense on the desktop; the headless
+        // binary has no AppHandle to build a tauri::State from here at all.
+        let Some(app_handle) = state.app_handle.clone() else { return Ok("ok") };
         tokio::spawn(async move {
             use tauri::Manager;
             let tauri_state = app_handle.state::<crate::state::AppState>();
-            let app_handle_clone = app_handle.clone();
+            let app_handle_clone = Some(app_handle.clone());
             let title = play_info.title.clone();
             let provider = play_info.provider.clone();
             let episode_title = play_info.episode_title.clone();
             let cover_image = play_info.cover_image.clone();
             let result = crate::commands::playback::start_playback(
-                app_handle_clone.clone(),
+                app_handle.clone(),
                 tauri_state,
                 play_info.media_id,
                 next_ep,
@@ -285,8 +357,10 @@ async fn player_prev_handler(
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
+                    // TODO(Stage 2 wiring): see the matching note in player_next_handler.
                     if let Err(e) = crate::commands::playback::record_playback_progress(
                         &app_state_clone,
+                        0,
                         media_id,
                         ep_num,
                         pos,
@@ -315,7 +389,7 @@ async fn player_prev_handler(
             prev_ep,
             play_info.provider
         );
-        let app_handle = state.app_handle.clone();
+        let Some(app_handle) = state.app_handle.clone() else { return Ok("ok") };
         let title = play_info.title.clone();
         let provider = play_info.provider.clone();
         let episode_title = play_info.episode_title.clone();
@@ -323,9 +397,9 @@ async fn player_prev_handler(
         tokio::spawn(async move {
             use tauri::Manager;
             let tauri_state = app_handle.state::<crate::state::AppState>();
-            let app_handle_clone = app_handle.clone();
+            let app_handle_clone = Some(app_handle.clone());
             let result = crate::commands::playback::start_playback(
-                app_handle_clone.clone(),
+                app_handle.clone(),
                 tauri_state,
                 play_info.media_id,
                 prev_ep,
@@ -354,11 +428,13 @@ async fn player_prev_handler(
 
 async fn player_stop_handler(
     State(state): State<ProxyState>,
+    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested stop: pos={:?}, duration={:?}", params.pos, params.duration);
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -370,13 +446,14 @@ async fn player_stop_handler(
     if let Some(play_info) = play_info {
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
-                let app_state_clone = state.app_state.clone();
+                let scoped_clone = scoped.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
                     if let Err(e) = crate::commands::playback::record_playback_progress(
-                        &app_state_clone,
+                        &scoped_clone,
+                        user_id,
                         media_id,
                         ep_num,
                         pos,
@@ -397,14 +474,16 @@ async fn player_stop_handler(
 
 async fn player_progress_handler(
     State(state): State<ProxyState>,
+    auth: session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     // Progress ticks (every 30s and once per completed seek) re-anchor the
     // Discord countdown to the real position, so skipping around doesn't drift.
     // Only re-anchor while playing — a tick during pause must not revive the
     // timer.
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -421,7 +500,7 @@ async fn player_progress_handler(
     };
     if let Some(pb) = play_info {
         if let (Some(pos), Some(dur)) = (params.pos, params.duration) {
-            state.app_state.discord.set_presence(
+            scoped.discord.set_presence(
                 &pb.title,
                 pb.episode_number,
                 &pb.episode_title,
@@ -437,14 +516,16 @@ async fn player_progress_handler(
 
 async fn player_pause_handler(
     State(state): State<ProxyState>,
+    auth: session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested pause: pos={:?}, duration={:?}", params.pos, params.duration);
     // Only act on a real play->pause transition. mpv emits pause/resume on
     // window focus changes (e.g. cmd-tab), and re-sending presence each time
     // makes the timer visibly flicker.
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -463,7 +544,7 @@ async fn player_pause_handler(
     if let Some(play_info) = play_info {
         let pos = params.pos.unwrap_or(0);
         let dur = params.duration.unwrap_or(0);
-        state.app_state.discord.set_presence(
+        scoped.discord.set_presence(
             &play_info.title,
             play_info.episode_number,
             &play_info.episode_title,
@@ -478,11 +559,13 @@ async fn player_pause_handler(
 
 async fn player_resume_handler(
     State(state): State<ProxyState>,
+    auth: session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested resume: pos={:?}, duration={:?}", params.pos, params.duration);
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -501,7 +584,7 @@ async fn player_resume_handler(
     if let Some(play_info) = play_info {
         let pos = params.pos.unwrap_or(0);
         let dur = params.duration.unwrap_or(0);
-        state.app_state.discord.set_presence(
+        scoped.discord.set_presence(
             &play_info.title,
             play_info.episode_number,
             &play_info.episode_title,
@@ -516,12 +599,14 @@ async fn player_resume_handler(
 
 async fn player_preload_handler(
     State(state): State<ProxyState>,
+    auth: session::AuthedUser,
     Query(_params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     // Fired by the player once it's most of the way through an episode: resolve
     // the next episode's stream ahead of time so auto-next is instant.
+    let scoped = state.scoped_for(auth).await;
     let pb = {
-        let guard = state.app_state.current_playback.lock().await;
+        let guard = scoped.current_playback.lock().await;
         guard.clone()
     };
     let pb = match pb {
@@ -534,14 +619,14 @@ async fn player_preload_handler(
     }
     // Already preloaded (or being worked on) for this target — don't repeat.
     {
-        let slot = state.app_state.preloaded_stream.lock().await;
+        let slot = scoped.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
             if p.media_id == pb.media_id && p.episode_number == next_ep {
                 return Ok("ok");
             }
         }
     }
-    let app_state = state.app_state.clone();
+    let app_state = scoped.clone();
     tokio::spawn(async move {
         match crate::commands::playback::resolve_stream_for_provider(
             &app_state,
@@ -601,8 +686,10 @@ async fn player_toggle_translation_handler(
         // instead of resuming where the viewer is.
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
+                // Sub/dub toggle is desktop-only (mobile never calls this route).
                 let _ = crate::commands::playback::record_playback_progress(
                     &state.app_state,
+                    0,
                     play_info.media_id,
                     play_info.episode_number,
                     pos,
@@ -612,29 +699,29 @@ async fn player_toggle_translation_handler(
                 .await;
             }
         }
-        let app_handle = state.app_handle.clone();
-        tokio::spawn(async move {
-            use tauri::Manager;
-            let tauri_state = app_handle.state::<crate::state::AppState>();
-            let app_handle_clone = app_handle.clone();
-            let title = play_info.title.clone();
-            let provider = play_info.provider.clone();
-            let episode_title = play_info.episode_title.clone();
-            let cover_image = play_info.cover_image.clone();
-            let _ = crate::commands::playback::start_playback(
-                app_handle_clone,
-                tauri_state,
-                play_info.media_id,
-                play_info.episode_number,
-                Some(provider),
-                None, // Pass None to let it auto-select the server based on the new sub/dub preference
-                Some(title),
-                Some(episode_title),
-                Some(cover_image),
-                None,
-            )
-            .await;
-        });
+        if let Some(app_handle) = state.app_handle.clone() {
+            tokio::spawn(async move {
+                use tauri::Manager;
+                let tauri_state = app_handle.state::<crate::state::AppState>();
+                let title = play_info.title.clone();
+                let provider = play_info.provider.clone();
+                let episode_title = play_info.episode_title.clone();
+                let cover_image = play_info.cover_image.clone();
+                let _ = crate::commands::playback::start_playback(
+                    app_handle.clone(),
+                    tauri_state,
+                    play_info.media_id,
+                    play_info.episode_number,
+                    Some(provider),
+                    None, // Pass None to let it auto-select the server based on the new sub/dub preference
+                    Some(title),
+                    Some(episode_title),
+                    Some(cover_image),
+                    None,
+                )
+                .await;
+            });
+        }
     }
 
     Ok("ok")
@@ -661,8 +748,10 @@ async fn player_toggle_upscale_handler(
     }
     let enabled = new_val != "off";
     notify_frontend(&state.app_handle, &format!("Upscaling {}.", if enabled { "enabled" } else { "disabled" }));
-    use tauri::Emitter;
-    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "shader_profile", "value": new_val }));
+    if let Some(ah) = &state.app_handle {
+        use tauri::Emitter;
+        let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "shader_profile", "value": new_val }));
+    }
     Ok("ok")
 }
 
@@ -681,8 +770,10 @@ async fn player_toggle_interpolation_handler(
     }
     let enabled = new_val != "off";
     notify_frontend(&state.app_handle, &format!("Smooth motion {}.", if enabled { "enabled" } else { "disabled" }));
-    use tauri::Emitter;
-    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "interpolation", "value": new_val }));
+    if let Some(ah) = &state.app_handle {
+        use tauri::Emitter;
+        let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "interpolation", "value": new_val }));
+    }
     Ok("ok")
 }
 
@@ -700,8 +791,10 @@ async fn player_toggle_autoskip_handler(
         log::error!("Failed to save config on autoskip toggle: {}", e);
     }
     notify_frontend(&state.app_handle, &format!("Auto-skip intro {}.", if new_val { "enabled" } else { "disabled" }));
-    use tauri::Emitter;
-    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "autoskip", "value": new_val }));
+    if let Some(ah) = &state.app_handle {
+        use tauri::Emitter;
+        let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "autoskip", "value": new_val }));
+    }
     Ok("ok")
 }
 
@@ -719,8 +812,10 @@ async fn player_toggle_auto_next_handler(
         log::error!("Failed to save config on auto-play-next toggle: {}", e);
     }
     notify_frontend(&state.app_handle, &format!("Auto-play next {}.", if new_val { "enabled" } else { "disabled" }));
-    use tauri::Emitter;
-    let _ = state.app_handle.emit("anicat_setting_toggled", serde_json::json!({ "key": "autoplay", "value": new_val }));
+    if let Some(ah) = &state.app_handle {
+        use tauri::Emitter;
+        let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "autoplay", "value": new_val }));
+    }
     Ok("ok")
 }
 

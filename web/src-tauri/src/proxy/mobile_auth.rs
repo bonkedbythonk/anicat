@@ -58,21 +58,28 @@ pub async fn authenticate(
 pub struct LanInfo {
     lan_ip: String,
     port: u16,
+    /// Tells the PWA's login screen which flow to show: the single shared
+    /// PIN (`/mobile-api/auth`) or per-user login
+    /// (`/mobile-api/session/login`, populated from `/mobile-api/users/list-names`).
+    multi_user: bool,
 }
 
 /// Unauthenticated on purpose — a client needs this before it has a token
-/// (it's just informational: what LAN IP to type into the phone). Called
-/// directly from the desktop Settings page too, whose Tauri webview origin
-/// differs from this server's (127.0.0.1:13370) — without an explicit CORS
-/// header here, the request still succeeds server-side (nothing to log) but
-/// the browser silently discards the response, so `fetch()` in Settings
-/// just sees a rejected promise.
+/// (it's just informational: what LAN IP to type into the phone, and which
+/// login flow to render). Called directly from the desktop Settings page
+/// too, whose Tauri webview origin differs from this server's
+/// (127.0.0.1:13370) — without an explicit CORS header here, the request
+/// still succeeds server-side (nothing to log) but the browser silently
+/// discards the response, so `fetch()` in Settings just sees a rejected
+/// promise.
 pub async fn lan_info(State(state): State<ProxyState>) -> impl axum::response::IntoResponse {
+    let multi_user = state.app_state.config.read().await.general.multi_user;
     (
         [(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
         Json(LanInfo {
             lan_ip: local_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
             port: state.proxy_port,
+            multi_user,
         }),
     )
 }
@@ -99,13 +106,29 @@ pub(crate) fn is_authorized(configured_pin: Option<&str>, provided_token: Option
 /// the PIN check entirely — this keeps the existing desktop `/player/*` flow
 /// working exactly as it did before the mobile feature existed. Anything
 /// arriving from elsewhere on the LAN must carry a valid bearer token.
+///
+/// The bypass only applies when `app_handle` is `Some` — i.e. the desktop
+/// build, where a loopback caller can only be mpv's own Lua script. The
+/// headless `anicat-server` binary always has `app_handle: None` and never
+/// runs mpv, so there is no legitimate same-host caller to exempt there;
+/// treating every request as loopback-trusted regardless of origin would be
+/// especially dangerous if this process ever sat behind a reverse proxy
+/// forwarding from 127.0.0.1, since that would silently defeat the PIN gate
+/// for every real client.
 pub async fn require_mobile_auth(
     State(state): State<ProxyState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if addr.ip().is_loopback() {
+    // Single-PIN mode has no concept of distinct users — insert the same
+    // desktop sentinel (0) every downstream handler that calls
+    // AppState::scoped_for_user already treats as "not a real second
+    // identity," so handlers can use the AuthedUser extractor uniformly
+    // whether multi-user mode is on or not.
+    req.extensions_mut().insert(super::session::AuthedUser(0));
+
+    if state.app_handle.is_some() && addr.ip().is_loopback() {
         return Ok(next.run(req).await);
     }
 

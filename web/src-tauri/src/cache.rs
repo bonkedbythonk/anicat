@@ -13,6 +13,12 @@ pub struct AniListCache {
     insert_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+impl Default for AniListCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AniListCache {
     pub fn new() -> Self {
         Self {

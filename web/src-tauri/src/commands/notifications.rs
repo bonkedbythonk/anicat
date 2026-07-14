@@ -10,17 +10,21 @@ use tauri_plugin_notification::NotificationExt;
 
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
-pub async fn start_airing_notification_worker(app_handle: tauri::AppHandle, state: crate::state::AppState) {
+pub async fn start_airing_notification_worker(app_handle: Option<tauri::AppHandle>, state: crate::state::AppState) {
     log::info!("Airing-notification worker started");
     loop {
         tokio::time::sleep(POLL_INTERVAL).await;
-        if let Err(e) = poll_once(&app_handle, &state).await {
+        if let Err(e) = poll_once(app_handle.as_ref(), &state).await {
             log::warn!("Airing-notification poll failed: {}", e);
         }
     }
 }
 
-async fn poll_once(app_handle: &tauri::AppHandle, state: &crate::state::AppState) -> Result<(), String> {
+/// AniList polling and dedupe run the same headless or not; only the native
+/// OS toast (below) needs a real desktop notification daemon, so it's the
+/// one thing skipped when `app_handle` is `None` (the headless server binary
+/// has no such daemon to talk to regardless of platform).
+async fn poll_once(app_handle: Option<&tauri::AppHandle>, state: &crate::state::AppState) -> Result<(), String> {
     // No account, nothing to poll. Gate on the (now real) Settings toggle too.
     if !state.anilist_client.has_token() {
         return Ok(());
@@ -86,8 +90,10 @@ async fn poll_once(app_handle: &tauri::AppHandle, state: &crate::state::AppState
                 None => "A new episode just aired".to_string(),
             };
 
-            if let Err(e) = app_handle.notification().builder().title(title).body(body).show() {
-                log::warn!("Failed to show airing notification: {}", e);
+            if let Some(app_handle) = app_handle {
+                if let Err(e) = app_handle.notification().builder().title(title).body(body).show() {
+                    log::warn!("Failed to show airing notification: {}", e);
+                }
             }
         }
     }

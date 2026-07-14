@@ -3,6 +3,10 @@ use tauri::State;
 
 #[tauri::command]
 pub async fn get_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    get_config_impl(state.inner()).await
+}
+
+pub async fn get_config_impl(state: &AppState) -> Result<serde_json::Value, String> {
     let config = state.config.read().await;
     serde_json::to_value(&*config).map_err(|e| e.to_string())
 }
@@ -12,6 +16,10 @@ pub async fn update_config(
     state: State<'_, AppState>,
     updates: serde_json::Value,
 ) -> Result<(), String> {
+    update_config_impl(state.inner(), updates).await
+}
+
+pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) -> Result<(), String> {
     let mut config = state.config.write().await;
 
     if let Some(obj) = updates.as_object() {

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react"
 import { AnimatePresence, motion } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { getConfig, getHealth, mediaApi } from "@/lib/api";
-import { getMobileToken } from "@/lib/transport";
+import { getMobileToken, mobileFetch } from "@/lib/transport";
 
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { NotificationsView } from "@/components/views/NotificationsView";
@@ -10,6 +10,7 @@ import { ProfileView } from "@/components/views/ProfileView";
 const MangaView = lazy(() => import("@/components/views/MangaView").then((m) => ({ default: m.MangaView })));
 
 import { PinGate } from "./PinGate";
+import { ConnectAniList } from "./ConnectAniList";
 import { BottomNav } from "./BottomNav";
 import { MobileHeader } from "./MobileHeader";
 import { MoreView } from "./MoreView";
@@ -40,8 +41,16 @@ const SUB_TITLES: Record<MoreSubView, string> = {
   profile: "Profile",
 };
 
+interface Whoami {
+  user_id: number;
+  display_name: string;
+  anilist_connected: boolean;
+  anilist_username: string | null;
+}
+
 export default function MobileApp() {
   const [unlocked, setUnlocked] = useState(() => !!getMobileToken());
+  const [whoami, setWhoami] = useState<Whoami | null>(null);
   const [player, setPlayer] = useState<PlayerState | null>(null);
 
   // Mobile owns its own navigation state entirely, independent of the
@@ -81,6 +90,20 @@ export default function MobileApp() {
 
   useEffect(() => {
     if (unlocked) loadConfig();
+  }, [unlocked]);
+
+  // Gates the ConnectAniList screen below. Refetched on every unlock (a
+  // fresh login, or bouncing back after a 401) rather than cached, since
+  // whether AniList is connected can change between sessions.
+  useEffect(() => {
+    if (!unlocked) {
+      setWhoami(null);
+      return;
+    }
+    mobileFetch("/mobile-api/session/whoami")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: Whoami | null) => setWhoami(data))
+      .catch(() => setWhoami(null));
   }, [unlocked]);
 
   // Desktop's App.tsx does this same check to drive apiAuthenticated/
@@ -145,6 +168,15 @@ export default function MobileApp() {
 
   if (!unlocked) {
     return <PinGate onSuccess={() => setUnlocked(true)} />;
+  }
+
+  if (whoami && !whoami.anilist_connected) {
+    return (
+      <ConnectAniList
+        displayName={whoami.display_name}
+        onConnected={() => setWhoami({ ...whoami, anilist_connected: true })}
+      />
+    );
   }
 
   const onSelect = openDetail;

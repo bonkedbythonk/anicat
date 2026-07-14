@@ -48,6 +48,12 @@ pub struct TorrentManager {
     resolved: tokio::sync::Mutex<HashMap<(i64, i64), Resolved>>,
 }
 
+impl Default for TorrentManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TorrentManager {
     pub fn new() -> Self {
         let cache_dir = dirs::cache_dir()

@@ -1,0 +1,315 @@
+# Running anicat headless on a Raspberry Pi
+
+This sets up the `anicat-server` binary (a headless build of the same backend the
+desktop app uses — no window, no mpv) on a Raspberry Pi 3, reachable from your
+phone anywhere via Tailscale. It serves the mobile PWA and the same
+`/mobile-api/*` surface the desktop app exposes on your home LAN today, just
+running continuously instead of only while the desktop app is open.
+
+This is Stage 1: one shared AniList account (the one already in your desktop
+`config.toml`), reachable only from devices you invite into your Tailscale
+network. Per-friend AniList logins are a later stage — until then, treat this
+as "my own account, reachable from my own devices anywhere."
+
+**Build strategy note:** the Pi 3 has only 1GB of RAM, and `cargo build
+--release` for this crate (Tauri's Linux bindings + axum + tokio + rusqlite +
+librqbit) routinely uses well over that during codegen — it would very likely
+OOM-kill partway through a native on-device build, or at best thrash swap on
+a slow SD card for hours. So the binary gets **built on your Mac inside an
+arm64 Docker container** (a real native aarch64 compile, not a fragile
+cross-compilation — Docker's `--platform linux/arm64` runs actual
+aarch64 code, natively if your Mac is Apple Silicon, emulated via Docker's
+built-in QEMU integration if it's Intel) and then copied to the Pi, which
+only ever *runs* the finished binary.
+
+## What you need
+
+- A Raspberry Pi 3 (1GB RAM — fine for running the server, not for compiling it)
+- Raspberry Pi OS **64-bit** (Lite is fine — no desktop environment needed).
+  Flash it with Raspberry Pi Imager, enable SSH in the imager's settings so
+  you don't need a monitor/keyboard. Double-check you picked the 64-bit
+  image specifically — the Pi 3's SoC supports AArch64, but Imager's default
+  for older Pi models can still be the 32-bit legacy image, which won't run
+  an aarch64 binary.
+- Docker Desktop installed on your Mac
+- SSH access to the Pi from your Mac
+- A [Tailscale](https://tailscale.com) account (free tier is enough)
+
+## 1. Build anicat-server on your Mac, targeting the Pi's OS
+
+Raspberry Pi OS is Debian-based (current releases track Debian 12
+"bookworm"), so building inside a matching Debian container keeps the
+compiled binary's glibc version compatible with what's actually on the Pi.
+From the repo root on your **Mac**:
+
+```bash
+docker run --rm --platform linux/arm64 \
+  -v "$PWD":/work -w /work/web/src-tauri \
+  rust:1-bookworm \
+  bash -c "
+    apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+      libjavascriptcoregtk-4.1-dev &&
+    cargo build --release --bin anicat-server
+  "
+```
+
+The `libwebkit2gtk`/`libgtk-3`/`libsoup` dev packages are needed to *compile*
+`anicat-server` even though it never opens a window — the Tauri crate it
+shares code with links against them unconditionally on Linux. Because this
+is a real native-arm64 container (not a cross-compiler), `apt-get install`
+just works normally here — no cross-architecture package wrangling.
+
+This will take a while the first time (pulling the image, compiling the full
+dependency tree) — grab a coffee. Afterwards, the binary is at
+`web/src-tauri/target/release/anicat-server` on your Mac. Subsequent builds
+after pulling code changes reuse Cargo's incremental cache (as long as you
+keep reusing the same container image) and are much faster.
+
+Copy it to the Pi:
+
+```bash
+scp web/src-tauri/target/release/anicat-server pi@<pi-hostname>:/tmp/anicat-server
+```
+
+## 2. Runtime packages on the Pi
+
+SSH into the Pi. It only needs the *runtime* shared libraries (no `-dev`
+headers, no compiler — nothing gets built here), plus `uv` for the Python
+scraper and `git` to pull the scraper source and future updates:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git curl \
+  libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 libjavascriptcoregtk-4.1-0
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+```
+
+## 3. Get the scraper + mobile PWA onto the Pi
+
+The Rust binary is already built and copied over — you just need the Python
+scraper source and the mobile PWA's static files. Easiest path: clone the
+repo on the Pi for the scraper source (it's plain Python, fine to run
+in-place), and copy the frontend build from your Mac:
+
+```bash
+sudo mkdir -p /opt/anicat
+sudo chown $USER:$USER /opt/anicat
+git clone <your-repo-url> /opt/anicat/src
+sudo mkdir -p /opt/anicat/bin
+sudo mv /tmp/anicat-server /opt/anicat/bin/anicat-server
+sudo chmod +x /opt/anicat/bin/anicat-server
+```
+
+## 4. Set up the scraper
+
+The scraper is a `uv`-managed Python project — no manual venv needed, `uv`
+resolves one automatically the first time it runs:
+
+```bash
+cd /opt/anicat/src/scraper
+uv sync
+```
+
+`nodriver` (one of the scraper's dependencies) drives a real headless
+Chromium for some providers' Cloudflare bypass — worth keeping an eye on
+memory if you notice the Pi getting tight at runtime (see the swap note in
+step 8), since that's a heavier process than the rest of the scraper.
+
+## 5. Build the mobile PWA static files
+
+From your **Mac** (much faster than the Pi either way, but doubly true here
+since we're not building anything else on the Pi at all now):
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+Then copy the built `dist/` folder to the Pi:
+
+```bash
+scp -r dist pi@<pi-hostname>:/opt/anicat/mobile-dist
+```
+
+## 6. Create a dedicated user (optional but recommended)
+
+Running the server as its own user, not your login user, keeps its config
+and permissions contained:
+
+```bash
+sudo useradd -r -m -d /home/anicat -s /usr/sbin/nologin anicat
+sudo chown -R anicat:anicat /opt/anicat
+```
+
+## 7. A safety-margin swap file
+
+Nothing here needs to *build* on the Pi anymore, but at runtime the Rust
+server + the Python scraper (which can spin up a real headless Chromium via
+`nodriver` for some providers) share 1GB of RAM. A small permanent swap file
+costs nothing when unused and avoids an OOM-kill if things get briefly tight:
+
+```bash
+sudo apt install -y dphys-swapfile
+sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+sudo systemctl restart dphys-swapfile
+```
+
+## 8. systemd service
+
+```bash
+sudo tee /etc/systemd/system/anicat.service > /dev/null <<'EOF'
+[Unit]
+Description=anicat headless server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=anicat
+Environment=HOME=/home/anicat
+Environment=ANICAT_SCRAPER_PYTHON=uv
+Environment=ANICAT_SCRAPER_SCRIPT=/opt/anicat/src/scraper/main.py
+Environment=ANICAT_MOBILE_DIST=/opt/anicat/mobile-dist
+ExecStart=/opt/anicat/bin/anicat-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now anicat.service
+```
+
+Check it's actually up:
+
+```bash
+sudo systemctl status anicat.service
+journalctl -u anicat.service -f    # live logs, Ctrl+C to stop watching
+```
+
+## 9. Tailscale
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+
+Follow the printed login URL to add the Pi to your tailnet. Then, from the
+[Tailscale admin console](https://login.tailscale.com/admin/machines), invite
+any friends' devices you want to have access — they install the Tailscale
+app, accept the invite, and their phone can now reach the Pi's tailnet
+address directly, from anywhere, without you doing anything else per-friend.
+
+Find the Pi's Tailscale hostname:
+
+```bash
+tailscale status
+```
+
+## 10. First connection
+
+On your phone (with Tailscale running and connected to the same tailnet),
+open a browser to:
+
+```
+http://<pi-tailscale-hostname>:13370/mobile.html
+```
+
+You should hit the same PIN gate the desktop app's LAN mode uses today — the
+PIN is whatever's set in Settings → Phone Access on the desktop app (that
+setting is stored in `config.toml`, which the Pi build reads from the same
+place). From there, everything should work exactly like it does over your
+home Wi-Fi today: browsing, search, streaming, manga — just reachable from
+anywhere your phone has a signal.
+
+This is single-user mode: everyone who has the PIN streams through your own
+AniList account. If a friend wants their own AniList login and their own
+separate watch progress instead, see "Adding a friend their own account"
+below — flip that on before handing out access, since switching later
+doesn't retroactively split up progress that was already recorded under your
+account.
+
+## 11. Adding a friend their own account (optional)
+
+Each friend can have their own AniList login and their own watch
+progress/lists, fully separate from yours and from each other's. This is
+opt-in — skip this section entirely if everyone sharing your account is
+fine.
+
+On the **Pi**, create an account for each friend (their PIN can be anything
+they'll remember — it's identity, not a security boundary; Tailscale is what
+actually keeps strangers out):
+
+```bash
+/opt/anicat/bin/anicat-server add-user "Sam" 4821
+```
+
+Then turn on multi-user mode in `config.toml` (usually
+`~/.config/anicat/config.toml` for the user the systemd service runs as):
+
+```toml
+[general]
+multi_user = true
+```
+
+```bash
+sudo systemctl restart anicat.service
+```
+
+Text or call each friend their PIN (out of band — not through anicat
+itself). When they open the PWA, they'll see a "Who's watching?" screen
+instead of the plain PIN box: they enter their name and PIN, then a
+one-time "Connect AniList" step (opens AniList's login in their own phone
+browser, same as the very first desktop setup) links their own account.
+From then on their watch history, lists, and progress are entirely their
+own — invisible to you and to any other friend.
+
+Add more friends any time with the same `add-user` command — no restart
+needed for that part, only the first time you flip `multi_user` on.
+
+## Updating later
+
+Rebuild happens on your **Mac**, same as the first build (step 1):
+
+```bash
+docker run --rm --platform linux/arm64 \
+  -v "$PWD":/work -w /work/web/src-tauri \
+  rust:1-bookworm \
+  bash -c "
+    apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+      libjavascriptcoregtk-4.1-dev &&
+    cargo build --release --bin anicat-server
+  "
+scp web/src-tauri/target/release/anicat-server pi@<pi-hostname>:/tmp/anicat-server
+```
+
+Then on the **Pi**:
+
+```bash
+sudo mv /tmp/anicat-server /opt/anicat/bin/anicat-server
+sudo chmod +x /opt/anicat/bin/anicat-server
+sudo systemctl restart anicat.service
+```
+
+If the scraper's Python source changed, also `git pull` inside
+`/opt/anicat/src` on the Pi and re-run `uv sync` (step 4). If the frontend
+changed, rebuild and re-copy `mobile-dist` (step 5) before restarting.
+
+## Troubleshooting
+
+- **Service won't start** — `journalctl -u anicat.service -n 50` for the
+  actual error. Most common cause: `ANICAT_MOBILE_DIST` pointing at a folder
+  that doesn't exist yet (step 5 wasn't done) or `/opt/anicat/bin` not owned
+  by the `anicat` user (step 6).
+- **Scraper errors in the log** — SSH in as the `anicat` user
+  (`sudo -u anicat -s`) and run `cd /opt/anicat/src/scraper && uv run python
+  main.py --port 9999` manually to see the real Python traceback.
+- **Can't reach it from your phone** — confirm both the phone and the Pi show
+  up in `tailscale status` / the admin console, and that you're using the
+  Tailscale hostname (or its `100.x.x.x` IP), not the Pi's LAN IP — the LAN
+  IP only works when your phone is on the same home Wi-Fi.

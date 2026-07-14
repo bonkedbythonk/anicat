@@ -54,6 +54,10 @@ impl AniListClient {
         self.token.lock().map(|t| t.is_some()).unwrap_or(false)
     }
 
+    pub fn get_token(&self) -> Option<String> {
+        self.token.lock().ok().and_then(|t| t.clone())
+    }
+
     pub fn set_username(&self, username: Option<String>) {
         if let Ok(mut u) = self.username.lock() {
             *u = username;

@@ -33,21 +33,33 @@ const MEDIA_ERROR_NAMES: Record<number, string> = {
   4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
 };
 
+interface SkipSegment {
+  skip_type: string; // "op" | "ed"
+  start: number;
+  end: number;
+}
+
 export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
   const [episodeNumber, setEpisodeNumber] = useState(props.episodeNumber);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [resumeSeconds, setResumeSeconds] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [stalled, setStalled] = useState(false);
+  const [skipSegments, setSkipSegments] = useState<SkipSegment[]>([]);
+  const [activeSkip, setActiveSkip] = useState<SkipSegment | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastProgressReport = useRef(0);
 
   const resolve = useCallback(async (epNum: number) => {
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     setStalled(false);
     setStreamUrl(null);
+    setSkipSegments([]);
+    setActiveSkip(null);
     try {
       const res = await mobileFetch("/mobile-api/playback/resolve", {
         method: "POST",
@@ -69,12 +81,27 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       setResumeSeconds(data.resume_seconds);
     } catch (e) {
       console.error("[VideoPlayerOverlay] resolve failed:", e);
-      setError(e instanceof Error ? e.message : "Failed to load stream");
+      setError("Couldn't load this episode.");
+      setErrorDetail(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.mediaId, props.provider, props.title, props.episodeTitle, props.coverImage, props.totalEpisodes]);
+
+  // AniSkip segments — best-effort, mirrors desktop's mpv skip-intro/outro.
+  // Fetched alongside the stream resolve rather than blocking on it: a
+  // missing or slow AniSkip response should never delay playback starting.
+  useEffect(() => {
+    const params = new URLSearchParams({
+      episode_number: String(episodeNumber),
+      title: props.title || "",
+    });
+    mobileFetch(`/mobile-api/media/${props.mediaId}/skip-times?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : { segments: [] }))
+      .then((data: { segments: SkipSegment[] }) => setSkipSegments(data.segments || []))
+      .catch(() => setSkipSegments([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.mediaId, episodeNumber]);
 
   // The video element can fail silently (no `error` event) if the network
   // request just never resolves — surface a message either way instead of
@@ -96,7 +123,8 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     const mediaError = videoRef.current?.error;
     const name = mediaError ? MEDIA_ERROR_NAMES[mediaError.code] || `code ${mediaError.code}` : "unknown";
     console.error("[VideoPlayerOverlay] <video> error:", name, mediaError?.message, streamUrl);
-    setError(`Playback failed (${name}). URL: ${streamUrl}`);
+    setError("Playback failed.");
+    setErrorDetail(`${name}${mediaError?.message ? `: ${mediaError.message}` : ""} — ${streamUrl}`);
   };
 
   useEffect(() => {
@@ -193,6 +221,14 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       lastProgressReport.current = pos;
       callPlayer("progress", pos, duration);
     }
+    const inSegment = skipSegments.find((s) => pos >= s.start && pos < s.end) || null;
+    setActiveSkip((prev) => (prev?.start === inSegment?.start && prev?.end === inSegment?.end ? prev : inSegment));
+  };
+
+  const handleSkip = () => {
+    if (!activeSkip || !videoRef.current) return;
+    videoRef.current.currentTime = activeSkip.end;
+    setActiveSkip(null);
   };
 
   const handlePause = () => {
@@ -235,16 +271,33 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       <div className="flex-1 flex items-center justify-center relative">
         {loading && <Loader2 className="animate-spin text-white/70" size={36} />}
         {error && !loading && (
-          <div className="flex flex-col items-center gap-2 text-white/80 px-8 text-center">
+          <div className="flex flex-col items-center gap-3 text-white/80 px-8 text-center">
             <AlertCircle size={28} />
             <p className="text-sm">{error}</p>
+            <button
+              onClick={() => resolve(episodeNumber)}
+              className="rounded-full bg-white/15 px-5 py-2 text-sm font-semibold active:scale-95 transition-transform"
+            >
+              Retry
+            </button>
+            {errorDetail && (
+              <details className="mt-1 text-left">
+                <summary className="text-[11px] text-white/40 cursor-pointer">Details</summary>
+                <p className="mt-1 max-w-xs break-all text-[10px] text-white/40">{errorDetail}</p>
+              </details>
+            )}
           </div>
         )}
         {stalled && !error && !loading && (
-          <div className="flex flex-col items-center gap-2 text-white/80 px-8 text-center">
+          <div className="flex flex-col items-center gap-3 text-white/80 px-8 text-center">
             <AlertCircle size={28} />
-            <p className="text-sm">Still loading after 12s — the stream may be unreachable.</p>
-            <p className="break-all text-[10px] text-white/40">{streamUrl}</p>
+            <p className="text-sm">This is taking longer than expected — the stream may be unreachable.</p>
+            <button
+              onClick={() => resolve(episodeNumber)}
+              className="rounded-full bg-white/15 px-5 py-2 text-sm font-semibold active:scale-95 transition-transform"
+            >
+              Retry
+            </button>
           </div>
         )}
         {streamUrl && !error && (
@@ -264,6 +317,14 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
             onCanPlay={() => setStalled(false)}
             onLoadedData={() => setStalled(false)}
           />
+        )}
+        {activeSkip && !error && (
+          <button
+            onClick={handleSkip}
+            className="absolute bottom-4 right-4 rounded-lg bg-black/70 backdrop-blur px-4 py-2.5 text-sm font-semibold text-white border border-white/20 active:scale-95 transition-transform"
+          >
+            Skip {activeSkip.skip_type === "ed" ? "Outro" : "Intro"}
+          </button>
         )}
       </div>
 

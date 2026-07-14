@@ -17,6 +17,10 @@ pub struct HealthResponse {
 
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
+    check_health_impl(state.inner()).await
+}
+
+pub async fn check_health_impl(state: &AppState) -> Result<HealthResponse, String> {
     let token_present = state.anilist_client.has_token();
     let (authenticated, viewer_name, auth_error) = if token_present {
         match state

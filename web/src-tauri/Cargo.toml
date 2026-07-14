@@ -4,6 +4,15 @@ version = "5.4.3"
 license = "GPL-3.0-only"
 edition = "2021"
 
+# Headless self-hosted build (see PI_SETUP.md) — no Tauri window/event loop,
+# just the same AppState/proxy/scraper machinery run standalone. Named with a
+# hyphen (Cargo's default for src/bin/anicat_server.rs would be the
+# underscored file stem) purely so the produced binary reads naturally on
+# the command line and in the systemd unit.
+[[bin]]
+name = "anicat-server"
+path = "src/bin/anicat_server.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -425,6 +425,16 @@ pub async fn preload_episode(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<(), String> {
+    preload_episode_impl(state.inner(), media_id, episode_number, provider, title).await
+}
+
+pub async fn preload_episode_impl(
+    state: &AppState,
+    media_id: i64,
+    episode_number: i64,
+    provider: Option<String>,
+    title: Option<String>,
+) -> Result<(), String> {
     let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
 
     // Already preloaded (or being worked on) for this exact target — skip.
@@ -437,7 +447,7 @@ pub async fn preload_episode(
         }
     }
 
-    let state_inner = state.inner().clone();
+    let state_inner = state.clone();
     tokio::spawn(async move {
         match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title).await {
             Ok((raw_url, headers)) => {
@@ -456,6 +466,127 @@ pub async fn preload_episode(
         }
     });
     Ok(())
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct AniSkipSegment {
+    pub skip_type: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Resolves AniSkip op/ed skip segments for an episode: AniList's `idMal` if
+/// present, else a Jikan title search, then a lookup against AniSkip's API.
+/// Shared by desktop's mpv IPC push (`start_playback`'s background task,
+/// below) and the mobile-api skip-times endpoint — extracted so both push
+/// the same segments rather than reimplementing this resolution twice.
+pub async fn fetch_aniskip_segments(
+    state: &AppState,
+    media_id: i64,
+    episode_number: i64,
+    title: &str,
+) -> Vec<AniSkipSegment> {
+    let mal_id = {
+        let res = super::media::fetch_media_detail_cached(state, media_id, false).await;
+        let mut found = None;
+        if let Ok(r) = res {
+            if let Some(media) = r.media {
+                log::info!("[aniskip] AniList media id={}, id_mal={:?}, title_romaji={:?}, title_english={:?}",
+                    media.id, media.id_mal,
+                    media.title.as_ref().and_then(|t| t.romaji.as_deref()),
+                    media.title.as_ref().and_then(|t| t.english.as_deref()));
+                // 1. Direct idMal from AniList
+                if let Some(id) = media.id_mal {
+                    log::info!("[aniskip] Using MAL ID {} from AniList", id);
+                    found = Some(id);
+                // 2. Fallback: search Jikan by title
+                } else if let Some(search_title) = media.title.as_ref()
+                    .and_then(|t| t.english.as_deref().or(t.romaji.as_deref()))
+                    .filter(|t| !t.is_empty())
+                    .or(if !title.is_empty() { Some(title) } else { None })
+                {
+                    let jikan_url = format!(
+                        "https://api.jikan.moe/v4/anime?q={}&limit=1&sfw",
+                        percent_encode(search_title)
+                    );
+                    log::info!("[aniskip] Jikan searching by title '{}' url={}", search_title, jikan_url);
+                    match state.http_client
+                        .get(&jikan_url)
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            let status = resp.status();
+                            log::info!("[aniskip] Jikan response status: {}", status);
+                            if let Ok(body) = resp.text().await {
+                                if let Ok(jikan_res) = serde_json::from_str::<serde_json::Value>(&body) {
+                                    if let Some(data) = jikan_res["data"].as_array() {
+                                        found = data.first().and_then(|f| f["mal_id"].as_i64());
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => log::warn!("[aniskip] Jikan request error: {}", e),
+                    }
+                }
+            }
+        }
+        found
+    };
+
+    let Some(m_id) = mal_id else { return Vec::new() };
+
+    // Shared client: explicitly rustls — see AppState::new.
+    let client = state.http_client.clone();
+    let url = format!(
+        "https://api.aniskip.com/v2/skip-times/{}/{}?types[]=op&types[]=ed&episodeLength=0",
+        m_id, episode_number
+    );
+    log::info!("[aniskip] Fetching AniSkip times from: {}", url);
+    let resp = match client.get(&url).timeout(std::time::Duration::from_millis(5000)).send().await {
+        Ok(resp) if resp.status().is_success() => resp,
+        Ok(resp) => {
+            log::warn!("[aniskip] non-success status: {}", resp.status());
+            return Vec::new();
+        }
+        Err(e) => {
+            log::warn!("[aniskip] AniSkip request error: {}", e);
+            return Vec::new();
+        }
+    };
+
+    // The API has served both camelCase and snake_case over time; accept either.
+    #[derive(serde::Deserialize)]
+    struct AniSkipResult {
+        #[serde(default)]
+        results: Vec<AniSkipTime>,
+    }
+    #[derive(serde::Deserialize)]
+    struct AniSkipTime {
+        #[serde(rename = "skipType", alias = "skip_type")]
+        skip_type: String,
+        interval: AniSkipInterval,
+    }
+    #[derive(serde::Deserialize)]
+    struct AniSkipInterval {
+        #[serde(rename = "startTime", alias = "start_time")]
+        start_time: f64,
+        #[serde(rename = "endTime", alias = "end_time")]
+        end_time: f64,
+    }
+
+    match resp.json::<AniSkipResult>().await {
+        Ok(aniskip_res) => aniskip_res
+            .results
+            .into_iter()
+            .map(|r| AniSkipSegment { skip_type: r.skip_type, start: r.interval.start_time, end: r.interval.end_time })
+            .collect(),
+        Err(e) => {
+            log::warn!("[aniskip] Failed to parse AniSkip response: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 #[tauri::command]
@@ -508,7 +639,7 @@ pub async fn start_playback(
 
     let resume_seconds = {
         let mut sec = 0;
-        if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, media_id) {
+        if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, 0, media_id) {
             if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
                 sec = resume_position(entry.stop_time, entry.duration);
                 if sec > 0 {
@@ -718,107 +849,15 @@ pub async fn start_playback(
         if state_clone.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
             return;
         }
-        let mal_id = {
-            let res = super::media::fetch_media_detail_cached(&state_clone, media_id, false).await;
-            let mut found = None;
-            if let Ok(r) = res {
-                if let Some(media) = r.media {
-                    log::info!("[aniskip] AniList media id={}, id_mal={:?}, title_romaji={:?}, title_english={:?}",
-                        media.id, media.id_mal,
-                        media.title.as_ref().and_then(|t| t.romaji.as_deref()),
-                        media.title.as_ref().and_then(|t| t.english.as_deref()));
-                    // 1. Direct idMal from AniList
-                    if let Some(id) = media.id_mal {
-                        log::info!("[aniskip] Using MAL ID {} from AniList", id);
-                        found = Some(id);
-                    // 2. Fallback: search Jikan by title
-                    } else if let Some(search_title) = media.title.as_ref()
-                        .and_then(|t| t.english.as_deref().or(t.romaji.as_deref()))
-                        .filter(|t| !t.is_empty())
-                        .or_else(|| if !title_clone.is_empty() { Some(&title_clone as &str) } else { None })
-                    {
-                        let jikan_url = format!(
-                            "https://api.jikan.moe/v4/anime?q={}&limit=1&sfw",
-                            percent_encode(search_title)
-                        );
-                        log::info!("[aniskip] Jikan searching by title '{}' url={}", search_title, jikan_url);
-                        match state_clone.http_client
-                            .get(&jikan_url)
-                            .timeout(std::time::Duration::from_secs(5))
-                            .send()
-                            .await
-                        {
-                            Ok(resp) => {
-                                let status = resp.status();
-                                log::info!("[aniskip] Jikan response status: {}", status);
-                                if let Ok(body) = resp.text().await {
-                                    if let Ok(jikan_res) = serde_json::from_str::<serde_json::Value>(&body) {
-                                        if let Some(data) = jikan_res["data"].as_array() {
-                                            found = data.first().and_then(|f| f["mal_id"].as_i64());
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => log::warn!("[aniskip] Jikan request error: {}", e),
-                        }
-                    }
-                }
-            }
-            found
-        };
-
+        let segments = fetch_aniskip_segments(&state_clone, media_id, episode_number, &title_clone).await;
         let mut bg_skip_times_arg = String::new();
-        if let Some(m_id) = mal_id {
-            // Shared client: explicitly rustls — see AppState::new.
-            let client = state_clone.http_client.clone();
-            let url = format!(
-                "https://api.aniskip.com/v2/skip-times/{}/{}?types[]=op&types[]=ed&episodeLength=0",
-                m_id, episode_number
-            );
-            log::info!("[aniskip] Fetching AniSkip times from: {}", url);
-            match client.get(&url).timeout(std::time::Duration::from_millis(5000)).send().await {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if status.is_success() {
-                        #[derive(serde::Deserialize)]
-                        struct AniSkipResult {
-                            #[serde(default)]
-                            results: Vec<AniSkipTime>,
-                        }
-                        // The API has served both camelCase and snake_case
-                        // over time; accept either.
-                        #[derive(serde::Deserialize)]
-                        struct AniSkipTime {
-                            #[serde(rename = "skipType", alias = "skip_type")]
-                            skip_type: String,
-                            interval: AniSkipInterval,
-                        }
-                        #[derive(serde::Deserialize)]
-                        struct AniSkipInterval {
-                            #[serde(rename = "startTime", alias = "start_time")]
-                            start_time: f64,
-                            #[serde(rename = "endTime", alias = "end_time")]
-                            end_time: f64,
-                        }
-                        if let Ok(aniskip_res) = resp.json::<AniSkipResult>().await {
-                            let mut parts = Vec::new();
-                            for result in aniskip_res.results {
-                                parts.push(format!(
-                                    "{},{},{}",
-                                    result.skip_type,
-                                    result.interval.start_time.floor(),
-                                    result.interval.end_time.floor()
-                                ));
-                            }
-                            if !parts.is_empty() {
-                                bg_skip_times_arg = parts.join(";");
-                                log::info!("[aniskip] Found skip times in background: {}", bg_skip_times_arg);
-                            }
-                        }
-                    }
-                }
-                Err(e) => log::warn!("[aniskip] AniSkip request error: {}", e),
-            }
+        if !segments.is_empty() {
+            bg_skip_times_arg = segments
+                .iter()
+                .map(|s| format!("{},{},{}", s.skip_type, s.start.floor(), s.end.floor()))
+                .collect::<Vec<_>>()
+                .join(";");
+            log::info!("[aniskip] Found skip times in background: {}", bg_skip_times_arg);
         }
 
         if !bg_skip_times_arg.is_empty() {
@@ -1135,7 +1174,7 @@ pub async fn start_playback(
                 }
             };
             if last_pos > 0 && cur_media > 0 {
-                let _ = record_playback_progress(&state, cur_media, cur_ep, last_pos, last_dur, cur_total).await;
+                let _ = record_playback_progress(&state, 0, cur_media, cur_ep, last_pos, last_dur, cur_total).await;
             }
         }
     }
@@ -1260,6 +1299,7 @@ pub async fn start_playback(
                     if last_pos > 0 {
                         let _ = crate::commands::playback::record_playback_progress(
                             &app_state_clone,
+                            0,
                             monitor_media_id,
                             monitor_episode,
                             last_pos,
@@ -1297,6 +1337,7 @@ pub async fn start_playback(
 #[tauri::command]
 pub async fn record_playback_progress(
     state: &AppState,
+    user_id: i64,
     media_id: i64,
     episode_number: i64,
     stop_time: i64,
@@ -1323,6 +1364,7 @@ pub async fn record_playback_progress(
     let db = state.open_db()?;
     let _ = crate::registry::service::record_watched_episode(
         &db,
+        user_id,
         media_id,
         episode_number,
         stop_time,
@@ -1427,7 +1469,7 @@ pub async fn stop_playback(
         let guard = state.current_playback.lock().await;
         guard.as_ref().map(|p| p.total_episodes).unwrap_or(0)
     };
-    record_playback_progress(&state, media_id, episode_number, stop_time, duration, total_episodes).await?;
+    record_playback_progress(&state, 0, media_id, episode_number, stop_time, duration, total_episodes).await?;
 
     Ok(())
 }
@@ -1439,16 +1481,31 @@ pub async fn get_watched_episodes(
     state: State<'_, AppState>,
     media_id: i64,
 ) -> Result<Vec<WatchEntry>, String> {
+    get_watched_episodes_impl(state.inner(), 0, media_id).await
+}
+
+pub async fn get_watched_episodes_impl(
+    state: &AppState,
+    user_id: i64,
+    media_id: i64,
+) -> Result<Vec<WatchEntry>, String> {
     let db = state.open_db()?;
-    crate::registry::service::get_watched_episodes(&db, media_id)
+    crate::registry::service::get_watched_episodes(&db, user_id, media_id)
 }
 
 #[tauri::command]
 pub async fn get_all_last_watched(
     state: State<'_, AppState>,
 ) -> Result<HashMap<i64, String>, String> {
+    get_all_last_watched_impl(state.inner(), 0).await
+}
+
+pub async fn get_all_last_watched_impl(
+    state: &AppState,
+    user_id: i64,
+) -> Result<HashMap<i64, String>, String> {
     let db = state.open_db()?;
-    crate::registry::service::get_all_last_watched(&db)
+    crate::registry::service::get_all_last_watched(&db, user_id)
 }
 
 // Separate from CURRENT_MPV: a trailer is a standalone, untracked playback

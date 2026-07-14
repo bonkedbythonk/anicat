@@ -24,6 +24,20 @@ pub async fn search_media(
     year: Option<i64>,
     min_score: Option<i64>,
 ) -> Result<Value, String> {
+    search_media_impl(state.inner(), query, page, media_type, status, genre, year, min_score).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn search_media_impl(
+    state: &AppState,
+    query: String,
+    page: Option<i64>,
+    media_type: Option<String>,
+    status: Option<String>,
+    genre: Option<String>,
+    year: Option<i64>,
+    min_score: Option<i64>,
+) -> Result<Value, String> {
     log::info!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
     let _has_token = state.anilist_client.has_token();
     let media_type = media_type.unwrap_or_else(|| "ANIME".to_string());
@@ -79,6 +93,14 @@ pub async fn get_media_detail(
     media_id: i64,
     media_type: Option<String>,
 ) -> Result<Value, String> {
+    get_media_detail_impl(state.inner(), media_id, media_type).await
+}
+
+pub async fn get_media_detail_impl(
+    state: &AppState,
+    media_id: i64,
+    media_type: Option<String>,
+) -> Result<Value, String> {
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(media_id));
     vars.insert("type".to_string(), serde_json::json!(media_type.unwrap_or_else(|| "ANIME".to_string())));
@@ -94,6 +116,14 @@ pub async fn get_media_detail(
 #[tauri::command]
 pub async fn get_trending(
     state: State<'_, AppState>,
+    page: Option<i64>,
+    media_type: Option<String>,
+) -> Result<Value, String> {
+    get_trending_impl(state.inner(), page, media_type).await
+}
+
+pub async fn get_trending_impl(
+    state: &AppState,
     page: Option<i64>,
     media_type: Option<String>,
 ) -> Result<Value, String> {
@@ -120,6 +150,16 @@ pub async fn get_trending(
 #[tauri::command]
 pub async fn get_seasonal(
     state: State<'_, AppState>,
+    season: Option<String>,
+    season_year: Option<i64>,
+    page: Option<i64>,
+    media_type: Option<String>,
+) -> Result<Value, String> {
+    get_seasonal_impl(state.inner(), season, season_year, page, media_type).await
+}
+
+pub async fn get_seasonal_impl(
+    state: &AppState,
     season: Option<String>,
     season_year: Option<i64>,
     page: Option<i64>,
@@ -155,6 +195,14 @@ pub async fn get_upcoming(
     page: Option<i64>,
     media_type: Option<String>,
 ) -> Result<Value, String> {
+    get_upcoming_impl(state.inner(), page, media_type).await
+}
+
+pub async fn get_upcoming_impl(
+    state: &AppState,
+    page: Option<i64>,
+    media_type: Option<String>,
+) -> Result<Value, String> {
     let mtype = media_type.unwrap_or_else(|| "ANIME".to_string());
     let key = AniListCache::key("get_upcoming", &[("page", &page.unwrap_or(1).to_string()), ("type", &mtype)]);
     if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
@@ -180,6 +228,13 @@ pub async fn get_media_characters(
     state: State<'_, AppState>,
     media_id: i64,
 ) -> Result<Value, String> {
+    get_media_characters_impl(state.inner(), media_id).await
+}
+
+pub async fn get_media_characters_impl(
+    state: &AppState,
+    media_id: i64,
+) -> Result<Value, String> {
     let key = AniListCache::key("get_media_characters", &[("id", &media_id.to_string())]);
     if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
 
@@ -201,6 +256,12 @@ pub async fn get_media_characters(
 #[tauri::command]
 pub async fn get_smart_playlist(
     state: State<'_, AppState>,
+) -> Result<Value, String> {
+    get_smart_playlist_impl(state.inner()).await
+}
+
+pub async fn get_smart_playlist_impl(
+    state: &AppState,
 ) -> Result<Value, String> {
     let key = "get_smart_playlist|action".to_string();
     if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
@@ -229,6 +290,25 @@ pub async fn get_episodes(
     title: Option<String>,
     episode_count: Option<i64>,
 ) -> Result<Value, String> {
+    use tauri::Emitter;
+    let notify = |message: &str| {
+        let _ = app.emit("show_notification", serde_json::json!({ "message": message }));
+    };
+    get_episodes_impl(state.inner(), media_id, provider, title, episode_count, &notify).await
+}
+
+/// `notify` surfaces non-fatal scrape hiccups (auth-error toast, "loaded from
+/// fallback provider" notice) to whatever's watching — the desktop wrapper
+/// above emits a Tauri event for the webview to show as a toast; the
+/// headless mobile-api route just logs, since there's no toast surface there.
+pub async fn get_episodes_impl(
+    state: &AppState,
+    media_id: i64,
+    provider: Option<String>,
+    title: Option<String>,
+    episode_count: Option<i64>,
+    notify: &(dyn Fn(&str) + Send + Sync),
+) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
@@ -243,7 +323,7 @@ pub async fn get_episodes(
     if provider_name == "nyaa" && !is_manga {
         let count = match episode_count.filter(|&n| n > 0) {
             Some(n) => Some(n),
-            None => crate::torrent::gather_media_info(&state, media_id, title.clone()).await.1,
+            None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.1,
         };
         let episodes: Vec<crate::scraper::client::Episode> = (1..=count.unwrap_or(0))
             .map(|n| crate::scraper::client::Episode {
@@ -278,14 +358,13 @@ pub async fn get_episodes(
             Err(e) => {
                 log::error!("Scraper auto-search error for media_id={}, provider={}, title={}: {}", media_id, slug_provider, title.as_deref().unwrap_or(""), e);
                 let _ = registry::service::clear_provider_cache(&db, media_id);
-                use tauri::Emitter;
-                let _ = app.emit("show_notification", serde_json::json!({ "message": format!("Failed to load episodes: {}", e) }));
+                notify(&format!("Failed to load episodes: {}", e));
                 vec![]
             }
         }
     } else {
         if let Some(slug) = resolve_and_save_provider_slug(
-            &state,
+            state,
             media_id,
             &provider_name,
             is_manga,
@@ -325,13 +404,13 @@ pub async fn get_episodes(
         if let Some(expected) = episode_count.filter(|&n| n > 0) {
             let got = episodes.len() as i64;
             let suspect = got > 0 && (got * 2 <= expected || got >= expected * 2);
-            if suspect && media_is_finished(&state, media_id).await {
+            if suspect && media_is_finished(state, media_id).await {
                 log::warn!(
                     "get_episodes: saved '{}' slug '{}' has {} episodes but AniList expects {}; re-resolving",
                     slug_provider, slug.as_deref().unwrap_or(""), got, expected
                 );
                 let _ = registry::service::clear_provider_slug(&db, media_id, &slug_provider);
-                match resolve_and_save_provider_slug(&state, media_id, &slug_provider, false, None).await {
+                match resolve_and_save_provider_slug(state, media_id, &slug_provider, false, None).await {
                     Ok(Some(new_slug)) if Some(&new_slug) != slug.as_ref() => {
                         if let Ok(info) = state.scraper_manager.get_anime(&new_slug, &slug_provider).await {
                             if !info.episodes.is_empty() {
@@ -379,14 +458,11 @@ pub async fn get_episodes(
             if has_fallback {
                 log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
                 let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
-                    .or(resolve_and_save_provider_slug(&state, media_id, &fallback, false, None).await.ok().flatten());
+                    .or(resolve_and_save_provider_slug(state, media_id, &fallback, false, None).await.ok().flatten());
                 if let Some(slug) = fb_slug {
                     match state.scraper_manager.get_anime(&slug, &fallback).await {
                         Ok(info) if !info.episodes.is_empty() => {
-                            use tauri::Emitter;
-                            let _ = app.emit("show_notification", serde_json::json!({
-                                "message": format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback))
-                            }));
+                            notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
                             episodes = info.episodes;
                         }
                         Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
@@ -424,6 +500,15 @@ pub async fn resolve_stream(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<Value, String> {
+    resolve_stream_impl(state.inner(), media_id, episode_number, provider).await
+}
+
+pub async fn resolve_stream_impl(
+    state: &AppState,
+    media_id: i64,
+    episode_number: i32,
+    provider: Option<String>,
+) -> Result<Value, String> {
     let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
@@ -432,7 +517,7 @@ pub async fn resolve_stream(
 
     if provider_name == "nyaa" {
         let (url, _) = super::playback::resolve_stream_for_provider(
-            &state, media_id, episode_number as i64, "nyaa", &None, None,
+            state, media_id, episode_number as i64, "nyaa", &None, None,
         )
         .await?;
         return Ok(serde_json::json!({ "streams": [{
@@ -479,6 +564,14 @@ pub async fn search_provider(
     query: String,
     provider: Option<String>,
 ) -> Result<Vec<crate::scraper::AnimeRef>, String> {
+    search_provider_impl(state.inner(), query, provider).await
+}
+
+pub async fn search_provider_impl(
+    state: &AppState,
+    query: String,
+    provider: Option<String>,
+) -> Result<Vec<crate::scraper::AnimeRef>, String> {
     let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
     let fallback = {
         let cfg = state.config.read().await;
@@ -512,6 +605,15 @@ pub async fn map_provider_slug(
     provider: String,
     slug: String,
 ) -> Result<(), String> {
+    map_provider_slug_impl(state.inner(), media_id, provider, slug).await
+}
+
+pub async fn map_provider_slug_impl(
+    state: &AppState,
+    media_id: i64,
+    provider: String,
+    slug: String,
+) -> Result<(), String> {
     let db = state.open_db()?;
     registry::service::set_provider_slug(&db, media_id, &provider, &slug)
 }
@@ -519,6 +621,13 @@ pub async fn map_provider_slug(
 #[tauri::command]
 pub async fn clear_provider_cache(
     state: State<'_, AppState>,
+    media_id: i64,
+) -> Result<(), String> {
+    clear_provider_cache_impl(state.inner(), media_id).await
+}
+
+pub async fn clear_provider_cache_impl(
+    state: &AppState,
     media_id: i64,
 ) -> Result<(), String> {
     let db = state.open_db()?;
@@ -590,6 +699,14 @@ pub async fn get_chapter_pages(
     media_id: i64,
     chapter_number: String,
 ) -> Result<Value, String> {
+    get_chapter_pages_impl(state.inner(), media_id, chapter_number).await
+}
+
+pub async fn get_chapter_pages_impl(
+    state: &AppState,
+    media_id: i64,
+    chapter_number: String,
+) -> Result<Value, String> {
     let provider_name = "mangakatana".to_string();
 
     let db = state.open_db().map_err(|e| e.to_string())?;
@@ -610,13 +727,35 @@ pub async fn get_chapter_pages(
 pub async fn get_library(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::registry::LibraryEntry>, String> {
+    get_library_impl(state.inner(), 0).await
+}
+
+pub async fn get_library_impl(
+    state: &AppState,
+    user_id: i64,
+) -> Result<Vec<crate::registry::LibraryEntry>, String> {
     let db = state.open_db()?;
-    registry::service::get_all_library(&db)
+    registry::service::get_all_library(&db, user_id)
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn add_to_library(
     state: State<'_, AppState>,
+    media_id: i64,
+    media_type: String,
+    status: Option<String>,
+    score: Option<f64>,
+    progress: Option<i32>,
+    notes: Option<String>,
+) -> Result<(), String> {
+    add_to_library_impl(state.inner(), 0, media_id, media_type, status, score, progress, notes).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn add_to_library_impl(
+    state: &AppState,
+    user_id: i64,
     media_id: i64,
     media_type: String,
     status: Option<String>,
@@ -627,6 +766,7 @@ pub async fn add_to_library(
     let db = state.open_db()?;
     registry::service::upsert_library_entry(
         &db,
+        user_id,
         media_id,
         &media_type,
         status.as_deref(),
@@ -641,8 +781,16 @@ pub async fn remove_from_library(
     state: State<'_, AppState>,
     media_id: i64,
 ) -> Result<(), String> {
+    remove_from_library_impl(state.inner(), 0, media_id).await
+}
+
+pub async fn remove_from_library_impl(
+    state: &AppState,
+    user_id: i64,
+    media_id: i64,
+) -> Result<(), String> {
     let db = state.open_db()?;
-    registry::service::delete_library_entry(&db, media_id)
+    registry::service::delete_library_entry(&db, user_id, media_id)
 }
 
 fn notify_download(app_handle: &tauri::AppHandle, message: &str) {

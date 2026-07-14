@@ -1,16 +1,39 @@
 //! JSON HTTP surface for the LAN-facing mobile PWA.
 //!
-//! Every handler here is a thin wrapper: pull `AppState` out of the same
-//! `AppHandle` the proxy already carries (`app_handle.state::<AppState>()` —
-//! the same pattern `proxy/server.rs`'s `/player/*` handlers already use to
-//! call into Tauri commands from outside Tauri's own IPC dispatch), then call
-//! the existing `#[tauri::command]` function directly. No business logic is
-//! duplicated; this module only adapts HTTP <-> the same command functions
-//! the desktop webview calls via `invoke()`.
+//! Every handler here is a thin wrapper: it calls the same plain
+//! `X_impl(state: &AppState, ...)` function the corresponding
+//! `#[tauri::command]` wrapper delegates to for the desktop IPC path (see
+//! e.g. `commands::config::get_config`/`get_config_impl`). No business logic
+//! is duplicated; this module only adapts HTTP <-> the same underlying
+//! implementation the desktop webview reaches via `invoke()`. Unlike the
+//! desktop wrappers, these handlers never need a live `tauri::AppHandle` —
+//! `ProxyState.app_state` is a plain, Tauri-free `AppState` clone, which is
+//! what makes this surface reachable from the headless server binary too.
 //!
 //! Deliberately excluded: the 4 download-queue commands (out of scope per
 //! the user's request), and anything that needs desktop OS integration
 //! (OAuth browser launch, log viewer, auto-update, app restart).
+//!
+//! **Multi-user scoping**: every handler that touches AniList (client,
+//! cache, or the DB's user_id-columned watch-history/library tables) calls
+//! `ProxyState::scoped_for` first and uses the result instead of
+//! `state.app_state` directly. This isn't limited to obviously-personal
+//! endpoints like "my list" — AniList embeds the authenticated viewer's own
+//! list status (`mediaListEntry`/`user_status`) into otherwise-generic
+//! queries too (trending, seasonal, search, smart-playlist), and
+//! `cache.rs`'s `update_user_list_progress` rewrites exactly those embedded
+//! fields in cached responses. Leaving any of those unscoped would let one
+//! user's progress badges bleed into another's browsing. Provider-slug
+//! mapping and scraper calls are the one category that's genuinely global (a
+//! slug maps an AniList id to a scraper-site id — the same fact regardless
+//! of who's asking), so those stay unscoped.
+//!
+//! In single-user mode `AuthedUser(0)` (set by `mobile_auth::require_mobile_auth`
+//! on every successful request) makes `scoped_for` a no-op clone of the real
+//! global `AppState` — see `AppState::scoped_for_user`'s doc comment. The
+//! `/player/*` handlers in `server.rs` use the same `scoped_for` method,
+//! since mobile's `<video>` element reports progress through those routes,
+//! not through this module.
 
 use axum::{
     extract::{Path, Query, State},
@@ -21,10 +44,9 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use tauri::Manager;
 
 use super::server::ProxyState;
-use crate::state::AppState;
+use super::session::AuthedUser;
 
 fn ok_or_500<T: serde::Serialize>(r: Result<T, String>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     r.map(|v| Json(serde_json::to_value(v).unwrap_or(Value::Null)))
@@ -41,6 +63,7 @@ pub fn routes() -> Router<ProxyState> {
         .route("/user/favourite", post(toggle_favourite))
         .route("/user/notifications", get(get_notifications))
         .route("/user/notifications/read", post(mark_notifications_read))
+        .route("/user/connect-anilist", post(connect_anilist))
         .route("/schedule", get(get_airing_schedule))
         .route("/media/search", get(search_media))
         .route("/media/trending", get(get_trending))
@@ -51,6 +74,7 @@ pub fn routes() -> Router<ProxyState> {
         .route("/media/{id}/characters", get(get_media_characters))
         .route("/media/{id}/episodes", get(get_episodes))
         .route("/media/{id}/streams", get(resolve_stream))
+        .route("/media/{id}/skip-times", get(get_skip_times))
         .route("/media/{id}/chapters/{chapter_number}", get(get_chapter_pages))
         .route("/provider/search", get(search_provider))
         .route("/provider/map-slug", post(map_provider_slug))
@@ -61,25 +85,22 @@ pub fn routes() -> Router<ProxyState> {
         .route("/playback/last-watched", get(get_all_last_watched))
         .route("/playback/preload", post(preload_episode))
         .route("/playback/resolve", post(resolve_playback))
+        .route("/session/whoami", get(whoami))
         .route("/health", get(check_health))
         .route("/version", get(get_app_version))
 }
 
-fn state_of(state: &ProxyState) -> tauri::State<'_, AppState> {
-    state.app_handle.state::<AppState>()
-}
-
-// ── config ──────────────────────────────────────────────────
+// ── config (global — not per-user; mirrors the single desktop config.toml) ─
 
 async fn get_config(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::config::get_config(state_of(&state)).await)
+    ok_or_500(crate::commands::config::get_config_impl(&state.app_state).await)
 }
 
 async fn update_config(
     State(state): State<ProxyState>,
     Json(updates): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::config::update_config(state_of(&state), updates).await.map(|_| Value::Null))
+    ok_or_500(crate::commands::config::update_config_impl(&state.app_state, updates).await.map(|_| Value::Null))
 }
 
 // ── user ────────────────────────────────────────────────────
@@ -93,13 +114,19 @@ struct UserListQuery {
 
 async fn get_user_list(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<UserListQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::get_user_list(state_of(&state), q.user_name, q.status, q.media_type).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::get_user_list_impl(&scoped, q.user_name, q.status, q.media_type).await)
 }
 
-async fn get_user_profile(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::get_user_profile(state_of(&state)).await)
+async fn get_user_profile(
+    State(state): State<ProxyState>,
+    auth: AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::get_user_profile_impl(&scoped).await)
 }
 
 #[derive(Deserialize)]
@@ -110,16 +137,20 @@ struct ListEntryBody {
 
 async fn save_media_list_entry(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Json(body): Json<ListEntryBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::save_media_list_entry(state_of(&state), body.media_id, body.updates).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::save_media_list_entry_impl(&scoped, body.media_id, body.updates).await)
 }
 
 async fn delete_media_list_entry(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Path(entry_id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::delete_media_list_entry(state_of(&state), entry_id).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::delete_media_list_entry_impl(&scoped, entry_id).await)
 }
 
 #[derive(Deserialize)]
@@ -130,9 +161,11 @@ struct FavouriteBody {
 
 async fn toggle_favourite(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Json(body): Json<FavouriteBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::toggle_favourite(state_of(&state), body.media_id, body.is_manga).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::toggle_favourite_impl(&scoped, body.media_id, body.is_manga).await)
 }
 
 #[derive(Deserialize)]
@@ -142,13 +175,69 @@ struct PageQuery {
 
 async fn get_notifications(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<PageQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::get_notifications(state_of(&state), q.page).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::get_notifications_impl(&scoped, q.page).await)
 }
 
-async fn mark_notifications_read(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::user::mark_notifications_read(state_of(&state)).await)
+async fn mark_notifications_read(
+    State(state): State<ProxyState>,
+    auth: AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::user::mark_notifications_read_impl(&scoped).await)
+}
+
+#[derive(Deserialize)]
+struct ConnectAniListBody {
+    token: String,
+}
+
+/// Each registered friend connects their OWN AniList account once, from
+/// their own phone browser (AniList's implicit-grant authorize URL, opened
+/// client-side — see `web/src/mobile/ConnectAniList.tsx`), then POSTs the
+/// resulting token here. Tied to the caller's own session, so there's no way
+/// to set another user's token. Desktop's separate `commands::auth`
+/// (browser + `open::that()`) flow is untouched.
+async fn connect_anilist(
+    State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
+    Json(body): Json<ConnectAniListBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if user_id == 0 {
+        // Single-user mode: this is just the desktop's own token — reuse
+        // the existing config-based path instead of the users table.
+        return ok_or_500(
+            crate::commands::config::update_config_impl(
+                &state.app_state,
+                serde_json::json!({ "api": { "token": body.token } }),
+            )
+            .await
+            .map(|_| Value::Null),
+        );
+    }
+
+    let db = state.app_state.open_db().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+    // Resolve the username with a throwaway client scoped to the freshly
+    // provided token — the same pattern get_user_list_impl uses to resolve
+    // its own username, just against a client that isn't cached anywhere.
+    let probe = crate::anilist::AniListClient::new(state.app_state.http_client.clone(), Some(body.token.clone()));
+    let username: Option<String> = probe
+        .execute::<Value>(crate::anilist::queries::USER_PROFILE_QUERY, std::collections::HashMap::new())
+        .await
+        .ok()
+        .and_then(|v| v.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()).map(|s| s.to_string()));
+
+    crate::registry::service::set_user_anilist_token(&db, user_id, Some(&body.token), username.as_deref())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+
+    // Drop the cached UserAniList entry (if any) so the next request picks
+    // up the new token/username immediately instead of a stale prior one.
+    state.app_state.user_anilist.lock().await.remove(&user_id);
+
+    Ok(Json(serde_json::json!({ "username": username })))
 }
 
 #[derive(Deserialize)]
@@ -162,13 +251,15 @@ struct ScheduleQuery {
 
 async fn get_airing_schedule(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<ScheduleQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let media_ids = q.media_ids.as_deref().map(|s| {
         s.split(',').filter_map(|p| p.trim().parse::<i64>().ok()).collect::<Vec<_>>()
     });
+    let scoped = state.scoped_for(auth).await;
     ok_or_500(
-        crate::commands::user::get_airing_schedule(state_of(&state), q.days_back, q.days_ahead, media_ids, q.page, q.per_page)
+        crate::commands::user::get_airing_schedule_impl(&scoped, q.days_back, q.days_ahead, media_ids, q.page, q.per_page)
             .await,
     )
 }
@@ -189,11 +280,13 @@ struct SearchQuery {
 
 async fn search_media(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let scoped = state.scoped_for(auth).await;
     ok_or_500(
-        crate::commands::media::search_media(
-            state_of(&state), q.query, q.page, q.media_type, q.status, q.genre, q.year, q.min_score,
+        crate::commands::media::search_media_impl(
+            &scoped, q.query, q.page, q.media_type, q.status, q.genre, q.year, q.min_score,
         )
         .await,
     )
@@ -206,10 +299,12 @@ struct MediaTypeQuery {
 
 async fn get_media_detail(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Path(id): Path<i64>,
     Query(q): Query<MediaTypeQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_media_detail(state_of(&state), id, q.media_type).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::media::get_media_detail_impl(&scoped, id, q.media_type).await)
 }
 
 #[derive(Deserialize)]
@@ -220,9 +315,11 @@ struct PagedTypeQuery {
 
 async fn get_trending(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<PagedTypeQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_trending(state_of(&state), q.page, q.media_type).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::media::get_trending_impl(&scoped, q.page, q.media_type).await)
 }
 
 #[derive(Deserialize)]
@@ -235,27 +332,37 @@ struct SeasonalQuery {
 
 async fn get_seasonal(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<SeasonalQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_seasonal(state_of(&state), q.season, q.season_year, q.page, q.media_type).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::media::get_seasonal_impl(&scoped, q.season, q.season_year, q.page, q.media_type).await)
 }
 
 async fn get_upcoming(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Query(q): Query<PagedTypeQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_upcoming(state_of(&state), q.page, q.media_type).await)
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::media::get_upcoming_impl(&scoped, q.page, q.media_type).await)
 }
 
 async fn get_media_characters(
     State(state): State<ProxyState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_media_characters(state_of(&state), id).await)
+    // Character bios carry no per-viewer data — safe to leave on the shared
+    // global cache/client rather than scoping.
+    ok_or_500(crate::commands::media::get_media_characters_impl(&state.app_state, id).await)
 }
 
-async fn get_smart_playlist(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_smart_playlist(state_of(&state)).await)
+async fn get_smart_playlist(
+    State(state): State<ProxyState>,
+    auth: AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let scoped = state.scoped_for(auth).await;
+    ok_or_500(crate::commands::media::get_smart_playlist_impl(&scoped).await)
 }
 
 #[derive(Deserialize)]
@@ -267,11 +374,15 @@ struct EpisodesQuery {
 
 async fn get_episodes(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Path(id): Path<i64>,
     Query(q): Query<EpisodesQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // No webview to push a toast to headlessly — just log it server-side.
+    let notify = |message: &str| log::info!("[mobile-api get_episodes] {}", message);
+    let scoped = state.scoped_for(auth).await;
     ok_or_500(
-        crate::commands::media::get_episodes(state.app_handle.clone(), state_of(&state), id, q.provider, q.title, q.episode_count)
+        crate::commands::media::get_episodes_impl(&scoped, id, q.provider, q.title, q.episode_count, &notify)
             .await,
     )
 }
@@ -280,7 +391,8 @@ async fn get_chapter_pages(
     State(state): State<ProxyState>,
     Path((id, chapter_number)): Path<(i64, String)>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_chapter_pages(state_of(&state), id, chapter_number).await)
+    // Scraper-only, no AniList/viewer data involved — global is correct.
+    ok_or_500(crate::commands::media::get_chapter_pages_impl(&state.app_state, id, chapter_number).await)
 }
 
 #[derive(Deserialize)]
@@ -297,7 +409,28 @@ async fn resolve_stream(
     Path(id): Path<i64>,
     Query(q): Query<ResolveStreamQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::resolve_stream(state_of(&state), id, q.episode_number, q.provider).await)
+    // Stream server list is scraper-derived, not per-viewer.
+    ok_or_500(crate::commands::media::resolve_stream_impl(&state.app_state, id, q.episode_number, q.provider).await)
+}
+
+#[derive(Deserialize)]
+struct SkipTimesQuery {
+    episode_number: i64,
+    #[serde(default)]
+    title: String,
+}
+
+/// Desktop gets AniSkip segments pushed into mpv over IPC; the mobile player
+/// has no mpv to push into, so it fetches the same segments directly and
+/// renders its own skip button. Never fails hard — an empty list just means
+/// no skip button shows, same as AniSkip having no data for desktop.
+async fn get_skip_times(
+    State(state): State<ProxyState>,
+    Path(id): Path<i64>,
+    Query(q): Query<SkipTimesQuery>,
+) -> Json<Value> {
+    let segments = crate::commands::playback::fetch_aniskip_segments(&state.app_state, id, q.episode_number, &q.title).await;
+    Json(serde_json::json!({ "segments": segments }))
 }
 
 #[derive(Deserialize)]
@@ -310,7 +443,7 @@ async fn search_provider(
     State(state): State<ProxyState>,
     Query(q): Query<ProviderSearchQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::search_provider(state_of(&state), q.query, q.provider).await)
+    ok_or_500(crate::commands::media::search_provider_impl(&state.app_state, q.query, q.provider).await)
 }
 
 #[derive(Deserialize)]
@@ -325,7 +458,7 @@ async fn map_provider_slug(
     Json(body): Json<MapSlugBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     ok_or_500(
-        crate::commands::media::map_provider_slug(state_of(&state), body.media_id, body.provider, body.slug)
+        crate::commands::media::map_provider_slug_impl(&state.app_state, body.media_id, body.provider, body.slug)
             .await
             .map(|_| Value::Null),
     )
@@ -340,11 +473,14 @@ async fn clear_provider_cache(
     State(state): State<ProxyState>,
     Json(body): Json<MediaIdBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::clear_provider_cache(state_of(&state), body.media_id).await.map(|_| Value::Null))
+    ok_or_500(crate::commands::media::clear_provider_cache_impl(&state.app_state, body.media_id).await.map(|_| Value::Null))
 }
 
-async fn get_library(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::get_library(state_of(&state)).await)
+async fn get_library(
+    State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::media::get_library_impl(&state.app_state, user_id).await)
 }
 
 #[derive(Deserialize)]
@@ -359,11 +495,12 @@ struct AddLibraryBody {
 
 async fn add_to_library(
     State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
     Json(body): Json<AddLibraryBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     ok_or_500(
-        crate::commands::media::add_to_library(
-            state_of(&state), body.media_id, body.media_type, body.status, body.score, body.progress, body.notes,
+        crate::commands::media::add_to_library_impl(
+            &state.app_state, user_id, body.media_id, body.media_type, body.status, body.score, body.progress, body.notes,
         )
         .await
         .map(|_| Value::Null),
@@ -372,22 +509,27 @@ async fn add_to_library(
 
 async fn remove_from_library(
     State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
     Path(media_id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::media::remove_from_library(state_of(&state), media_id).await.map(|_| Value::Null))
+    ok_or_500(crate::commands::media::remove_from_library_impl(&state.app_state, user_id, media_id).await.map(|_| Value::Null))
 }
 
 // ── playback (read-only + mobile resolve) ──────────────────
 
 async fn get_watched_episodes(
     State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
     Path(media_id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::playback::get_watched_episodes(state_of(&state), media_id).await)
+    ok_or_500(crate::commands::playback::get_watched_episodes_impl(&state.app_state, user_id, media_id).await)
 }
 
-async fn get_all_last_watched(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::playback::get_all_last_watched(state_of(&state)).await)
+async fn get_all_last_watched(
+    State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::playback::get_all_last_watched_impl(&state.app_state, user_id).await)
 }
 
 #[derive(Deserialize)]
@@ -400,10 +542,12 @@ struct PreloadBody {
 
 async fn preload_episode(
     State(state): State<ProxyState>,
+    auth: AuthedUser,
     Json(body): Json<PreloadBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let scoped = state.scoped_for(auth).await;
     ok_or_500(
-        crate::commands::playback::preload_episode(state_of(&state), body.media_id, body.episode_number, body.provider, body.title)
+        crate::commands::playback::preload_episode_impl(&scoped, body.media_id, body.episode_number, body.provider, body.title)
             .await
             .map(|_| Value::Null),
     )
@@ -425,16 +569,16 @@ struct ResolvePlaybackBody {
 /// relative URL a plain `<video>` tag can play directly. It still updates
 /// `current_playback` so the existing `/player/progress` etc. handlers (which
 /// the phone's `<video>` element calls the same way the mpv Lua script does)
-/// have a session to update.
-///
-/// Known limitation, accepted for personal/home use: `current_playback` is a
-/// single process-global, not per-session — simultaneous desktop mpv and
-/// phone playback would clobber each other's progress state.
+/// have a session to update — those handlers read/write the SAME per-user
+/// scoped `current_playback` this sets, since `AuthedUser` (populated by
+/// whichever auth middleware ran) resolves to the same user_id there too.
 async fn resolve_playback(
     State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
     Json(body): Json<ResolvePlaybackBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let app_state = &state.app_state;
+    let app_state = state.scoped_for(AuthedUser(user_id)).await;
+    let app_state = &app_state;
     let provider_name = body.provider.clone().unwrap_or_else(|| "mkissa".to_string());
     let fallback_provider = {
         let cfg = app_state.config.read().await;
@@ -506,7 +650,7 @@ async fn resolve_playback(
     let resume_seconds = {
         let mut sec = 0;
         if let Ok(db) = app_state.open_db() {
-            if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, body.media_id) {
+            if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, user_id, body.media_id) {
                 if let Some(entry) = entries.iter().find(|e| e.episode_number == body.episode_number) {
                     sec = crate::commands::playback::resume_position(entry.stop_time, entry.duration);
                 }
@@ -556,10 +700,68 @@ async fn resolve_playback(
     })))
 }
 
+// ── session (Stage 2: multi-user) ──────────────────────────
+
+#[derive(serde::Serialize)]
+struct WhoamiResponse {
+    user_id: i64,
+    display_name: String,
+    anilist_connected: bool,
+    anilist_username: Option<String>,
+}
+
+/// Tells the PWA who's logged in and whether they still need the
+/// "connect AniList" onboarding step. In single-user mode (`user_id == 0`)
+/// this reflects the desktop's own config-based token instead of a users
+/// table row, so the same screen works for both modes.
+async fn whoami(
+    State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
+) -> Result<Json<WhoamiResponse>, (StatusCode, Json<Value>)> {
+    if user_id == 0 {
+        let cfg = state.app_state.config.read().await;
+        return Ok(Json(WhoamiResponse {
+            user_id: 0,
+            display_name: cfg.api.anilist_username.clone().unwrap_or_else(|| "You".to_string()),
+            anilist_connected: cfg.api.anilist_token.is_some(),
+            anilist_username: cfg.api.anilist_username.clone(),
+        }));
+    }
+    let db = state.app_state.open_db().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+    let user = crate::registry::service::get_user_by_id(&db, user_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?
+        .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "user not found" }))))?;
+    Ok(Json(WhoamiResponse {
+        user_id: user.id,
+        display_name: user.display_name,
+        anilist_connected: user.anilist_token.is_some(),
+        anilist_username: user.anilist_username,
+    }))
+}
+
+#[derive(serde::Serialize)]
+pub struct UserNameEntry {
+    display_name: String,
+}
+
+/// Unauthenticated on purpose, same rationale as `/mobile-api/lan-info` —
+/// registered directly in `server.rs` alongside `/mobile-api/auth` and
+/// `/mobile-api/session/login` rather than through this module's `routes()`,
+/// which is entirely behind the auth gate. A client needs this to populate
+/// the login screen's "who's watching" picker before it has a token.
+/// Deliberately returns only display names — never ids, PINs, or AniList
+/// tokens.
+pub async fn list_user_names(State(state): State<ProxyState>) -> Result<Json<Vec<UserNameEntry>>, (StatusCode, Json<Value>)> {
+    let db = state.app_state.open_db().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+    let users = crate::registry::service::list_users(&db)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+    Ok(Json(users.into_iter().map(|u| UserNameEntry { display_name: u.display_name }).collect()))
+}
+
 // ── health ──────────────────────────────────────────────────
 
 async fn check_health(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::health::check_health(state_of(&state)).await)
+    ok_or_500(crate::commands::health::check_health_impl(&state.app_state).await)
 }
 
 async fn get_app_version() -> Json<Value> {

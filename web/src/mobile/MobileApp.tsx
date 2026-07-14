@@ -2,18 +2,19 @@ import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react"
 import { AnimatePresence, motion } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { getConfig, getHealth, mediaApi } from "@/lib/api";
-import { getMobileToken, mobileFetch } from "@/lib/transport";
+import { getMobileToken, clearMobileToken, mobileFetch } from "@/lib/transport";
+import { applyMobileSettings } from "./mobileSettings";
 
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { NotificationsView } from "@/components/views/NotificationsView";
 import { ProfileView } from "@/components/views/ProfileView";
-const MangaView = lazy(() => import("@/components/views/MangaView").then((m) => ({ default: m.MangaView })));
+const MobileMangaView = lazy(() => import("./MobileMangaView").then((m) => ({ default: m.MobileMangaView })));
 
 import { PinGate } from "./PinGate";
 import { ConnectAniList } from "./ConnectAniList";
-import { BottomNav } from "./BottomNav";
+import { BottomNav, type PrimaryTab } from "./BottomNav";
 import { MobileHeader } from "./MobileHeader";
-import { MoreView } from "./MoreView";
+import { YouView } from "./YouView";
 import { MobileHomeView } from "./MobileHomeView";
 import { MobileSearchView } from "./MobileSearchView";
 import { MobileListsView } from "./MobileListsView";
@@ -27,16 +28,18 @@ async function loadConfig() {
   } catch {
     // Config will use defaults
   }
+  // Device-local preference overrides win over server config — the server's
+  // config.toml is shared by every user in multi-user mode.
+  applyMobileSettings();
 }
 
 type PlayerState = Omit<VideoPlayerOverlayProps, "onClose">;
-type Tab = "home" | "search" | "lists" | "more";
-type MoreSubView = "schedule" | "manga" | "notifications" | "profile";
+type Tab = PrimaryTab;
+type YouSubView = "schedule" | "notifications" | "profile";
 
-const TITLES: Record<Tab, string> = { home: "Anicat", search: "Search", lists: "My Lists", more: "More" };
-const SUB_TITLES: Record<MoreSubView, string> = {
+const TITLES: Record<Tab, string> = { home: "Anicat", search: "Search", library: "Library", manga: "Manga", you: "You" };
+const SUB_TITLES: Record<YouSubView, string> = {
   schedule: "Schedule",
-  manga: "Manga",
   notifications: "Notifications",
   profile: "Profile",
 };
@@ -55,10 +58,10 @@ export default function MobileApp() {
 
   // Mobile owns its own navigation state entirely, independent of the
   // shared store's `currentView` (which desktop's Sidebar/App.tsx still use)
-  // — the two nav shells are different enough (4-tab + More hub vs desktop's
-  // full sidebar) that tying them together would just create edge cases.
+  // — the two nav shells are different enough (5-tab bar vs desktop's full
+  // sidebar) that tying them together would just create edge cases.
   const [activeTab, setActiveTab] = useState<Tab>("home");
-  const [moreSubView, setMoreSubView] = useState<MoreSubView | null>(null);
+  const [youSubView, setYouSubView] = useState<YouSubView | null>(null);
 
   const selectedItem = useAppStore((s) => s.selectedItem);
   const initialAction = useAppStore((s) => s.initialAction);
@@ -73,14 +76,14 @@ export default function MobileApp() {
   const goToTab = (tab: Tab) => {
     clearDetail();
     setActiveTab(tab);
-    setMoreSubView(null);
+    setYouSubView(null);
   };
-  const goToMoreSub = (view: MoreSubView) => {
+  const goToYouSub = (view: YouSubView) => {
     clearDetail();
-    setActiveTab("more");
-    setMoreSubView(view);
+    setActiveTab("you");
+    setYouSubView(view);
   };
-  const backToMoreHub = () => setMoreSubView(null);
+  const backToYouHub = () => setYouSubView(null);
 
   useEffect(() => {
     const onUnauthorized = () => setUnlocked(false);
@@ -180,15 +183,26 @@ export default function MobileApp() {
   }
 
   const onSelect = openDetail;
-  const isMoreTab = activeTab === "more";
-  const title = isMoreTab && moreSubView ? SUB_TITLES[moreSubView] : TITLES[activeTab];
+  const isYouTab = activeTab === "you";
+  const title = isYouTab && youSubView ? SUB_TITLES[youSubView] : TITLES[activeTab];
 
   const renderContent = () => {
-    if (isMoreTab) {
-      if (!moreSubView) return <MoreView onNavigate={goToMoreSub} />;
-      switch (moreSubView) {
+    if (isYouTab) {
+      if (!youSubView) {
+        return (
+          <YouView
+            displayName={whoami?.display_name || "You"}
+            anilistUsername={whoami?.anilist_username ?? null}
+            onNavigate={goToYouSub}
+            onLogout={() => {
+              clearMobileToken();
+              setUnlocked(false);
+            }}
+          />
+        );
+      }
+      switch (youSubView) {
         case "schedule": return <ScheduleView onSelect={onSelect} />;
-        case "manga": return <MangaView onSelect={onSelect} />;
         case "notifications": return <NotificationsView onSelect={onSelect} />;
         case "profile": return <ProfileView onSelect={onSelect} />;
       }
@@ -196,7 +210,8 @@ export default function MobileApp() {
     switch (activeTab) {
       case "home": return <MobileHomeView onSelect={onSelect} />;
       case "search": return <MobileSearchView onSelect={onSelect} />;
-      case "lists": return <MobileListsView onSelect={onSelect} />;
+      case "library": return <MobileListsView onSelect={onSelect} />;
+      case "manga": return <MobileMangaView onSelect={onSelect} />;
       default: return <MobileHomeView onSelect={onSelect} />;
     }
   };
@@ -204,7 +219,7 @@ export default function MobileApp() {
   return (
     <div className="mobile-shell flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       {!selectedItem && (
-        <MobileHeader title={title} onBack={isMoreTab && moreSubView ? backToMoreHub : undefined} />
+        <MobileHeader title={title} onBack={isYouTab && youSubView ? backToYouHub : undefined} />
       )}
       <main
         className="flex-1 overflow-y-auto scroll-container px-6 pt-4"
@@ -225,7 +240,7 @@ export default function MobileApp() {
             </motion.div>
           ) : (
             <motion.div
-              key={`${activeTab}-${moreSubView ?? ""}`}
+              key={`${activeTab}-${youSubView ?? ""}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
@@ -237,12 +252,7 @@ export default function MobileApp() {
         </AnimatePresence>
       </main>
 
-      <BottomNav
-        activeTab={activeTab === "more" ? null : activeTab}
-        moreActive={isMoreTab}
-        onTabChange={goToTab}
-        onMoreTap={() => goToTab("more")}
-      />
+      <BottomNav activeTab={activeTab} onTabChange={goToTab} />
 
       {player && <VideoPlayerOverlay {...player} onClose={() => setPlayer(null)} />}
     </div>

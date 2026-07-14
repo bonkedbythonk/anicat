@@ -1,31 +1,30 @@
-import { Home, Search, Monitor, MoreHorizontal } from "lucide-react";
+import { Home, Search, Bookmark, BookOpen, User } from "lucide-react";
 import { useAppStore } from "@/stores/app";
+
+export type PrimaryTab = "home" | "search" | "library" | "manga" | "you";
 
 const navItems = [
   { icon: Home, label: "Home", tab: "home" as const },
   { icon: Search, label: "Search", tab: "search" as const },
-  { icon: Monitor, label: "Lists", tab: "lists" as const },
+  { icon: Bookmark, label: "Library", tab: "library" as const },
+  { icon: BookOpen, label: "Manga", tab: "manga" as const },
+  { icon: User, label: "You", tab: "you" as const },
 ];
 
-type PrimaryTab = "home" | "search" | "lists";
-
 interface BottomNavProps {
-  activeTab: PrimaryTab | null;
-  moreActive: boolean;
+  activeTab: PrimaryTab;
   onTabChange: (tab: PrimaryTab) => void;
-  onMoreTap: () => void;
 }
 
 /** Deliberately its own styling rather than the desktop Sidebar's
  * `.glass-fixed` (that class was written for a vertical left rail — it ships
  * a `border-right` that makes no sense on a horizontal bottom bar, and no
- * safe-area awareness). Capped at 4 tabs (Home/Search/Lists/More) rather
- * than mirroring every desktop nav item 1:1 — Apple's HIG caps tab bars at
- * ~5 for a reason, and beyond that labels truncate on a real phone width.
- * Schedule/Manga/Notifications/Profile live inside the More hub instead.
- * Purely prop-driven — mobile navigation state lives in MobileApp, not the
- * shared store's `currentView` that desktop's Sidebar also reads. */
-export function BottomNav({ activeTab, moreActive, onTabChange, onMoreTap }: BottomNavProps) {
+ * safe-area awareness). Five tabs — the HIG ceiling — with Manga promoted to
+ * first-class and profile/secondary sections folded into "You"; the old
+ * "More" hub is gone. Purely prop-driven — mobile navigation state lives in
+ * MobileApp, not the shared store's `currentView` that desktop's Sidebar
+ * also reads. */
+export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const selectedItem = useAppStore((s) => s.selectedItem);
 
   const tabClass = (active: boolean) =>
@@ -48,10 +47,6 @@ export function BottomNav({ activeTab, moreActive, onTabChange, onMoreTap }: Bot
           </button>
         );
       })}
-      <button onClick={onMoreTap} className={tabClass(moreActive && !selectedItem)}>
-        <MoreHorizontal size={23} strokeWidth={moreActive ? 2.5 : 2} />
-        <span className="text-[10px] font-medium">More</span>
-      </button>
     </nav>
   );
 }

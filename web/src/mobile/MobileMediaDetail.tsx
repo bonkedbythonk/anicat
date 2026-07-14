@@ -15,6 +15,7 @@ import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import MangaReader from "@/components/media/MangaReader";
 import { MobileEpisodeList } from "./MobileEpisodeList";
+import { loadMobileSettings } from "./mobileSettings";
 import { PosterCard } from "./PosterCard";
 import { BottomSheet, SheetRow } from "./BottomSheet";
 
@@ -68,9 +69,13 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
     queryFn: () => mediaApi.getConfig(),
   });
 
+  // Device-local Source setting (You tab) wins over the server's global
+  // provider — config.toml is shared by every user in multi-user mode.
   const [selectedProvider, setSelectedProvider] = useState<string>("mkissa");
   useEffect(() => {
-    if (config?.general?.provider) setSelectedProvider(config.general.provider as string);
+    const deviceProvider = loadMobileSettings().defaultProvider;
+    const provider = deviceProvider || (config?.general?.provider as string | undefined);
+    if (provider) setSelectedProvider(provider);
   }, [config]);
 
   const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));

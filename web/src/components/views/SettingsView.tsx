@@ -184,18 +184,6 @@ export function SettingsView({ health }: SettingsViewProps) {
 
   }, []);
 
-  // /mobile-api/lan-info is a plain HTTP endpoint (not a Tauri command), and
-  // it's unauthenticated by design — it just tells the desktop app what LAN
-  // IP to show the user, needed before any phone has a PIN token at all.
-  const [lanInfo, setLanInfo] = useState<{ lan_ip: string; port: number } | null>(null);
-  const [lanInfoFailed, setLanInfoFailed] = useState(false);
-  useEffect(() => {
-    fetch(`${apiOrigin()}/mobile-api/lan-info`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((data) => setLanInfo(data))
-      .catch(() => setLanInfoFailed(true));
-  }, []);
-
   // The ctrl+1 (upscaling) / ctrl+2 (auto-skip) mpv shortcuts persist their
   // flip on the backend, but this page's own `config` snapshot was fetched
   // once on mount — patch it live so the toggles here don't show stale state
@@ -597,43 +585,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <option value="jikan">Jikan (MyAnimeList - Fallback)</option>
                   </select>
                 </SettingField>
-              </CardSection>
-
-              <CardSection
-                title="Phone Access"
-                description="Watch anicat from your phone over the same Wi-Fi while this Mac is running. This is a light PIN gate to keep it from being entered by accident — not meant to withstand someone who isn't on your home network."
-              >
-                <SettingField label="Enable" description="Lets other devices on this Wi-Fi reach anicat. Off by default.">
-                  <SettingToggle
-                    on={Boolean(config.mobile?.lan_access_enabled)}
-                    onChange={(v) => updateField("mobile", "lan_access_enabled", v)}
-                  />
-                </SettingField>
-
-                <SettingField label="PIN" description="4-8 digits. Whatever your phone types in must match this exactly.">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={String(config.mobile?.pin || "")}
-                    onChange={(e) => updateField("mobile", "pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
-                    placeholder="e.g. 4821"
-                    className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
-                  />
-                </SettingField>
-
-                {Boolean(config.mobile?.lan_access_enabled) && (
-                  <SettingField label="Open on your phone" description="Same Wi-Fi network, then enter the PIN above.">
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 bg-black/30 border border-white/[0.08] rounded-xl p-3 text-xs font-mono text-accent select-all overflow-x-auto whitespace-nowrap">
-                        {lanInfo
-                          ? `http://${lanInfo.lan_ip}:${lanInfo.port}/mobile.html`
-                          : lanInfoFailed
-                            ? "Couldn't reach the backend. Restart Anicat and reopen Settings."
-                            : "Loading..."}
-                      </code>
-                    </div>
-                  </SettingField>
-                )}
               </CardSection>
             </div>
           )}

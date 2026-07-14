@@ -303,12 +303,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
         return <MediaRow title="Airing Today" items={airingTodayQuery.data.media} onSelect={onSelect} />;
       case "continue":
         if (!isAuthenticated || continueWatchingList.length === 0) return null;
-        return (
-          <>
-            <EpisodeRow title="Continue Watching" items={continueWatchingList} onSelect={onSelect} />
-            {smartPicks.length > 0 && <MediaRow title="Smart Picks" items={smartPicks} onSelect={onSelect} />}
-          </>
-        );
+        return <EpisodeRow title="Continue Watching" items={continueWatchingList} onSelect={onSelect} />;
       case "newForYou":
         if (!isAuthenticated) return null;
         if (recentReleasesQuery.isLoading) return <MediaRowSkeleton title="New for You" />;

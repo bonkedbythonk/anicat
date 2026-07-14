@@ -545,7 +545,12 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
                 aria-label="Back 10 seconds"
               >
                 <RotateCcw size={22} />
-                <span className="absolute bottom-1.5 text-[8px] font-bold">10</span>
+                <span
+                  className="absolute bottom-1 text-[10px] font-extrabold"
+                  style={{ textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}
+                >
+                  10
+                </span>
               </button>
               <button
                 onClick={togglePlay}
@@ -560,7 +565,12 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
                 aria-label="Forward 10 seconds"
               >
                 <RotateCw size={22} />
-                <span className="absolute bottom-1.5 text-[8px] font-bold">10</span>
+                <span
+                  className="absolute bottom-1 text-[10px] font-extrabold"
+                  style={{ textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}
+                >
+                  10
+                </span>
               </button>
             </div>
           )}

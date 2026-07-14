@@ -10,8 +10,6 @@ export interface MobileSettings {
   defaultProvider?: string;
   autoplay?: boolean;
   autoskip?: boolean;
-  dataSaver?: boolean;
-  preferredTitleLanguage?: string;
 }
 
 export function loadMobileSettings(): MobileSettings {

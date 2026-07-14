@@ -233,6 +233,7 @@ fn notify_frontend(app_handle: &Option<tauri::AppHandle>, message: &str) {
 
 async fn player_next_handler(
     State(state): State<ProxyState>,
+    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested next episode: pos={:?}, duration={:?}, manual={:?}", params.pos, params.duration, params.manual);
@@ -241,8 +242,9 @@ async fn player_next_handler(
     // watched if that real position is past the threshold (record_playback_
     // progress decides). So skipping forward mid-episode no longer marks the
     // skipped episode as watched.
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -254,18 +256,14 @@ async fn player_next_handler(
     if let Some(play_info) = play_info {
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
-                let app_state_clone = state.app_state.clone();
+                let scoped_clone = scoped.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
-                    // TODO(Stage 2 wiring): 0 is the single-user sentinel; this
-                    // handler is reachable by both desktop mpv and the mobile
-                    // <video> element's progress reporting, so it'll need the
-                    // real AuthedUser once multi-user session auth lands here.
                     if let Err(e) = crate::commands::playback::record_playback_progress(
-                        &app_state_clone,
-                        0,
+                        &scoped_clone,
+                        user_id,
                         media_id,
                         ep_num,
                         pos,
@@ -336,11 +334,13 @@ async fn player_next_handler(
 
 async fn player_prev_handler(
     State(state): State<ProxyState>,
+    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested previous episode: pos={:?}, duration={:?}", params.pos, params.duration);
+    let scoped = state.scoped_for(auth).await;
     let play_info = {
-        let mut guard = state.app_state.current_playback.lock().await;
+        let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
@@ -352,15 +352,14 @@ async fn player_prev_handler(
     if let Some(play_info) = play_info {
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
-                let app_state_clone = state.app_state.clone();
+                let scoped_clone = scoped.clone();
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
                 tokio::spawn(async move {
-                    // TODO(Stage 2 wiring): see the matching note in player_next_handler.
                     if let Err(e) = crate::commands::playback::record_playback_progress(
-                        &app_state_clone,
-                        0,
+                        &scoped_clone,
+                        user_id,
                         media_id,
                         ep_num,
                         pos,

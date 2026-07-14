@@ -16,7 +16,6 @@ interface PinGateProps {
  * flashes the wrong one. */
 export function PinGate({ onSuccess }: PinGateProps) {
   const [multiUser, setMultiUser] = useState<boolean | null>(null);
-  const [userNames, setUserNames] = useState<string[]>([]);
   const [displayName, setDisplayName] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,14 +24,7 @@ export function PinGate({ onSuccess }: PinGateProps) {
   useEffect(() => {
     fetch("/mobile-api/lan-info")
       .then((res) => res.json())
-      .then((data: { multi_user: boolean }) => {
-        setMultiUser(data.multi_user);
-        if (data.multi_user) {
-          return fetch("/mobile-api/users/list-names")
-            .then((res) => res.json())
-            .then((names: { display_name: string }[]) => setUserNames(names.map((n) => n.display_name)));
-        }
-      })
+      .then((data: { multi_user: boolean }) => setMultiUser(data.multi_user))
       .catch(() => setMultiUser(false)); // can't reach the server at all — fall back to the simpler form, submit will report the real error
   }, []);
 
@@ -92,19 +84,15 @@ export function PinGate({ onSuccess }: PinGateProps) {
         <input
           type="text"
           autoFocus
-          list="anicat-user-names"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="words"
+          spellCheck={false}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           placeholder="Your name"
           className="w-56 text-center text-lg bg-card border border-border rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
         />
-      )}
-      {multiUser && userNames.length > 0 && (
-        <datalist id="anicat-user-names">
-          {userNames.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
       )}
       <input
         type="tel"

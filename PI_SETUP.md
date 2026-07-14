@@ -227,17 +227,58 @@ curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
 ```
 
-Follow the printed login URL to add the Pi to your tailnet. Then, from the
-[Tailscale admin console](https://login.tailscale.com/admin/machines), invite
-any friends' devices you want to have access — they install the Tailscale
-app, accept the invite, and their phone can now reach the Pi's tailnet
-address directly, from anywhere, without you doing anything else per-friend.
+Follow the printed login URL to add the Pi to your tailnet.
 
-Find the Pi's Tailscale hostname:
+Find the Pi's Tailscale hostname / IP:
 
 ```bash
 tailscale status
 ```
+
+### 9a. Giving friends access — use node sharing, not tailnet members
+
+Important: the Tailscale **free (Personal) plan caps a tailnet at 3 users**.
+Inviting 7 friends as full tailnet *members* blows past that. The correct
+(free, unlimited) way to hand out access to a single machine is **node
+sharing** — and it's also safer, because a shared-in device can reach *only
+the Pi*, never the rest of your devices:
+
+1. Each friend makes their own free Tailscale account and installs the
+   Tailscale app on their phone.
+2. You: [admin console](https://login.tailscale.com/admin/machines) -> the Pi
+   -> the "..." menu -> **Share...** -> copy the share link -> send it to that
+   friend (one link per friend).
+3. The friend opens the link, accepts, and enables the shared node in their
+   Tailscale app. Their phone can now reach the Pi from anywhere.
+
+If you already added the 7 friends as tailnet members, migrate them to shares
+before you hit the 3-user cap.
+
+### 9b. Recommended: serve over HTTPS with `tailscale serve`
+
+The steps below reach the Pi over plain `http://…:13370`. Inside Tailscale
+that traffic is already WireGuard-encrypted end to end, so this is not a
+confidentiality problem — but a plain-HTTP origin is not a "secure context"
+in the browser, which blocks PWA niceties (service worker, some device APIs)
+and just looks less trustworthy. One command fixes it, with a real
+auto-renewed TLS cert and a clean hostname, tailnet-only:
+
+```bash
+sudo tailscale serve --bg 13370
+```
+
+Your PWA URL then becomes `https://<pi-hostname>.<tailnet>.ts.net/mobile.html`
+(see `tailscale serve status` for the exact name). Nothing else changes.
+
+### 9c. Note on LAN exposure
+
+`anicat-server` binds `0.0.0.0:13370`, so on your home network it's reachable
+over the LAN IP too, not only the Tailscale IP. The `/mobile-api/*` surface is
+still behind the PIN/per-user gate, and `/proxy` is SSRF-allowlisted to media
+CDNs only, so this is low-risk — but if you'd rather the Pi answer *only* over
+Tailscale, add a firewall rule allowing 13370 solely on the `tailscale0`
+interface (e.g. via `ufw`), or rely on `tailscale serve` (9b) and firewall the
+raw port off entirely.
 
 ## 10. First connection
 

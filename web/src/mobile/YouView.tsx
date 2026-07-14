@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Play,
   FastForward,
-  Languages,
   Server,
 } from "lucide-react";
 import { getNotifications } from "@/lib/api";
@@ -83,7 +82,6 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
   const autoplay = useSettingsStore((s) => s.autoplay);
   const autoskip = useSettingsStore((s) => s.autoskip);
   const provider = useSettingsStore((s) => s.defaultProvider);
-  const titleLanguage = useSettingsStore((s) => s.preferredTitleLanguage);
   const apiConnected = useAppStore((s) => s.apiConnected);
 
   const { data: unreadCount } = useQuery({
@@ -101,10 +99,6 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
     const idx = PROVIDERS.indexOf(provider as (typeof PROVIDERS)[number]);
     saveMobileSetting("defaultProvider", PROVIDERS[(idx + 1) % PROVIDERS.length]);
   };
-  const cycleTitleLanguage = () => {
-    saveMobileSetting("preferredTitleLanguage", titleLanguage === "english" ? "romaji" : "english");
-  };
-
   const groupClass = "rounded-xl bg-white/[0.04] border border-white/[0.05] overflow-hidden";
   const groupLabel = "px-4 pt-5 pb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground";
 
@@ -150,14 +144,6 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
           onClick={() => saveMobileSetting("autoskip", !autoskip)}
         >
           <Toggle on={autoskip} onChange={(v) => saveMobileSetting("autoskip", v)} />
-        </Row>
-      </div>
-
-      <p className={groupLabel}>Display</p>
-      <div className={groupClass}>
-        <Row first color="bg-[#8e8e93]" icon={Languages} label="Title language" onClick={cycleTitleLanguage}>
-          <span className="text-[14px] text-muted-foreground capitalize">{titleLanguage}</span>
-          <ChevronRight size={16} className="text-muted-foreground shrink-0" />
         </Row>
       </div>
 

@@ -35,6 +35,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const [readingDirection, setReadingDirection] = useState<"ltr" | "rtl">("rtl");
   const [showControls, setShowControls] = useState(true);
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
+  const [zoom, setZoom] = useState(1);
   // Desktop's window enforces an 800px minimum, so this can never be true
   // there — safe to gate mobile-only behavior on it without a separate
   // mobile build of this component (double-page mode, the fullscreen
@@ -232,6 +233,10 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       // never accumulates deltaX while the manga reader is open.
       e.stopPropagation();
 
+      // Trackpad pinch is reported as ctrlKey+wheel — the zoom handler
+      // below owns that, don't let it accumulate into a page turn.
+      if (e.ctrlKey) return;
+
       accX += e.deltaX;
       accY += Math.abs(e.deltaY);
       clearTimeout(resetTimer);
@@ -256,6 +261,28 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       clearTimeout(resetTimer);
     };
   }, [readingMode, readingDirection, handleNext, handlePrev]);
+
+  // Trackpad pinch-to-zoom: browsers report this as wheel events with
+  // ctrlKey set and deltaY carrying the pinch magnitude — there's no
+  // separate gesture API in Chromium/WebKit for it. Must be non-passive to
+  // preventDefault, otherwise the OS/webview's own page-zoom fires too.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onPinch = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom((z) => Math.min(3, Math.max(1, z - e.deltaY * 0.01)));
+    };
+    container.addEventListener("wheel", onPinch, { passive: false });
+    return () => container.removeEventListener("wheel", onPinch);
+  }, []);
+
+  // Reset zoom on page/chapter/mode change so it never carries over into
+  // content the user didn't zoom.
+  useEffect(() => {
+    setZoom(1);
+  }, [currentPage, readingMode, chapterNumber]);
 
   // Touch swipe → flip pages (single/double mode only). The trackpad wheel
   // handler above has no touch equivalent at all, so on a phone the only way
@@ -536,7 +563,10 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       {/* Content Area */}
       <div className={`flex-1 w-full overflow-y-auto scroll-smooth scrollbar-hide ${readingMode === "vertical" ? "" : "flex items-center justify-center"}`}>
         {readingMode === "vertical" ? (
-          <div className="max-w-3xl w-full mx-auto" style={{ padding: "0 0 8rem 0" }}>
+          <div
+            className="max-w-3xl w-full mx-auto"
+            style={{ padding: "0 0 8rem 0", transform: `scale(${zoom})`, transformOrigin: "top center" }}
+          >
             {pages.map((page, idx) => (
               <div key={idx} className="relative flex items-center justify-center bg-black">
                 {!loadedImages.has(idx) && <Loader2 className="animate-spin text-white/10" size={32} />}
@@ -566,7 +596,10 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
               onClick={readingDirection === "rtl" ? handlePrev : handleNext} 
             />
 
-            <div className={`flex items-center justify-center h-full gap-1 transition-all ${readingMode === "double" ? "w-full" : "max-w-3xl"}`}>
+            <div
+              className={`flex items-center justify-center h-full gap-1 transition-all ${readingMode === "double" ? "w-full" : "max-w-3xl"}`}
+              style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
+            >
               {readingMode === "double" ? (
                 readingDirection === "rtl" ? (
                   <>

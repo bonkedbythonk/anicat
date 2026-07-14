@@ -52,7 +52,7 @@ export function MobileHero({ items, onSelect }: MobileHeroProps) {
       <div className="absolute inset-0 bg-gradient-to-b from-background/50 via-transparent to-transparent h-24" />
 
       <div className="absolute bottom-0 left-0 right-0 px-6 pb-5 space-y-3">
-        <h1 className="line-clamp-2 text-[26px] font-extrabold leading-tight text-white drop-shadow-lg">{title}</h1>
+        <h1 className="line-clamp-2 text-[26px] font-bold leading-tight text-white" style={{ textShadow: "0 2px 16px rgba(0,0,0,0.7)" }}>{title}</h1>
         <div className="flex items-center gap-2 text-xs font-semibold text-white/70">
           {item.average_score && <span className="text-amber-400">★ {item.average_score}%</span>}
           {item.seasonYear && <span>{item.seasonYear}</span>}

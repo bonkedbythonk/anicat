@@ -3,6 +3,10 @@ name = "anicat"
 version = "5.4.3"
 license = "GPL-3.0-only"
 edition = "2021"
+# Without this, adding the anicat-server [[bin]] below makes `cargo run`
+# (which tauri dev / tauri build shell out to) ambiguous between it and the
+# implicit main.rs binary.
+default-run = "anicat"
 
 # Headless self-hosted build (see PI_SETUP.md) — no Tauri window/event loop,
 # just the same AppState/proxy/scraper machinery run standalone. Named with a

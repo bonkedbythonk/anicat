@@ -100,7 +100,45 @@ async fn update_config(
     State(state): State<ProxyState>,
     Json(updates): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::config::update_config_impl(&state.app_state, updates).await.map(|_| Value::Null))
+    // config.toml is process-global (one file shared by every user on a
+    // headless deployment), so any authenticated friend hitting this endpoint
+    // would otherwise be able to rewrite server-wide state — including the
+    // owner's AniList token (`api.token`), the phone-access PIN, and
+    // `lan_access_enabled` (setting it false locks everyone out). PIN/Tailscale
+    // is an identity boundary, not an authorization one, so this can't rely on
+    // "friends won't poke it." Restrict the mobile surface to a fixed allowlist
+    // of benign playback preferences; everything else is silently dropped. The
+    // desktop IPC path calls `update_config_impl` directly and is unaffected.
+    let filtered = sanitize_mobile_config_updates(updates);
+    ok_or_500(crate::commands::config::update_config_impl(&state.app_state, filtered).await.map(|_| Value::Null))
+}
+
+/// Rebuilds the incoming config-update object keeping only the nested keys the
+/// mobile PWA is allowed to change. Anything not explicitly listed (any `api`/
+/// `anilist`/`mobile` section, `general.multi_user`/`provider`/`downloads_path`,
+/// etc.) is discarded before it reaches `update_config_impl`.
+fn sanitize_mobile_config_updates(updates: Value) -> Value {
+    const ALLOWED: &[(&str, &[&str])] = &[
+        ("general", &["autoplay", "autoskip", "anime_preview", "preferred_title_language", "time_format"]),
+        ("stream", &["shader_profile", "interpolation", "translation_type", "quality"]),
+    ];
+    let mut out = serde_json::Map::new();
+    if let Some(obj) = updates.as_object() {
+        for (section, keys) in ALLOWED {
+            if let Some(section_obj) = obj.get(*section).and_then(Value::as_object) {
+                let mut kept = serde_json::Map::new();
+                for key in *keys {
+                    if let Some(v) = section_obj.get(*key) {
+                        kept.insert((*key).to_string(), v.clone());
+                    }
+                }
+                if !kept.is_empty() {
+                    out.insert((*section).to_string(), Value::Object(kept));
+                }
+            }
+        }
+    }
+    Value::Object(out)
 }
 
 // ── user ────────────────────────────────────────────────────
@@ -766,4 +804,40 @@ async fn check_health(State(state): State<ProxyState>) -> Result<Json<Value>, (S
 
 async fn get_app_version() -> Json<Value> {
     Json(serde_json::json!({ "version": crate::commands::health::get_app_version().await }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_mobile_config_updates;
+    use serde_json::json;
+
+    #[test]
+    fn strips_sensitive_sections() {
+        let out = sanitize_mobile_config_updates(json!({
+            "api": { "token": "steal-me" },
+            "anilist": { "token": "steal-me" },
+            "mobile": { "pin": "0000", "lan_access_enabled": false },
+            "general": { "multi_user": false, "provider": "x", "autoskip": true }
+        }));
+        // Only the allowlisted general.autoskip survives.
+        assert_eq!(out, json!({ "general": { "autoskip": true } }));
+    }
+
+    #[test]
+    fn keeps_benign_playback_prefs() {
+        let out = sanitize_mobile_config_updates(json!({
+            "general": { "autoplay": true, "autoskip": false },
+            "stream": { "shader_profile": "on" }
+        }));
+        assert_eq!(out, json!({
+            "general": { "autoplay": true, "autoskip": false },
+            "stream": { "shader_profile": "on" }
+        }));
+    }
+
+    #[test]
+    fn empty_when_nothing_allowed() {
+        let out = sanitize_mobile_config_updates(json!({ "api": { "token": "x" } }));
+        assert_eq!(out, json!({}));
+    }
 }

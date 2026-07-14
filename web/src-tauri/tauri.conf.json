@@ -1,6 +1,6 @@
 {
   "productName": "Anicat",
-  "version": "5.4.3",
+  "version": "5.4.4",
   "identifier": "com.anicat.app",
   "build": {
     "beforeDevCommand": "npm run dev",

@@ -93,9 +93,9 @@ pub struct MobileConfig {
     #[serde(default = "default_false")]
     pub lan_access_enabled: bool,
     /// Optional secret that unlocks the read-only `/mobile-api/admin/status`
-    /// activity endpoint (who's online, who's watching what). When unset the
-    /// endpoint 404s, so the feature is off unless an owner deliberately sets
-    /// a key. Deliberately separate from friend PINs so no friend token can
+    /// activity endpoint (active sessions, current playback). When unset the
+    /// endpoint 404s, so the feature is off unless an admin deliberately sets
+    /// a key. Deliberately separate from standard auth tokens so no regular user can
     /// read the activity list.
     #[serde(default)]
     pub admin_key: Option<String>,

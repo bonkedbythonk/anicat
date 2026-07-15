@@ -814,13 +814,13 @@ pub struct AdminStatusQuery {
     key: Option<String>,
 }
 
-/// Read-only activity view: who's used the Pi since the server last started,
-/// how long ago, and what (if anything) each person is watching right now.
+/// Read-only activity view: monitors active user sessions since the server last started,
+/// how long ago, and current playback state.
 /// Gated by `config.mobile.admin_key` supplied as `?key=` — when that key is
 /// unset, or the supplied one doesn't match, this 404s (never 403) so the
-/// endpoint's existence isn't advertised to friends. Registered ungated in
-/// `server.rs` because it does its own key check rather than using a friend
-/// token. "Online" here means "made an authenticated request in the last 90s"
+/// endpoint's existence is hidden. Registered ungated in
+/// `server.rs` because it does its own key check rather than using standard
+/// auth tokens. "Online" here means "made an authenticated request in the last 90s"
 /// — someone browsing counts, not just someone streaming; `watching` is null
 /// for the browsing case since only playback populates it.
 pub async fn admin_status(

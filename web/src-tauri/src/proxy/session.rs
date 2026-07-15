@@ -2,11 +2,12 @@
 //! philosophy as `mobile_auth.rs`'s single shared PIN — recompute a token
 //! from live DB state on every request, no server-side session store, no
 //! expiry — just scoped per registered row instead of one shared config
-//! value. This is identity, not a security boundary: on a headless
-//! deployment the actual boundary is Tailscale (only invited devices can
-//! reach this server at all), so — like the single-PIN gate it replaces —
-//! there is no rate limiting or lockout here, only "which registered friend
-//! is this."
+//! value. The primary boundary is Tailscale (only invited devices can reach
+//! this server at all); on top of that, `login` is rate-limited per client IP
+//! (see `throttle`) so an invited-but-malicious friend can't script-guess
+//! another friend's PIN. Behind `tailscale serve` every request's TCP peer is
+//! loopback, so the throttle keys on the forwarded client IP — see
+//! `throttle::client_ip`.
 //!
 //! Unlike `require_mobile_auth`, there is no loopback bypass: multi-user
 //! mode has no legitimate same-host caller (mpv doesn't run in the headless
@@ -14,7 +15,7 @@
 
 use axum::{
     extract::{ConnectInfo, FromRequestParts, Request, State},
-    http::{request::Parts, StatusCode},
+    http::{request::Parts, HeaderMap, StatusCode},
     middleware::Next,
     response::Response,
     Json,
@@ -47,9 +48,10 @@ pub struct LoginResponse {
 pub async fn login(
     State(state): State<ProxyState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<LoginBody>,
 ) -> Result<Json<LoginResponse>, StatusCode> {
-    let ip = addr.ip();
+    let ip = super::throttle::client_ip(addr.ip(), &headers);
     if state.login_throttle.check(ip).await.is_some() {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }

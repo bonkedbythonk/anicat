@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware::Next,
     response::Response,
     Json,
@@ -41,9 +41,10 @@ pub struct AuthResponse {
 pub async fn authenticate(
     State(state): State<ProxyState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<AuthBody>,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let ip = addr.ip();
+    let ip = super::throttle::client_ip(addr.ip(), &headers);
     if state.login_throttle.check(ip).await.is_some() {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }

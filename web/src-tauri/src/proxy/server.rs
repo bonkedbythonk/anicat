@@ -66,7 +66,7 @@ pub struct ProxyState {
     pub login_throttle: super::throttle::LoginThrottle,
     /// Last authenticated request seen per user_id, updated by
     /// `require_user_session`. Powers the read-only `/mobile-api/admin/status`
-    /// activity endpoint — "who's using the Pi right now" — without any
+    /// activity endpoint — for monitoring active sessions — without any
     /// per-request DB writes.
     pub last_seen: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<i64, LastSeen>>>,
 }
@@ -179,8 +179,8 @@ pub async fn start_proxy(
         .route("/mobile-api/session/login", post(session::login))
         .route("/mobile-api/lan-info", get(mobile_auth::lan_info))
         .route("/mobile-api/users/list-names", get(mobile_api::list_user_names))
-        // Owner activity view. Ungated here because it authenticates with its
-        // own admin_key query param, not a friend token — see admin_status.
+        // Admin activity view. Ungated here because it authenticates with its
+        // own admin_key query param, not a standard auth token — see admin_status.
         .route("/mobile-api/admin/status", get(mobile_api::admin_status))
         .merge(gated)
         // Fallback rather than a nested prefix: mobile.html and its manifest/
@@ -886,10 +886,13 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
     "filemoon.sx", "filemoon.art", "filemoon.top",
     "repackager.wixmp.com", "vivibebe.site",
-    // mkissa (allanime) ok.ru sources: embed host + video CDN. Needed so the
-    // mobile PWA, which proxies every stream, can serve them when the ok.ru
-    // server is chosen over mp4upload.
-    "ok.ru", "okcdn.ru",
+    // mkissa (allanime) ok.ru sources: embed host + video CDN(s). Needed so
+    // the mobile PWA, which proxies every stream, can serve them when the
+    // ok.ru server is chosen over mp4upload. ok.ru rotates the actual video
+    // host between okcdn.ru and vkuser.net (same VK video infrastructure) --
+    // missing either one means playback dies within seconds whenever mkissa
+    // happens to hand back a stream server on the missing host.
+    "ok.ru", "okcdn.ru", "vkuser.net",
 ];
 
 fn host_is_allowed(url: &str) -> bool {

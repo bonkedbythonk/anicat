@@ -11,11 +11,36 @@
 //! deploy is harmless. Keyed by the peer IP, which on a tailnet is a stable
 //! per-device address, so one misbehaving device locks only itself out.
 
+use axum::http::HeaderMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+/// The IP to throttle a login attempt against. Behind `tailscale serve` (which
+/// terminates TLS and proxies to 127.0.0.1) the TCP peer is loopback for every
+/// friend, which would otherwise collapse them all into one shared lockout
+/// bucket — one person fat-fingering their PIN 5x would lock out everyone. So
+/// when the peer is loopback we trust the first `X-Forwarded-For` hop, which
+/// serve sets to the caller's real tailnet IP. A non-loopback peer is a direct
+/// hit on `0.0.0.0:13370`, so its own address is authoritative and any
+/// client-supplied `X-Forwarded-For` is ignored — otherwise an attacker
+/// reaching the port directly could forge the header to dodge the throttle.
+pub fn client_ip(peer: IpAddr, headers: &HeaderMap) -> IpAddr {
+    if peer.is_loopback() {
+        if let Some(first) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|xff| xff.split(',').next())
+        {
+            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+    peer
+}
 
 /// Consecutive failures before a lockout kicks in.
 const MAX_FAILS: u32 = 5;
@@ -101,6 +126,24 @@ mod tests {
             t.record_failure(ip).await;
         }
         assert!(t.check(ip).await.is_none());
+    }
+
+    #[test]
+    fn client_ip_trusts_xff_only_from_loopback() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-for", "100.64.0.9, 10.0.0.1".parse().unwrap());
+        // Loopback peer (behind serve): trust the first XFF hop.
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(client_ip(lo, &h).to_string(), "100.64.0.9");
+        // Direct non-loopback hit: ignore XFF, use the real peer.
+        let direct: IpAddr = "192.168.1.50".parse().unwrap();
+        assert_eq!(client_ip(direct, &h), direct);
+        // Loopback with no XFF (desktop mpv): falls back to the peer.
+        assert_eq!(client_ip(lo, &HeaderMap::new()), lo);
+        // Garbage XFF from loopback: ignored, falls back to the peer.
+        let mut bad = HeaderMap::new();
+        bad.insert("x-forwarded-for", "not-an-ip".parse().unwrap());
+        assert_eq!(client_ip(lo, &bad), lo);
     }
 
     #[tokio::test]

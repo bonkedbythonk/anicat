@@ -64,6 +64,20 @@ pub struct ProxyState {
     /// Per-IP failed-login counter shared by both login endpoints. Empty until
     /// something fails; see `throttle` module.
     pub login_throttle: super::throttle::LoginThrottle,
+    /// Last authenticated request seen per user_id, updated by
+    /// `require_user_session`. Powers the read-only `/mobile-api/admin/status`
+    /// activity endpoint — "who's using the Pi right now" — without any
+    /// per-request DB writes.
+    pub last_seen: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<i64, LastSeen>>>,
+}
+
+/// One user's most recent authenticated request. `at` is monotonic (for
+/// computing "how long ago"); `path` is the request path (a coarse hint at
+/// what they were doing — browsing vs. streaming).
+#[derive(Clone)]
+pub struct LastSeen {
+    pub at: std::time::Instant,
+    pub path: String,
 }
 
 impl ProxyState {
@@ -120,6 +134,7 @@ pub async fn start_proxy(
         app_handle: app_handle.clone(),
         app_state,
         login_throttle: super::throttle::LoginThrottle::new(),
+        last_seen: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Player callback routes (called by mpv's Lua script today, and by the
@@ -164,6 +179,9 @@ pub async fn start_proxy(
         .route("/mobile-api/session/login", post(session::login))
         .route("/mobile-api/lan-info", get(mobile_auth::lan_info))
         .route("/mobile-api/users/list-names", get(mobile_api::list_user_names))
+        // Owner activity view. Ungated here because it authenticates with its
+        // own admin_key query param, not a friend token — see admin_status.
+        .route("/mobile-api/admin/status", get(mobile_api::admin_status))
         .merge(gated)
         // Fallback rather than a nested prefix: mobile.html and its manifest/
         // service-worker/asset references are root-relative (a standard Vite

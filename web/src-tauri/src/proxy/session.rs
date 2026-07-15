@@ -115,6 +115,13 @@ pub async fn require_user_session(
 
     match matched {
         Some(user) => {
+            // Record activity for /mobile-api/admin/status before running the
+            // handler — one in-memory map write, no DB touch on the hot path.
+            {
+                let path = req.uri().path().to_string();
+                let mut seen = state.last_seen.lock().await;
+                seen.insert(user.id, super::server::LastSeen { at: std::time::Instant::now(), path });
+            }
             req.extensions_mut().insert(AuthedUser(user.id));
             Ok(next.run(req).await)
         }

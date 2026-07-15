@@ -268,7 +268,18 @@ async fn connect_anilist(
         .ok()
         .and_then(|v| v.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()).map(|s| s.to_string()));
 
-    crate::registry::service::set_user_anilist_token(&db, user_id, Some(&body.token), username.as_deref())
+    // A valid token always resolves the viewer's own name; failing to means
+    // the token is invalid/expired (or, less often, a transient AniList blip).
+    // Reject rather than store an unusable token behind a misleading success —
+    // otherwise the friend thinks they're connected but every list call 401s.
+    let Some(username) = username else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Could not verify that AniList token. Make sure you copied it fully, then try again." })),
+        ));
+    };
+
+    crate::registry::service::set_user_anilist_token(&db, user_id, Some(&body.token), Some(&username))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
 
     // Drop the cached UserAniList entry (if any) so the next request picks
@@ -276,6 +287,8 @@ async fn connect_anilist(
     state.app_state.user_anilist.lock().await.remove(&user_id);
 
     Ok(Json(serde_json::json!({ "username": username })))
+    // NB: single-user (user_id == 0) path above returns earlier and is
+    // unaffected by this stricter verification.
 }
 
 #[derive(Deserialize)]

@@ -115,6 +115,11 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   useEffect(() => {
     setLoading(true);
     setError(null);
+    // Reset up front: currentPage is local state that survives a chapterNumber
+    // prop change (the reader stays mounted across chapter navigation), so
+    // without this a jump from a longer chapter to a shorter one leaves
+    // currentPage pointing past the end of the new pages array.
+    setCurrentPage(initialPage);
     mediaApi.getChapterPages(mediaId, chapterNumber)
       .then(data => {
         setPages(data.thumbnails || []);
@@ -355,9 +360,19 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
 
     // Clear saved page for this chapter since it's finished
     localStorage.removeItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
-    
+
     if (onProgressUpdate) onProgressUpdate(chapterNumber);
     onClose();
+  };
+
+  // Same as handleFinish but continues straight into the next chapter instead
+  // of closing the reader -- this is the primary end-of-chapter action when
+  // there is a next chapter to read, since closing and re-opening from the
+  // chapter list every time was the friction being fixed here.
+  const handleNextChapter = () => {
+    localStorage.removeItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
+    if (onProgressUpdate) onProgressUpdate(chapterNumber);
+    onNavigateChapter?.("next");
   };
 
   const handleMouseMove = () => {
@@ -580,7 +595,13 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
               </div>
             ))}
             <div className="pt-20 pb-10 flex justify-center">
-              <button onClick={handleFinish} className="px-12 py-4 bg-accent text-white rounded-full font-black text-sm shadow-2xl">Finish Reading</button>
+              {hasNextChapter ? (
+                <button onClick={handleNextChapter} className="flex items-center gap-2 px-12 py-4 bg-accent text-white rounded-full font-black text-sm shadow-2xl">
+                  Next Chapter <ChevronRight size={18} />
+                </button>
+              ) : (
+                <button onClick={handleFinish} className="px-12 py-4 bg-accent text-white rounded-full font-black text-sm shadow-2xl">Finish Reading</button>
+              )}
             </div>
           </div>
         ) : (
@@ -713,9 +734,15 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                   </span> / {pages.length}
                 </div>
               </div>
-              {((readingMode === "single" && currentPage === pages.length - 1) || 
+              {((readingMode === "single" && currentPage === pages.length - 1) ||
                 (readingMode === "double" && currentPage >= pages.length - 2)) && (
-                <button onClick={handleFinish} className="px-10 py-3.5 bg-accent text-white rounded-2xl font-black text-sm shadow-2xl animate-fade-in cursor-pointer">Finish Reading</button>
+                hasNextChapter ? (
+                  <button onClick={handleNextChapter} className="flex items-center gap-2 px-10 py-3.5 bg-accent text-white rounded-2xl font-black text-sm shadow-2xl animate-fade-in cursor-pointer">
+                    Next Chapter <ChevronRight size={18} />
+                  </button>
+                ) : (
+                  <button onClick={handleFinish} className="px-10 py-3.5 bg-accent text-white rounded-2xl font-black text-sm shadow-2xl animate-fade-in cursor-pointer">Finish Reading</button>
+                )
               )}
             </div>
           </div>

@@ -144,7 +144,7 @@ uv sync
 `nodriver` (one of the scraper's dependencies) drives a real headless
 Chromium for some providers' Cloudflare bypass — worth keeping an eye on
 memory if you notice the Pi getting tight at runtime (see the swap note in
-step 8), since that's a heavier process than the rest of the scraper.
+step 7), since that's a heavier process than the rest of the scraper.
 
 ## 5. Build the mobile PWA static files
 
@@ -163,15 +163,16 @@ Then copy the built `dist/` folder to the Pi:
 scp -r dist pi@<pi-hostname>:/opt/anicat/mobile-dist
 ```
 
-## 6. Create a dedicated user (optional but recommended)
+## 6. The user the service runs as
 
-Running the server as its own user, not your login user, keeps its config
-and permissions contained:
+The service runs as the default `pi` login user — no dedicated service user.
+That means its config lives at `/home/pi/.config/anicat/` (`config.toml`,
+`registry.db`), and everything under `/opt/anicat` should be owned by `pi`
+(the `chown $USER:$USER` in step 3 already did that if you SSH'd in as `pi`).
 
-```bash
-sudo useradd -r -m -d /home/anicat -s /usr/sbin/nologin anicat
-sudo chown -R anicat:anicat /opt/anicat
-```
+A dedicated locked-down user would be slightly tidier permission-wise, but
+running as `pi` keeps debugging simple (the interactive shell sees exactly
+what the service sees) and matches the actual deployment.
 
 ## 7. A safety-margin swap file
 
@@ -196,9 +197,9 @@ After=network-online.target tailscaled.service
 Wants=network-online.target
 
 [Service]
-User=anicat
-Environment=HOME=/home/anicat
-Environment=ANICAT_SCRAPER_PYTHON=uv
+User=pi
+Environment=HOME=/home/pi
+Environment=ANICAT_SCRAPER_PYTHON=/home/pi/.local/bin/uv
 Environment=ANICAT_SCRAPER_SCRIPT=/opt/anicat/src/scraper/main.py
 Environment=ANICAT_MOBILE_DIST=/opt/anicat/mobile-dist
 ExecStart=/opt/anicat/bin/anicat-server
@@ -212,6 +213,10 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now anicat.service
 ```
+
+`ANICAT_SCRAPER_PYTHON` is the *full path* to `uv` — the systemd service
+doesn't get your login shell's PATH, so a bare `uv` wouldn't resolve
+(`~/.local/bin` is only added by the shell profile).
 
 Check it's actually up:
 
@@ -318,8 +323,8 @@ actually keeps strangers out):
 /opt/anicat/bin/anicat-server add-user "Sam" 4821
 ```
 
-Then turn on multi-user mode in `config.toml` (usually
-`~/.config/anicat/config.toml` for the user the systemd service runs as):
+Then turn on multi-user mode in `config.toml` (the service runs as `pi`, so
+that's `/home/pi/.config/anicat/config.toml`):
 
 ```toml
 [general]
@@ -340,6 +345,34 @@ own — invisible to you and to any other friend.
 
 Add more friends any time with the same `add-user` command — no restart
 needed for that part, only the first time you flip `multi_user` on.
+
+## 12. Daily maintenance timers
+
+Two systemd timers keep an eye on the deployment. Install/update both from
+your **Mac** (idempotent — rerun after editing anything in `scripts/pi/`):
+
+```bash
+bash scripts/pi/install-pi-timers.sh   # optional arg: pi hostname, default anicatpi.local
+```
+
+- **`anicat-smoke.timer`** — daily at 09:00 (±15 min jitter), runs the
+  provider smoke test (`scraper/smoke_test.py`, shipped to the Pi by the
+  install script). No push alerting (ntfy.sh iOS delivery proved unreliable
+  and was dropped) — check results manually:
+  `ssh pi@anicatpi.local 'journalctl -u anicat-smoke.service -n 20'`.
+- **`anicat-backup.timer`** — daily at 04:30, snapshots `registry.db` (via
+  sqlite's online backup API, safe against the live server) and `config.toml`
+  from `/home/pi/.config/anicat/` into `/opt/anicat/backups/`, keeping the 14
+  most recent of each. This protects against corruption and bad migrations,
+  not SD-card death — occasionally pull the backups off the Pi:
+
+  ```bash
+  rsync -az pi@anicatpi.local:/opt/anicat/backups/ ~/anicat-pi-backups/
+  ```
+
+Check timer status on the Pi with
+`systemctl list-timers 'anicat-*'` and last-run logs with
+`journalctl -u anicat-smoke.service -u anicat-backup.service -n 50`.
 
 ## Updating later
 
@@ -390,11 +423,12 @@ changed, rebuild and re-copy `mobile-dist` (step 5) before restarting.
 
 - **Service won't start** — `journalctl -u anicat.service -n 50` for the
   actual error. Most common cause: `ANICAT_MOBILE_DIST` pointing at a folder
-  that doesn't exist yet (step 5 wasn't done) or `/opt/anicat/bin` not owned
-  by the `anicat` user (step 6).
-- **Scraper errors in the log** — SSH in as the `anicat` user
-  (`sudo -u anicat -s`) and run `cd /opt/anicat/src/scraper && uv run python
-  main.py --port 9999` manually to see the real Python traceback.
+  that doesn't exist yet (step 5 wasn't done) or `/opt/anicat` not owned by
+  `pi` (step 3's `chown`).
+- **Scraper errors in the log** — SSH in as `pi` and run
+  `cd /opt/anicat/src/scraper && uv run python main.py --port 9999` manually
+  to see the real Python traceback (the service runs as the same user, so
+  you're seeing exactly its environment).
 - **Can't reach it from your phone** — confirm both the phone and the Pi show
   up in `tailscale status` / the admin console, and that you're using the
   Tailscale hostname (or its `100.x.x.x` IP), not the Pi's LAN IP — the LAN

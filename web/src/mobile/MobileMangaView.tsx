@@ -59,8 +59,8 @@ export function MobileMangaView({ onSelect }: MobileMangaViewProps) {
     <div className="animate-fade-in space-y-7 pb-4">
       {reading.length > 0 && (
         <section>
-          <h2 className="mb-2.5 text-[17px] font-bold text-foreground">Continue Reading</h2>
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.05] overflow-hidden">
+          <h2 className="mb-2.5 text-[15px] font-semibold tracking-tight text-foreground">Continue Reading</h2>
+          <div className="rounded-md bg-surface border border-border overflow-hidden">
             {reading.map((item, i) => {
               const progress = item.user_status?.progress || 0;
               const total = item.chapters || 0;
@@ -68,20 +68,20 @@ export function MobileMangaView({ onSelect }: MobileMangaViewProps) {
               return (
                 <div
                   key={item.id}
-                  className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-white/[0.05]" : ""}`}
+                  className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-border" : ""}`}
                 >
                   <button onClick={() => onSelect(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <div className="h-16 w-11 shrink-0 overflow-hidden rounded-md bg-surface">
+                    <div className="h-16 w-11 shrink-0 overflow-hidden rounded-[4px] bg-surface">
                       <img src={proxyImage(coverOf(item))} alt="" className="h-full w-full object-cover" loading="lazy" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-foreground">{titleOf(item)}</p>
-                      <p className="mt-0.5 text-[11.5px] tabular-nums text-muted-foreground">
-                        Ch {progress}{total > 0 ? ` of ${total}` : ""}
+                      <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.07em] tabular-nums text-muted-foreground">
+                        CH {progress}{total > 0 ? ` / ` : ""}
                       </p>
                       {total > 0 && (
-                        <div className="mt-1.5 h-[3px] rounded-full bg-white/[0.1]">
-                          <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                        <div className="mt-1.5 h-[2px] rounded-[1px] bg-foreground/10">
+                          <div className="h-full rounded-[1px] bg-accent" style={{ width: `${pct}%` }} />
                         </div>
                       )}
                     </div>

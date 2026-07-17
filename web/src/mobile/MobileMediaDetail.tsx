@@ -2,15 +2,14 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ChevronLeft, ChevronDown, ChevronUp, Play, BookOpen, Heart, Loader2, Star, Users,
-  Calendar, SkipForward, Sparkles, PlayCircle, RotateCcw, Frown, Meh, Smile, Minus, Plus,
+  ChevronLeft, ChevronDown, ChevronUp, Play, BookOpen, Heart, Loader2, Star,
+  SkipForward, PlayCircle, RotateCcw, Frown, Meh, Smile, Minus, Plus,
 } from "lucide-react";
 import { mediaApi, type MediaItem, type Episode, type Character } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
 import { formatRelativeTimeFromUnix } from "@/lib/date";
-import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import MangaReader from "@/components/media/MangaReader";
@@ -86,7 +85,6 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   });
   const fullItem = fullItemData ?? item;
   const banner = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large;
-  const ambientColor = useAmbientColor(banner);
   const progressEditor = useProgressEditor();
   const scoreEditor = useProgressEditor();
 
@@ -224,8 +222,6 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   const setAutoskip = useSettingsStore((s) => s.setAutoskip);
   const autoplay = useSettingsStore((s) => s.autoplay);
   const setAutoplay = useSettingsStore((s) => s.setAutoplay);
-  const shaderProfile = useSettingsStore((s) => s.shaderProfile);
-  const setShaderProfile = useSettingsStore((s) => s.setShaderProfile);
 
   const handleToggleAutoskip = async () => {
     const v = !autoskip; setAutoskip(v);
@@ -234,10 +230,6 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   const handleToggleAutoNext = async () => {
     const v = !autoplay; setAutoplay(v);
     try { await mediaApi.updateConfig({ general: { autoplay: v } }); } catch { /* noop */ }
-  };
-  const handleToggleUpscaling = async () => {
-    const v = shaderProfile === "off" ? "balanced" : "off"; setShaderProfile(v);
-    try { await mediaApi.updateConfig({ stream: { shader_profile: v } }); } catch { /* noop */ }
   };
 
   const handleUpdateProgress = async (newProgress: number) => {
@@ -352,48 +344,41 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   return (
     <>
       <div className="-mx-6 -mt-4">
-        {/* Banner */}
-        <div className="relative w-full overflow-hidden" style={{ height: "38vh" }}>
+        {/* Banner — art carries the color; chrome stays quiet. No ambient
+            radial glow (banned by the skin), just a straight fade into the
+            ink ground. */}
+        <div className="relative w-full overflow-hidden" style={{ height: "32vh" }}>
           <img src={proxyImage(banner)} alt={title} className="h-full w-full object-cover" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 40%, var(--background) 100%)" }} />
-          <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ background: `radial-gradient(ellipse at 10% 0%, ${ambientColor} 0%, transparent 55%)` }} />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.3) 45%, var(--background) 100%)" }} />
           <button onClick={onClose} className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white active:scale-90" style={{ marginTop: "env(safe-area-inset-top)" }}>
             <ChevronLeft size={20} />
           </button>
           <button
             onClick={handleToggleFavourite}
             disabled={isTogglingFavourite}
-            className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full active:scale-90 ${fullItem?.is_favourite ? "bg-pink-500/80 text-white" : "bg-black/50 text-white"}`}
+            className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full active:scale-90 ${fullItem?.is_favourite ? "bg-accent text-background" : "bg-black/50 text-white"}`}
             style={{ marginTop: "env(safe-area-inset-top)" }}
           >
             <Heart size={17} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
           </button>
         </div>
 
-        <div className="px-6 -mt-6 relative space-y-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2 py-0.5 bg-accent rounded text-[10px] font-black uppercase tracking-widest text-white">
-              {fullItem.format || (isManga ? "MANGA" : "ANIME")}
-            </span>
-            {fullItem.status === "RELEASING" && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[10px] font-bold text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Airing
-              </span>
-            )}
-          </div>
-          <h1 className="text-[26px] font-extrabold leading-tight text-white">{title}</h1>
-          <div className="flex items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground flex-wrap">
-            {fullItem.studios?.nodes?.[0]?.name && <span className="text-white/70 font-medium">{fullItem.studios.nodes[0].name}</span>}
+        <div className="px-6 -mt-5 relative space-y-4">
+          {/* Mono metadata line — the card-catalog signature. */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums">
+            <span>{fullItem.format || (isManga ? "MANGA" : "ANIME")}</span>
+            {!isManga && fullItem.episodes ? <span>{fullItem.episodes} EP</span> : null}
+            {isManga && fullItem.chapters ? <span>{fullItem.chapters} CH</span> : null}
             {(fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year) && <span>{fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year}</span>}
-            {!isManga && fullItem.episodes ? <span>{fullItem.episodes} eps</span> : null}
-            {isManga && fullItem.chapters ? <span>{fullItem.chapters} ch</span> : null}
-            {fullItem.average_score ? <span className="flex items-center gap-1 text-amber-400"><Star size={12} fill="currentColor" />{fullItem.average_score}%</span> : null}
-            {(fullItem.popularity ?? 0) > 0 && <span className="flex items-center gap-1"><Users size={12} />{fullItem.popularity!.toLocaleString()}</span>}
+            {fullItem.studios?.nodes?.[0]?.name && <span>{fullItem.studios.nodes[0].name}</span>}
+            {fullItem.average_score ? <span>Score {fullItem.average_score}</span> : null}
+            {fullItem.status === "RELEASING" && <span className="text-accent">Airing</span>}
           </div>
+          <h1 className="text-[24px] font-bold leading-tight tracking-tight text-foreground">{title}</h1>
           {fullItem.genres && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
               {fullItem.genres.slice(0, 4).map((g: string) => (
-                <span key={g} className="px-2.5 py-1 bg-white/[0.06] rounded-lg text-[11px] font-semibold text-muted-foreground">{g}</span>
+                <span key={g}>{g}</span>
               ))}
             </div>
           )}
@@ -402,25 +387,63 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
           <button
             onClick={() => handlePlayNext()}
             disabled={isPlayingNext || isCaughtUp}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-3.5 text-[15px] font-bold text-white active:scale-[0.98] disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 text-[14px] font-semibold text-background active:scale-[0.98] disabled:opacity-40"
           >
-            {isPlayingNext ? <Loader2 className="animate-spin" size={18} /> : isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
-            {isFinished ? "Completed" : isCaughtUp ? "Caught Up" : `${isManga ? "Read" : actualProgress > 0 ? "Continue" : "Start"} ${isManga ? "Chapter" : "Episode"} ${nextEpisode}`}
+            {isPlayingNext ? <Loader2 className="animate-spin" size={17} /> : isManga ? <BookOpen size={17} /> : <Play size={17} fill="currentColor" />}
+            {isFinished ? "Completed" : isCaughtUp ? "Caught up" : `${isManga ? "Read" : "Play"} ${isManga ? "CH" : "EP"} ${nextEpisode}`}
           </button>
 
+          {/* Watch grid — one square per episode, whole season legible in
+              one glance; tap a square to play it. Skipped for very long
+              shows where a thousand squares stops being legible (the
+              episode list below still covers them). */}
+          {!isManga && total > 0 && total <= 100 && (
+            <div>
+              <div className="flex flex-wrap gap-[5px]" style={{ touchAction: "pan-y" }}>
+                {Array.from({ length: total }, (_, i) => i + 1).map((n) => {
+                  const watched = n <= actualProgress;
+                  const current = n === nextEpisode;
+                  const unaired = nextAiringEp !== undefined && n >= nextAiringEp;
+                  return (
+                    <button
+                      key={n}
+                      disabled={unaired}
+                      onClick={() => handlePlayNext(n)}
+                      style={{ touchAction: "pan-y" }}
+                      className={`grid h-[24px] w-[24px] place-items-center rounded-[4px] border font-mono text-[9px] tabular-nums ${
+                        watched
+                          ? "border-transparent bg-accent/15 text-accent"
+                          : current
+                            ? "border-accent text-foreground"
+                            : unaired
+                              ? "border-border text-muted-foreground/40"
+                              : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums">
+                {actualProgress} of {total} watched{!isFinished && !isCaughtUp ? ` · up next EP ${nextEpisode}` : ""}
+              </p>
+            </div>
+          )}
+
           {/* Status / progress / score row */}
-          <div className="flex items-center gap-2">
-            <button onClick={() => setStatusSheetOpen(true)} className="flex-1 rounded-2xl bg-white/[0.06] px-4 py-3 text-left active:bg-white/[0.1]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Status</p>
-              <p className="text-[14px] font-bold text-foreground">{currentStatusLabel ? (isManga ? currentStatusLabel.mangaLabel || currentStatusLabel.label : currentStatusLabel.label) : "Add to List"}</p>
+          <div className="flex items-stretch gap-2">
+            <button onClick={() => setStatusSheetOpen(true)} className="flex-1 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left active:bg-foreground/[0.06]">
+              <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">Status</p>
+              <p className="mt-0.5 text-[13.5px] font-semibold text-foreground">{currentStatusLabel ? (isManga ? currentStatusLabel.mangaLabel || currentStatusLabel.label : currentStatusLabel.label) : "Add to list"}</p>
             </button>
-            <button onClick={() => { progressEditor.startEditing(actualProgress); setProgressSheetOpen(true); }} className="flex-1 rounded-2xl bg-white/[0.06] px-4 py-3 text-left active:bg-white/[0.1]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Progress</p>
-              <p className="text-[14px] font-bold text-foreground tabular-nums">{actualProgress} / {isManga ? fullItem.chapters || "?" : fullItem.episodes || "?"}</p>
+            <button onClick={() => { progressEditor.startEditing(actualProgress); setProgressSheetOpen(true); }} className="flex-1 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left active:bg-foreground/[0.06]">
+              <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">Progress</p>
+              <p className="mt-0.5 text-[13.5px] font-semibold text-foreground tabular-nums">{actualProgress} / {isManga ? fullItem.chapters || "?" : fullItem.episodes || "?"}</p>
             </button>
-            <button onClick={() => { scoreEditor.startEditing(actualScore || 0); setScoreSheetOpen(true); }} className="flex-1 rounded-2xl bg-white/[0.06] px-4 py-3 text-left active:bg-white/[0.1]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{actualScore ? "Your Score" : "Avg Score"}</p>
-              <p className="text-[14px] font-bold text-foreground tabular-nums">{actualScore ? actualScore : fullItem.average_score ? `${fullItem.average_score}%` : "-"}</p>
+            <button onClick={() => { scoreEditor.startEditing(actualScore || 0); setScoreSheetOpen(true); }} className="flex-1 rounded-md border border-border bg-surface px-3.5 py-2.5 text-left active:bg-foreground/[0.06]">
+              <p className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted-foreground">{actualScore ? "Your score" : "Avg score"}</p>
+              <p className="mt-0.5 text-[13.5px] font-semibold text-foreground tabular-nums">{actualScore ? actualScore : fullItem.average_score ? `${fullItem.average_score}%` : "-"}</p>
             </button>
           </div>
 
@@ -439,26 +462,23 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             </div>
           )}
 
-          {/* Next episode */}
+          {/* Next episode — one mono countdown line, not a billboard card. */}
           {!isManga && fullItem.next_airing && (
-            <div className="flex items-center gap-3 rounded-2xl bg-accent/5 border border-accent/10 p-4">
-              <div className="rounded-xl bg-accent/10 p-2.5 text-accent"><Calendar size={18} /></div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-accent">Next Episode</p>
-                <p className="text-[13px] font-bold text-foreground">Episode {fullItem.next_airing.episode} <span className="font-medium text-muted-foreground">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span></p>
-              </div>
-            </div>
+            <p className="font-mono text-[10.5px] uppercase tracking-[0.08em] tabular-nums">
+              <span className="text-accent">EP {fullItem.next_airing.episode}</span>{" "}
+              <span className="text-muted-foreground">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
+            </p>
           )}
 
           {/* Prequel / sequel */}
           {(prequel || sequel) && (
             <div className="grid grid-cols-2 gap-2.5">
               {[{ rel: prequel, label: "Previous" }, { rel: sequel, label: "Next" }].filter((s) => s.rel).map(({ rel, label }) => (
-                <button key={label} onClick={() => rel && selectItem(rel)} className="flex items-center gap-2.5 rounded-2xl bg-white/[0.04] p-2.5 text-left active:bg-white/[0.08]">
-                  {(rel?.cover_image?.large || rel?.coverImage?.large) && <img src={proxyImage(rel?.cover_image?.large || rel?.coverImage?.large)} className="h-14 w-10 shrink-0 rounded-lg object-cover" />}
+                <button key={label} onClick={() => rel && selectItem(rel)} className="flex items-center gap-2.5 rounded-md border border-border bg-surface p-2.5 text-left active:bg-foreground/[0.06]">
+                  {(rel?.cover_image?.large || rel?.coverImage?.large) && <img src={proxyImage(rel?.cover_image?.large || rel?.coverImage?.large)} className="h-14 w-10 shrink-0 rounded-[4px] object-cover" />}
                   <div className="min-w-0">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-accent">{label}</p>
-                    <p className="truncate text-[12px] font-bold text-foreground">{rel?.title?.english || rel?.title?.romaji}</p>
+                    <p className="font-mono text-[9px] uppercase tracking-[0.08em] text-accent">{label}</p>
+                    <p className="truncate text-[12px] font-semibold text-foreground">{rel?.title?.english || rel?.title?.romaji}</p>
                   </div>
                 </button>
               ))}
@@ -471,7 +491,9 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`shrink-0 rounded-full px-4 py-2 text-[13px] font-bold ${activeTab === tab ? "bg-accent text-white" : "bg-white/[0.06] text-muted-foreground"}`}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] ${
+                  activeTab === tab ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
+                }`}
               >
                 {tab === "episodes" ? (isManga ? "Chapters" : "Episodes") : tab === "related" ? "Related" : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
@@ -482,8 +504,8 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             {activeTab === "episodes" && (
               <motion.div key="episodes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3 w-full">
                 {!isManga && (
-                  <button onClick={() => setEpisodeSettingsOpen(true)} className="flex w-full items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 text-[13px] text-muted-foreground active:bg-white/[0.06]">
-                    <span>Playback settings & source</span>
+                  <button onClick={() => setEpisodeSettingsOpen(true)} className="flex w-full items-center justify-between rounded-md border border-border px-4 py-2.5 text-[13px] text-muted-foreground active:bg-foreground/[0.06]">
+                    <span>Playback settings and source</span>
                     <ChevronDown size={15} />
                   </button>
                 )}
@@ -573,19 +595,19 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       {/* Progress sheet */}
       <BottomSheet open={progressSheetOpen} onClose={() => { setProgressSheetOpen(false); progressEditor.cancelEditing(); }} title="Update Progress">
         <div className="flex items-center justify-center gap-6 px-4 py-4">
-          <button onClick={() => progressEditor.setEditValue(String(Math.max(0, (parseInt(progressEditor.editValue) || 0) - 1)))} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.08] active:scale-90"><Minus size={18} /></button>
+          <button onClick={() => progressEditor.setEditValue(String(Math.max(0, (parseInt(progressEditor.editValue) || 0) - 1)))} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface active:scale-90"><Minus size={18} /></button>
           <input
             type="number"
             value={progressEditor.editValue}
             onChange={(e) => progressEditor.setEditValue(e.target.value)}
-            className="w-20 bg-transparent text-center text-3xl font-black text-foreground outline-none"
+            className="w-20 bg-transparent text-center text-3xl font-bold tabular-nums text-foreground outline-none"
           />
-          <button onClick={() => progressEditor.setEditValue(String((parseInt(progressEditor.editValue) || 0) + 1))} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.08] active:scale-90"><Plus size={18} /></button>
+          <button onClick={() => progressEditor.setEditValue(String((parseInt(progressEditor.editValue) || 0) + 1))} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface active:scale-90"><Plus size={18} /></button>
         </div>
         <div className="px-4 pb-2">
           <button
             onClick={() => { handleUpdateProgress(parseInt(progressEditor.editValue) || 0); setProgressSheetOpen(false); }}
-            className="w-full rounded-full bg-accent py-3 text-[15px] font-bold text-white active:scale-[0.98]"
+            className="w-full rounded-md bg-accent py-3 text-[14px] font-semibold text-background active:scale-[0.98]"
           >
             Save
           </button>
@@ -609,19 +631,19 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
         ) : (
           <>
             <div className="flex items-center justify-center gap-6 px-4 py-4">
-              <button onClick={() => scoreEditor.setEditValue(String(Math.max(0, (parseFloat(scoreEditor.editValue) || 0) - 1)))} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.08] active:scale-90"><Minus size={18} /></button>
+              <button onClick={() => scoreEditor.setEditValue(String(Math.max(0, (parseFloat(scoreEditor.editValue) || 0) - 1)))} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface active:scale-90"><Minus size={18} /></button>
               <input
                 type="number"
                 value={scoreEditor.editValue}
                 onChange={(e) => scoreEditor.setEditValue(e.target.value)}
-                className="w-20 bg-transparent text-center text-3xl font-black text-foreground outline-none"
+                className="w-20 bg-transparent text-center text-3xl font-bold tabular-nums text-foreground outline-none"
               />
-              <button onClick={() => scoreEditor.setEditValue(String((parseFloat(scoreEditor.editValue) || 0) + 1))} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.08] active:scale-90"><Plus size={18} /></button>
+              <button onClick={() => scoreEditor.setEditValue(String((parseFloat(scoreEditor.editValue) || 0) + 1))} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface active:scale-90"><Plus size={18} /></button>
             </div>
             <div className="px-4 pb-2">
               <button
                 onClick={() => { handleUpdateScore(parseFloat(scoreEditor.editValue) || 0); setScoreSheetOpen(false); }}
-                className="w-full rounded-full bg-accent py-3 text-[15px] font-bold text-white active:scale-[0.98]"
+                className="w-full rounded-md bg-accent py-3 text-[14px] font-semibold text-background active:scale-[0.98]"
               >
                 Save
               </button>
@@ -633,7 +655,6 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       {/* Episode settings sheet */}
       <BottomSheet open={episodeSettingsOpen} onClose={() => setEpisodeSettingsOpen(false)} title="Playback Settings">
         <SheetRow active={autoskip} onClick={handleToggleAutoskip}><SkipForward size={18} /> Auto-Skip Intro {autoskip ? "(On)" : "(Off)"}</SheetRow>
-        <SheetRow active={shaderProfile !== "off"} onClick={handleToggleUpscaling}><Sparkles size={18} /> GPU Upscaling {shaderProfile !== "off" ? "(On)" : "(Off)"}</SheetRow>
         <SheetRow active={autoplay} onClick={handleToggleAutoNext}><PlayCircle size={18} /> Auto Next Episode {autoplay ? "(On)" : "(Off)"}</SheetRow>
         <SheetRow onClick={() => setSelectedProvider((p) => (p === "mkissa" ? "anineko" : "mkissa"))}>
           <RotateCcw size={18} /> Source: {selectedProvider === "mkissa" ? "Mkissa" : "AniNeko"} (tap to switch)

@@ -6,8 +6,9 @@ import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 import { proxyImage } from "@/lib/proxy";
 import { parseAiringTime } from "@/lib/date";
-import { MobileHero } from "./MobileHero";
+import { UpNextCard } from "./UpNextCard";
 import { PosterRow } from "./PosterRow";
+import { PosterCard } from "./PosterCard";
 import { EpisodeCard } from "./EpisodeCard";
 
 // `airing_at` is unix seconds when snakify copied AniList's raw airingAt
@@ -33,11 +34,12 @@ interface MobileHomeViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
-/** Purpose-built mobile home screen — poster rows + an immersive hero
- * carousel, matching the shape of a real streaming app (Crunchyroll/
- * Netflix) rather than a shrunk version of the desktop dashboard. Reuses
- * the same underlying queries/cache keys as desktop's HomeView so both
- * surfaces share warm cache, but the presentation is entirely new. */
+/** Ink & Index mobile home: resume is the product. One dominant Up Next
+ * card (the most recently watched in-progress show), the rest of the
+ * watching queue as a horizontal shelf, then a Watching grid and quiet
+ * poster rows. The hero carousel is deleted, not restyled — billboards
+ * sell, archives resume. Reuses the same queries/cache keys as desktop's
+ * HomeView so both surfaces share warm cache. */
 export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
@@ -77,6 +79,7 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
       });
   }, [watchingQuery.data, lastWatchedQuery.data]);
 
+  const watching = watchingQuery.data?.media || [];
   const trending = trendingQuery.data?.media || [];
   const seasonal = seasonalQuery.data?.media || [];
   const planning = planningQuery.data?.media || [];
@@ -85,18 +88,18 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
   // the phone equivalent of glancing at the Schedule tab for "anything
   // I follow airing today?".
   const airingSoon = useMemo(() => {
-    const watching = watchingQuery.data?.media || [];
     return watching
       .map((m) => ({ item: m, at: airingAtMs(m) }))
       .filter((e): e is { item: MediaItem; at: number } => e.at !== null && e.at > Date.now() - 6 * 3_600_000)
       .sort((a, b) => a.at - b.at)
       .slice(0, 10);
-  }, [watchingQuery.data]);
+  }, [watching]);
 
-  const heroPool = (continueWatching.length > 0 ? continueWatching : trending).slice(0, 5);
+  const upNext = continueWatching[0];
+  const queueRest = continueWatching.slice(1);
 
   const isLoading = trendingQuery.isLoading || (isAuthenticated && watchingQuery.isLoading);
-  if (isLoading && heroPool.length === 0) {
+  if (isLoading && !upNext && trending.length === 0) {
     return (
       <div className="flex items-center justify-center py-32">
         <Loader2 className="animate-spin text-accent" size={36} />
@@ -106,45 +109,66 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
 
   return (
     <div className="space-y-7 pb-6">
-      <MobileHero items={heroPool} onSelect={onSelect} />
-      <div className="space-y-7 px-0">
-        {continueWatching.length > 0 && (
-          <div className="space-y-2.5">
-            <h2 className="text-[17px] font-bold text-foreground">Continue Watching</h2>
-            <div className="-mx-6 flex gap-3 overflow-x-auto px-6 pb-1 scrollbar-hide">
-              {continueWatching.map((item) => (
-                <EpisodeCard key={item.id} item={item} onSelect={onSelect} />
-              ))}
-            </div>
+      {upNext && <UpNextCard item={upNext} onSelect={onSelect} />}
+
+      {queueRest.length > 0 && (
+        <div className="space-y-2.5">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Continue</h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums">{queueRest.length}</span>
           </div>
-        )}
-        {airingSoon.length > 0 && (
-          <div className="space-y-2.5">
-            <h2 className="text-[17px] font-bold text-foreground">Airing Soon</h2>
-            <div className="-mx-6 flex gap-2.5 overflow-x-auto px-6 pb-1 scrollbar-hide">
-              {airingSoon.map(({ item, at }) => {
-                const cover = item.cover_image?.large || item.cover_image?.medium || item.coverImage?.large || item.coverImage?.medium;
-                return (
-                  <button key={item.id} onClick={() => onSelect(item)} className="w-[112px] shrink-0 text-left">
-                    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-surface shadow-lg shadow-black/40">
-                      <img src={proxyImage(cover)} alt="" className="h-full w-full object-cover" loading="lazy" />
-                    </div>
-                    <p className="mt-1.5 line-clamp-1 text-[12.5px] font-semibold leading-tight text-foreground">
-                      {item.title?.english || item.title?.romaji}
-                    </p>
-                    <p className="text-[11px] tabular-nums text-muted-foreground">
-                      Ep {item.next_airing?.episode ?? "?"} {airingLabel(at)}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="-mx-6 flex gap-3 overflow-x-auto px-6 pb-1 scrollbar-hide">
+            {queueRest.map((item) => (
+              <EpisodeCard key={item.id} item={item} onSelect={onSelect} />
+            ))}
           </div>
-        )}
-        <PosterRow title="Planning" items={planning} onSelect={onSelect} />
-        <PosterRow title="Trending Now" items={trending} onSelect={onSelect} />
-        <PosterRow title="This Season" items={seasonal} onSelect={onSelect} />
-      </div>
+        </div>
+      )}
+
+      {airingSoon.length > 0 && (
+        <div className="space-y-2.5">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Airing soon</h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Schedule</span>
+          </div>
+          <div className="-mx-6 flex gap-3 overflow-x-auto px-6 pb-1 scrollbar-hide">
+            {airingSoon.map(({ item, at }) => {
+              const cover = item.cover_image?.large || item.cover_image?.medium || item.coverImage?.large || item.coverImage?.medium;
+              return (
+                <button key={item.id} onClick={() => onSelect(item)} className="w-[112px] shrink-0 text-left">
+                  <div className="relative aspect-[2/3] w-full overflow-hidden rounded-[5px] bg-surface">
+                    <img src={proxyImage(cover)} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  </div>
+                  <p className="mt-1.5 line-clamp-1 text-[12px] font-medium leading-[1.3] text-foreground">
+                    {item.title?.english || item.title?.romaji}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.07em] text-accent tabular-nums">
+                    EP {item.next_airing?.episode ?? "?"} {airingLabel(at)}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {watching.length > 0 && (
+        <div className="space-y-2.5">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Watching</h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums">{watching.length} shows</span>
+          </div>
+          <div className="grid grid-cols-3 gap-x-3 gap-y-4">
+            {watching.map((item) => (
+              <PosterCard key={item.id} item={item} onSelect={onSelect} width="100%" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <PosterRow title="Planning" items={planning} onSelect={onSelect} />
+      <PosterRow title="Trending" items={trending} onSelect={onSelect} />
+      <PosterRow title="This season" items={seasonal} onSelect={onSelect} />
     </div>
   );
 }

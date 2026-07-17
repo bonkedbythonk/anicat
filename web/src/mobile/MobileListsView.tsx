@@ -1,5 +1,4 @@
-import { type ComponentType } from "react";
-import { Loader2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Heart, Repeat } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
@@ -7,13 +6,13 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore, type WatchStatus } from "@/stores/app";
 import { PosterCard } from "./PosterCard";
 
-const LIST_TABS: { key: WatchStatus; label: string; icon: ComponentType<{ size?: number; className?: string }> }[] = [
-  { key: "watching", label: "Watching", icon: Monitor },
-  { key: "repeating", label: "Rewatching", icon: Repeat },
-  { key: "completed", label: "Completed", icon: CheckCircle2 },
-  { key: "planning", label: "Planning", icon: Bookmark },
-  { key: "paused", label: "Paused", icon: Pause },
-  { key: "dropped", label: "Dropped", icon: XCircle },
+const LIST_TABS: { key: WatchStatus; label: string }[] = [
+  { key: "watching", label: "Watching" },
+  { key: "repeating", label: "Rewatching" },
+  { key: "completed", label: "Completed" },
+  { key: "planning", label: "Planning" },
+  { key: "paused", label: "Paused" },
+  { key: "dropped", label: "Dropped" },
 ];
 
 interface MobileListsViewProps {
@@ -53,11 +52,10 @@ export function MobileListsView({ onSelect }: MobileListsViewProps) {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-semibold transition-colors ${
-                active ? "bg-accent text-white" : "bg-white/[0.06] text-muted-foreground"
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-colors ${
+                active ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
               }`}
             >
-              <tab.icon size={14} />
               {label}
             </button>
           );
@@ -74,8 +72,7 @@ export function MobileListsView({ onSelect }: MobileListsViewProps) {
         <div className="flex justify-center py-20"><Loader2 className="animate-spin text-accent" size={32} /></div>
       ) : (
         <div className="py-20 text-center">
-          <Heart size={36} className="mx-auto mb-3 text-muted-foreground" />
-          <p className="font-medium text-muted-foreground">This list is empty.</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">This list is empty</p>
         </div>
       )}
 

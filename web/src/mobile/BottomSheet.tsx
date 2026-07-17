@@ -39,11 +39,11 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 32, stiffness: 320 }}
-            className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-[#111113] border-t border-white/10 max-h-[80vh] overflow-y-auto"
+            className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-surface border-t border-border max-h-[80vh] overflow-y-auto"
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
           >
-            <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-white/20" />
-            {title && <h3 className="px-5 pt-3 pb-1 text-[13px] font-bold uppercase tracking-wider text-muted-foreground">{title}</h3>}
+            <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-foreground/20" />
+            {title && <h3 className="px-5 pt-3 pb-1 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">{title}</h3>}
             <div className="px-2 pb-2 pt-1">{children}</div>
           </motion.div>
         </div>
@@ -57,7 +57,7 @@ export function SheetRow({ onClick, active, destructive, children }: { onClick: 
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-[15px] font-semibold active:bg-white/[0.06] ${
+      className={`flex w-full items-center gap-3 rounded-md px-4 py-3.5 text-left text-[15px] font-medium active:bg-foreground/[0.06] ${
         destructive ? "text-red-400" : active ? "text-accent" : "text-foreground"
       }`}
     >

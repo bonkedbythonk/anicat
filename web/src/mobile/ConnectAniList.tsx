@@ -61,7 +61,7 @@ export function ConnectAniList({ displayName, onConnected }: ConnectAniListProps
         href={ANILIST_AUTHORIZE_URL}
         target="_blank"
         rel="noreferrer"
-        className="px-6 py-2.5 rounded-xl bg-accent text-white font-semibold"
+        className="px-6 py-2.5 rounded-md bg-accent text-background font-semibold"
       >
         Connect AniList
       </a>
@@ -73,13 +73,13 @@ export function ConnectAniList({ displayName, onConnected }: ConnectAniListProps
         value={pasted}
         onChange={(e) => setPasted(e.target.value)}
         placeholder="Paste redirect URL or token..."
-        className="w-full max-w-xs bg-card border border-border rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+        className="w-full max-w-xs bg-card border border-border rounded-md py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
       />
       {error && <p className="text-sm text-red-400 max-w-xs">{error}</p>}
       <button
         onClick={submit}
         disabled={submitting || !pasted}
-        className="px-6 py-2.5 rounded-xl bg-white/15 font-semibold disabled:opacity-50"
+        className="px-6 py-2.5 rounded-md border border-border font-semibold disabled:opacity-50"
       >
         {submitting ? "Connecting..." : "Save"}
       </button>

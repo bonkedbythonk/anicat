@@ -91,7 +91,7 @@ export function PinGate({ onSuccess }: PinGateProps) {
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           placeholder="Your name"
-          className="w-56 text-center text-lg bg-card border border-border rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
+          className="w-56 text-center text-lg bg-card border border-border rounded-md py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
         />
       )}
       <input
@@ -102,14 +102,14 @@ export function PinGate({ onSuccess }: PinGateProps) {
         onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
         onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
         maxLength={8}
-        className="w-40 text-center text-3xl tracking-[0.5em] bg-card border border-border rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
+        className="w-40 text-center text-3xl tracking-[0.5em] bg-card border border-border rounded-md py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
         placeholder="----"
       />
       {error && <p className="text-sm text-red-400 max-w-xs text-center">{error}</p>}
       <button
         onClick={submit}
         disabled={submitting || !pin || (!!multiUser && !displayName)}
-        className="px-6 py-2.5 rounded-xl bg-accent text-white font-semibold disabled:opacity-50"
+        className="px-6 py-2.5 rounded-md bg-accent text-background font-semibold disabled:opacity-50"
       >
         {submitting ? "Checking..." : "Unlock"}
       </button>

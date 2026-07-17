@@ -82,12 +82,12 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search ${type.toLowerCase()}`}
-            className="w-full rounded-full bg-white/[0.06] py-2.5 pl-10 pr-4 text-[15px] outline-none placeholder:text-muted-foreground"
+            className="w-full rounded-md border border-border bg-surface py-2.5 pl-10 pr-4 text-[15px] outline-none placeholder:text-muted-foreground"
           />
         </div>
         <button
           onClick={() => setShowFilters((v) => !v)}
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${hasFilters ? "bg-accent text-white" : "bg-white/[0.06] text-muted-foreground"}`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border `}
         >
           <SlidersHorizontal size={17} />
         </button>
@@ -96,12 +96,12 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
       <MediaTypeToggle value={type} onChange={setType} />
 
       {showFilters && (
-        <div className="grid grid-cols-2 gap-2.5 rounded-2xl bg-white/[0.03] p-3">
-          <select value={filters.genre || ""} onChange={(e) => setFilters((f) => ({ ...f, genre: e.target.value || undefined }))} className="rounded-lg bg-white/[0.06] p-2.5 text-sm">
+        <div className="grid grid-cols-2 gap-2.5 rounded-md border border-border bg-surface p-3">
+          <select value={filters.genre || ""} onChange={(e) => setFilters((f) => ({ ...f, genre: e.target.value || undefined }))} className="rounded-[4px] border border-border bg-background p-2.5 text-sm">
             <option value="">Any Genre</option>
             {GENRES.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
-          <select value={filters.status || ""} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))} className="rounded-lg bg-white/[0.06] p-2.5 text-sm">
+          <select value={filters.status || ""} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))} className="rounded-[4px] border border-border bg-background p-2.5 text-sm">
             <option value="">Any Status</option>
             <option value="FINISHED">Finished</option>
             <option value="RELEASING">Releasing</option>
@@ -131,8 +131,7 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
 
       {isSearching && !loading && results.length === 0 && (
         <div className="py-20 text-center">
-          <Search size={36} className="mx-auto mb-3 text-muted-foreground" />
-          <p className="font-medium text-muted-foreground">No {type.toLowerCase()} found.</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">No {type.toLowerCase()} found</p>
         </div>
       )}
     </div>

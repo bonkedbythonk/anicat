@@ -92,7 +92,7 @@ export function MobileEpisodeList({
           <button
             onClick={handleRetry}
             disabled={retrying}
-            className="inline-flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/10 px-4 py-2 text-xs font-bold text-accent active:scale-95 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-accent/10 px-4 py-2 text-xs font-semibold text-accent active:scale-95 disabled:opacity-50"
           >
             <RefreshCw size={14} className={retrying ? "animate-spin" : ""} />
             {retrying ? "Retrying..." : "Retry Search"}
@@ -122,21 +122,21 @@ export function MobileEpisodeList({
           <div
             key={`${epNum}-${idx}`}
             onClick={() => !isUnaired && handlePlay(epNum)}
-            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 active:bg-white/[0.05] ${isWatched ? "opacity-50" : ""}`}
+            className={`flex items-center gap-3 rounded-md px-3 py-2.5 active:bg-foreground/[0.05] ${isWatched ? "opacity-50" : ""}`}
           >
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${
-              isNext && !isUnaired ? "bg-accent text-white" : "bg-white/[0.06] text-foreground"
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border font-mono text-[11px] tabular-nums ${
+              isNext && !isUnaired ? "border-accent text-foreground" : isWatched ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
             }`}>
               {playingEp === epNum ? <Loader2 size={15} className="animate-spin" /> : epNum}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-foreground">{displayTitle}</p>
+              <p className="truncate text-[13.5px] font-medium text-foreground">{displayTitle}</p>
               {isFiller(Number(ep.number)) && (
-                <span className="mt-0.5 inline-block rounded bg-yellow-500/15 px-1.5 py-0.5 text-[9px] font-bold text-yellow-400">Filler</span>
+                <span className="mt-0.5 inline-block font-mono text-[9px] uppercase tracking-[0.08em] text-[#c07a5b]">Filler</span>
               )}
             </div>
             {isUnaired ? (
-              <span className="shrink-0 rounded-lg bg-white/[0.06] px-2.5 py-1 text-[10px] font-bold uppercase text-muted-foreground">Soon</span>
+              <span className="shrink-0 rounded-[4px] border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground">Soon</span>
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); setSheetEp(epNum); }}

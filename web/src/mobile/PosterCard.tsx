@@ -7,10 +7,10 @@ interface PosterCardProps {
   width?: number | string;
 }
 
-/** A Crunchyroll/Netflix-style poster card — image-forward, minimal text,
- * no inline genre/score clutter. Distinct from the shared desktop
- * `MediaCard` (which is a wider landscape-ish card with more metadata baked
- * in) — this is purpose-built for a phone-width horizontal shelf. */
+/** Ink & Index poster card — art carries the color, chrome stays quiet: no
+ * drop shadow, small radius, progress as a thin bottom tick, and the count
+ * as a mono line under the name (the card-catalog signature). Distinct from
+ * the shared desktop `MediaCard`; purpose-built for phone grids/shelves. */
 export function PosterCard({ item, onSelect, width = 112 }: PosterCardProps) {
   const title = item.title?.english || item.title?.romaji || "Unknown";
   // snakify() (lib/api.ts) only adds the cover_image alias on the top-level
@@ -25,15 +25,20 @@ export function PosterCard({ item, onSelect, width = 112 }: PosterCardProps) {
 
   return (
     <button onClick={() => onSelect(item)} className="shrink-0 text-left" style={{ width }}>
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-surface shadow-lg shadow-black/40">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-[5px] bg-surface">
         <img src={proxyImage(cover)} alt={title} className="h-full w-full object-cover" loading="lazy" />
         {progressPct > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+          <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/45">
             <div className="h-full bg-accent" style={{ width: `${progressPct}%` }} />
           </div>
         )}
       </div>
-      <p className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-tight text-foreground">{title}</p>
+      <p className="mt-1.5 line-clamp-2 text-[12px] font-medium leading-[1.3] text-foreground">{title}</p>
+      {progress > 0 && (
+        <p className="mt-0.5 font-mono text-[10px] tracking-[0.07em] text-muted-foreground tabular-nums">
+          {progress}/{total || "?"}
+        </p>
+      )}
     </button>
   );
 }

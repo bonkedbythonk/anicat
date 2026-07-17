@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{ConnectInfo, Query, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     middleware,
     middleware::Next,
     response::Response,
@@ -162,6 +162,20 @@ pub async fn start_proxy(
     log::info!("Serving mobile PWA static files from {:?}", mobile_dist_path);
     let mobile_index = mobile_dist_path.join("mobile.html");
     let static_service = ServeDir::new(&mobile_dist_path).fallback(ServeFile::new(&mobile_index));
+    // ServeDir sets no Cache-Control by default, so Safari falls back to
+    // heuristic HTTP caching for mobile.html — the entry point that
+    // references each build's content-hashed JS bundle by name. A phone can
+    // sit on a stale mobile.html (and therefore a stale bundle reference)
+    // for a long time after a Pi redeploy with nothing to force a refetch.
+    // Vite's hashed /assets/* filenames are already safe to cache forever
+    // (a new build never reuses an old hash), so only the unhashed shell
+    // files need no-cache — wrapped via a one-route catch-all Router rather
+    // than a bare tower::ServiceBuilder since `tower` isn't a direct
+    // dependency here, only tower-http and axum (which re-exports what it
+    // needs from tower internally).
+    let static_service = Router::new()
+        .fallback_service(static_service)
+        .layer(middleware::from_fn(no_cache_shell_files));
 
     let app = Router::new()
         .route("/proxy", get(proxy_handler))
@@ -206,6 +220,20 @@ pub async fn start_proxy(
     });
 
     bound
+}
+
+/// Forces revalidation of the mobile PWA's unhashed entry files (mobile.html,
+/// the manifest, sw.js) so a Pi redeploy is visible on next load instead of
+/// requiring a manual cache clear on the phone. Content-hashed build output
+/// under /assets/ is left alone — a new build never reuses an old hash, so
+/// caching those forever is both safe and desirable.
+async fn no_cache_shell_files(req: Request<Body>, next: Next) -> Response {
+    let is_asset = req.uri().path().starts_with("/assets/");
+    let mut res = next.run(req).await;
+    if !is_asset {
+        res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    }
+    res
 }
 
 /// Locates the built mobile PWA's static assets (mobile.html + its JS/CSS

@@ -36,7 +36,7 @@ type PlayerState = Omit<VideoPlayerOverlayProps, "onClose">;
 type Tab = PrimaryTab;
 type YouSubView = "schedule" | "notifications" | "profile";
 
-const TITLES: Record<Tab, string> = { home: "Anicat", search: "Search", library: "Library", manga: "Manga", you: "You" };
+const TITLES: Record<Tab, string> = { home: "Up Next", search: "Search", library: "Library", manga: "Manga", you: "You" };
 const SUB_TITLES: Record<YouSubView, string> = {
   schedule: "Schedule",
   notifications: "Notifications",

@@ -1756,13 +1756,11 @@ where
         let cand_lower = cand_title.to_lowercase();
         
         let has_dub = cand_lower.contains("dub") && (cand_lower.contains("(dub)") || cand_lower.contains("[dub]"));
-        let translation_penalty = if preferred_translation == "sub" && has_dub {
-            0.5
-        } else if preferred_translation == "dub" && !has_dub && candidates.iter().any(|c| get_title(c).to_lowercase().contains("dub")) {
-            0.5
-        } else {
-            1.0
-        };
+        let mismatched_translation = (preferred_translation == "sub" && has_dub)
+            || (preferred_translation == "dub"
+                && !has_dub
+                && candidates.iter().any(|c| get_title(c).to_lowercase().contains("dub")));
+        let translation_penalty = if mismatched_translation { 0.5 } else { 1.0 };
 
         for &target in target_titles {
             if target.is_empty() {

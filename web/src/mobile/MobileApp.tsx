@@ -233,7 +233,7 @@ export default function MobileApp() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22 }}
-              className="h-full w-full"
+              className="min-h-full w-full"
             >
               <MobileMediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
             </motion.div>

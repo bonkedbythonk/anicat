@@ -143,8 +143,7 @@ const ROUTES: Record<string, Route> = {
     path: () => "/mobile-api/user/favourite",
     body: (a) => ({ media_id: a.mediaId, is_manga: a.isManga }),
   },
-  get_notifications: { method: "GET", path: (a) => `/mobile-api/user/notifications${qs({ page: a.page })}` },
-  mark_notifications_read: { method: "POST", path: () => "/mobile-api/user/notifications/read" },
+
   get_airing_schedule: {
     method: "GET",
     path: (a) => `/mobile-api/schedule${qs({
@@ -165,6 +164,7 @@ const ROUTES: Record<string, Route> = {
 
   get_watched_episodes: { method: "GET", path: (a) => `/mobile-api/playback/watched/${a.mediaId}` },
   get_all_last_watched: { method: "GET", path: () => "/mobile-api/playback/last-watched" },
+  get_watch_history: { method: "GET", path: () => "/mobile-api/playback/history" },
 
   check_health: { method: "GET", path: () => "/mobile-api/health" },
   get_app_version: { method: "GET", path: () => "/mobile-api/version" },

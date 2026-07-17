@@ -6,7 +6,6 @@ import { getMobileToken, clearMobileToken, mobileFetch } from "@/lib/transport";
 import { applyMobileSettings } from "./mobileSettings";
 
 import { ScheduleView } from "@/components/views/ScheduleView";
-import { NotificationsView } from "@/components/views/NotificationsView";
 import { ProfileView } from "@/components/views/ProfileView";
 const MobileMangaView = lazy(() => import("./MobileMangaView").then((m) => ({ default: m.MobileMangaView })));
 
@@ -203,7 +202,6 @@ export default function MobileApp() {
       }
       switch (youSubView) {
         case "schedule": return <ScheduleView onSelect={onSelect} />;
-        case "notifications": return <NotificationsView onSelect={onSelect} />;
         case "profile": return <ProfileView onSelect={onSelect} />;
       }
     }
@@ -227,7 +225,7 @@ export default function MobileApp() {
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="popLayout">
           {selectedItem ? (
             <motion.div
               key={`detail-${selectedItem.id}`}
@@ -235,6 +233,7 @@ export default function MobileApp() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22 }}
+              className="h-full w-full"
             >
               <MobileMediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
             </motion.div>
@@ -245,6 +244,7 @@ export default function MobileApp() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18 }}
+              className="h-full w-full"
             >
               <Suspense fallback={null}>{renderContent()}</Suspense>
             </motion.div>

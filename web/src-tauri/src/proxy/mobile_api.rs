@@ -61,8 +61,6 @@ pub fn routes() -> Router<ProxyState> {
         .route("/user/list-entry", post(save_media_list_entry))
         .route("/user/list-entry/{entry_id}", delete(delete_media_list_entry))
         .route("/user/favourite", post(toggle_favourite))
-        .route("/user/notifications", get(get_notifications))
-        .route("/user/notifications/read", post(mark_notifications_read))
         .route("/user/connect-anilist", post(connect_anilist))
         .route("/schedule", get(get_airing_schedule))
         .route("/media/search", get(search_media))
@@ -83,6 +81,7 @@ pub fn routes() -> Router<ProxyState> {
         .route("/library/{media_id}", delete(remove_from_library))
         .route("/playback/watched/{media_id}", get(get_watched_episodes))
         .route("/playback/last-watched", get(get_all_last_watched))
+        .route("/playback/history", get(get_watch_history))
         .route("/playback/preload", post(preload_episode))
         .route("/playback/resolve", post(resolve_playback))
         .route("/session/whoami", get(whoami))
@@ -206,27 +205,6 @@ async fn toggle_favourite(
     ok_or_500(crate::commands::user::toggle_favourite_impl(&scoped, body.media_id, body.is_manga).await)
 }
 
-#[derive(Deserialize)]
-struct PageQuery {
-    page: Option<i64>,
-}
-
-async fn get_notifications(
-    State(state): State<ProxyState>,
-    auth: AuthedUser,
-    Query(q): Query<PageQuery>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let scoped = state.scoped_for(auth).await;
-    ok_or_500(crate::commands::user::get_notifications_impl(&scoped, q.page).await)
-}
-
-async fn mark_notifications_read(
-    State(state): State<ProxyState>,
-    auth: AuthedUser,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let scoped = state.scoped_for(auth).await;
-    ok_or_500(crate::commands::user::mark_notifications_read_impl(&scoped).await)
-}
 
 #[derive(Deserialize)]
 struct ConnectAniListBody {
@@ -581,6 +559,13 @@ async fn get_all_last_watched(
     AuthedUser(user_id): AuthedUser,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     ok_or_500(crate::commands::playback::get_all_last_watched_impl(&state.app_state, user_id).await)
+}
+
+async fn get_watch_history(
+    State(state): State<ProxyState>,
+    AuthedUser(user_id): AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::playback::get_watch_history_impl(&state.app_state, user_id, None).await)
 }
 
 #[derive(Deserialize)]

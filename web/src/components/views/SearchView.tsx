@@ -136,19 +136,19 @@ export function SearchView({ onSelect }: SearchViewProps) {
       {/* Search header */}
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight text-white">Search</h1>
+          <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Search</h1>
           <MediaTypeToggle value={type} onChange={setType} />
         </div>
 
         <div className="relative group">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-600 group-focus-within:text-accent transition-colors" size={22} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-accent transition-colors" size={17} />
           <input
             autoFocus
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search for ${type.toLowerCase()}...`}
-            className="w-full bg-white/[0.03] border border-white/[0.08] rounded-2xl py-4 pl-14 pr-6 text-lg font-medium focus:outline-none focus:border-accent/40 focus:bg-white/[0.04] transition-all placeholder:text-gray-700"
+            className="w-full bg-transparent border border-border rounded-lg py-3 pl-12 pr-6 text-[15px] focus:outline-none focus:border-accent transition-colors placeholder:text-muted-foreground/60"
           />
           {loading && (
             <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 text-accent animate-spin" size={22} />
@@ -156,9 +156,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
         </div>
 
         {debouncedQuery.trim().length >= 2 && suggestions.length > 0 && (
-          <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 shadow-2xl shadow-black/20">
+          <div className="space-y-3 rounded-lg border border-border p-4">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-gray-500">Suggestions</p>
+              <p className="meta-mono text-muted-foreground">Suggestions</p>
               {loadingSuggestions && <Loader2 className="animate-spin text-accent" size={14} />}
             </div>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -171,7 +171,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     onClick={() => {
                       onSelect(item);
                     }}
-                    className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-2 text-left transition-colors hover:border-accent/30 hover:bg-white/[0.05]"
+                    className="flex items-center gap-3 rounded-md border border-border p-2 text-left transition-colors hover:border-foreground/25 hover:bg-surface/70 cursor-pointer"
                   >
                     <img
                       src={item.cover_image?.large}
@@ -179,8 +179,8 @@ export function SearchView({ onSelect }: SearchViewProps) {
                       className="h-14 w-10 rounded-lg object-cover"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-white">{title}</p>
-                      <p className="truncate text-[11px] text-gray-500">
+                      <p className="truncate text-[13px] font-medium text-foreground">{title}</p>
+                      <p className="meta-mono truncate text-muted-foreground mt-0.5">
                         {item.season && item.seasonYear ? `${item.season.charAt(0) + item.season.slice(1).toLowerCase()} ${item.seasonYear}` : item.status || "Anime"}
                       </p>
                     </div>
@@ -194,10 +194,10 @@ export function SearchView({ onSelect }: SearchViewProps) {
         {/* Filter toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
+          className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-[12.5px] font-medium transition-colors border cursor-pointer ${
             showFilters || Object.values(filters).some(Boolean)
-              ? "bg-accent/10 text-accent border-accent/20"
-              : "bg-white/[0.03] text-gray-500 border-white/[0.06] hover:text-white"
+              ? "bg-accent/15 text-accent border-transparent"
+              : "text-foreground/50 border-border hover:text-foreground"
           }`}
         >
           <SlidersHorizontal size={14} />
@@ -206,13 +206,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
         {/* Filter panel */}
         {showFilters && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl animate-fade-in">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 border border-border rounded-lg animate-fade-in">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Genre</label>
+              <label className="meta-mono text-muted-foreground">Genre</label>
               <select
                 value={filters.genre || ""}
                 onChange={(e) => setFilters({ ...filters, genre: e.target.value || undefined })}
-                className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                className="w-full bg-transparent border border-border rounded-md p-2.5 text-xs focus:border-accent outline-none transition-colors appearance-none cursor-pointer"
               >
                 <option value="">Any Genre</option>
                 {["Action","Adventure","Comedy","Drama","Fantasy","Horror","Mystery","Romance","Sci-Fi","Slice of Life","Sports","Supernatural","Thriller"].map(g => (
@@ -221,11 +221,11 @@ export function SearchView({ onSelect }: SearchViewProps) {
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Year</label>
+              <label className="meta-mono text-muted-foreground">Year</label>
               <select
                 value={filters.year || ""}
                 onChange={(e) => setFilters({ ...filters, year: e.target.value ? Number(e.target.value) : undefined })}
-                className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                className="w-full bg-transparent border border-border rounded-md p-2.5 text-xs focus:border-accent outline-none transition-colors appearance-none cursor-pointer"
               >
                 <option value="">Any Year</option>
                 {Array.from({ length: 27 }, (_, i) => 2026 - i).map(y => (
@@ -234,11 +234,11 @@ export function SearchView({ onSelect }: SearchViewProps) {
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Min Score</label>
+              <label className="meta-mono text-muted-foreground">Min Score</label>
               <select
                 value={filters.minScore || ""}
                 onChange={(e) => setFilters({ ...filters, minScore: e.target.value ? Number(e.target.value) : undefined })}
-                className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                className="w-full bg-transparent border border-border rounded-md p-2.5 text-xs focus:border-accent outline-none transition-colors appearance-none cursor-pointer"
               >
                 <option value="">Any Score</option>
                 {[90, 80, 70, 60, 50].map(s => (
@@ -247,11 +247,11 @@ export function SearchView({ onSelect }: SearchViewProps) {
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</label>
+              <label className="meta-mono text-muted-foreground">Status</label>
               <select
                 value={filters.status || ""}
                 onChange={(e) => setFilters({ ...filters, status: e.target.value || undefined })}
-                className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 text-xs font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer"
+                className="w-full bg-transparent border border-border rounded-md p-2.5 text-xs focus:border-accent outline-none transition-colors appearance-none cursor-pointer"
               >
                 <option value="">Any Status</option>
                 <option value="FINISHED">Finished</option>
@@ -276,9 +276,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
             <div className="space-y-12 relative">
               {loadingDiscovery && hasDiscovery && (
                 <div className="absolute top-1/2 left-0 right-0 z-10 flex justify-center -translate-y-1/2 animate-fade-in">
-                  <div className="bg-black/80 px-6 py-3 rounded-2xl border border-white/10 flex items-center space-x-3 shadow-2xl">
-                    <Loader2 className="animate-spin text-accent" size={20} />
-                    <span className="text-xs font-bold text-white uppercase tracking-widest">Loading {type.toLowerCase()}...</span>
+                  <div className="bg-surface px-5 py-2.5 rounded-lg border border-border flex items-center space-x-3 shadow-xl">
+                    <Loader2 className="animate-spin text-accent" size={16} />
+                    <span className="meta-mono text-foreground">Loading {type.toLowerCase()}</span>
                   </div>
                 </div>
               )}
@@ -292,7 +292,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                   <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                     {Array.from({ length: 12 }).map((_, i) => (
                       <div key={i} className="space-y-3 animate-pulse">
-                        <div className="aspect-[2/3] w-full bg-white/[0.04] rounded-2xl border border-white/[0.03]" />
+                        <div className="aspect-[2/3] w-full bg-white/[0.04] rounded-md border border-border" />
                         <div className="h-4 bg-white/[0.04] rounded-md w-3/4" />
                         <div className="h-3 bg-white/[0.02] rounded-md w-1/2" />
                       </div>
@@ -305,12 +305,12 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     <div className={`space-y-4 transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h2 className="text-2xl font-extrabold tracking-tight text-white">Discover {type === "ANIME" ? "Anime" : "Manga"}</h2>
-                          <p className="text-sm text-gray-500">A rotating mix of trending, seasonal, and recent picks.</p>
+                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Discover {type === "ANIME" ? "Anime" : "Manga"}</h2>
+                          <p className="meta-mono mt-1 text-muted-foreground">Trending · seasonal · recent</p>
                         </div>
                         <button
                           onClick={handleShuffle}
-                          className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white"
+                          className="rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:border-foreground/25 hover:text-foreground cursor-pointer"
                         >
                           Shuffle
                         </button>
@@ -324,16 +324,16 @@ export function SearchView({ onSelect }: SearchViewProps) {
                   )}
 
                   {randomList.length > 0 && (
-                    <div className={`space-y-4 pt-12 border-t border-white/[0.04] transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
+                    <div className={`space-y-4 pt-12 border-t border-border transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h2 className="text-2xl font-extrabold tracking-tight text-white">Random Picks</h2>
-                          <p className="text-sm text-gray-500">Completely random picks from across the database.</p>
+                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Random Picks</h2>
+                          <p className="meta-mono mt-1 text-muted-foreground">From across the whole database</p>
                         </div>
                         <button
                           onClick={() => { refetchRandom(); }}
                           disabled={fetchingRandom}
-                          className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm font-semibold text-gray-300 transition-colors hover:border-accent/30 hover:text-white disabled:opacity-50"
+                          className="rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:border-foreground/25 hover:text-foreground disabled:opacity-50 cursor-pointer"
                         >
                           {fetchingRandom ? "Loading..." : "New Random"}
                         </button>
@@ -347,7 +347,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                   )}
 
                   {!loadingDiscovery && !hasDiscovery && randomList.length === 0 && (
-                    <div className="text-center py-24 bg-white/[0.02] rounded-3xl border border-dashed border-white/[0.06]">
+                    <div className="text-center py-24 rounded-lg border border-dashed border-border">
                       <Activity size={40} className="mx-auto text-gray-800 mb-4" />
                       <p className="text-gray-500 font-semibold">Unable to load discovery feed.</p>
                       <button 

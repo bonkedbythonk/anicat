@@ -1,12 +1,10 @@
 
-import { Fragment, useMemo, useRef, useState, useCallback, useEffect } from "react";
-import { Loader2, Clock, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
-import { Hero } from "@/components/media/Hero";
+import { Fragment, useMemo, useState, useCallback, useEffect } from "react";
+import { Loader2, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
 import { MediaRow } from "@/components/media/MediaRow";
-import { EpisodeRow } from "@/components/media/EpisodeRow";
+import { UpNextQueue, WeekStrip } from "@/components/media/UpNextQueue";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
@@ -15,15 +13,14 @@ interface HomeViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
-// UX-22: Default row configuration
-type RowId = "continue" | "airingToday" | "newForYou" | "smartPlaylist" | "trending" | "newlyReleasing" | "seasonal" | "watching" | "planning";
+// Rows below the fixed sections. The queue, Watching row, and week strip are
+// not configurable — they are the front page. "Airing Today" is covered by
+// the week strip and "New for You" is merged into the queue, so both are gone
+// (loadRowConfig reconciles stale localStorage entries automatically).
+type RowId = "smartPlaylist" | "trending" | "newlyReleasing" | "seasonal" | "planning";
 
 const DEFAULT_ROWS: { id: RowId; title: string; visible: boolean }[] = [
-  { id: "airingToday", title: "Airing Today", visible: true },
-  { id: "continue", title: "Continue Watching", visible: true },
-  { id: "watching", title: "Watching", visible: true },
   { id: "planning", title: "Planning", visible: true },
-  { id: "newForYou", title: "New for You", visible: true },
   { id: "smartPlaylist", title: "Smart Picks", visible: true },
   { id: "trending", title: "Trending Now", visible: true },
   { id: "newlyReleasing", title: "Newly Releasing", visible: true },
@@ -149,15 +146,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }, [watchingQuery.data, repeatingQuery.data]);
   const watchingIds = useMemo(() => watchingMedia.map((m) => m.id), [watchingMedia]);
 
-  // UX-13: Airing Today — schedule for current day (must be after watchingIds)
-  const airingTodayQuery = useQuery({
-    queryKey: ["home-airing-today"],
-    queryFn: () => mediaApi.getSchedule(0, 1, 1, 15, watchingIds),
-    enabled: isAuthenticated && watchingIds.length > 0,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
   // UX-22: Customizable row visibility + order
   const [rowConfig, setRowConfig] = useState(() => loadRowConfig());
 
@@ -180,7 +168,12 @@ export function HomeView({ onSelect }: HomeViewProps) {
   //    falling back to AniList update time.
   const continueWatchingList = useMemo(() => {
     const lastWatchedMap = (lastWatchedQuery.data || {}) as Record<string, string>;
-    return watchingMedia.filter((m) => !isCaughtUp(m)).sort((a, b) => {
+    // Rewatches always stay in the queue: a REPEATING entry whose progress
+    // still sits at the old total (AniList keeps it until the first rewatched
+    // episode) would otherwise be filtered as "caught up".
+    const isRepeating = (m: MediaItem) =>
+      (m.user_status?.status || m.media_list_entry?.status || "").toUpperCase() === "REPEATING";
+    return watchingMedia.filter((m) => isRepeating(m) || !isCaughtUp(m)).sort((a, b) => {
       const aLocal = lastWatchedMap[a.id] || lastWatchedMap[String(a.id)];
       const bLocal = lastWatchedMap[b.id] || lastWatchedMap[String(b.id)];
       if (aLocal || bLocal) {
@@ -280,28 +273,11 @@ export function HomeView({ onSelect }: HomeViewProps) {
     },
   });
 
-  // Compute candidate hero item — prefer recently watched (in-progress), then watching list, then trending
-  const candidateHeroItem = useMemo(() => {
-    // First: pick the most recently watched item that is still in progress
-    if (continueWatchingList.length > 0) {
-      return continueWatchingList[0];
-    }
-
-    // Second: fall back to AniList watching list (first in-progress item)
-    if (watchingMedia.length > 0) {
-      const availableToWatch = watchingMedia.filter((item) => !isCaughtUp(item));
-      if (availableToWatch.length > 0) return availableToWatch[0];
-    }
-
-    // Third: trending
-    if (trendingQuery.data?.media && trendingQuery.data.media.length > 0) {
-      return trendingQuery.data.media[0];
-    }
-    return null;
-  }, [continueWatchingList, watchingMedia, trendingQuery.data]);
-
-  const [activeHeroItem, setActiveHeroItem] = useState<MediaItem | null>(null);
-  const ambientColor = useAmbientColor(activeHeroItem?.banner_image || activeHeroItem?.cover_image?.large);
+  // Ids with a freshly aired, unwatched episode — marked in the queue.
+  const newEpisodeIds = useMemo(
+    () => new Set<number>((recentReleasesQuery.data || []).map((m: MediaItem) => m.id)),
+    [recentReleasesQuery.data]
+  );
 
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const closeLayoutEditor = useCallback(() => setShowLayoutEditor(false), []);
@@ -312,22 +288,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
   // show (not authenticated, still loading with no data, or empty result).
   const renderRow = (id: RowId) => {
     switch (id) {
-      case "airingToday":
-        if (!isAuthenticated) return null;
-        if (airingTodayQuery.isLoading) return <MediaRowSkeleton title="Airing Today" />;
-        if (!airingTodayQuery.data?.media?.length) return null;
-        return <MediaRow title="Airing Today" items={airingTodayQuery.data.media} onSelect={onSelect} />;
-      case "continue":
-        if (!isAuthenticated || continueWatchingList.length === 0) return null;
-        return <EpisodeRow title="Continue Watching" items={continueWatchingList} onSelect={onSelect} />;
-      case "newForYou":
-        if (!isAuthenticated) return null;
-        if (recentReleasesQuery.isLoading) return <MediaRowSkeleton title="New for You" />;
-        if (!recentReleasesQuery.data?.length) return null;
-        return <MediaRow title="New for You" items={recentReleasesQuery.data} onSelect={onSelect} />;
-      case "watching":
-        if (!isAuthenticated || watchingMedia.length === 0) return null;
-        return <MediaRow title="Currently Watching" items={watchingMedia} onSelect={onSelect} />;
       case "planning":
         if (!isAuthenticated || !planningQuery.data?.media?.length) return null;
         return <MediaRow title="Planning" items={planningQuery.data.media} onSelect={onSelect} />;
@@ -360,25 +320,42 @@ export function HomeView({ onSelect }: HomeViewProps) {
     );
   }
 
+  const newCount = continueWatchingList.filter((m) => newEpisodeIds.has(m.id)).length;
+
   return (
-    <div className="relative h-full space-y-12 pb-12 overflow-x-hidden">
-      {/* Ambient background glow */}
-      <div 
-        className="absolute top-[-100px] right-0 w-[500px] h-[500px] rounded-full opacity-[0.14] pointer-events-none -z-10"
-        style={{ 
-          background: `radial-gradient(circle, ${ambientColor} 0%, transparent 70%)`
-        }}
-      />
-      <Hero 
-        onSelect={onSelect}
-        continueList={continueWatchingList}
-        recentReleases={recentReleasesQuery.data || []}
-        airingToday={airingTodayQuery.data?.media || []}
-        fallbackList={trendingQuery.data?.media || []}
-        onFocusChange={setActiveHeroItem}
-      />
+    <div className="relative h-full space-y-10 pb-12 overflow-x-hidden max-w-[1100px]">
+      <div>
+        <div className="flex items-end justify-between mb-4 px-1">
+          <div>
+            <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Up Next</h1>
+            <p className="meta-mono mt-1 text-muted-foreground">
+              {continueWatchingList.length} in progress
+              {newCount > 0 ? ` · ${newCount} new episode${newCount === 1 ? "" : "s"}` : ""}
+            </p>
+          </div>
+          {isAuthenticated && continueWatchingList.length > 1 && (
+            <button
+              onClick={() => useAppStore.getState().setPickerOpen(true)}
+              className="shrink-0 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
+            >
+              Pick for me
+            </button>
+          )}
+        </div>
+        {isAuthenticated && continueWatchingList.length > 0 ? (
+          <UpNextQueue
+            items={continueWatchingList.slice(0, 8)}
+            newEpisodeIds={newEpisodeIds}
+            lastWatched={(lastWatchedQuery.data || {}) as Record<string, string>}
+            onSelect={onSelect}
+          />
+        ) : isAuthenticated ? (
+          <p className="meta-mono px-1 text-muted-foreground">Nothing in progress. Pick something from your library.</p>
+        ) : null}
+      </div>
+
       {!isAuthenticated && (
-        <div className="flex items-center justify-between px-5 py-3.5 rounded-2xl bg-accent/[0.07] border border-accent/[0.12] mt-6">
+        <div className="flex items-center justify-between px-5 py-3.5 rounded-lg bg-surface border border-border">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
               <User size={15} className="text-accent" />
@@ -393,12 +370,26 @@ export function HomeView({ onSelect }: HomeViewProps) {
               useAppStore.getState().setSettingsDefaultTab("account");
               useAppStore.getState().setCurrentView("settings");
             }}
-            className="shrink-0 px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-bold hover:bg-accent/90 transition-all"
+            className="shrink-0 px-4 py-1.5 rounded-md bg-accent text-black text-xs font-semibold hover:bg-accent-light"
           >
             Connect
           </button>
         </div>
       )}
+
+      {/* Watching is a fixed section, not a configurable row — the design's
+          poster shelf under the queue. Includes rewatches. */}
+      {isAuthenticated && watchingMedia.length > 0 && (
+        <div>
+          <div className="flex items-baseline justify-between mb-3 px-1">
+            <h2 className="text-[15px] font-semibold text-foreground tracking-tight">Watching</h2>
+            <span className="meta-mono text-muted-foreground">{watchingMedia.length} shows</span>
+          </div>
+          <MediaRow title="" items={watchingMedia} onSelect={onSelect} />
+        </div>
+      )}
+
+      {isAuthenticated && <WeekStrip watching={watchingMedia} onSelect={(item) => onSelect(item)} />}
 
       {/* Rows render in the user's saved order; hidden rows are skipped. */}
       {rowConfig.filter(r => r.visible).map(r => (
@@ -417,7 +408,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
         {showLayoutEditor && (
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
             onClick={() => setShowLayoutEditor(false)}
           >
             <div
@@ -426,7 +417,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
               aria-modal="true"
               aria-labelledby="customize-home-title"
               tabIndex={-1}
-              className="w-full max-w-md rounded-2xl bg-[#111114] border border-white/[0.1] shadow-2xl p-6 max-h-[85vh] overflow-y-auto outline-none"
+              className="w-full max-w-md rounded-lg bg-surface border border-white/[0.1] shadow-2xl p-6 max-h-[85vh] overflow-y-auto outline-none"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">

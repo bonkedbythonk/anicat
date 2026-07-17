@@ -22,23 +22,19 @@ MKISSA_REFR = "https://mkissa.to"
 MKISSA_BASE = "allanime.day"
 MKISSA_API = f"https://api.{MKISSA_BASE}"
 MKISSA_KEY = hashlib.sha256(b"Xot36i3lK3:v1").hexdigest()
-# Raw digest (not hex string) of the same legacy string — this is the actual
-# AES-GCM key the client uses to decrypt the sourceUrls blob (verified by
-# instrumenting crypto.subtle in a real browser session: the site tries the
-# partB^mask key first, that call throws, and it silently falls back to this
-# static key, which succeeds — independent of buildId/partB/epoch entirely).
-# So unlike the signing token below, this one doesn't rotate.
-MKISSA_RESPONSE_KEY = hashlib.sha256(b"Xot36i3lK3:v1").digest()
 
 # allanime.day's client-crypto (aaReq) constants, lifted from the site's JS
-# bundle (chunks/*.js: `const zr="13"` is the build id, `$n="..."` the XOR
-# mask). Both rotate every so often; when the API starts returning
-# AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH again, re-read them from the
-# current bundle. The mask is XORed against the fetched partB to derive the
-# AES key used only for signing the request token (aaReq) — NOT for
-# decrypting the response; see MKISSA_RESPONSE_KEY above for that.
-MKISSA_BUILD_ID = "20"
-MKISSA_MASK_HEX = "52735823afe9a3eb96958a8b8981254d8b70d2ebc3ae1999960b1a7ab7fbbe5b"
+# bundle (cdn.mkissa.net/.../_app/immutable/chunks/*.js: the buildId and XOR
+# mask sit next to the string "aaReq signed"). Both rotate every so often;
+# when the API starts returning AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH
+# again, re-read them from the current bundle. The mask is XORed against the
+# fetched partB to derive an AES-GCM key used both to sign the request token
+# (aaReq) and — as of the site's 2026-07 update — to decrypt the response's
+# sourceUrls blob too (the old build used a fixed static key for that; the
+# site now derives it the same way as the signing key, so there's no
+# separate MKISSA_RESPONSE_KEY anymore).
+MKISSA_BUILD_ID = "41"
+MKISSA_MASK_HEX = "5264513ba898cb78c5c646bc1c12f2965a53a99891d91e83a2bf9244c36cca41"
 
 # Persisted query hash for episode embeds (from ani-cli v4.14.0)
 EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
@@ -332,20 +328,34 @@ class MkissaProvider:
             log.warning(f"Failed to fetch auth configs from HTML: {e}")
             self.auth_data = {}
 
+    def _derive_key(self) -> Optional[bytes]:
+        """AES-GCM key derived by XORing the fetched partB against the site's
+        build mask. Used both to sign the aaReq request token and to decrypt
+        the response's sourceUrls blob (see MKISSA_MASK_HEX comment above)."""
+        partB = self.auth_data.get('partB', '') if self.auth_data else ''
+        if not partB:
+            return None
+        try:
+            Dn = bytes.fromhex(MKISSA_MASK_HEX)
+            partB_bytes = base64.b64decode(partB)
+            return bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
+        except Exception as e:
+            log.error(f"Key derivation failed: {e}")
+            return None
+
     def _get_crypto_token(self, query_hash: str) -> str:
         import time
         from hashlib import sha256
         import json
-        
+
         epoch = self.auth_data.get('epoch', 0)
-        partB = self.auth_data.get('partB', '')
         cr = MKISSA_BUILD_ID
 
         try:
-            Dn = bytes.fromhex(MKISSA_MASK_HEX)
-            partB_bytes = base64.b64decode(partB)
-            key = bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
-            
+            key = self._derive_key()
+            if key is None:
+                return ""
+
             ts = int(time.time() * 1000 / 300000) * 300000
             i_str = f"{epoch}:{cr}:{query_hash}:{ts}"
             iv = sha256(i_str.encode()).digest()[:12]
@@ -632,7 +642,10 @@ class MkissaProvider:
             if not api_data:
                 return []
 
-            resp_lines = parse_source_lines(api_data, MKISSA_RESPONSE_KEY)
+            response_key = self._derive_key()
+            if response_key is None:
+                return []
+            resp_lines = parse_source_lines(api_data, response_key)
             
             if not resp_lines:
                 return []

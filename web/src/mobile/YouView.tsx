@@ -1,13 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Calendar,
-  Bell,
   ChevronRight,
   Play,
   FastForward,
   Server,
 } from "lucide-react";
-import { getNotifications } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { saveMobileSetting } from "./mobileSettings";
 
@@ -84,16 +82,7 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
   const provider = useSettingsStore((s) => s.defaultProvider);
   const apiConnected = useAppStore((s) => s.apiConnected);
 
-  const { data: unreadCount } = useQuery({
-    queryKey: ["more-unread-notifications"],
-    queryFn: async () => {
-      const lastCleared = Number(localStorage.getItem("anicat_last_notifications_cleared") || 0);
-      const res = await getNotifications();
-      const notifications = res?.Page?.notifications ?? [];
-      return notifications.filter((n) => (n.createdAt || 0) > lastCleared).length;
-    },
-    staleTime: 60_000,
-  });
+
 
   const cycleProvider = () => {
     const idx = PROVIDERS.indexOf(provider as (typeof PROVIDERS)[number]);
@@ -150,14 +139,6 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
       <p className={groupLabel}>Sections</p>
       <div className={groupClass}>
         <Row first color="bg-[#ff375f]" icon={Calendar} label="Schedule" onClick={() => onNavigate("schedule")}>
-          <ChevronRight size={16} className="text-muted-foreground shrink-0" />
-        </Row>
-        <Row color="bg-accent" icon={Bell} label="Notifications" onClick={() => onNavigate("notifications")}>
-          {!!unreadCount && (
-            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
           <ChevronRight size={16} className="text-muted-foreground shrink-0" />
         </Row>
       </div>

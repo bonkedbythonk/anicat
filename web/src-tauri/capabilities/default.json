@@ -11,10 +11,6 @@
     "shell:allow-spawn",
     "shell:allow-execute",
     "shell:allow-open",
-    "notification:default",
-    "notification:allow-notify",
-    "notification:allow-request-permission",
-    "notification:allow-is-permission-granted",
     "log:default",
     "global-shortcut:default"
   ]

@@ -5,6 +5,7 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 import { proxyImage } from "@/lib/proxy";
+import { parseAiringTime } from "@/lib/date";
 import { MobileHero } from "./MobileHero";
 import { PosterRow } from "./PosterRow";
 import { EpisodeCard } from "./EpisodeCard";
@@ -15,10 +16,8 @@ import { EpisodeCard } from "./EpisodeCard";
 function airingAtMs(item: MediaItem): number | null {
   const raw = item.next_airing?.airing_at;
   if (raw == null) return null;
-  if (typeof raw === "number") return raw * 1000;
-  if (/^\d+$/.test(raw)) return Number(raw) * 1000;
-  const ms = new Date(raw.endsWith("Z") ? raw : `${raw}Z`).getTime();
-  return isNaN(ms) ? null : ms;
+  const ms = parseAiringTime(raw);
+  return ms === 0 || isNaN(ms) ? null : ms;
 }
 
 function airingLabel(ms: number): string {

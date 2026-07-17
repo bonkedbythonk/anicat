@@ -83,7 +83,7 @@ const MediaRow = memo(function MediaRow({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <h2 className="text-lg font-bold text-white tracking-tight px-1">{title}</h2>
+      {title && <h2 className="text-[15px] font-semibold text-white tracking-tight px-1">{title}</h2>}
 
       <div className="relative">
         {/* Left arrow */}

@@ -66,14 +66,15 @@ AniList is only used for tracking. Playback and the episode list do not require 
 
 ## Features
 
-- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip). AllAnime and AniNeko providers with automatic fallback between them, sub/dub selection, resume position, auto-next with a binge countdown.
-- **Trailers** — Plays a title's trailer through mpv (not an embedded YouTube player) directly from the detail page.
+- **Up Next** — A single "continue where you left off" queue across every show in progress, plus a "Pick for me" random-episode button for when you can't decide.
+- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip). Mkissa and AniNeko scraper providers with automatic fallback between them, plus a torrent-backed provider (SubsPlease API + Nyaa RSS) that streams straight from the swarm while it downloads — no waiting for the file to finish. Sub/dub selection, resume position, auto-next into the following episode.
+- **Trailers** — View a title's trailer directly from the detail page.
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
 - **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
-- **Schedule** — 7-day airing calendar with live countdowns, filtered to your watching list.
+- **Schedule** — 7-day airing calendar filtered to your watching list.
 - **Discovery** — Customizable home layout (show/hide rows: trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
-- **Phone access over LAN** — Leave the desktop app running and open it from your phone's browser (installable as a home-screen app) while on the same Wi-Fi — browsing, search, lists, and playback via native HLS, all PIN-gated. Downloads aren't available from the phone.
+- **Mobile PWA** — A purpose-built phone frontend (poster grids, bottom sheets, native HLS playback), installable as a home-screen app. Leave the desktop app running and open it from your phone's browser while on the same Wi-Fi — browsing, search, lists, and playback, all PIN-gated. Downloads aren't available from the phone.
 - **Discord Rich Presence** — Shows what you are watching in your Discord status.
 - **Themes** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga.
 - **Keyboard-driven** — Shortcuts for navigating every view, with a built-in cheat sheet (`?`).

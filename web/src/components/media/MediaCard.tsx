@@ -79,7 +79,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
       onMouseLeave={handleMouseLeave}
       className="group cursor-pointer flex flex-col space-y-2.5 w-full text-left relative"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-surface card-glow border border-white/[0.06]">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface card-glow border border-border">
         <img 
           src={item.cover_image?.large || item.cover_image?.medium} 
           alt={title} 
@@ -105,13 +105,10 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           </button>
         </div>
 
-        {/* Progress bar */}
+        {/* Progress tick — thin bar over a dark scrim, the skin's poster language */}
         {entry && totalCount > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-10">
-            <div 
-              className="h-full bg-accent transition-[width] duration-300"
-              style={{ width: `${(progress / totalCount) * 100}%` }}
-            />
+          <div className="poster-tick z-10">
+            <i style={{ width: `${(progress / totalCount) * 100}%` }} />
           </div>
         )}
       </div>
@@ -122,7 +119,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2">
           {title}
         </h3>
-        <p className="flex items-center gap-1.5 text-[11px] tabular-nums text-gray-500">
+        <p className="meta-mono flex items-center gap-1.5 text-gray-500">
           {item.average_score ? (
             <span className="inline-flex items-center gap-0.5">
               <Star size={9} fill="currentColor" className="text-gray-500" />

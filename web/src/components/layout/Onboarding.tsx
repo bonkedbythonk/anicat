@@ -182,15 +182,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-2xl animate-fade-in p-4">
-      <div className="relative w-full max-w-lg bg-card border border-white/[0.08] rounded-3xl p-8 shadow-2xl shadow-black/80 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide">
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background/95 animate-fade-in p-4">
+      <div className="relative w-full max-w-lg bg-card border border-border rounded-lg p-8 shadow-xl shadow-black/20 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide">
         
         {/* Step Indicators */}
         <div className="flex justify-center space-x-2.5">
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 1 ? "w-8 bg-accent" : "w-2.5 bg-white/[0.12]"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 2 ? "w-8 bg-accent" : "w-2.5 bg-white/[0.12]"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 3 ? "w-8 bg-accent" : "w-2.5 bg-white/[0.12]"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 4 ? "w-8 bg-accent" : "w-2.5 bg-white/[0.12]"}`} />
+          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 1 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
+          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 2 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
+          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 3 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
+          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 4 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
         </div>
 
         {/* Step 1: Welcome Screen */}
@@ -200,29 +200,29 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               <img src="/anicat_logo.png" alt="Anicat Logo" className="h-16 w-auto object-contain" />
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-black tracking-tight text-white flex items-center justify-center gap-2">
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground flex items-center justify-center gap-2">
                 <span>Welcome to Anicat</span>
-                <Sparkles className="text-accent animate-pulse" size={20} />
+                <Sparkles className="text-accent " size={20} />
               </h2>
-              <p className="text-sm text-gray-400 leading-relaxed px-4">
+              <p className="text-sm text-muted-foreground leading-relaxed px-4">
                 Stream anime, read manga, and track your library automatically in a premium desktop interface.
               </p>
             </div>
 
-            <div className="space-y-3.5 text-left max-w-sm mx-auto bg-white/[0.02] border border-white/[0.04] p-5 rounded-2xl">
-              <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
+            <div className="space-y-3.5 text-left max-w-sm mx-auto bg-foreground/[0.02] border border-border p-5 rounded-lg">
+              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
                 <Globe size={18} className="text-accent shrink-0" />
                 <span>Syncs instantly with AniList (Anime & Manga)</span>
               </div>
-              <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
+              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
                 <Monitor size={18} className="text-accent shrink-0" />
                 <span>Media player & built-in manga reader</span>
               </div>
-              <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
+              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
                 <Sparkles size={18} className="text-accent shrink-0" />
                 <span>High-performance GPU upscaling (Anime4K)</span>
               </div>
-              <div className="flex items-center space-x-3 text-xs text-gray-300 font-semibold">
+              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
                 <Download size={18} className="text-accent shrink-0" />
                 <span>Offline download manager</span>
               </div>
@@ -230,7 +230,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
             <button
               onClick={() => setStep(2)}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 bg-accent hover:bg-accent-light text-white rounded-xl font-bold shadow-lg shadow-accent/25 transition-all cursor-pointer"
+              className="w-full flex items-center justify-center space-x-2 py-3.5 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer"
             >
               <span>Get Started</span>
               <ArrowRight size={16} />
@@ -242,8 +242,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {step === 2 && (
           <div className="space-y-6 animate-fade-in">
             <div className="space-y-2 text-center">
-              <h2 className="text-xl font-black text-white">Connect AniList</h2>
-              <p className="text-xs text-gray-400 px-6 leading-relaxed">
+              <h2 className="text-xl font-semibold text-foreground">Connect AniList</h2>
+              <p className="text-xs text-muted-foreground px-6 leading-relaxed">
                 Connect your account to access your custom watch lists, track anime/manga progress, and sync your rating history.
               </p>
             </div>
@@ -256,7 +256,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     .then(() => setAuthPending(false))
                     .catch(() => setAuthPending(false));
                 }}
-                className="w-full flex items-center justify-center space-x-2 py-3.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white rounded-xl font-bold transition-all cursor-pointer"
+                className="w-full flex items-center justify-center space-x-2 py-3.5 bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-lg font-bold transition-all cursor-pointer"
               >
                 {authPending ? (
                   <>
@@ -272,33 +272,33 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </button>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400">Paste Authorization URL or Token</label>
+                <label className="meta-mono text-muted-foreground/70">Paste Authorization URL or Token</label>
                 <input
                   type="password"
                   value={tokenInput}
                   onChange={(e) => handleTokenChange(e.target.value)}
                   placeholder="Paste here to link account..."
-                  className="w-full bg-white/[0.02] border border-white/[0.08] rounded-xl p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700 text-white"
+                  className="w-full bg-foreground/[0.02] border border-border rounded-lg p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-muted-foreground/40 text-foreground"
                 />
               </div>
 
               {/* Status Message */}
               {validating && (
-                <div className="flex items-center justify-center space-x-2 text-xs text-gray-400 bg-white/[0.01] py-2 rounded-xl">
+                <div className="flex items-center justify-center space-x-2 text-xs text-muted-foreground bg-foreground/[0.01] py-2 rounded-lg">
                   <Loader2 size={14} className="animate-spin text-accent" />
                   <span>Checking authentication...</span>
                 </div>
               )}
 
               {connectedUser && (
-                <div className="flex items-center space-x-2.5 p-3 rounded-xl bg-green-500/10 border border-green-500/25 text-green-400 text-xs font-semibold animate-scale-in">
+                <div className="flex items-center space-x-2.5 p-3 rounded-lg bg-green-500/10 border border-green-500/25 text-green-400 text-xs font-semibold animate-scale-in">
                   <CheckCircle2 size={16} />
-                  <span>Connected successfully as <strong className="text-white">{connectedUser}</strong>!</span>
+                  <span>Connected successfully as <strong className="text-foreground">{connectedUser}</strong>!</span>
                 </div>
               )}
 
               {authError && (
-                <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-400 text-xs leading-relaxed animate-scale-in">
+                <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-xs leading-relaxed animate-scale-in">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5" />
                   <span>{authError}</span>
                 </div>
@@ -306,7 +306,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <button onClick={() => setStep(1)} className="text-xs font-bold text-gray-500 hover:text-white transition-colors cursor-pointer">
+              <button onClick={() => setStep(1)} className="text-xs font-bold text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer">
                 Back
               </button>
               <button onClick={() => setStep(3)} className="text-xs font-bold text-accent hover:text-accent-light transition-colors cursor-pointer">
@@ -320,8 +320,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {step === 3 && (
           <div className="space-y-6 animate-fade-in">
             <div className="space-y-2 text-center">
-              <h2 className="text-xl font-black text-white">Choose Preferences</h2>
-              <p className="text-xs text-gray-400 leading-relaxed">
+              <h2 className="text-xl font-semibold text-foreground">Choose Preferences</h2>
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Personalize your experience. These settings can always be updated later.
               </p>
             </div>
@@ -329,7 +329,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <div className="space-y-5">
               {/* Theme preference */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Palette size={12} className="text-accent" />
                   <span>Interface Theme</span>
                 </label>
@@ -338,10 +338,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t}
                       onClick={() => handleThemeChange(t)}
-                      className={`py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                         theme === t
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {t}
@@ -352,7 +352,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               {/* Visual Skin Preference */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Palette size={12} className="text-accent" />
                   <span>Visual Theme Skin</span>
                 </label>
@@ -365,10 +365,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t.key}
                       onClick={() => handleUiStyleChange(t.key)}
-                      className={`py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                         uiStyle === t.key
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {t.label}
@@ -379,7 +379,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               {/* Time Format */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Clock size={12} className="text-accent" />
                   <span>Time Format (for Airing Schedules)</span>
                 </label>
@@ -388,10 +388,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={f}
                       onClick={() => handleTimeFormatChange(f)}
-                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         timeFormat === f
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {f === "24h" ? "24-Hour (13:00)" : "12-Hour (1:00 PM)"}
@@ -402,7 +402,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               {/* Preferred Translation (Sub/Dub) */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Globe size={12} className="text-accent" />
                   <span>Preferred Translation</span>
                 </label>
@@ -411,10 +411,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t}
                       onClick={() => handleTranslationTypeChange(t)}
-                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         translationType === t
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {t === "sub" ? "Subtitled (Sub)" : "English Dubbed (Dub)"}
@@ -425,7 +425,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               {/* GPU Upscaling */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Monitor size={12} className="text-accent" />
                   <span>Anime4K GPU Upscaling</span>
                 </label>
@@ -434,10 +434,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={g}
                       onClick={() => handleGpuUpscalingChange(g)}
-                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         gpuUpscaling === g
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {g === "on" ? "On (Recommended)" : "Off"}
@@ -448,11 +448,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               {/* Smooth Motion (Frame Interpolation) */}
               <div className="space-y-2.5">
-                <label className="text-[11px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
                   <Gauge size={12} className="text-accent" />
                   <span>Smooth Motion</span>
                 </label>
-                <p className="text-[11px] text-gray-500 leading-relaxed">
+                <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
                   Frame interpolation for smoother panning, up to your display's refresh rate. Best left off for on-twos anime — may look soap-opera-y.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
@@ -460,10 +460,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={g}
                       onClick={() => handleInterpolationChange(g)}
-                      className={`py-3 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         interpolation === g
-                          ? "bg-accent text-white shadow-lg shadow-accent/20"
-                          : "bg-white/[0.03] border border-white/[0.06] text-gray-400 hover:text-white"
+                          ? "bg-accent text-black "
+                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {g === "off" ? "Off (Recommended)" : "On"}
@@ -473,18 +473,18 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-white/[0.04] space-y-3">
-              <div className="text-center text-xs text-gray-400 font-semibold">Would you like to see key player controls (like upscaling) and shortcuts?</div>
+            <div className="pt-4 border-t border-border space-y-3">
+              <div className="text-center text-xs text-muted-foreground font-semibold">Would you like to see key player controls (like upscaling) and shortcuts?</div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep(4)}
-                  className="flex-1 py-3 bg-accent hover:bg-accent-light text-white rounded-xl font-bold shadow-lg shadow-accent/25 transition-all cursor-pointer text-xs"
+                  className="flex-1 py-3 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer text-xs"
                 >
                   Yes, show shortcuts
                 </button>
                 <button
                   onClick={handleFinish}
-                  className="flex-1 py-3 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white rounded-xl font-bold transition-all cursor-pointer text-xs"
+                  className="flex-1 py-3 bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-lg font-bold transition-all cursor-pointer text-xs"
                 >
                   No, skip to app
                 </button>
@@ -497,8 +497,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {step === 4 && (
           <div className="space-y-6 animate-fade-in max-h-[480px] overflow-y-auto pr-2">
             <div className="space-y-2 text-center">
-              <h2 className="text-xl font-black text-white">Shortcuts & Info</h2>
-              <p className="text-xs text-gray-400 leading-relaxed">
+              <h2 className="text-xl font-semibold text-foreground">Shortcuts & Info</h2>
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Key features and player keyboard shortcuts.
               </p>
             </div>
@@ -506,36 +506,36 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <div className="space-y-4 text-xs">
               <div className="space-y-2">
                 <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">1. Settings — Ctrl + number</h3>
-                <p className="text-gray-400 leading-relaxed">Toggle these live in the external MPV window during playback — they're saved back into your app settings too:</p>
-                <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 1</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-skip Intro</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 2</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Smooth Motion</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 3</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Ctrl + 4</kbd></div>
+                <p className="text-muted-foreground leading-relaxed">Toggle these live in the external MPV window during playback — they're saved back into your app settings too:</p>
+                <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Upscaling</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Auto-skip Intro</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Smooth Motion</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 3</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Autoplay Next</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">2. Actions — Shift + letter</h3>
-                <p className="text-gray-400 leading-relaxed">One-off playback actions, same MPV window:</p>
-                <div className="grid grid-cols-2 gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl">
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Reload Episode</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + R</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + S</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">Shift + T</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-white/[0.02]"><span className="text-gray-400">Nudge Skip Timing</span><kbd className="px-1.5 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono">[ / ]</kbd></div>
+                <p className="text-muted-foreground leading-relaxed">One-off playback actions, same MPV window:</p>
+                <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Reload Episode</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
+                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Nudge Skip Timing</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">[ / ]</kbd></div>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">3. Manga Reading & Tracking</h3>
-                <p className="text-gray-400 leading-relaxed">Read manga chapters with our built-in reader. Your reading progress is automatically tracked and synchronized to AniList, ensuring your library is always up to date.</p>
+                <p className="text-muted-foreground leading-relaxed">Read manga chapters with our built-in reader. Your reading progress is automatically tracked and synchronized to AniList, ensuring your library is always up to date.</p>
               </div>
             </div>
 
             <div className="pt-2">
               <button
                 onClick={handleFinish}
-                className="w-full py-3.5 bg-accent hover:bg-accent-light text-white rounded-xl font-bold shadow-lg shadow-accent/25 transition-all cursor-pointer"
+                className="w-full py-3.5 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer"
               >
                 Let's Go!
               </button>

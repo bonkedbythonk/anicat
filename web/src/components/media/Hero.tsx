@@ -1,6 +1,6 @@
-
 import { useState, useEffect, useRef, memo, useMemo } from "react";
-import { Play, Maximize, BookOpen, Loader2, Clock, Tv } from "lucide-react";
+import { Play, Maximize, BookOpen, Loader2, Clock, Tv, Calendar, Star, History, ArrowRight, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
+import { parseAiringTime } from "@/lib/date";
 import { useQuery } from "@tanstack/react-query";
 import { proxyImage } from "@/lib/proxy";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -26,11 +26,11 @@ interface CommandCenterItem {
 }
 
 // Live ticking countdown badge component
-function AiringCountdown({ airingAt }: { airingAt: string }) {
+function AiringCountdown({ airingAt }: { airingAt: string | number }) {
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
-    const target = new Date(airingAt.endsWith("Z") ? airingAt : `${airingAt}Z`).getTime();
+    const target = parseAiringTime(airingAt);
 
     const updateTimer = () => {
       const now = Date.now();
@@ -99,7 +99,7 @@ const Hero = memo(function Hero({
         type: "fallback" as const,
         reasonText: singleItem.user_status ? (isManga ? "Resume reading" : "Resume watching") : "Featured choice",
         badgeColor: singleItem.user_status
-          ? "bg-gradient-to-r from-accent to-accent-light shadow-md shadow-accent/20 text-white border-t border-white/10"
+          ? "bg-gradient-to-r from-accent to-accent-light shadow-md text-white border-t border-white/10"
           : "bg-white/10 border border-white/10 text-white/70",
         playEpisode: hasMoreEpisodes ? String(progress + 1) : null,
       }];
@@ -139,7 +139,7 @@ const Hero = memo(function Hero({
       const nextAiring = item.next_airing;
       if (nextAiring && nextAiring.airing_at) {
         seen.add(item.id);
-        const airingTime = new Date(nextAiring.airing_at.endsWith("Z") ? nextAiring.airing_at : `${nextAiring.airing_at}Z`).getTime();
+        const airingTime = parseAiringTime(nextAiring.airing_at);
         const now = Date.now();
         const timeDiff = airingTime - now;
 
@@ -194,7 +194,7 @@ const Hero = memo(function Hero({
         item,
         type: "continue",
         reasonText: hasMoreEpisodes ? "Resume watching" : "Completed",
-        badgeColor: "bg-gradient-to-r from-accent to-accent-light shadow-md shadow-accent/20 text-white border-t border-white/10",
+        badgeColor: "bg-gradient-to-r from-accent to-accent-light shadow-md text-white border-t border-white/10",
         playEpisode: hasMoreEpisodes ? String(progress + 1) : null,
       });
     });
@@ -304,7 +304,7 @@ const Hero = memo(function Hero({
   if (!item) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden -mx-6 lg:mx-0 lg:rounded-2xl bg-surface animate-pulse flex items-center justify-center">
+        <div className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden -mx-6 lg:mx-0 lg:rounded-lg bg-surface animate-pulse flex items-center justify-center">
           <div className="h-8 w-64 rounded-lg bg-white/[0.04]" />
         </div>
       </div>
@@ -341,7 +341,7 @@ const Hero = memo(function Hero({
       className="flex flex-col gap-4"
     >
       {/* Hero card container */}
-      <div ref={containerRef} className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden group -mx-6 lg:mx-0 lg:rounded-2xl hero-card-container forced-dark-container">
+      <div ref={containerRef} className="relative h-[52vh] lg:h-[58vh] w-full overflow-hidden group -mx-6 lg:mx-0 lg:rounded-lg hero-card-container forced-dark-container">
         {/* Background */}
         <div className="absolute inset-0 bg-background">
           <img
@@ -472,7 +472,7 @@ const Hero = memo(function Hero({
           {queue.length > 1 && (
             <div 
               ref={desktopQueueRef}
-              className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide"
+              className="hidden md:flex flex-col w-72 lg:w-80 shrink-0 bg-black/40 border border-white/5 rounded-lg p-4 space-y-3 self-center max-h-[320px] overflow-y-auto scrollbar-hide"
             >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-gray-500">
@@ -495,7 +495,7 @@ const Hero = memo(function Hero({
                       data-active={isFocused ? "true" : "false"}
                       className={`w-full flex items-center gap-3 p-2 rounded-xl text-left border transition-[background-color,border-color] duration-200 group cursor-pointer ${
                         isFocused
-                          ? "bg-accent/10 border-accent/30 shadow-[0_0_15px_rgba(0,0,0,0.1)] shadow-accent/25"
+                          ? "bg-accent/10 border-accent/30 shadow-[0_0_15px_rgba(0,0,0,0.1)]"
                           : "bg-white/[0.02] border-white/[0.04] hover:bg-white/[0.06] hover:border-white/10"
                       }`}
                     >

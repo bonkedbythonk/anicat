@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useRef } from "react";
-import { Play, Download, Loader2, CheckCircle2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check } from "lucide-react";
+import { Play, Download, Loader2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check, HardDriveDownload } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
 import { useSettingsStore } from "@/stores/app";
@@ -138,7 +138,7 @@ export function EpisodeList({
   };
 
   const statusIcon = (status: string | null | undefined) => {
-    if (status === "completed") return <CheckCircle2 size={16} className="text-green-400 shrink-0" />;
+    if (status === "completed") return <HardDriveDownload size={16} className="text-accent shrink-0" />;
     if (status === "downloading") return <Loader2 size={16} className="animate-spin text-accent shrink-0" />;
     if (status === "queued") return <Clock size={16} className="text-yellow-400 shrink-0" />;
     if (status === "failed") return <AlertCircle size={16} className="text-red-400 shrink-0" />;

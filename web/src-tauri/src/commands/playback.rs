@@ -1404,11 +1404,27 @@ pub async fn record_playback_progress(
             // is a one-click fix, a wrong COMPLETED silently drops the show
             // from Watching).
             let mut status = "CURRENT";
+            let mut write_progress = episode_number;
             if total_episodes > 0 && episode_number >= total_episodes {
+                // Bypass the media_detail cache here: it's a static-metadata
+                // cache with a 1hr TTL, but "episodes" is exactly the field
+                // that flips from null to a real number the instant a show's
+                // final episode airs. A cache entry populated moments earlier
+                // (e.g. the user opened the detail page while it was still
+                // airing) would report the show as not-yet-finished right at
+                // the one moment that matters — the finale.
+                state.cache.invalidate("media_detail");
                 let detail = super::media::fetch_media_detail_cached(state, media_id, false).await;
                 match detail {
                     Ok(d) => {
                         let planned = d.media.as_ref().and_then(|m| m.episodes);
+                        if let Some(n) = planned {
+                            // Providers occasionally number episodes with a
+                            // gap (e.g. a special bumping the finale to
+                            // total+1); never write AniList progress past the
+                            // series' real episode count.
+                            write_progress = write_progress.min(n as i64);
+                        }
                         if planned.map(|n| episode_number >= n as i64).unwrap_or(false) {
                             status = "COMPLETED";
                         } else {
@@ -1429,7 +1445,7 @@ pub async fn record_playback_progress(
             vars.insert("mediaId".to_string(), serde_json::json!(media_id));
             vars.insert("status".to_string(), serde_json::json!(status));
             vars.insert("progress".to_string(),
-                serde_json::json!(episode_number),
+                serde_json::json!(write_progress),
             );
 
             let _: Value = state
@@ -1440,7 +1456,7 @@ pub async fn record_playback_progress(
                 )
                 .await?;
 
-            state.cache.update_user_list_progress(media_id, Some(episode_number), Some(status), None);
+            state.cache.update_user_list_progress(media_id, Some(write_progress), Some(status), None);
             state.cache.invalidate("get_user_list");
             state.cache.invalidate("get_airing_schedule");
         }
@@ -1498,6 +1514,23 @@ pub async fn get_all_last_watched(
     state: State<'_, AppState>,
 ) -> Result<HashMap<i64, String>, String> {
     get_all_last_watched_impl(state.inner(), 0).await
+}
+
+#[tauri::command]
+pub async fn get_watch_history(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<crate::registry::service::HistoryEntry>, String> {
+    get_watch_history_impl(state.inner(), 0, limit).await
+}
+
+pub async fn get_watch_history_impl(
+    state: &AppState,
+    user_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<crate::registry::service::HistoryEntry>, String> {
+    let db = state.open_db()?;
+    crate::registry::service::get_watch_history(&db, user_id, limit.unwrap_or(1500))
 }
 
 pub async fn get_all_last_watched_impl(

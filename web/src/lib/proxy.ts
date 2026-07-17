@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { isTauri } from "./transport";
 
 const ANILIST_CDN = "s4.anilist.co";
@@ -33,6 +33,10 @@ export function proxyImage(url: string | null | undefined): string {
   if (!url) return "";
   if (url.includes(ANILIST_CDN) || url.includes("anilistcdn")) {
     return `${apiOrigin()}/proxy?url=${encodeURIComponent(url)}`;
+  }
+  // Convert local absolute paths to asset:// protocol so Tauri can load them
+  if (isTauri() && (url.startsWith("/") || /^[a-zA-Z]:\\/.test(url))) {
+    return convertFileSrc(url);
   }
   return url;
 }

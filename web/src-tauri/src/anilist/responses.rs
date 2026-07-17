@@ -83,6 +83,23 @@ pub struct ViewerResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationsPageResponse {
+    #[serde(rename = "Page")]
+    pub page: RecommendationsPage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationsPage {
+    pub media: Option<Vec<MediaWithRecommendations>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaWithRecommendations {
+    pub id: i64,
+    pub recommendations: Option<super::types::RecommendationConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterResponse {
     #[serde(rename = "Media")]
     pub media: Option<CharacterWrapper>,

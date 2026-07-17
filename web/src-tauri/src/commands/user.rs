@@ -152,16 +152,52 @@ pub async fn save_media_list_entry_impl(
     updates: Value,
 ) -> Result<Value, String> {
     let _has_token = state.anilist_client.has_token();
+
+    let mut status = updates.get("status").and_then(|v| v.as_str()).map(str::to_string);
+    let mut progress = updates.get("progress").and_then(|v| v.as_i64());
+
+    // Manual progress edits (mark-watched checkbox, manga reader) skip the
+    // clamp/auto-complete that natural playback gets in
+    // record_playback_progress. Providers occasionally list one more
+    // episode/chapter than AniList's official count (e.g. a special bumping
+    // the finale to total+1), so without this a manual mark-watched on that
+    // extra entry pushes progress past the real total and never flips the
+    // entry to COMPLETED. Only kicks in when the caller didn't already pick
+    // a status themselves.
+    if let (Some(p), None) = (progress, status.as_ref()) {
+        let mut detail_vars = HashMap::new();
+        detail_vars.insert("id".to_string(), serde_json::json!(media_id));
+        if let Ok(detail) = state
+            .anilist_client
+            .execute::<crate::anilist::responses::MediaResponse>(
+                crate::anilist::queries::MEDIA_DETAIL_QUERY,
+                detail_vars,
+            )
+            .await
+        {
+            if let Some(m) = detail.media {
+                let total = if m.media_type.as_deref() == Some("MANGA") { m.chapters } else { m.episodes };
+                if let Some(n) = total.filter(|n| *n > 0).map(|n| n as i64) {
+                    if p > n {
+                        progress = Some(n);
+                    }
+                    if progress.unwrap_or(0) >= n {
+                        status = Some("COMPLETED".to_string());
+                    }
+                }
+            }
+        }
+    }
+
     let mut vars = HashMap::new();
     vars.insert("mediaId".to_string(), serde_json::json!(media_id));
-
-    if let Some(s) = updates.get("status").and_then(|v| v.as_str()) {
+    if let Some(s) = status.as_deref() {
         vars.insert("status".to_string(), serde_json::json!(s));
     }
     if let Some(s) = updates.get("score").and_then(|v| v.as_f64()) {
         vars.insert("score".to_string(), serde_json::json!(s));
     }
-    if let Some(p) = updates.get("progress").and_then(|v| v.as_i64()) {
+    if let Some(p) = progress {
         vars.insert("progress".to_string(), serde_json::json!(p));
     }
 
@@ -171,10 +207,8 @@ pub async fn save_media_list_entry_impl(
         .await?;
 
     // In-place cache mutation to avoid CDN cache lag on subsequent requests
-    let progress = updates.get("progress").and_then(|v| v.as_i64());
-    let status = updates.get("status").and_then(|v| v.as_str());
     let score = updates.get("score").and_then(|v| v.as_f64());
-    state.cache.update_user_list_progress(media_id, progress, status, score);
+    state.cache.update_user_list_progress(media_id, progress, status.as_deref(), score);
 
     state.cache.invalidate("get_user_list");
     state.cache.invalidate("get_airing_schedule");
@@ -235,59 +269,6 @@ pub async fn delete_media_list_entry_impl(
     state.cache.remove_from_user_list_by_entry_id(entry_id);
     state.cache.invalidate("get_user_list");
     state.cache.invalidate("get_airing_schedule");
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn get_notifications(
-    state: State<'_, AppState>,
-    page: Option<i64>,
-) -> Result<Value, String> {
-    get_notifications_impl(state.inner(), page).await
-}
-
-pub async fn get_notifications_impl(
-    state: &AppState,
-    page: Option<i64>,
-) -> Result<Value, String> {
-    let cache_key = AniListCache::key("get_notifications", &[("page", &page.unwrap_or(1).to_string())]);
-    if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
-
-    let _has_token = state.anilist_client.has_token();
-    let mut vars = HashMap::new();
-    vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
-    vars.insert("perPage".to_string(), serde_json::json!(20));
-    vars.insert("reset".to_string(), serde_json::json!(false));
-
-    let result: Value = state
-        .anilist_client
-        .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
-        .await?;
-    state.cache.set(cache_key, result.clone(), "get_notifications");
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn mark_notifications_read(
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    mark_notifications_read_impl(state.inner()).await
-}
-
-pub async fn mark_notifications_read_impl(
-    state: &AppState,
-) -> Result<Value, String> {
-    let _has_token = state.anilist_client.has_token();
-    let mut vars = HashMap::new();
-    vars.insert("page".to_string(), serde_json::json!(1));
-    vars.insert("perPage".to_string(), serde_json::json!(1));
-    vars.insert("reset".to_string(), serde_json::json!(true));
-
-    let result: Value = state
-        .anilist_client
-        .execute(queries::USER_NOTIFICATIONS_QUERY, vars)
-        .await?;
-    state.cache.invalidate("get_notifications");
     Ok(result)
 }
 

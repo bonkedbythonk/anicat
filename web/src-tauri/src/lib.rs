@@ -50,7 +50,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Warn)
             .level_for("anicat", log::LevelFilter::Info)
@@ -78,21 +79,12 @@ pub fn run() {
                 commands::media::start_download_worker(app_handle_clone, app_state_clone2).await;
             });
 
-            let app_handle_clone2 = app.handle().clone();
-            let app_state_clone3 = app_state.clone();
-            let handle3 = tauri::async_runtime::spawn(async move {
-                commands::notifications::start_airing_notification_worker(Some(app_handle_clone2), app_state_clone3).await;
-            });
-
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = handle1.await {
                     log::error!("HLS proxy task panicked: {:?}", e);
                 }
                 if let Err(e) = handle2.await {
                     log::error!("Download worker task panicked: {:?}", e);
-                }
-                if let Err(e) = handle3.await {
-                    log::error!("Airing-notification worker task panicked: {:?}", e);
                 }
             });
 
@@ -127,8 +119,6 @@ pub fn run() {
             commands::user::save_media_list_entry,
             commands::user::delete_media_list_entry,
             commands::user::toggle_favourite,
-            commands::user::get_notifications,
-            commands::user::mark_notifications_read,
             commands::user::get_airing_schedule,
             commands::playback::start_playback,
             commands::playback::stop_playback,
@@ -136,6 +126,7 @@ pub fn run() {
             commands::playback::preload_episode,
             commands::playback::get_watched_episodes,
             commands::playback::get_all_last_watched,
+            commands::playback::get_watch_history,
             commands::health::check_health,
             commands::health::get_app_version,
             commands::health::log_frontend,

@@ -433,17 +433,37 @@ notify_backend = function(action, sync, manual)
   }
 
   if sync then
-    mp.command_native(cmd)
+    local ok, err = pcall(mp.command_native, cmd)
+    if not ok then
+      msg.error("Failed to notify backend (sync): " .. tostring(err))
+      mp.osd_message('AniCat connection failed.', 3.0)
+    end
   else
     mp.command_native_async(cmd, function(success, result, error)
       if not success then
         msg.error("Failed to notify backend: " .. (error or "unknown error"))
+        mp.osd_message('AniCat connection failed.', 3.0)
       end
     end)
   end
 end
 
 
+
+local next_timeout = nil
+
+local function arm_next_timeout(fallback_message)
+  if next_timeout then
+    next_timeout:kill()
+    next_timeout = nil
+  end
+  next_timeout = mp.add_timeout(12, function()
+    if state.next_triggered and not state.file_loaded then
+      state.next_triggered = false
+      mp.osd_message(fallback_message or 'Failed to load episode.', 3.0)
+    end
+  end)
+end
 
 local function play_next(sync, manual)
   if manual == nil then
@@ -457,6 +477,7 @@ local function play_next(sync, manual)
   end
 
   state.next_triggered = true
+  arm_next_timeout('No more episodes available.')
   mp.osd_message('Loading next episode...', 3.0)
   notify_backend("next", sync, manual)
 end
@@ -469,6 +490,7 @@ local function play_prev(sync)
   end
 
   state.next_triggered = true
+  arm_next_timeout('Failed to load previous episode.')
   mp.osd_message('Loading previous episode...', 3.0)
   notify_backend("prev", sync)
 end
@@ -499,8 +521,11 @@ local function register_script_messages()
     state.next_triggered = false
   end)
 
-  -- Force bind the skip keys directly in the player
+  -- Force bind action keys directly so other scripts / user input.conf can't
+  -- shadow the AniCat next/prev/skip bindings.
   if mp.add_forced_key_binding then
+    mp.add_forced_key_binding('N', 'anicat-next-key', function() play_next(nil, true) end)
+    mp.add_forced_key_binding('P', 'anicat-prev-key', function() play_prev(nil) end)
     mp.add_forced_key_binding('S', 'anicat-skip-shifts', skip_current_segment)
     mp.add_forced_key_binding('[', 'anicat-skip-shift-back', function() shift_skips(-1) end)
     mp.add_forced_key_binding(']', 'anicat-skip-shift-forward', function() shift_skips(1) end)
@@ -549,6 +574,10 @@ mp.register_event('file-loaded', function()
   state.next_triggered = false
   state.preload_sent = false
   state.duration = mp.get_property_number('duration') or 0
+  if next_timeout then
+    next_timeout:kill()
+    next_timeout = nil
+  end
   
   local skips = parse_skip_times(get_skip_times_opt())
   skips = merge_skips(skips, parse_chapters_for_skips())
@@ -614,12 +643,6 @@ end)
 mp.observe_property('eof-reached', 'bool', function(name, val)
   if val and get_auto_next_opt() == 'yes' and not state.next_triggered then
     play_next(nil, false)
-    mp.add_timeout(10, function()
-      if state.next_triggered and not state.file_loaded then
-        state.next_triggered = false
-        mp.osd_message('No more episodes available.', 3.0)
-      end
-    end)
   end
 end)
 

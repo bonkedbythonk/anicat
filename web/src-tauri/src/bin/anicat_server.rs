@@ -28,11 +28,6 @@ async fn main() {
     let bound = anicat::proxy::server::start_proxy(client, None, app_state.clone()).await;
     log::info!("anicat-server listening on {}", bound);
 
-    tokio::spawn(anicat::commands::notifications::start_airing_notification_worker(
-        None,
-        app_state.clone(),
-    ));
-
     wait_for_shutdown_signal().await;
     log::info!("Shutting down — stopping scraper subprocess");
     app_state.scraper_manager.shutdown_blocking();

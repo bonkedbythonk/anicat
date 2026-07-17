@@ -62,9 +62,6 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                         if let Some(v) = gen.get("downloads_path").and_then(|v| v.as_str()) {
                             config.general.downloads_path = v.to_string();
                         }
-                        if let Some(v) = gen.get("notifications").and_then(|v| v.as_bool()) {
-                            config.general.notifications = v;
-                        }
                     }
                 }
                 "stream" => {

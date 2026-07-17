@@ -307,6 +307,44 @@ pub fn get_watched_episodes(
     Ok(entries)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub media_id: i64,
+    pub episode_number: i64,
+    pub watched_at: String,
+}
+
+/// Full per-episode watch log, newest first. Note the watch_history table
+/// upserts on (media_id, episode_number), so a rewatch moves the entry
+/// forward in time rather than adding a second row.
+pub fn get_watch_history(
+    conn: &rusqlite::Connection,
+    user_id: i64,
+    limit: i64,
+) -> Result<Vec<HistoryEntry>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT media_id, episode_number, watched_at FROM watch_history
+             WHERE user_id = ?1 ORDER BY watched_at DESC LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![user_id, limit], |row| {
+            Ok(HistoryEntry {
+                media_id: row.get(0)?,
+                episode_number: row.get(1)?,
+                watched_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(entries)
+}
+
 pub fn get_all_last_watched(
     conn: &rusqlite::Connection,
     user_id: i64,

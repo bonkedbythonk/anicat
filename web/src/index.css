@@ -45,19 +45,22 @@
   --radius-3xl: 20px;
 }
 
+/* Default skin "Ink & Index": warm sumi-ink dark, washi-paper light, one
+   aizome-indigo accent. Chrome stays near-monochrome so poster art carries
+   the color. */
 :root {
-  --background: #050505;
-  --foreground: #ffffff;
-  --accent-color: #0A84FF;
-  --accent-light: #5E5CE6;
-  --secondary-color: #BF5AF2;
-  --card-color: rgba(28, 28, 30, 0.4);
-  --surface-color: rgba(28, 28, 30, 0.4);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --dynamic-white: #ffffff;
-  --dynamic-black: #000000;
-  --glass-bg: rgba(28, 28, 30, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.15);
+  --background: #161310;
+  --foreground: #ede7dc;
+  --accent-color: #8fb8dc;
+  --accent-light: #a8c9e6;
+  --secondary-color: #8fb8dc;
+  --card-color: #1e1a15;
+  --surface-color: #1e1a15;
+  --border-color: rgba(237, 231, 220, 0.1);
+  --dynamic-white: #ede7dc;
+  --dynamic-black: #161310;
+  --glass-bg: #1e1a15;
+  --glass-border: rgba(237, 231, 220, 0.14);
 }
 
 /* Token bridge: map new component var names to old CSS system */
@@ -72,7 +75,9 @@
   --accent:        var(--accent-color);
   --accent-hover:  var(--accent-light);
   --accent-dim:    color-mix(in srgb, var(--accent-color) 15%, transparent);
-  --accent-glow:   0 0 20px color-mix(in srgb, var(--accent-color) 40%, transparent);
+  /* Glow is dead in the Ink & Index skin — nothing emits light except
+     posters. Kept as a token so older components degrade to no shadow. */
+  --accent-glow:   0 0 0 0 transparent;
   --border:        var(--border-color);
   --border-subtle: color-mix(in srgb, var(--border-color) 50%, transparent);
 }
@@ -81,34 +86,34 @@
 html.light,
 html.system:not(.dark) {
   @media (prefers-color-scheme: light) {
-    --background: #f6f3ef;
-    --foreground: #26231f;
-    --accent-color: #4338ca;
-    --accent-light: #6366f1;
-    --secondary-color: #6d28d9;
-    --card-color: #fbf9f6;
-    --surface-color: #fbf9f6;
-    --border-color: rgba(38, 35, 31, 0.06);
-    --dynamic-white: #26231f;
-    --dynamic-black: #fbf9f6;
-    --glass-bg: rgba(251, 249, 246, 0.85);
-    --glass-border: rgba(38, 35, 31, 0.06);
+    --background: #f1ece2;
+    --foreground: #26221b;
+    --accent-color: #33617f;
+    --accent-light: #46779a;
+    --secondary-color: #33617f;
+    --card-color: #faf7f0;
+    --surface-color: #faf7f0;
+    --border-color: rgba(38, 34, 27, 0.12);
+    --dynamic-white: #26221b;
+    --dynamic-black: #faf7f0;
+    --glass-bg: #faf7f0;
+    --glass-border: rgba(38, 34, 27, 0.12);
   }
 }
 
 html.light {
-  --background: #f6f3ef;
-  --foreground: #26231f;
-  --accent-color: #4338ca;
-  --accent-light: #6366f1;
-  --secondary-color: #6d28d9;
-  --card-color: #fbf9f6;
-  --surface-color: #fbf9f6;
-  --border-color: rgba(38, 35, 31, 0.06);
-  --dynamic-white: #26231f;
-  --dynamic-black: #fbf9f6;
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(15, 23, 42, 0.08);
+  --background: #f1ece2;
+  --foreground: #26221b;
+  --accent-color: #33617f;
+  --accent-light: #46779a;
+  --secondary-color: #33617f;
+  --card-color: #faf7f0;
+  --surface-color: #faf7f0;
+  --border-color: rgba(38, 34, 27, 0.12);
+  --dynamic-white: #26221b;
+  --dynamic-black: #faf7f0;
+  --glass-bg: #faf7f0;
+  --glass-border: rgba(38, 34, 27, 0.12);
 }
 
 /* Logo — the blue cat wordmark reads on both themes, so no light-mode
@@ -163,8 +168,8 @@ html.light .text-white\/20 { color: color-mix(in srgb, var(--foreground) 20%, tr
 
 /* ── Forced dark containers ── */
 .forced-dark-container {
-  --background: #050505 !important;
-  --foreground: #ffffff !important;
+  --background: #161310 !important;
+  --foreground: #ede7dc !important;
 }
 .forced-dark-container .text-white,
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .forced-dark-container .text-white {
@@ -198,10 +203,10 @@ html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .force
 .forced-dark-container .text-white\/20, html.light .forced-dark-container .text-white\/20 { color: rgba(255, 255, 255, 0.20) !important; }
 
 .forced-dark-container .bg-gradient-to-t {
-  background-image: linear-gradient(to top, #050505 0%, rgba(5, 5, 5, 0.55) 55%, rgba(5, 5, 5, 0.05) 100%) !important;
+  background-image: linear-gradient(to top, #161310 0%, rgba(22, 19, 16, 0.55) 55%, rgba(22, 19, 16, 0.05) 100%) !important;
 }
 .forced-dark-container .bg-gradient-to-r {
-  background-image: linear-gradient(to right, rgba(5, 5, 5, 0.75) 0%, rgba(5, 5, 5, 0.15) 50%, transparent 100%) !important;
+  background-image: linear-gradient(to right, rgba(22, 19, 16, 0.75) 0%, rgba(22, 19, 16, 0.15) 50%, transparent 100%) !important;
 }
 
 /* Custom theme overrides */
@@ -223,7 +228,7 @@ html[data-style="retro-manga"] .forced-dark-container .bg-gradient-to-r {
 }
 
 html, body, #root {
-  background-color: #050505;
+  background-color: var(--background);
   min-height: 100vh;
 }
 
@@ -250,6 +255,7 @@ html, body, #root {
   }
 
   button, input, select, textarea, a, [role="button"] {
+    font-family: inherit;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
   }
 }
@@ -266,8 +272,8 @@ html, body, #root {
   background: transparent !important;
 }
 [data-mica] .glass-fixed {
-  background-color: rgba(12, 12, 14, 0.50);
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background-color: rgba(18, 15, 12, 0.55);
+  border-right: 1px solid rgba(237, 231, 220, 0.08);
 }
 
 /* macOS vibrancy: the window itself carries an NSVisualEffectView sidebar
@@ -278,31 +284,29 @@ html, body, #root {
   background: transparent !important;
 }
 [data-vibrancy] .glass-fixed {
-  background-color: rgba(16, 16, 18, 0.55);
+  background-color: rgba(22, 19, 16, 0.62);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-/* Sidebar — ONE backdrop-blur element, acceptable */
+/* Sidebar — solid ink, hairline border. No blur in the default skin. */
 .glass-fixed {
-  background-color: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background-color: var(--surface-color);
   border-right: 1px solid var(--border-color);
 }
 html.light .glass-fixed {
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--surface-color);
   border-right: 1px solid var(--border-color);
 }
 
 /* Panels/drawers — solid background, no blur */
 .glass-panel {
-  background-color: var(--glass-bg);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 24px;
+  background-color: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
 }
 html.light .glass-panel {
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--surface-color);
 }
 
 /* Detail drawer — solid, no blur */
@@ -314,16 +318,15 @@ html.light .media-detail-drawer {
   background-color: rgba(255, 255, 255, 0.85);
 }
 
-/* Glass button — no backdrop-filter */
+/* Flat button (formerly glass) — solid surface + hairline, no inner sheen */
 .glass-button {
-  background-color: rgba(40, 40, 40, 0.7);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15),
-              inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  color: white;
+  background-color: var(--surface-color);
+  box-shadow: inset 0 0 0 1px var(--border-color);
+  color: var(--foreground);
   transition: background-color 0.2s ease;
 }
 .glass-button:hover {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: color-mix(in srgb, var(--surface-color) 80%, var(--foreground) 20%);
 }
 
 .scroll-container {
@@ -408,8 +411,8 @@ html:not([data-style]) .card-glow:hover {
 .animate-slide-in-right { animation: slideInRight 0.35s ease-out; }
 
 @keyframes pulseGlow {
-  0%, 100% { box-shadow: 0 0 8px rgba(99, 102, 241, 0.3); }
-  50% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.6); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 .animate-pulse-glow { animation: pulseGlow 2s infinite; }
 
@@ -447,14 +450,14 @@ html:not([data-style]) .card-glow:hover {
 
 /* Focus rings */
 *:focus-visible {
-  outline: none !important;
-  outline: 2px solid var(--accent-color);
-  outline-offset: 2px;
+  outline: 1px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+  outline-offset: 1px;
   border-radius: 4px;
 }
 button:focus-visible, a:focus-visible, [role="button"]:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent-color), 0 0 0 4px rgba(99, 102, 241, 0.2);
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent);
 }
 
 /* Scrollbar */
@@ -469,143 +472,141 @@ video {
   outline: none;
 }
 
+/* ── Ink & Index primitives ──
+   .meta-mono: the skin's signature — secondary metadata in uppercase mono
+   (EP 21 / 28 · RESUME 12:40 · SUBSPLEASE 1080P). Never for titles or
+   buttons; those stay sentence case. */
+.meta-mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Watch-grid squares (detail page): one per episode. */
+.watch-sq {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  display: grid;
+  place-items: center;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
+}
+.watch-sq:hover { border-color: var(--accent-color); color: var(--foreground); }
+.watch-sq.watched { background: var(--accent-dim); border-color: transparent; color: var(--accent-color); }
+.watch-sq.current { border-color: var(--accent-color); color: var(--foreground); }
+
+/* Poster progress tick — thin bar at the bottom of cover art. */
+.poster-tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, 0.45); }
+.poster-tick > i { display: block; height: 100%; background: var(--accent-color); transition: width 0.3s ease; }
+
 select option {
   background: var(--surface-color);
   color: var(--foreground);
 }
 
 /* ═══════════════════════════════════════════════════════════
-   UI Skin: Sakura Zen
+   UI Skin: Sakura Zen (Ink & Index Aligned)
    ═══════════════════════════════════════════════════════════ */
 html[data-style="sakura-zen"] {
-  --background: #130910;
-  --foreground: #f5eef0;
-  --accent-color: #e8a0b4;
-  --accent-light: #f2bfce;
-  --secondary-color: #9ab89a;
-  --card-color: rgba(244, 180, 196, 0.05);
-  --surface-color: rgba(244, 180, 196, 0.05);
-  --border-color: rgba(232, 160, 180, 0.16);
-  --dynamic-white: #f5eef0;
-  --dynamic-black: #130910;
-  --glass-bg: rgba(30, 12, 22, 0.70);
-  --glass-border: rgba(232, 160, 180, 0.22);
+  --background: #180a10; /* Deep cherry dark */
+  --foreground: #fcfafb;
+  --accent-color: #e0607e;
+  --accent-light: #ea8ea3;
+  --secondary-color: #7b947c;
+  --card-color: #201016;
+  --surface-color: #2a151d;
+  --border-color: #422534;
+  --dynamic-white: #fcfafb;
+  --dynamic-black: #180a10;
+  --glass-bg: #201016;
+  --glass-border: #422534;
 
   --sk-heading-font: 'Noto Serif JP', Georgia, serif;
-  --sk-card-shadow: 0 8px 32px -4px rgba(200, 100, 130, 0.18);
-  --sk-card-hover-shadow: 0 20px 52px -10px rgba(200, 100, 130, 0.38);
-  --sk-surface-tint: rgba(232, 140, 165, 0.08);
-  --sk-surface-tint-md: rgba(232, 140, 165, 0.12);
-  --sk-border-tint: rgba(232, 160, 180, 0.14);
-  --sk-border-tint-md: rgba(232, 160, 180, 0.20);
 }
 
 html[data-style="sakura-zen"].light,
 html[data-style="sakura-zen"].system:not(.dark) {
-  --background: #fdf6f0;
-  --foreground: #3a2535;
-  --accent-color: #c06080;
-  --accent-light: #d4849c;
-  --secondary-color: #6a9468;
-  --card-color: rgba(255, 228, 220, 0.6);
-  --surface-color: rgba(255, 228, 220, 0.6);
-  --border-color: rgba(192, 96, 128, 0.14);
-  --dynamic-white: #3a2535;
-  --dynamic-black: #fdf6f0;
-  --glass-bg: rgba(255, 242, 238, 0.88);
-  --glass-border: rgba(192, 96, 128, 0.16);
+  --background: #fdf5f7; /* Soft sakura paper */
+  --foreground: #2d1822; /* Deep plum ink */
+  --accent-color: #c04060;
+  --accent-light: #d86884;
+  --secondary-color: #557555;
+  --card-color: #ffffff;
+  --surface-color: #faebef;
+  --border-color: #f2d5dc;
+  --dynamic-white: #2d1822;
+  --dynamic-black: #fdf5f7;
+  --glass-bg: #ffffff;
+  --glass-border: #f2d5dc;
 }
 
-html[data-style="sakura-zen"] body,
-html[data-style="sakura-zen"] span:not(.font-mono):not(code),
-html[data-style="sakura-zen"] p, html[data-style="sakura-zen"] button,
-html[data-style="sakura-zen"] input, html[data-style="sakura-zen"] select,
-html[data-style="sakura-zen"] label, html[data-style="sakura-zen"] li,
-html[data-style="sakura-zen"] td, html[data-style="sakura-zen"] th,
-html[data-style="sakura-zen"] a, html[data-style="sakura-zen"] div:not([class*="font-mono"]):not([class*="icon"]):not(svg) {
-  font-family: 'Noto Serif JP', Georgia, serif !important;
-}
+/* Apply Serif ONLY to headings */
 html[data-style="sakura-zen"] h1, html[data-style="sakura-zen"] h2,
 html[data-style="sakura-zen"] h3, html[data-style="sakura-zen"] h4,
-html[data-style="sakura-zen"] h5, html[data-style="sakura-zen"] h6,
-html[data-style="sakura-zen"] .font-bold,
-html[data-style="sakura-zen"] .font-black,
-html[data-style="sakura-zen"] .font-semibold {
+html[data-style="sakura-zen"] h5, html[data-style="sakura-zen"] h6 {
   font-family: 'Noto Serif JP', Georgia, serif !important;
   font-weight: 700 !important;
-  letter-spacing: -0.02em;
-}
-html[data-style="sakura-zen"] kbd, html[data-style="sakura-zen"] code,
-html[data-style="sakura-zen"] pre {
-  font-family: ui-monospace, monospace !important;
+  letter-spacing: -0.01em;
 }
 
-html[data-style="sakura-zen"] .text-gray-100 { color: rgba(245, 238, 240, 0.95) !important; }
-html[data-style="sakura-zen"] .text-gray-200 { color: rgba(245, 238, 240, 0.88) !important; }
-html[data-style="sakura-zen"] .text-gray-300 { color: rgba(235, 185, 198, 0.88) !important; }
-html[data-style="sakura-zen"] .text-gray-400 { color: rgba(225, 168, 183, 0.78) !important; }
-html[data-style="sakura-zen"] .text-gray-500 { color: rgba(215, 155, 173, 0.65) !important; }
-html[data-style="sakura-zen"] .text-gray-600 { color: rgba(210, 150, 168, 0.55) !important; }
-html[data-style="sakura-zen"] .text-gray-700 { color: rgba(200, 140, 158, 0.45) !important; }
-html[data-style="sakura-zen"] .text-gray-800 { color: rgba(200, 140, 158, 0.35) !important; }
-html[data-style="sakura-zen"] .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *)     { color: var(--foreground) !important; }
-
-html[data-style="sakura-zen"].light .text-gray-100 { color: rgba(58, 37, 53, 0.95) !important; }
-html[data-style="sakura-zen"].light .text-gray-200 { color: rgba(58, 37, 53, 0.88) !important; }
-html[data-style="sakura-zen"].light .text-gray-300 { color: rgba(58, 37, 53, 0.78) !important; }
-html[data-style="sakura-zen"].light .text-gray-400 { color: rgba(58, 37, 53, 0.65) !important; }
-html[data-style="sakura-zen"].light .text-gray-500 { color: rgba(58, 37, 53, 0.52) !important; }
-html[data-style="sakura-zen"].light .text-gray-600 { color: rgba(58, 37, 53, 0.40) !important; }
-html[data-style="sakura-zen"].light .text-gray-700 { color: rgba(58, 37, 53, 0.28) !important; }
-html[data-style="sakura-zen"].light .text-gray-800 { color: rgba(58, 37, 53, 0.18) !important; }
-
+/* Remove glass, blur, and shadows to create flat Index UI */
 html[data-style="sakura-zen"] aside {
-  background: rgba(18, 6, 14, 0.85) !important;
-  backdrop-filter: blur(44px) saturate(170%) !important;
-  -webkit-backdrop-filter: blur(44px) saturate(170%) !important;
-  border-right: 1px solid rgba(232, 160, 180, 0.20) !important;
-  box-shadow: 2px 0 56px -6px rgba(200, 100, 130, 0.32) !important;
+  background: var(--background) !important;
+  border-right: 1px solid var(--border-color) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
 }
+
 html[data-style="sakura-zen"].light aside {
-  background: rgba(255, 237, 242, 0.92) !important;
-  border-right: 1px solid rgba(192, 96, 128, 0.20) !important;
-  box-shadow: 2px 0 40px -8px rgba(180, 80, 110, 0.18) !important;
+  background: var(--background) !important;
+  border-right: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
 }
 
 html[data-style="sakura-zen"] .glass-panel {
-  background-color: rgba(26, 10, 18, 0.75) !important;
-  backdrop-filter: blur(36px) saturate(150%);
-  -webkit-backdrop-filter: blur(36px) saturate(150%);
-  border: 1px solid rgba(232, 160, 180, 0.20) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 200, 220, 0.16), var(--sk-card-shadow) !important;
-  border-radius: 26px !important;
+  background-color: var(--glass-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
+  border-radius: 8px !important; /* Sharper corners like a card catalog */
 }
+
 html[data-style="sakura-zen"].light .glass-panel {
-  background-color: rgba(255, 236, 241, 0.85) !important;
-  border: 1px solid rgba(192, 96, 128, 0.18) !important;
+  background-color: var(--glass-bg) !important;
+  border: 1px solid var(--border-color) !important;
 }
 
 html[data-style="sakura-zen"] .media-detail-drawer {
-  background-color: rgba(26, 10, 18, 0.96) !important;
-  border-left: 1px solid rgba(232, 160, 180, 0.22) !important;
+  background-color: var(--background) !important;
+  border-left: 1px solid var(--border-color) !important;
 }
+
 html[data-style="sakura-zen"].light .media-detail-drawer {
-  background-color: rgba(255, 236, 241, 0.96) !important;
-  border-left: 1px solid rgba(192, 96, 128, 0.22) !important;
+  background-color: var(--background) !important;
+  border-left: 1px solid var(--border-color) !important;
 }
 
 html[data-style="sakura-zen"] .card-glow:hover {
-  box-shadow: var(--sk-card-hover-shadow);
+  box-shadow: none !important;
 }
 
 html[data-style="sakura-zen"] .hero-gradient {
-  background: linear-gradient(to top, var(--background) 0%, rgba(19, 9, 16, 0.74) 40%, transparent 100%);
+  background: linear-gradient(to top, var(--background) 0%, rgba(13, 10, 11, 0.74) 40%, transparent 100%);
 }
 
 html[data-style="sakura-zen"] button:focus-visible,
 html[data-style="sakura-zen"] a:focus-visible,
 html[data-style="sakura-zen"] [role="button"]:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent-color), 0 0 0 4px rgba(232, 160, 180, 0.24) !important;
+  box-shadow: 0 0 0 2px var(--accent-color), 0 0 0 4px var(--border-color) !important;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -701,21 +702,20 @@ html[data-style="retro-manga"] .card-glow {
   background-image: radial-gradient(rgba(244, 239, 230, 0.07) 15%, transparent 16%) !important;
   background-size: 6px 6px !important;
   background-color: var(--card-color) !important;
-  border: 3px solid #000000 !important;
-  box-shadow: 4px 4px 0px #000000 !important;
+  border: 2px solid #000000 !important;
+  box-shadow: none !important;
   border-radius: 6px !important;
 }
 html[data-style="retro-manga"].light .card-glow {
   background-image: radial-gradient(rgba(25, 20, 16, 0.08) 15%, transparent 16%) !important;
   border-color: #191410 !important;
-  box-shadow: 4px 4px 0px #191410 !important;
 }
 html[data-style="retro-manga"] .card-glow:hover {
-  transform: translate(-4px, -4px) !important;
-  box-shadow: 8px 8px 0px #000000 !important;
+  transform: none !important;
+  border-color: var(--accent-color) !important;
 }
 html[data-style="retro-manga"].light .card-glow:hover {
-  box-shadow: 8px 8px 0px #191410 !important;
+  border-color: var(--accent-color) !important;
 }
 
 html[data-style="retro-manga"] .card-glow img {
@@ -729,22 +729,21 @@ html[data-style="retro-manga"] .glass-panel {
   background-color: var(--card-color) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border: 3px solid #000000 !important;
-  box-shadow: 5px 5px 0px #000000 !important;
+  border: 2px solid #000000 !important;
+  box-shadow: none !important;
   border-radius: 8px !important;
 }
 html[data-style="retro-manga"].light .glass-panel {
-  border: 3px solid #191410 !important;
-  box-shadow: 5px 5px 0px #191410 !important;
+  border: 2px solid #191410 !important;
 }
 
 html[data-style="retro-manga"] .media-detail-drawer {
   background-color: var(--card-color) !important;
-  border-left: 4px solid #000000 !important;
+  border-left: 2px solid #000000 !important;
   box-shadow: none !important;
 }
 html[data-style="retro-manga"].light .media-detail-drawer {
-  border-left: 4px solid #191410 !important;
+  border-left: 2px solid #191410 !important;
 }
 
 html[data-style="retro-manga"] .text-gray-100 { color: rgba(244, 239, 230, 0.95) !important; }

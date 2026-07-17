@@ -360,11 +360,7 @@ export async function toggleFavourite(mediaId: number, isManga: boolean): Promis
   return invoke("toggle_favourite", { mediaId, isManga });
 }
 
-export async function getNotifications(page?: number): Promise<{
-  Page: { notifications: Notification[]; pageInfo: PageInfo | null };
-}> {
-  return invoke("get_notifications", { page });
-}
+
 
 // ── Playback ──────────────────────────────────────────────
 
@@ -394,6 +390,17 @@ export async function getWatchHistory(
 
 export async function getAllLastWatched(): Promise<Record<number, string>> {
   return invoke("get_all_last_watched");
+}
+
+export interface WatchActivityEntry {
+  media_id: number;
+  episode_number: number;
+  watched_at: string;
+}
+
+/** Full per-episode watch log from the local registry, newest first. */
+export async function getWatchActivity(): Promise<WatchActivityEntry[]> {
+  return invoke("get_watch_history");
 }
 
 export async function playTrailer(trailerId: string): Promise<void> {
@@ -442,6 +449,7 @@ export const mediaApi = {
   getConfig,
   setConfig,
   getAllLastWatched,
+  getWatchActivity,
   searchMedia: searchAnime,
   getMediaDetail: async (id: number, mediaType?: string) => {
     const result = await getAnimeDetail(id, mediaType);
@@ -668,18 +676,6 @@ export const mediaApi = {
        return null;
      }
    },
-  getNotifications: async (page?: number) => {
-    try {
-      const raw = await getNotifications(page);
-      return raw?.Page?.notifications ?? [];
-    } catch (err) {
-      console.error("[API:getNotifications] failed:", err);
-      return [];
-    }
-  },
-  markNotificationsAsRead: async () => {
-    return invoke("mark_notifications_read");
-  },
   getLogs: async (limit = 100) => {
     try {
       const logs = await invoke<string>("get_logs", { limit });

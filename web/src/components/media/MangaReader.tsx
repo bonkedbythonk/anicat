@@ -69,16 +69,26 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastActionRef = useRef<number>(0);
 
-  // Load saved reading mode on mount
+  // Load saved reading mode on mount. The per-series key wins over the
+  // global one, so a webtoon remembered as vertical opens scrolling while
+  // chaptered manga stays paged.
   useEffect(() => {
-    const savedMode = localStorage.getItem("anicat_manga_reading_mode") as ReadingMode | null;
+    const savedMode = (localStorage.getItem(`anicat_manga_mode_${mediaId}`) ||
+      localStorage.getItem("anicat_manga_reading_mode")) as ReadingMode | null;
     if (savedMode === "single" || savedMode === "double" || savedMode === "vertical") {
       // A "double" preference saved from a desktop session isn't offered (or
       // usable) on a phone — fall back to single rather than rendering an
       // illegible squished two-page spread.
       setReadingMode(isMobile && savedMode === "double" ? "single" : savedMode);
     }
-  }, [isMobile]);
+  }, [isMobile, mediaId]);
+
+  // Persist mode both globally (the default for new series) and per series.
+  const changeMode = (mode: ReadingMode) => {
+    setReadingMode(mode);
+    localStorage.setItem("anicat_manga_reading_mode", mode);
+    localStorage.setItem(`anicat_manga_mode_${mediaId}`, mode);
+  };
 
   // Sync fullscreen state with browser
   useEffect(() => {
@@ -375,7 +385,11 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     onNavigateChapter?.("next");
   };
 
-  const handleMouseMove = () => {
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isMobile) return;
+    // Prevent scroll wheel from triggering mousemove events by checking actual movement
+    if (Math.abs(e.movementX) < 2 && Math.abs(e.movementY) < 2) return;
+    
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
@@ -406,7 +420,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           <button onClick={() => setReloadKey(k => k + 1)} className="px-6 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors font-bold">
             Try Again
           </button>
-          <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-bold">
+          <button onClick={onClose} className="px-6 py-2 bg-surface hover:bg-foreground/[0.03] border border-border text-foreground rounded-lg transition-colors font-bold">
             Close Reader
           </button>
         </div>
@@ -429,7 +443,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           <button onClick={() => setReloadKey(k => k + 1)} className="px-6 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors font-bold">
             Try Again
           </button>
-          <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-bold">
+          <button onClick={onClose} className="px-6 py-2 bg-surface hover:bg-foreground/[0.03] border border-border text-foreground rounded-lg transition-colors font-bold">
             Close Reader
           </button>
         </div>
@@ -449,17 +463,16 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
-      onTouchStart={isMobile ? handleMouseMove : undefined}
       className="fixed inset-0 z-[200] bg-[#050505] flex flex-col items-center select-none overflow-hidden transform-gpu will-change-[transform,opacity] forced-dark-container"
     >
       {/* Header Controls */}
       {isMobile ? (
         <div
-          className={`fixed top-0 inset-x-0 z-50 bg-gradient-to-b from-black/95 to-transparent transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
+          className={`fixed top-0 inset-x-0 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
           style={{ paddingTop: "env(safe-area-inset-top)" }}
         >
           <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-            <button onClick={onClose} className="p-2 rounded-full bg-white/5 text-white shrink-0">
+            <button onClick={onClose} className="p-2 rounded-full bg-surface border border-border text-foreground shrink-0">
               <X size={19} />
             </button>
 
@@ -468,24 +481,24 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                 <button
                   onClick={(e) => { e.stopPropagation(); onNavigateChapter("prev"); }}
                   disabled={!hasPrevChapter}
-                  className="p-1.5 rounded-lg bg-white/5 text-white disabled:opacity-20"
+                  className="p-1.5 rounded-lg bg-surface border border-border text-foreground disabled:opacity-20"
                 >
                   <ChevronLeft size={16} />
                 </button>
               )}
-              <p className="text-sm font-black text-white whitespace-nowrap">Ch. {chapterNumber}</p>
+              <p className="text-sm font-semibold text-foreground whitespace-nowrap">Ch. {chapterNumber}</p>
               {onNavigateChapter && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onNavigateChapter("next"); }}
                   disabled={!hasNextChapter}
-                  className="p-1.5 rounded-lg bg-white/5 text-white disabled:opacity-20"
+                  className="p-1.5 rounded-lg bg-surface border border-border text-foreground disabled:opacity-20"
                 >
                   <ChevronRight size={16} />
                 </button>
               )}
             </div>
 
-            <div className="flex items-center gap-1 bg-black/60 backdrop-blur-xl p-1 rounded-xl border border-white/10 shrink-0">
+            <div className="flex items-center gap-1 bg-surface p-1 rounded-xl border border-border shrink-0">
               {readingMode !== "vertical" && (
                 <button
                   onClick={() => {
@@ -493,52 +506,79 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     setReadingDirection(newDir);
                     localStorage.setItem("anicat_manga_reading_direction", newDir);
                   }}
-                  className="px-2 py-2 rounded-lg text-[10px] font-black tracking-wide text-accent uppercase"
+                  className="px-2 py-2 rounded-lg text-[10px] font-semibold tracking-wide text-accent uppercase"
                 >
                   {readingDirection === "rtl" ? "RTL" : "LTR"}
                 </button>
               )}
-              <button onClick={() => { setReadingMode("single"); localStorage.setItem("anicat_manga_reading_mode", "single"); }} className={`p-2 rounded-lg transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-gray-500"}`}><FileText size={16} /></button>
-              <button onClick={() => { setReadingMode("vertical"); localStorage.setItem("anicat_manga_reading_mode", "vertical"); }} className={`p-2 rounded-lg transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-gray-500"}`}><ScrollText size={16} /></button>
+              <button onClick={() => changeMode("single")} className={`p-2 rounded-lg transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-muted-foreground"}`}><FileText size={16} /></button>
+              <button onClick={() => changeMode("vertical")} className={`p-2 rounded-lg transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-muted-foreground"}`}><ScrollText size={16} /></button>
             </div>
           </div>
         </div>
       ) : (
-        <div className={`fixed top-0 inset-x-0 z-50 bg-gradient-to-b from-black/95 to-transparent p-6 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-6">
-              <button onClick={onClose} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white transition-all border border-white/5">
+        <>
+          {/* Left Vertical Bar */}
+          <div className={`fixed left-6 top-1/2 -translate-y-1/2 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
+            <div className="flex flex-col items-center space-y-4 bg-surface p-2 rounded-2xl border border-border">
+              <button onClick={onClose} className="p-3 rounded-xl bg-foreground/[0.03] hover:bg-foreground/[0.06] text-foreground transition-all" title="Close Reader">
                 <X size={20} />
               </button>
-              <div>
-                <h2 className="text-xs font-bold text-accent uppercase tracking-[0.2em] mb-1">Chapter</h2>
-                <div className="flex items-center space-x-2">
-                  {onNavigateChapter && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onNavigateChapter("prev"); }}
-                      disabled={!hasPrevChapter}
-                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 disabled:cursor-not-allowed transition-all"
-                      title="Previous Chapter"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                  )}
-                  <p className="text-xl font-black text-white">{chapterNumber}</p>
-                  {onNavigateChapter && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onNavigateChapter("next"); }}
-                      disabled={!hasNextChapter}
-                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 disabled:cursor-not-allowed transition-all"
-                      title="Next Chapter"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                  )}
-                </div>
+              
+              <div className="w-6 h-px bg-border" />
+              
+              <div className="flex flex-col items-center py-2">
+                <h2 className="text-[10px] font-bold text-accent tracking-[0.2em] [writing-mode:vertical-rl] rotate-180 uppercase">Chapter {chapterNumber}</h2>
               </div>
-            </div>
 
-            <div className="flex items-center space-x-3 bg-black/60 backdrop-blur-xl p-1.5 rounded-2xl border border-white/10 shadow-2xl">
+              <div className="flex flex-col gap-2">
+                {onNavigateChapter && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onNavigateChapter("prev"); }}
+                    disabled={!hasPrevChapter}
+                    className="p-2 rounded-lg hover:bg-foreground/[0.06] text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                    title="Previous Chapter"
+                  >
+                    <ChevronLeft size={16} className="rotate-90" />
+                  </button>
+                )}
+                {onNavigateChapter && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onNavigateChapter("next"); }}
+                    disabled={!hasNextChapter}
+                    className="p-2 rounded-lg hover:bg-foreground/[0.06] text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                    title="Next Chapter"
+                  >
+                    <ChevronRight size={16} className="rotate-90" />
+                  </button>
+                )}
+              </div>
+
+              <div className="w-6 h-px bg-border" />
+
+              {hasNextChapter ? (
+                <button onClick={handleNextChapter} className="p-3 bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors" title="Next Chapter">
+                  <ChevronRight size={20} />
+                </button>
+              ) : (
+                <button onClick={handleFinish} className="p-3 bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors" title="Finish Reading">
+                  <Book size={20} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Right Vertical Bar */}
+          <div className={`fixed right-6 top-1/2 -translate-y-1/2 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
+            <div className="flex flex-col items-center space-y-3 bg-surface p-1.5 rounded-2xl border border-border">
+              {readingMode !== "vertical" && (
+                <div className="py-3 px-1 flex flex-col items-center gap-1 border-b border-border w-full">
+                  <span className="text-xs font-bold text-foreground">{currentPage + 1}</span>
+                  <div className="w-4 h-px bg-border" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{pages.length}</span>
+                </div>
+              )}
+
               {/* Reading Direction Selector */}
               {readingMode !== "vertical" && (
                 <button
@@ -547,36 +587,39 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     setReadingDirection(newDir);
                     localStorage.setItem("anicat_manga_reading_direction", newDir);
                   }}
-                  className="px-3.5 py-2.5 rounded-xl text-[10px] font-black tracking-widest text-accent hover:bg-white/5 transition-all uppercase cursor-pointer"
+                  className="p-2 rounded-xl text-[10px] font-bold tracking-wider text-accent hover:bg-foreground/[0.03] transition-all"
                   title="Toggle Reading Direction (RTL/LTR)"
                 >
                   {readingDirection === "rtl" ? "RTL" : "LTR"}
                 </button>
               )}
-              {readingMode !== "vertical" && <div className="w-px h-6 bg-white/10" />}
+              {readingMode !== "vertical" && <div className="w-6 h-px bg-border" />}
 
-              <button onClick={() => { setReadingMode("single"); localStorage.setItem("anicat_manga_reading_mode", "single"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><FileText size={18} /></button>
-              <button onClick={() => { setReadingMode("double"); localStorage.setItem("anicat_manga_reading_mode", "double"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><Book size={18} /></button>
-              <button onClick={() => { setReadingMode("vertical"); localStorage.setItem("anicat_manga_reading_mode", "vertical"); }} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-gray-500 hover:text-white"}`}><ScrollText size={18} /></button>
-              {/* Fullscreen toggle is meaningless once the PWA is already running
-                  standalone (no browser chrome to hide), and iOS Safari's
-                  requestFullscreen support for arbitrary elements is unreliable. */}
-              <div className="w-px h-6 bg-white/10 mx-1" />
+              <button onClick={() => changeMode("single")} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Single Page"><FileText size={18} /></button>
+              <button onClick={() => changeMode("double")} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Double Page"><Book size={18} /></button>
+              <button onClick={() => changeMode("vertical")} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Vertical Scroll"><ScrollText size={18} /></button>
+              
+              <div className="w-6 h-px bg-border" />
               <button
-                onClick={() => {
-                  toggleFullscreen();
-                }}
-                className="p-2.5 rounded-xl text-gray-500 hover:text-white transition-all cursor-pointer z-[60]"
+                onClick={() => toggleFullscreen()}
+                className="p-2.5 rounded-xl text-muted-foreground hover:text-foreground transition-all cursor-pointer z-[60]"
+                title="Toggle Fullscreen"
               >
                 {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Content Area */}
-      <div className={`flex-1 w-full overflow-y-auto scroll-smooth scrollbar-hide ${readingMode === "vertical" ? "" : "flex items-center justify-center"}`}>
+      <div 
+        className={`flex-1 w-full overflow-y-auto scroll-smooth scrollbar-hide ${readingMode === "vertical" ? "" : "flex items-center justify-center"}`}
+        onClick={readingMode === "vertical" ? (e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          setShowControls(p => !p);
+        } : undefined}
+      >
         {readingMode === "vertical" ? (
           <div
             className="max-w-3xl w-full mx-auto"
@@ -584,7 +627,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           >
             {pages.map((page, idx) => (
               <div key={idx} className="relative flex items-center justify-center bg-black">
-                {!loadedImages.has(idx) && <Loader2 className="animate-spin text-white/10" size={32} />}
+                {!loadedImages.has(idx) && <Loader2 className="animate-spin text-muted-foreground/30" size={32} />}
                 <img 
                   src={getProxyUrl(page)} 
                   alt={`Page ${idx + 1}`} 
@@ -596,11 +639,11 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
             ))}
             <div className="pt-20 pb-10 flex justify-center">
               {hasNextChapter ? (
-                <button onClick={handleNextChapter} className="flex items-center gap-2 px-12 py-4 bg-accent text-white rounded-full font-black text-sm shadow-2xl">
+                <button onClick={handleNextChapter} className="flex items-center gap-2 px-12 py-4 bg-accent text-white rounded-full font-semibold text-sm shadow-2xl">
                   Next Chapter <ChevronRight size={18} />
                 </button>
               ) : (
-                <button onClick={handleFinish} className="px-12 py-4 bg-accent text-white rounded-full font-black text-sm shadow-2xl">Finish Reading</button>
+                <button onClick={handleFinish} className="px-12 py-4 bg-accent text-white rounded-full font-semibold text-sm shadow-2xl">Finish Reading</button>
               )}
             </div>
           </div>
@@ -616,6 +659,14 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
               className={`absolute inset-y-0 right-0 w-1/4 z-10 ${readingDirection === 'rtl' ? 'cursor-w-resize' : 'cursor-e-resize'}`} 
               onClick={readingDirection === "rtl" ? handlePrev : handleNext} 
             />
+            {/* Center Zone */}
+            <div 
+              className="absolute inset-y-0 left-1/4 right-1/4 z-10 cursor-pointer" 
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
+                setShowControls(p => !p);
+              }}
+            />
 
             <div
               className={`flex items-center justify-center h-full gap-1 transition-all ${readingMode === "double" ? "w-full" : "max-w-3xl"}`}
@@ -628,23 +679,23 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     <div className="flex-1 h-full flex items-center justify-end">
                       {currentPage + 1 < pages.length && (
                         <div className="relative max-h-full">
-                          {!loadedImages.has(currentPage + 1) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
+                          {!loadedImages.has(currentPage + 1) && <div className="absolute inset-0 flex items-center justify-center bg-foreground/[0.02]"><Loader2 className="animate-spin text-muted-foreground/30" size={32} /></div>}
                           <img 
                             key={pages[currentPage + 1]} 
                             src={getProxyUrl(pages[currentPage + 1])} 
-                            className="transition-all duration-300 object-contain bg-black shadow-2xl max-h-[calc(100vh-64px)]" 
+                            className="transition-all duration-300 object-contain bg-black max-h-[calc(100vh-64px)]" 
                           />
                         </div>
                       )}
                     </div>
                     {/* RTL Right Box (Lower Index Page A: currentPage) */}
-                    <div className="flex-1 h-full flex items-center justify-start border-l border-white/5">
+                    <div className="flex-1 h-full flex items-center justify-start border-l border-border">
                       <div className="relative max-h-full">
-                        {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
+                        {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-foreground/[0.02]"><Loader2 className="animate-spin text-muted-foreground/30" size={32} /></div>}
                         <img 
                           key={pages[currentPage]} 
                           src={getProxyUrl(pages[currentPage])} 
-                          className="transition-all duration-300 object-contain bg-black shadow-2xl max-h-[calc(100vh-64px)]" 
+                          className="transition-all duration-300 object-contain bg-black max-h-[calc(100vh-64px)]" 
                         />
                       </div>
                     </div>
@@ -654,23 +705,23 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     {/* LTR Left Box (Lower Index Page A: currentPage) */}
                     <div className="flex-1 h-full flex items-center justify-end">
                       <div className="relative max-h-full">
-                        {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
+                        {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-foreground/[0.02]"><Loader2 className="animate-spin text-muted-foreground/30" size={32} /></div>}
                         <img 
                           key={pages[currentPage]} 
                           src={getProxyUrl(pages[currentPage])} 
-                          className="transition-all duration-300 object-contain bg-black shadow-2xl max-h-[calc(100vh-64px)]" 
+                          className="transition-all duration-300 object-contain bg-black max-h-[calc(100vh-64px)]" 
                         />
                       </div>
                     </div>
                     {/* LTR Right Box (Higher Index Page B: currentPage + 1) */}
                     {currentPage + 1 < pages.length && (
-                      <div className="flex-1 h-full flex items-center justify-start border-l border-white/5">
+                      <div className="flex-1 h-full flex items-center justify-start border-l border-border">
                         <div className="relative max-h-full">
-                          {!loadedImages.has(currentPage + 1) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
+                          {!loadedImages.has(currentPage + 1) && <div className="absolute inset-0 flex items-center justify-center bg-foreground/[0.02]"><Loader2 className="animate-spin text-muted-foreground/30" size={32} /></div>}
                           <img 
                             key={pages[currentPage + 1]} 
                             src={getProxyUrl(pages[currentPage + 1])} 
-                            className="transition-all duration-300 object-contain bg-black shadow-2xl max-h-[calc(100vh-64px)]" 
+                            className="transition-all duration-300 object-contain bg-black max-h-[calc(100vh-64px)]" 
                           />
                         </div>
                       </div>
@@ -679,11 +730,11 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                 )
               ) : (
                 <div className="relative h-full flex items-center justify-center">
-                  {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02]"><Loader2 className="animate-spin text-white/10" size={32} /></div>}
+                  {!loadedImages.has(currentPage) && <div className="absolute inset-0 flex items-center justify-center bg-foreground/[0.02]"><Loader2 className="animate-spin text-muted-foreground/30" size={32} /></div>}
                   <img 
                     key={pages[currentPage]} 
                     src={getProxyUrl(pages[currentPage])} 
-                    className="transition-all duration-300 object-contain bg-black shadow-2xl max-h-[calc(100vh-64px)]" 
+                    className="transition-all duration-300 object-contain bg-black max-h-[calc(100vh-64px)]" 
                   />
                 </div>
               )}
@@ -691,57 +742,47 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           </div>
         )}
       </div>
-
-      {/* Footer */}
-      {readingMode !== "vertical" && (
-        <div className={`fixed bottom-0 inset-x-0 z-50 bg-gradient-to-t from-black/95 to-transparent p-8 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
-          <div className="max-w-5xl mx-auto flex flex-col space-y-6">
-            {/* In RTL, the range slider is visually reversed to match page numbering right-to-left */}
-            <input 
-              type="range" 
-              min="0" 
-              max={pages.length - 1} 
-              value={currentPage} 
-              onChange={(e) => setCurrentPage(parseInt(e.target.value))} 
-              className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent transform-gpu"
-              style={{ direction: readingDirection === "rtl" ? "rtl" : "ltr" }}
-            />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <button 
-                  onClick={readingDirection === "rtl" ? handleNext : handlePrev} 
-                  disabled={readingDirection === "rtl" ? currentPage >= pages.length - (readingMode === "double" ? 2 : 1) : currentPage === 0} 
-                  className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 cursor-pointer"
-                  title={readingDirection === "rtl" ? "Next Page" : "Previous Page"}
-                >
-                  <ChevronLeft size={24} />
-                </button>
-                <button 
-                  onClick={readingDirection === "rtl" ? handlePrev : handleNext} 
-                  disabled={readingDirection === "rtl" ? currentPage === 0 : currentPage >= pages.length - (readingMode === "double" ? 2 : 1)} 
-                  className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 cursor-pointer"
-                  title={readingDirection === "rtl" ? "Previous Page" : "Next Page"}
-                >
-                  <ChevronRight size={24} />
-                </button>
-                <div className="text-sm font-black text-white/40 tabular-nums">
-                  <span className="text-white">
-                    {readingDirection === "rtl" && readingMode === "double" && currentPage + 1 < pages.length 
-                      ? `${currentPage + 2}-${currentPage + 1}` 
-                      : (readingMode === "double" && currentPage + 1 < pages.length 
-                          ? `${currentPage + 1}-${currentPage + 2}` 
-                          : `${currentPage + 1}`)}
-                  </span> / {pages.length}
-                </div>
+      {/* Mobile Footer */}
+      {isMobile && readingMode !== "vertical" && (
+        <div className={`fixed bottom-6 inset-x-0 z-50 flex justify-center transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
+          <div className="w-[calc(100%-2rem)] max-w-md bg-surface border border-border p-4 rounded-2xl flex flex-col space-y-4">
+            {/* Page Slider */}
+            {pages.length <= 60 ? (
+              <div className="flex w-full gap-[2px]" style={{ direction: readingDirection === "rtl" ? "rtl" : "ltr" }}>
+                {pages.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentPage(idx)}
+                    className={`h-[4px] flex-1 rounded-full ${idx < currentPage ? "bg-accent" : idx === currentPage ? "bg-foreground" : "bg-foreground/20"}`}
+                  />
+                ))}
               </div>
+            ) : (
+              <input
+                type="range"
+                min="0"
+                max={pages.length - 1}
+                value={currentPage}
+                onChange={(e) => setCurrentPage(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-foreground/10 rounded-full appearance-none accent-accent"
+                style={{ direction: readingDirection === "rtl" ? "rtl" : "ltr" }}
+              />
+            )}
+            
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-muted-foreground">
+                {currentPage + 1} / {pages.length}
+              </span>
+              
+              {/* Finish/Next Chapter Action */}
               {((readingMode === "single" && currentPage === pages.length - 1) ||
                 (readingMode === "double" && currentPage >= pages.length - 2)) && (
                 hasNextChapter ? (
-                  <button onClick={handleNextChapter} className="flex items-center gap-2 px-10 py-3.5 bg-accent text-white rounded-2xl font-black text-sm shadow-2xl animate-fade-in cursor-pointer">
-                    Next Chapter <ChevronRight size={18} />
+                  <button onClick={handleNextChapter} className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg font-bold text-xs animate-fade-in">
+                    Next <ChevronRight size={16} />
                   </button>
                 ) : (
-                  <button onClick={handleFinish} className="px-10 py-3.5 bg-accent text-white rounded-2xl font-black text-sm shadow-2xl animate-fade-in cursor-pointer">Finish Reading</button>
+                  <button onClick={handleFinish} className="px-4 py-2 bg-accent text-white rounded-lg font-bold text-xs animate-fade-in">Finish</button>
                 )
               )}
             </div>

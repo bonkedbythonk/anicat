@@ -1728,7 +1728,12 @@ pub async fn resolve_and_save_provider_slug(
         }
     }
 
-    if let Some(best) = find_best_match(&target_titles, results, |r| &r.title) {
+    let translation_type = {
+        let cfg = state.config.read().await;
+        cfg.stream.translation_type.clone()
+    };
+
+    if let Some(best) = find_best_match(&target_titles, results, |r| &r.title, &translation_type) {
         log::info!("resolve_and_save_provider_slug: matched '{}' to slug '{}'", best.title, best.id);
         let db = state.open_db()?;
         let _ = registry::service::set_provider_slug(&db, media_id, provider_name, &best.id);
@@ -1739,7 +1744,7 @@ pub async fn resolve_and_save_provider_slug(
     }
 }
 
-pub fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F) -> Option<T>
+pub fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F, preferred_translation: &str) -> Option<T>
 where
     F: Fn(&T) -> &str,
 {
@@ -1748,11 +1753,22 @@ where
 
     for (idx, candidate) in candidates.iter().enumerate() {
         let cand_title = get_title(candidate);
+        let cand_lower = cand_title.to_lowercase();
+        
+        let has_dub = cand_lower.contains("dub") && (cand_lower.contains("(dub)") || cand_lower.contains("[dub]"));
+        let translation_penalty = if preferred_translation == "sub" && has_dub {
+            0.5
+        } else if preferred_translation == "dub" && !has_dub && candidates.iter().any(|c| get_title(c).to_lowercase().contains("dub")) {
+            0.5
+        } else {
+            1.0
+        };
+
         for &target in target_titles {
             if target.is_empty() {
                 continue;
             }
-            let score = calculate_similarity(target, cand_title);
+            let score = calculate_similarity(target, cand_title) * translation_penalty;
             if score > best_score {
                 best_score = score;
                 best_index = Some(idx);
@@ -1809,7 +1825,7 @@ mod tests {
         ];
 
         let targets = vec!["Koori no Jouheki", "The Ramparts of Ice", "氷 of 城壁"];
-        let matched = find_best_match(&targets, candidates, |r| &r.title);
+        let matched = find_best_match(&targets, candidates, |r| &r.title, "");
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().id, "123");
     }
@@ -1833,7 +1849,7 @@ mod tests {
         // Season 1's targets normalize identically to the "*" specials entry,
         // which used to win when it appeared first in the search results.
         let targets = vec!["Go-toubun no Hanayome", "The Quintessential Quintuplets"];
-        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title, "").unwrap();
         assert_eq!(m.id, "s1");
     }
 
@@ -1844,12 +1860,12 @@ mod tests {
         // With the marker read as a season, nothing here is string-similar
         // enough — no match beats a wrong-season match.
         let targets = vec!["Go-toubun no Hanayome ∬", "5-toubun no Hanayome ∬"];
-        assert!(find_best_match(&targets, quintuplets_candidates(), |r| &r.title).is_none());
+        assert!(find_best_match(&targets, quintuplets_candidates(), |r| &r.title, "").is_none());
 
         // With the English title present (as the real resolver always has),
         // season 2 wins.
         let targets = vec!["Go-toubun no Hanayome ∬", "The Quintessential Quintuplets 2"];
-        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title, "").unwrap();
         assert_eq!(m.id, "s2");
     }
 
@@ -1860,7 +1876,7 @@ mod tests {
             title: "The Quintessential Quintuplets".to_string(),
             id: "s1".to_string(),
         }];
-        assert!(find_best_match(&targets, candidates, |r| &r.title).is_none());
+        assert!(find_best_match(&targets, candidates, |r| &r.title, "").is_none());
     }
 
     #[test]
@@ -1878,7 +1894,7 @@ mod tests {
         .iter()
         .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
         .collect();
-        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        let m = find_best_match(&targets, candidates, |r| &r.title, "").unwrap();
         assert_eq!(m.id, "specials");
     }
 
@@ -1892,7 +1908,7 @@ mod tests {
         .iter()
         .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
         .collect();
-        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        let m = find_best_match(&targets, candidates, |r| &r.title, "").unwrap();
         assert_eq!(m.id, "s2");
     }
 
@@ -1906,7 +1922,7 @@ mod tests {
         .iter()
         .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
         .collect();
-        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        let m = find_best_match(&targets, candidates, |r| &r.title, "").unwrap();
         assert_eq!(m.id, "s1");
     }
 
@@ -1917,14 +1933,14 @@ mod tests {
             title: "Uma Musume ~Pretty Derby~".to_string(),
             id: "s1".to_string(),
         }];
-        let m = find_best_match(&targets, candidates, |r| &r.title).unwrap();
+        let m = find_best_match(&targets, candidates, |r| &r.title, "").unwrap();
         assert_eq!(m.id, "s1");
     }
 
     #[test]
     fn movie_target_prefers_movie_entry() {
         let targets = vec!["Go-toubun no Hanayome Movie", "The Quintessential Quintuplets Movie"];
-        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title).unwrap();
+        let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title, "").unwrap();
         assert_eq!(m.id, "movie");
     }
 

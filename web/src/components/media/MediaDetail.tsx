@@ -7,12 +7,26 @@ import { mediaApi, type MediaItem, type Episode, type Character, type Review } f
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
-import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix } from "@/lib/date";
-import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, parseAiringTime } from "@/lib/date";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { EpisodeList } from "./EpisodeList";
+import { WatchGrid } from "./WatchGrid";
 import MangaReader from "./MangaReader";
+
+// AniList airing timestamps are ISO strings without a zone suffix (UTC).
+function airingCountdown(airingAt?: string | number): string | null {
+  if (!airingAt) return null;
+  const t = parseAiringTime(airingAt);
+  if (!t) return null;
+  const diff = t - Date.now();
+  if (diff <= 0) return "out now";
+  const days = Math.floor(diff / 86_400_000);
+  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
+  if (days > 0) return `in ${days}d ${hours}h`;
+  const mins = Math.floor((diff % 3_600_000) / 60_000);
+  return hours > 0 ? `in ${hours}h ${mins}m` : `in ${mins}m`;
+}
 
 // AniList score formats — the raw score value lives on a different scale
 // depending on which one the viewer's account uses.
@@ -116,7 +130,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   };
 
   // Extracted hooks
-  const ambientColor = useAmbientColor(banner);
   const progressEditor = useProgressEditor();
   const scoreEditor = useProgressEditor();
 
@@ -253,7 +266,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   // Measure whether synopsis actually overflows the collapsed height
   useEffect(() => {
     if (!synopsisRef.current) return;
-    setSynopsisOverflows(synopsisRef.current.scrollHeight > 120);
+    setSynopsisOverflows(synopsisRef.current.scrollHeight > 60);
   }, [fullItem.description]);
 
   // Resolve the Continue/Start episode's stream as soon as we know which one
@@ -271,6 +284,21 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   }, [isManga, selectedProvider, actualProgress, item.id]);
 
   const isProcessingAction = useRef(false);
+  const [queueingAll, setQueueingAll] = useState(false);
+
+  const handleDownloadAll = async () => {
+    if (isManga || queueingAll) return;
+    setQueueingAll(true);
+    try {
+      const allEpNums = episodes.map(ep => parseInt(String(ep.number), 10));
+      await mediaApi.addToQueue(item.id, allEpNums, fullItem?.title?.english || fullItem?.title?.romaji || item.title?.english || item.title?.romaji || '', fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || '');
+      dispatchRefresh();
+    } catch (error) {
+      console.error("Failed to queue all:", error);
+    } finally {
+      setQueueingAll(false);
+    }
+  };
 
   // `overrideEpisode` is only ever passed by the one-time initial-action
   // effect above (honoring whatever episode the Hero/quick-play button that
@@ -495,397 +523,347 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
   const title = fullItem?.title?.english || fullItem?.title?.romaji || item?.title?.english || item?.title?.romaji || '';
 
+  const primaryActionButton = (() => {
+    const currentProgress = actualProgress;
+    const total = fullItem.episodes || fullItem.chapters || 0;
+    const nextAiringEp = fullItem.next_airing?.episode;
+    const filteredEps = episodes
+      .filter(e => !nextAiringEp || Number(e.number) < nextAiringEp)
+      .map(e => Number(e.number));
+    const latestAvailable = episodes.length > 0 && filteredEps.length > 0 ? Math.max(...filteredEps) : total;
+    const nextEpisode = actualProgress + 1;
+    const isFinished = total > 0 && currentProgress >= total && fullItem.status !== 'RELEASING';
+    const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
+    return (
+      <button
+        onClick={() => handlePlayNext()}
+        disabled={isPlayingNext || isCaughtUp}
+        className="flex items-center gap-2 px-5 py-3 bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
+      >
+        {isPlayingNext ? (
+          <Loader2 className="animate-spin" size={18} />
+        ) : (
+          <>
+            {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
+            <span>
+              {isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
+                : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
+            </span>
+          </>
+        )}
+      </button>
+    );
+  })();
+
   return (
     <>
-      {/* Full-page detail */}
       <div className="relative min-h-full bg-background">
-        {/* Hero Banner */}
-        <div className="relative w-full overflow-hidden forced-dark-container" style={{ height: 'clamp(300px, 48vh, 520px)' }}>
-          <img src={proxyImage(banner)} alt={title} className="w-full h-full object-cover" />
-          <div
-            className="absolute inset-0"
-            style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.45) 55%, #050505 100%)' }}
-          />
-          {/* Ambient tint — contained in the banner so it doesn't cause full-page repaints */}
-          <div
-            className="absolute inset-0 opacity-30 pointer-events-none"
-            style={{ background: `radial-gradient(ellipse at 10% 0%, ${ambientColor} 0%, transparent 55%)` }}
-          />
-          <button
-            onClick={onClose}
-            className="absolute top-7 left-7 z-10 flex items-center gap-2 px-4 py-2 bg-black/60 rounded-full text-white text-sm font-semibold border border-white/10 hover:bg-black/80 transition-colors active:scale-95"
-          >
-            <ChevronLeft size={16} />
-            Back
-          </button>
+        {/* Banner */}
+        <div className="relative h-56 sm:h-64 lg:h-72 overflow-hidden">
+          {banner ? (
+            <img src={banner} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <div className="absolute inset-0 bg-surface" />
+          )}
+          <div className="absolute inset-0 hero-gradient" />
+          <div className="absolute inset-x-0 top-0 z-20 px-4 sm:px-8 lg:px-14 pt-6">
+            <div className="max-w-[1150px] mx-auto">
+              <button
+                onClick={onClose}
+                className="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground/70 hover:text-foreground cursor-pointer"
+              >
+                <ChevronLeft size={14} />
+                Back
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Content */}
-        <div className="relative z-10 px-4 sm:px-8 lg:px-14 pb-16">
-          {/* Cover + Title row: cover art overlaps the banner. Stacked and
-              centered below `sm` (640px) — this component has no phone-width
-              use on desktop, since the app window enforces an 800px minimum,
-              comfortably above `sm`, so that variant is unreachable there. */}
-          <div className="flex flex-col sm:flex-row items-center sm:items-stretch text-center sm:text-left gap-4 sm:gap-8 -mt-20 sm:-mt-32">
-            <img
-              src={proxyImage(fullItem?.cover_image?.large || item?.cover_image?.large || '')}
-              alt={title}
-              className="w-32 h-44 sm:w-44 sm:h-60 rounded-2xl object-cover shadow-[0_20px_70px_rgba(0,0,0,0.8)] border border-white/[0.07] shrink-0 self-center sm:self-end"
-            />
-            <div className="flex flex-col justify-end pb-2 space-y-3 min-w-0 w-full items-center sm:items-stretch">
-              <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
-                <span className="px-2 py-0.5 bg-accent rounded text-[11px] font-semibold text-white">
-                  {fullItem.format || (isManga ? 'Manga' : 'Anime')}
-                </span>
-                {fullItem.status === 'RELEASING' && (
-                  <span className="flex items-center gap-1.5 px-2 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[10px] font-bold text-green-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-                    Airing
-                  </span>
-                )}
-                {fullItem.status === 'FINISHED' && (
-                  <span className="px-2 py-0.5 bg-white/[0.05] border border-white/[0.08] rounded text-[10px] font-bold text-gray-400">Finished</span>
-                )}
-              </div>
-              <h1 className="text-2xl lg:text-3xl xl:text-4xl font-bold text-white leading-tight">{title}</h1>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-                {fullItem.studios?.nodes?.[0]?.name && (
-                  <>
-                    <Building2 size={13} className="shrink-0" />
-                    <span className="text-white/70 font-medium">{fullItem.studios.nodes[0].name}</span>
-                    <span className="text-white/20 select-none">·</span>
-                  </>
-                )}
-                {(fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year) && (
-                  <>
-                    <span>{fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year}</span>
-                    {(fullItem.episodes || fullItem.chapters) && <span className="text-white/20 select-none">·</span>}
-                  </>
-                )}
-                {!isManga && fullItem.episodes ? <span>{fullItem.episodes} eps</span> : null}
-                {isManga && fullItem.chapters ? <span>{fullItem.chapters} ch</span> : null}
-              </div>
-              <div className="flex items-center gap-5">
-                {fullItem.average_score ? (
-                  <div className="flex items-center gap-1.5">
-                    <Star size={14} fill="currentColor" className="text-yellow-400" />
-                    <span className="text-sm font-bold text-white">{fullItem.average_score}%</span>
-                    <span className="text-xs text-muted-foreground">score</span>
-                  </div>
-                ) : null}
-                {(fullItem.popularity ?? 0) > 0 && (
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Users size={13} />
-                    <span className="text-sm">{fullItem.popularity!.toLocaleString()} users</span>
-                  </div>
-                )}
-              </div>
-              {fullItem.genres && (
-                <div className="flex flex-wrap gap-2">
-                  {fullItem.genres.map((g: string) => (
-                    <span key={g} className="px-3 py-1 bg-white/[0.05] border border-white/[0.07] rounded-lg text-[11px] font-bold text-muted-foreground genre-chip">{g}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Action bar */}
-          <div className="mt-8 flex items-center gap-3 flex-wrap">
-            {(() => {
-              const currentProgress = actualProgress;
-              const total = fullItem.episodes || fullItem.chapters || 0;
-              const nextAiringEp = fullItem.next_airing?.episode;
-              const filteredEps = episodes
-                .filter(e => !nextAiringEp || Number(e.number) < nextAiringEp)
-                .map(e => Number(e.number));
-              const latestAvailable = episodes.length > 0 && filteredEps.length > 0 ? Math.max(...filteredEps) : total;
-              const nextEpisode = actualProgress + 1;
-              // A still-RELEASING show can't be "Completed" even if AniList's
-              // reported `episodes` total happens to already match how many
-              // have aired so far (its eventual total, once known, is often
-              // set before the season finishes) — without this guard,
-              // watching everything currently out shows "Completed" instead
-              // of "Caught Up".
-              const isFinished = total > 0 && currentProgress >= total && fullItem.status !== 'RELEASING';
-              const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
-              return (
-                <button
-                  onClick={() => handlePlayNext()}
-                  disabled={isPlayingNext || isCaughtUp}
-                  className="flex items-center gap-3 px-8 py-3.5 bg-accent hover:bg-accent-light text-white font-semibold text-sm rounded-xl transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
-                >
-                  {isPlayingNext ? (
-                    <Loader2 className="animate-spin" size={18} />
+        {/* Main content — cover + info side by side */}
+        <div className="relative z-10 px-4 sm:px-8 lg:px-14 -mt-24 sm:-mt-28 pb-16 max-w-[1150px] mx-auto">
+          <div className="flex flex-col sm:flex-row gap-6 sm:gap-8">
+            {/* Cover art — left column */}
+            <div className="shrink-0 flex flex-col items-center sm:items-start gap-4">
+              <img
+                src={proxyImage(fullItem?.cover_image?.large || item?.cover_image?.large || '')}
+                alt={title}
+                className="w-36 h-52 sm:w-44 sm:h-64 lg:w-48 lg:h-[272px] rounded-lg object-cover border border-border shadow-2xl"
+              />
+              {/* Compact stats under cover */}
+              <div className="w-36 sm:w-44 lg:w-48 space-y-3">
+                <div className="group/progress">
+                  <div className="meta-mono text-muted-foreground mb-1">Progress</div>
+                  {progressEditor.isEditing ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        autoFocus
+                        type="number"
+                        value={progressEditor.editValue}
+                        onChange={(e) => progressEditor.setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleUpdateProgress(parseInt(progressEditor.editValue) || 0);
+                          if (e.key === 'Escape') progressEditor.cancelEditing();
+                        }}
+                        className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
+                      />
+                      <button onClick={() => handleUpdateProgress(parseInt(progressEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></button>
+                      <button onClick={() => progressEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></button>
+                    </div>
                   ) : (
-                    <>
-                      {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
-                      <span>
-                        {isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
-                          : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
-                      </span>
-                    </>
-                  )}
-                </button>
-              );
-            })()}
-
-            {hasTrailer && (
-              <button
-                onClick={handlePlayTrailer}
-                disabled={isResolvingTrailer}
-                className="flex items-center gap-2 px-5 py-3.5 bg-foreground/5 hover:bg-foreground/10 border border-border text-foreground rounded-2xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
-              >
-                {isResolvingTrailer ? <Loader2 size={18} className="animate-spin" /> : <Film size={18} />}
-                <span>Trailer</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleToggleFavourite}
-              disabled={isTogglingFavourite}
-              title={fullItem?.is_favourite ? "Remove from AniList favourites" : "Add to AniList favourites"}
-              className={`p-3.5 rounded-2xl border transition-all active:scale-95 disabled:opacity-50 ${
-                fullItem?.is_favourite
-                  ? "bg-pink-500/15 hover:bg-pink-500/25 text-pink-500 border-pink-500/25"
-                  : "bg-foreground/5 hover:bg-foreground/10 text-foreground border-border"
-              }`}
-            >
-              <Heart size={18} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
-            </button>
-
-            <div className="relative">
-              <select
-                value={(() => { const s = fullItem.user_status?.status?.toLowerCase(); return s === 'current' ? 'watching' : (s || 'none'); })()}
-                onChange={(e) => {
-                  const newStatus = e.target.value;
-                  if (newStatus === 'none') {
-                    handleRemoveFromList(true);
-                  } else {
-                    setIsUpdatingStatus(true);
-                    mediaApi.updateStatus(item.id, newStatus)
-                      .then(() => {
-                        updateProgressInQueries(queryClient, item.id, actualProgress, newStatus);
-                        queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
-                        queryClient.invalidateQueries({ queryKey: ['lists'] });
-                        queryClient.invalidateQueries({ queryKey: ['home-watching'], refetchType: 'all' });
-                        queryClient.invalidateQueries({ queryKey: ['home-repeating'], refetchType: 'all' });
-                        dispatchRefresh();
-                      })
-                      .catch((err) => { console.error('Failed to update status:', err); notifyError("Couldn't update your list status on AniList."); })
-                      .finally(() => setIsUpdatingStatus(false));
-                  }
-                }}
-                disabled={isUpdatingStatus}
-                className="bg-foreground/5 border border-border text-foreground hover:bg-foreground/10 rounded-2xl pl-4 pr-10 py-3.5 text-sm font-bold focus:outline-none focus:border-accent transition-all cursor-pointer appearance-none"
-              >
-                <option value="none" className="text-muted-foreground">-- Add to List --</option>
-                <option value="planning">Planning</option>
-                <option value="watching">{isManga ? 'Reading' : 'Watching'}</option>
-                <option value="repeating">{isManga ? 'Rereading' : 'Rewatching'}</option>
-                <option value="completed">Completed</option>
-                <option value="paused">Paused</option>
-                <option value="dropped">Dropped</option>
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                <ChevronDown size={16} />
-              </div>
-            </div>
-
-            <button
-              onClick={handleRemoveFromList}
-              title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
-              className={`p-3.5 rounded-2xl transition-all border active:scale-95 ${
-                deleteConfirmPending
-                  ? 'bg-red-500/80 text-white border-red-500 scale-105 animate-pulse'
-                  : 'bg-red-500/10 hover:bg-red-500/20 text-red-500/70 hover:text-red-500 border-red-500/20'
-              }`}
-            >
-              <Trash2 size={20} />
-            </button>
-          </div>
-
-          {/* Progress + Score */}
-          <div className="mt-6 flex items-center gap-6 px-1">
-            <div>
-              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Progress</div>
-              {progressEditor.isEditing ? (
-                <div className="flex items-center space-x-2">
-                  <input
-                    autoFocus
-                    type="number"
-                    value={progressEditor.editValue}
-                    onChange={(e) => progressEditor.setEditValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleUpdateProgress(parseInt(progressEditor.editValue) || 0);
-                      if (e.key === 'Escape') progressEditor.cancelEditing();
-                    }}
-                    className="w-16 bg-foreground/5 border border-border rounded-lg px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
-                  />
-                  <button onClick={() => handleUpdateProgress(parseInt(progressEditor.editValue) || 0)} className="p-1.5 bg-accent text-white rounded-lg hover:bg-accent-light transition-colors"><Check size={14} /></button>
-                  <button onClick={() => progressEditor.cancelEditing()} className="p-1.5 bg-foreground/5 text-muted-foreground rounded-lg hover:bg-foreground/10 transition-colors"><X size={14} /></button>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-3 group/progress">
-                  <div>
-                    <p className="text-xl font-black text-foreground tabular-nums">
-                      {actualProgress}
-                      <span className="text-muted-foreground/45 mx-1.5 font-medium">/</span>
-                      <span className="text-muted-foreground">{isManga ? (fullItem.chapters || '?') : (fullItem.episodes || '?')}</span>
-                    </p>
-                    {isManga && actualProgressVolumes != null && actualProgressVolumes > 0 && (
-                      <p className="text-[11px] text-muted-foreground/60 tabular-nums mt-0.5">
-                        Vol. {actualProgressVolumes}{fullItem.volumes ? <><span className="text-muted-foreground/45 mx-1 font-medium">/</span>{fullItem.volumes}</> : ''}
+                    <div className="flex items-center gap-2">
+                      <p className="text-lg font-semibold text-foreground tabular-nums">
+                        {actualProgress}
+                        <span className="text-muted-foreground/45 mx-1 font-medium">/</span>
+                        <span className="text-muted-foreground">{isManga ? (fullItem.chapters || '?') : (fullItem.episodes || '?')}</span>
                       </p>
-                    )}
-                  </div>
-                  <button onClick={() => progressEditor.startEditing(actualProgress)} className="p-1.5 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-lg transition-all opacity-0 group-hover/progress:opacity-100">
-                    <Edit2 size={12} />
-                  </button>
+                      <button onClick={() => progressEditor.startEditing(actualProgress)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-hover/progress:opacity-100">
+                        <Edit2 size={11} />
+                      </button>
+                    </div>
+                  )}
+                  {isManga && actualProgressVolumes != null && actualProgressVolumes > 0 && (
+                    <p className="text-[11px] text-muted-foreground/60 tabular-nums mt-0.5">
+                      Vol. {actualProgressVolumes}{fullItem.volumes ? <><span className="text-muted-foreground/45 mx-1 font-medium">/</span>{fullItem.volumes}</> : ''}
+                    </p>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="h-8 w-px bg-border" />
-            <div className="flex flex-col">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                {actualScore != null && actualScore > 0 ? 'Your Score' : 'Avg Score'}
-              </span>
-              {scoreFormat === 'POINT_5' || scoreFormat === 'POINT_3' ? (
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="flex items-center gap-0.5">
-                    {Array.from({ length: SCORE_FORMAT_MAX[scoreFormat] }, (_, i) => i + 1).map((n) => {
-                      if (scoreFormat === 'POINT_5') {
-                        const active = (actualScore || 0) >= n;
+
+                <div className="h-px bg-border" />
+
+                <div className="group/score">
+                  <span className="meta-mono text-muted-foreground">Your Score</span>
+                  {scoreFormat === 'POINT_5' || scoreFormat === 'POINT_3' ? (
+                    <div className="flex items-center gap-0.5 mt-1">
+                      {Array.from({ length: SCORE_FORMAT_MAX[scoreFormat] }, (_, i) => i + 1).map((n) => {
+                        if (scoreFormat === 'POINT_5') {
+                          const active = (actualScore || 0) >= n;
+                          return (
+                            <button key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
+                              <Star size={16} className={active ? 'text-accent' : 'text-muted-foreground/30'} fill={active ? 'currentColor' : 'none'} />
+                            </button>
+                          );
+                        }
+                        const Icon = n === 1 ? Frown : n === 2 ? Meh : Smile;
+                        const selected = (actualScore || 0) === n;
                         return (
-                          <button key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
-                            <Star size={18} className={active ? 'text-accent' : 'text-muted-foreground/30'} fill={active ? 'currentColor' : 'none'} />
+                          <button key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
+                            <Icon size={18} className={selected ? 'text-accent' : 'text-muted-foreground/30'} />
                           </button>
                         );
-                      }
-                      const Icon = n === 1 ? Frown : n === 2 ? Meh : Smile;
-                      const selected = (actualScore || 0) === n;
-                      return (
-                        <button key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
-                          <Icon size={20} className={selected ? 'text-accent' : 'text-muted-foreground/30'} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {(!actualScore || actualScore === 0) && !!fullItem.average_score && (
-                    <span className="text-[11px] text-muted-foreground/60">avg {fullItem.average_score}%</span>
+                      })}
+                    </div>
+                  ) : scoreEditor.isEditing ? (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        max={SCORE_FORMAT_MAX[scoreFormat] ?? 100}
+                        step={scoreFormat === 'POINT_10_DECIMAL' ? 0.1 : 1}
+                        value={scoreEditor.editValue}
+                        onChange={(e) => scoreEditor.setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleUpdateScore(parseFloat(scoreEditor.editValue) || 0);
+                          if (e.key === 'Escape') scoreEditor.cancelEditing();
+                        }}
+                        className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
+                      />
+                      <button onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></button>
+                      <button onClick={() => scoreEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-lg font-semibold text-foreground tabular-nums">
+                        {actualScore != null && actualScore > 0
+                          ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-xs">/ {SCORE_FORMAT_MAX[scoreFormat] ?? 100}</span></>
+                          : <span className="text-muted-foreground/60">—</span>}
+                      </span>
+                      <button onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-hover/score:opacity-100">
+                        <Edit2 size={11} />
+                      </button>
+                    </div>
                   )}
                 </div>
-              ) : scoreEditor.isEditing ? (
-                <div className="flex items-center space-x-2 mt-0.5">
-                  <input
-                    autoFocus
-                    type="number"
-                    min={0}
-                    max={SCORE_FORMAT_MAX[scoreFormat] ?? 100}
-                    step={scoreFormat === 'POINT_10_DECIMAL' ? 0.1 : 1}
-                    value={scoreEditor.editValue}
-                    onChange={(e) => scoreEditor.setEditValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleUpdateScore(parseFloat(scoreEditor.editValue) || 0);
-                      if (e.key === 'Escape') scoreEditor.cancelEditing();
-                    }}
-                    className="w-16 bg-foreground/5 border border-border rounded-lg px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
-                  />
-                  <button onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1.5 bg-accent text-white rounded-lg hover:bg-accent-light transition-colors"><Check size={14} /></button>
-                  <button onClick={() => scoreEditor.cancelEditing()} className="p-1.5 bg-foreground/5 text-muted-foreground rounded-lg hover:bg-foreground/10 transition-colors"><X size={14} /></button>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2 group/score">
-                  <span className="text-xl font-black text-foreground tabular-nums">
-                    {actualScore != null && actualScore > 0
-                      ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-sm">/ {SCORE_FORMAT_MAX[scoreFormat] ?? 100}</span></>
-                      : <>{fullItem.average_score ? `${fullItem.average_score}%` : '-'}</>}
+              </div>
+            </div>
+
+            {/* Info — right column */}
+            <div className="flex-1 min-w-0 pt-0 sm:pt-6 space-y-5">
+              {/* Meta tags */}
+              <div className="meta-mono flex items-center flex-wrap gap-x-3 gap-y-1 text-foreground/70">
+                {fullItem.format && <span>{fullItem.format}</span>}
+                {fullItem.status === 'RELEASING' && <span className="text-accent">Airing</span>}
+                {fullItem.status === 'FINISHED' && <span>Finished</span>}
+                {!isManga && fullItem.episodes ? <span>{fullItem.episodes} EP</span> : null}
+                {isManga && fullItem.chapters ? <span>{fullItem.chapters} CH</span> : null}
+                {(fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year) && (
+                  <span>{fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year}</span>
+                )}
+                {fullItem.studios?.nodes?.[0]?.name && <span>{fullItem.studios.nodes[0].name}</span>}
+                {fullItem.average_score ? <span>Score {fullItem.average_score}</span> : null}
+                {!isManga && fullItem.next_airing?.episode && (
+                  <span className="text-accent">
+                    EP {fullItem.next_airing.episode} {airingCountdown(fullItem.next_airing.airing_at) || ""}
                   </span>
-                  <button onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1.5 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-lg transition-all opacity-0 group-hover/score:opacity-100">
-                    <Edit2 size={12} />
+                )}
+              </div>
+
+              {/* Title */}
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-foreground leading-tight tracking-tight">{title}</h1>
+
+              {/* Action bar */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {primaryActionButton}
+
+                {hasTrailer && (
+                  <button
+                    onClick={handlePlayTrailer}
+                    disabled={isResolvingTrailer}
+                    className="flex items-center gap-2 px-5 py-3 bg-surface border border-border text-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] rounded-md text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isResolvingTrailer ? <Loader2 size={18} className="animate-spin" /> : <Film size={18} />}
+                    <span>Trailer</span>
                   </button>
+                )}
+
+                <button
+                  onClick={handleToggleFavourite}
+                  disabled={isTogglingFavourite}
+                  title={fullItem?.is_favourite ? "Remove from AniList favourites" : "Add to AniList favourites"}
+                  className={`p-3 rounded-md border transition-all active:scale-95 disabled:opacity-50 ${
+                    fullItem?.is_favourite
+                      ? "bg-pink-500/15 hover:bg-pink-500/25 text-pink-500 border-pink-500/25"
+                      : "glass-button"
+                  }`}
+                >
+                  <Heart size={18} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
+                </button>
+
+                <div className="relative">
+                  <select
+                    value={(() => { const s = fullItem.user_status?.status?.toLowerCase(); return s === 'current' ? 'watching' : (s || 'none'); })()}
+                    onChange={(e) => {
+                      const newStatus = e.target.value;
+                      if (newStatus === 'none') {
+                        handleRemoveFromList(true);
+                      } else {
+                        setIsUpdatingStatus(true);
+                        mediaApi.updateStatus(item.id, newStatus)
+                          .then(() => {
+                            updateProgressInQueries(queryClient, item.id, actualProgress, newStatus);
+                            queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
+                            queryClient.invalidateQueries({ queryKey: ['lists'] });
+                            queryClient.invalidateQueries({ queryKey: ['home-watching'], refetchType: 'all' });
+                            queryClient.invalidateQueries({ queryKey: ['home-repeating'], refetchType: 'all' });
+                            dispatchRefresh();
+                          })
+                          .catch((err) => { console.error('Failed to update status:', err); notifyError("Couldn't update your list status on AniList."); })
+                          .finally(() => setIsUpdatingStatus(false));
+                      }
+                    }}
+                    disabled={isUpdatingStatus}
+                    className="bg-surface border border-border text-foreground/80 hover:text-foreground rounded-md pl-4 pr-10 py-3 text-sm font-medium focus:outline-none focus:border-accent transition-all cursor-pointer appearance-none"
+                  >
+                    <option value="none" className="text-muted-foreground">-- Add to List --</option>
+                    <option value="planning">Planning</option>
+                    <option value="watching">{isManga ? 'Reading' : 'Watching'}</option>
+                    <option value="repeating">{isManga ? 'Rereading' : 'Rewatching'}</option>
+                    <option value="completed">Completed</option>
+                    <option value="paused">Paused</option>
+                    <option value="dropped">Dropped</option>
+                  </select>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                    <ChevronDown size={16} />
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleRemoveFromList}
+                  title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
+                  className={`p-3 rounded-md transition-all border active:scale-95 ${
+                    deleteConfirmPending
+                      ? 'bg-red-500/80 text-background border-red-500 scale-105 animate-pulse'
+                      : 'bg-red-500/10 hover:bg-red-500/20 text-red-500/70 hover:text-red-500 border-red-500/20'
+                  }`}
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+
+              {/* Synopsis */}
+              {fullItem.description && (
+                <div className="space-y-3">
+                  <h3 className="meta-mono text-accent">Synopsis</h3>
+                  <motion.div
+                    className="relative overflow-hidden"
+                    animate={{ maxHeight: isExpanded ? 2000 : 60 }}
+                    initial={false}
+                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                  >
+                    <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
+                  </motion.div>
+                  {synopsisOverflows && (
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
+                      <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Next Episode Banner */}
+              {!isManga && fullItem.next_airing && (
+                <div className="bg-accent/[0.06] border border-accent/10 rounded-md p-4 flex items-center gap-4 next-episode-banner">
+                  <div className="p-2.5 bg-accent/10 rounded-xl text-accent"><Calendar size={18} /></div>
+                  <div>
+                    <div className="meta-mono text-accent mb-0.5">Next Episode</div>
+                    <div className="text-sm text-foreground font-bold">
+                      Episode {fullItem.next_airing.episode}{' '}
+                      <span className="text-muted-foreground font-medium text-xs">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Season chain: previous / next */}
+              {(prequel || sequel) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { rel: prequel, label: 'Previous', side: 'prev' as const },
+                    { rel: sequel, label: 'Next', side: 'next' as const },
+                  ].filter((s) => s.rel).map(({ rel, label, side }) => {
+                    const cover = rel?.cover_image?.large || rel?.coverImage?.large;
+                    return (
+                      <button
+                        key={side}
+                        onClick={() => rel && selectItem(rel)}
+                        className={`group flex items-center gap-3 p-2.5 border border-border rounded-md bg-foreground/[0.02] hover:bg-surface/70 hover:border-foreground/20 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
+                      >
+                        {side === 'prev'
+                          ? <ChevronLeft size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
+                          : <ChevronRight size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />}
+                        {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
+                        <div className="min-w-0 flex-1">
+                          <div className="meta-mono text-accent">{label} Season</div>
+                          <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
+                          {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
 
-          <div className="mt-8 border-t border-white/[0.05]" />
-
-          {/* Synopsis */}
-          {fullItem.description && (
-            <div className="mt-6 space-y-3">
-              <h3 className="text-[11px] font-semibold text-accent uppercase tracking-wide">Synopsis</h3>
-              <motion.div
-                className="relative overflow-hidden"
-                animate={{ maxHeight: isExpanded ? 2000 : 120 }}
-                initial={false}
-                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-              >
-                <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
-                {!isExpanded && synopsisOverflows && (
-                  <div className="absolute bottom-0 left-0 right-0 h-12 pointer-events-none" style={{ background: 'linear-gradient(to bottom, transparent, rgba(5,5,5,0.97))' }} />
-                )}
-              </motion.div>
-              {synopsisOverflows && (
-                <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
-                  <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
-                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Next Episode Banner */}
-          {!isManga && fullItem.next_airing && (
-            <div className="mt-6 bg-accent/5 border border-accent/10 rounded-2xl p-5 flex items-center space-x-4 next-episode-banner">
-              <div className="p-3 bg-accent/10 rounded-xl text-accent shadow-inner"><Calendar size={20} /></div>
-              <div>
-                <div className="text-[11px] font-semibold text-accent uppercase tracking-wide">Next Episode</div>
-                <div className="text-base text-foreground font-bold">
-                  Episode {fullItem.next_airing.episode}{' '}
-                  <span className="text-muted-foreground font-medium text-sm">airing {formatRelativeTimeFromUnix(fullItem.next_airing.airing_at ?? 0)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Season chain: previous / next */}
-          {(prequel || sequel) && (
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { rel: prequel, label: 'Previous', side: 'prev' as const },
-                { rel: sequel, label: 'Next', side: 'next' as const },
-              ].filter((s) => s.rel).map(({ rel, label, side }) => {
-                const cover = rel?.cover_image?.large || rel?.coverImage?.large;
-                return (
-                  <button
-                    key={side}
-                    onClick={() => rel && selectItem(rel)}
-                    className={`group flex items-center gap-3 p-2.5 bg-foreground/[0.03] border border-white/[0.06] rounded-2xl hover:bg-foreground/[0.06] hover:border-accent/30 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
-                  >
-                    {side === 'prev'
-                      ? <ChevronLeft size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
-                      : <ChevronRight size={18} className="shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />}
-                    {cover && <img src={proxyImage(cover)} className="w-10 h-14 rounded-lg object-cover shrink-0" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-semibold text-accent uppercase tracking-wide">{label} Season</div>
-                      <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
-                      {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Tabs */}
-          <div className="mt-10 space-y-6">
-            <div className="flex border-b border-white/[0.06] pb-0 relative">
+          <div className="mt-8 space-y-6">
+            <div className="flex border-b border-border pb-0 relative">
               {(['episodes', 'characters', 'seasons', 'more'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${activeTab === tab ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                  className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${activeTab === tab ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {tab === 'episodes' ? (isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                   {activeTab === tab && (
@@ -896,39 +874,46 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             </div>
 
             <div className="min-h-[300px]">
-              <AnimatePresence mode="wait">
+              <AnimatePresence mode="popLayout">
                 {activeTab === 'episodes' && (
-                  <motion.div key="episodes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+                  <motion.div key="episodes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     {!isManga && (
-                      <div className="flex flex-wrap gap-4 items-center p-3.5 bg-foreground/[0.02] border border-border/50 rounded-2xl mb-4">
-                        <button
-                          onClick={handleToggleAutoskip}
-                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${autoskip ? 'bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5' : 'bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60'}`}
-                        >
-                          <SkipForward size={14} fill={autoskip ? 'currentColor' : 'none'} />
-                          <span>Auto Skip Intro</span>
-                        </button>
-                        <button
-                          onClick={handleToggleUpscaling}
-                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${shaderProfile !== 'off' ? 'bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5' : 'bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60'}`}
-                        >
-                          <Sparkles size={14} className={shaderProfile !== 'off' ? 'text-accent' : ''} />
-                          <span>Upscaling</span>
-                        </button>
-                        <button
-                          onClick={handleToggleAutoNext}
-                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${autoplay ? 'bg-accent/15 text-accent border border-accent/30 shadow-sm shadow-accent/5' : 'bg-background/40 text-muted-foreground border border-border/50 hover:bg-background/60'}`}
-                        >
-                          <PlayCircle size={14} className={autoplay ? 'text-accent' : ''} />
-                          <span>Auto Next</span>
-                        </button>
-                      </div>
-                    )}
-                    {!isManga && (
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs text-muted-foreground">Streaming source</p>
+                      <div className="glass-panel p-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={handleToggleAutoskip}
+                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoskip ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
+                          >
+                            <SkipForward size={14} fill={autoskip ? 'currentColor' : 'none'} />
+                            <span>Auto Skip Intro</span>
+                          </button>
+                          <button
+                            onClick={handleToggleUpscaling}
+                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${shaderProfile !== 'off' ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
+                          >
+                            <Sparkles size={14} className={shaderProfile !== 'off' ? 'text-accent' : ''} />
+                            <span>Upscaling</span>
+                          </button>
+                          <button
+                            onClick={handleToggleAutoNext}
+                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoplay ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
+                          >
+                            <PlayCircle size={14} className={autoplay ? 'text-accent' : ''} />
+                            <span>Auto Next</span>
+                          </button>
+                        </div>
                         <div className="flex items-center gap-2">
-                          <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="text-xs bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-foreground outline-none">
+                          {(!isManga && episodes.length > 0) && (
+                            <button
+                              onClick={handleDownloadAll}
+                              disabled={queueingAll}
+                              className="p-1.5 rounded-lg glass-button transition-all active:scale-95 text-accent disabled:opacity-50"
+                              title="Download All Episodes"
+                            >
+                              {queueingAll ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                            </button>
+                          )}
+                          <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
                             <option value="mkissa">Mkissa</option>
                             <option value="anineko">AniNeko</option>
                             <option value="nyaa">Torrents (1080p)</option>
@@ -939,7 +924,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                               queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id] });
                               queryClient.invalidateQueries({ queryKey: ['media-detail', item.id] });
                             }}
-                            className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground transition-all active:scale-95"
+                            className="p-1.5 rounded-lg glass-button transition-all active:scale-95"
                             title="Re-match source"
                           >
                             <RotateCcw size={14} />
@@ -947,6 +932,22 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         </div>
                       </div>
                     )}
+                    {(() => {
+                      const total = isManga
+                        ? (fullItem.chapters || episodes.length || 0)
+                        : (fullItem.episodes || episodes.length || 0);
+                      const nextAiringEp = fullItem.next_airing?.episode;
+                      const latestAvailable = !isManga && nextAiringEp ? nextAiringEp - 1 : undefined;
+                      return (
+                        <WatchGrid
+                          total={total}
+                          progress={actualProgress}
+                          latestAvailable={latestAvailable}
+                          isManga={isManga}
+                          onPlay={(n) => handlePlayNext(n)}
+                        />
+                      );
+                    })()}
                     <EpisodeList
                       mediaId={item.id}
                       episodes={episodes}
@@ -972,13 +973,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   </motion.div>
                 )}
                 {activeTab === 'characters' && (
-                  <motion.div key="characters" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+                  <motion.div key="characters" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                       {loadingChars ? (
                         <div className="col-span-4 py-20 flex justify-center"><Loader2 className="animate-spin text-accent" size={24} /></div>
                       ) : characters.length > 0 ? (
                         characters.map((char: Character) => (
-                          <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 bg-foreground/[0.02] border border-border rounded-2xl hover:bg-foreground/[0.04] transition-colors group character-card text-left">
+                          <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 glass-panel hover:bg-foreground/[0.03] transition-colors group character-card text-left">
                             {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
                             <div className="min-w-0">
                               <div className="text-[13px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
@@ -993,7 +994,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   </motion.div>
                 )}
                 {activeTab === 'seasons' && (
-                  <motion.div key="seasons" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+                  <motion.div key="seasons" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     {(() => {
                       type RelEdge = { relationType: string; node?: MediaItem };
                       const seasonRels = relations.filter((r: RelEdge) => ['PREQUEL','SEQUEL','PARENT','SIDE_STORY','SUMMARY','ADAPTATION'].includes(r.relationType));
@@ -1008,7 +1009,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                                 {seasonRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
-                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left">
+                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
                                       {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
@@ -1028,7 +1029,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                                 {otherRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
-                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left">
+                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
                                       {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
@@ -1047,7 +1048,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   </motion.div>
                 )}
                 {activeTab === 'more' && (
-                  <motion.div key="more" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+                  <motion.div key="more" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     {recommendations.length > 0 ? (
                       <div className="space-y-4">
                         <p className="text-xs font-semibold text-foreground">Recommendations</p>
@@ -1059,7 +1060,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                                 <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
                                   <img src={proxyImage(rec.cover_image?.large || m.coverImage?.large)} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                                 </div>
-                                {(rec.rating ?? 0) > 0 && <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-white text-[9px] font-bold">{rec.rating}%</span>}
+                                {(rec.rating ?? 0) > 0 && <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-background text-[9px] font-bold">{rec.rating}%</span>}
                                 <div className="text-[11px] font-bold text-muted-foreground line-clamp-2 group-hover:text-foreground transition-colors">{m.title?.english || m.title?.romaji}</div>
                               </button>
                             );
@@ -1081,7 +1082,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       {selectedCharacter && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={() => setSelectedCharacter(null)}>
           <div className="absolute inset-0 bg-black/60" />
-          <div className="relative max-w-md w-[90%] bg-background border border-border rounded-2xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-md w-[90%] bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setSelectedCharacter(null)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
             <div className="flex items-start space-x-4">
               {selectedCharacter.image?.large && <img src={selectedCharacter.image.large} alt={selectedCharacter.name?.full} className="w-20 h-20 rounded-xl object-cover shadow-lg shrink-0" />}
@@ -1090,7 +1091,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 <div className="text-[11px] text-muted-foreground capitalize">{selectedCharacter.role?.replace(/_/g, ' ')?.toLowerCase()}</div>
                 {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
                   <div className="pt-2 space-y-1.5">
-                    <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Voice Actors</div>
+                    <div className="meta-mono text-muted-foreground">Voice Actors</div>
                     {selectedCharacter.voiceActors?.map((va) => (
                       <div key={va.id} className="flex items-center space-x-2">
                         {va.image?.large && <img src={va.image.large} alt={va.name?.full} className="w-6 h-6 rounded-full object-cover" />}

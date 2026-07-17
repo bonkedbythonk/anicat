@@ -177,7 +177,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
 
   useEffect(() => {
     if (!synopsisRef.current) return;
-    setSynopsisOverflows(synopsisRef.current.scrollHeight > 90);
+    setSynopsisOverflows(synopsisRef.current.scrollHeight > 60);
   }, [fullItem.description]);
 
   useEffect(() => {
@@ -402,7 +402,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
           <button
             onClick={() => handlePlayNext()}
             disabled={isPlayingNext || isCaughtUp}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-accent py-3.5 text-[15px] font-bold text-white active:scale-[0.98] disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-3.5 text-[15px] font-bold text-white active:scale-[0.98] disabled:opacity-40"
           >
             {isPlayingNext ? <Loader2 className="animate-spin" size={18} /> : isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
             {isFinished ? "Completed" : isCaughtUp ? "Caught Up" : `${isManga ? "Read" : actualProgress > 0 ? "Continue" : "Start"} ${isManga ? "Chapter" : "Episode"} ${nextEpisode}`}
@@ -427,11 +427,8 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
           {/* Synopsis */}
           {fullItem.description && (
             <div className="space-y-2">
-              <motion.div className="relative overflow-hidden" animate={{ maxHeight: isExpanded ? 2000 : 90 }} initial={false} transition={{ duration: 0.35 }}>
+              <motion.div className="relative overflow-hidden" animate={{ maxHeight: isExpanded ? 2000 : 60 }} initial={false} transition={{ duration: 0.35 }}>
                 <p ref={synopsisRef} className="text-[13.5px] leading-relaxed text-muted-foreground" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
-                {!isExpanded && synopsisOverflows && (
-                  <div className="absolute bottom-0 left-0 right-0 h-10 pointer-events-none" style={{ background: "linear-gradient(to bottom, transparent, var(--background))" }} />
-                )}
               </motion.div>
               {synopsisOverflows && (
                 <button onClick={() => setIsExpanded((v) => !v)} className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground active:opacity-60">
@@ -481,9 +478,9 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             ))}
           </div>
 
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="popLayout">
             {activeTab === "episodes" && (
-              <motion.div key="episodes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+              <motion.div key="episodes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3 w-full">
                 {!isManga && (
                   <button onClick={() => setEpisodeSettingsOpen(true)} className="flex w-full items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 text-[13px] text-muted-foreground active:bg-white/[0.06]">
                     <span>Playback settings & source</span>
@@ -516,7 +513,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             )}
 
             {activeTab === "characters" && (
-              <motion.div key="characters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-3 gap-3">
+              <motion.div key="characters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-3 gap-3 w-full">
                 {loadingChars ? (
                   <div className="col-span-3 flex justify-center py-16"><Loader2 className="animate-spin text-accent" size={24} /></div>
                 ) : characters.length > 0 ? (
@@ -533,7 +530,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             )}
 
             {activeTab === "related" && (
-              <motion.div key="related" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div key="related" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full">
                 {seasonRels.length > 0 ? (
                   <div className="grid grid-cols-3 gap-x-3 gap-y-4">
                     {seasonRels.map((rel: { relationType: string; node?: MediaItem }) => rel.node && (
@@ -547,7 +544,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             )}
 
             {activeTab === "more" && (
-              <motion.div key="more" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div key="more" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full">
                 {recommendations.length > 0 ? (
                   <div className="grid grid-cols-3 gap-x-3 gap-y-4">
                     {(recommendations as { mediaRecommendation?: MediaItem }[]).map((rec) => rec.mediaRecommendation && (

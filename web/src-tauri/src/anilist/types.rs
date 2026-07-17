@@ -53,6 +53,12 @@ pub struct MediaTrailer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaTag {
+    pub name: String,
+    pub rank: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaItem {
     pub id: i64,
     #[serde(alias = "idMal")]
@@ -74,6 +80,7 @@ pub struct MediaItem {
     pub chapters: Option<i32>,
     pub duration: Option<i32>,
     pub genres: Option<Vec<String>>,
+    pub tags: Option<Vec<MediaTag>>,
     #[serde(rename = "averageScore")]
     pub average_score: Option<i32>,
     #[serde(rename = "meanScore")]

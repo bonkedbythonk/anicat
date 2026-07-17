@@ -1,3 +1,13 @@
+
+
+export function parseAiringTime(airingAt?: string | number | null): number {
+  if (!airingAt) return 0;
+  if (typeof airingAt === "number") {
+    return airingAt > 10000000000 ? airingAt : airingAt * 1000;
+  }
+  return new Date(airingAt.endsWith("Z") ? airingAt : `${airingAt}Z`).getTime();
+}
+
 export function formatTime(seconds: number): string {
   if (!seconds || seconds < 0) return "0:00";
   const h = Math.floor(seconds / 3600);

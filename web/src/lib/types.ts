@@ -79,11 +79,11 @@ export interface MediaItem {
     airingAt?: number;
     episode?: number;
     timeUntilAiring?: number;
-    airing_at?: string;
+    airing_at?: string | number;
   };
   next_airing?: {
     episode?: number;
-    airing_at?: string;
+    airing_at?: string | number;
   };
   trailer?: {
     id?: string;

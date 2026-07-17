@@ -325,7 +325,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   return (
     <div className="space-y-8 animate-fade-in max-w-6xl">
       {successMessage && (
-        <div className="flex items-center space-x-3 px-5 py-3.5 rounded-2xl bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm animate-fade-in shadow-lg">
+        <div className="flex items-center space-x-3 px-5 py-3.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm animate-fade-in shadow-lg">
           <CheckCircle2 size={18} />
           <span>{successMessage}</span>
           <button onClick={() => setSuccessMessage(null)} className="ml-auto p-1 hover:bg-green-500/10 rounded-lg transition-colors">
@@ -335,10 +335,13 @@ export function SettingsView({ health }: SettingsViewProps) {
       )}
       {errorMessage && <ErrorBanner message={errorMessage} />}
       <div className="flex items-end justify-between">
-        <h1 className="text-[28px] font-bold tracking-tight text-white">Settings</h1>
+        <div>
+          <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Settings</h1>
+          <p className="text-[13px] text-muted-foreground mt-0.5">Configure playback, appearance, and account</p>
+        </div>
         <div className="flex items-center space-x-2">
           {saving && (
-            <div className="flex items-center space-x-1.5 text-xs text-gray-500 font-medium">
+            <div className="flex items-center space-x-1.5 text-xs text-muted-foreground font-medium">
               <Loader2 size={12} className="animate-spin" />
               <span>Saving...</span>
             </div>
@@ -355,15 +358,15 @@ export function SettingsView({ health }: SettingsViewProps) {
       <div className="flex flex-col lg:flex-row gap-8">
         {/* Vertical nav rail — full-height settings layout */}
         <nav className="lg:w-56 shrink-0">
-          <div className="lg:sticky lg:top-2 flex lg:flex-col gap-1 bg-white/[0.02] lg:bg-transparent p-1 lg:p-0 rounded-xl border lg:border-0 border-white/[0.06] overflow-x-auto scrollbar-hide">
+          <div className="lg:sticky lg:top-2 flex lg:flex-col gap-1 overflow-x-auto scrollbar-hide p-0.5">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2.5 px-4 py-2 rounded-lg font-medium text-[13px] whitespace-nowrap transition-all justify-center lg:w-full lg:justify-start ${
+                className={`flex items-center gap-2.5 px-4 py-2 rounded-md font-medium text-[13px] whitespace-nowrap transition-all justify-center lg:w-full lg:justify-start ${
                   activeTab === tab.id
-                    ? "bg-white/[0.08] text-white font-semibold"
-                    : "text-gray-500 hover:text-white hover:bg-white/[0.04]"
+                    ? "bg-foreground/[0.07] text-foreground font-semibold"
+                    : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]"
                 }`}
               >
                 <tab.icon size={18} />
@@ -385,7 +388,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={theme}
                     onChange={(e) => handleThemeChange(e.target.value as "system" | "dark" | "light")}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="system">System Default</option>
                     <option value="dark">Dark</option>
@@ -399,29 +402,28 @@ export function SettingsView({ health }: SettingsViewProps) {
                   stack
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {/* Neon Abyss */}
+                    {/* Ink & Index */}
                     <button
                       onClick={() => handleStyleChange("neon-abyss")}
-                      className={`relative rounded-2xl overflow-hidden border-2 transition-all text-left ${
+                      className={`group relative rounded-lg overflow-hidden border-2 transition-all text-left ${
                         uiStyle === "neon-abyss"
-                          ? "border-[#0A84FF] shadow-lg shadow-[#0A84FF]/20"
-                          : "border-white/[0.06] hover:border-white/[0.15]"
+                          ? "border-accent shadow-sm"
+                          : "border-border hover:border-foreground/25"
                       }`}
                     >
-                      {/* Preview swatch */}
-                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #050505 0%, #0d0d1a 60%, #1a1025 100%)" }}>
-                        <div className="flex gap-1 p-2 h-full items-end">
-                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(28,28,30,0.6)", border: "1px solid rgba(255,255,255,0.08)" }} />
-                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(10,132,255,0.3)", border: "1px solid rgba(10,132,255,0.4)" }} />
+                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #161310 0%, #1e1a15 60%, #252015 100%)" }}>
+                        <div className="flex gap-1.5 p-2.5 h-full items-end">
+                          <div className="flex-1 h-8 rounded-md" style={{ background: "#1e1a15", border: "1px solid rgba(255,255,255,0.05)" }} />
+                          <div className="flex-1 h-8 rounded-md" style={{ background: "rgba(143,184,220,0.3)", border: "1px solid rgba(143,184,220,0.4)" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2 bg-white/[0.02] h-14 flex flex-col justify-center">
-                        <div className="text-xs font-bold text-white">Neon Abyss</div>
-                        <div className="text-[10px] text-gray-500 mt-0.5">Deep black / Apple glass</div>
+                      <div className="px-3 py-2 h-14 flex flex-col justify-center bg-surface">
+                        <div className="text-xs font-bold text-foreground">Ink & Index</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">Warm ink / Indigo accent</div>
                       </div>
                       {uiStyle === "neon-abyss" && (
-                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#0A84FF] flex items-center justify-center">
-                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-accent flex items-center justify-center">
+                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="var(--dynamic-black)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
                       )}
                     </button>
@@ -429,26 +431,25 @@ export function SettingsView({ health }: SettingsViewProps) {
                     {/* Sakura Zen */}
                     <button
                       onClick={() => handleStyleChange("sakura-zen")}
-                      className={`relative rounded-2xl overflow-hidden border-2 transition-all text-left ${
+                      className={`group relative rounded-lg overflow-hidden border-2 transition-all text-left ${
                         uiStyle === "sakura-zen"
-                          ? "border-[#e8a0b4] shadow-lg shadow-[#e8a0b4]/20"
-                          : "border-white/[0.06] hover:border-white/[0.15]"
+                          ? "border-accent shadow-sm"
+                          : "border-border hover:border-foreground/25"
                       }`}
                     >
-                      {/* Preview swatch */}
-                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #0f0b10 0%, #1a1018 60%, #1f1222 100%)" }}>
-                        <div className="flex gap-1 p-2 h-full items-end">
-                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(244,180,196,0.08)", border: "1px solid rgba(232,160,180,0.2)" }} />
-                          <div className="flex-1 h-8 rounded-xl" style={{ background: "rgba(232,160,180,0.25)", border: "1px solid rgba(232,160,180,0.4)" }} />
+                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #130910 0%, #1a0e14 60%, #1f1018 100%)" }}>
+                        <div className="flex gap-1.5 p-2.5 h-full items-end">
+                          <div className="flex-1 h-8 rounded-md" style={{ background: "rgba(244,180,196,0.08)", border: "1px solid rgba(232,160,180,0.2)" }} />
+                          <div className="flex-1 h-8 rounded-md" style={{ background: "rgba(232,160,180,0.25)", border: "1px solid rgba(232,160,180,0.4)" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2 h-14 flex flex-col justify-center" style={{ background: "rgba(244,180,196,0.04)" }}>
-                        <div className="text-xs font-bold" style={{ color: "#f2bfce" }}>Sakura Zen</div>
-                        <div className="text-[10px] mt-0.5" style={{ color: "#9ab89a" }}>Soft pastel / Japanese editorial</div>
+                      <div className="px-3 py-2 h-14 flex flex-col justify-center bg-surface">
+                        <div className="text-xs font-bold text-foreground">Sakura Zen</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">Soft pastel / Japanese editorial</div>
                       </div>
                       {uiStyle === "sakura-zen" && (
-                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: "#e8a0b4" }}>
-                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-accent flex items-center justify-center">
+                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="var(--dynamic-black)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
                       )}
                     </button>
@@ -456,31 +457,28 @@ export function SettingsView({ health }: SettingsViewProps) {
                     {/* Retro Manga */}
                     <button
                       onClick={() => handleStyleChange("retro-manga")}
-                      className={`relative rounded-2xl overflow-hidden border-2 transition-all text-left ${
+                      className={`group relative rounded-lg overflow-hidden border-2 transition-all text-left ${
                         uiStyle === "retro-manga"
-                          ? "border-[#e8272c] shadow-lg shadow-[#e8272c]/20"
-                          : "border-white/[0.06] hover:border-white/[0.15]"
+                          ? "border-accent shadow-sm"
+                          : "border-border hover:border-foreground/25"
                       }`}
                     >
-                      {/* Preview swatch */}
-                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #1a1510 0%, #231e18 100%)" }}>
-                        <div className="flex gap-1 p-2 h-full items-end">
-                          <div className="flex-1 h-8 rounded" style={{ background: "#ede8e0", border: "3px solid #1a1a1a" }} />
-                          <div className="flex-1 h-8 rounded" style={{ background: "#e8272c", border: "2px solid #1a1a1a" }} />
+                      <div className="h-20 w-full" style={{ background: "linear-gradient(135deg, #191410 0%, #241e17 100%)" }}>
+                        <div className="flex gap-1.5 p-2.5 h-full items-end">
+                          <div className="flex-1 h-8 rounded" style={{ background: "#ede8e0", border: "3px solid #0c0a08" }} />
+                          <div className="flex-1 h-8 rounded" style={{ background: "#c02024", border: "2px solid #0c0a08" }} />
                         </div>
                       </div>
-                      <div className="px-3 py-2 h-14 flex flex-col justify-center" style={{ background: "rgba(232, 39, 44, 0.04)" }}>
-                        <div className="text-xs font-bold" style={{ color: "#e8272c" }}>Retro Manga</div>
-                        <div className="text-[10px] mt-0.5 text-gray-500">Halftone dot / Manga panel style</div>
+                      <div className="px-3 py-2 h-14 flex flex-col justify-center bg-surface">
+                        <div className="text-xs font-bold text-foreground">Retro Manga</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">Halftone dot / Manga panel style</div>
                       </div>
                       {uiStyle === "retro-manga" && (
-                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: "#e8272c" }}>
-                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-accent flex items-center justify-center">
+                          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="var(--dynamic-black)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
                       )}
                     </button>
-
-
                   </div>
                 </SettingField>
 
@@ -502,22 +500,13 @@ export function SettingsView({ health }: SettingsViewProps) {
                       // never changed no matter what you picked.
                       localStorage.setItem("anicat_time_format", format);
                     }}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="12h">12-hour (AM/PM)</option>
                     <option value="24h">24-hour</option>
                   </select>
                 </SettingField>
 
-                <SettingField
-                  label="New Episode Notifications"
-                  description="Native macOS notification when a show you're watching airs a new episode, checked every 15 minutes."
-                >
-                  <SettingToggle
-                    on={Boolean(config.general?.notifications ?? true)}
-                    onChange={(v) => updateField("general", "notifications", v)}
-                  />
-                </SettingField>
               </CardSection>
 
               <CardSection title="Advanced" description="Rarely need to change these after initial setup.">
@@ -530,12 +519,12 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField label="Download Location" description="Where downloaded episodes are saved.">
                   <div className="relative">
-                    <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
+                    <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="text"
                       value={String(config.general?.downloads_path || "")}
                       onChange={(e) => updateField("general", "downloads_path", e.target.value)}
-                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent/40 outline-none transition-all"
+                      className="w-full bg-transparent border border-border rounded-md py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent outline-none transition-all"
                     />
                   </div>
                 </SettingField>
@@ -544,7 +533,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.provider || "mkissa")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
@@ -556,7 +545,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.fallback_provider || "anineko")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="none">None</option>
                     <option value="mkissa">Mkissa</option>
@@ -569,7 +558,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.manga_provider || "mangakatana")}
                     onChange={(e) => updateField("general", "manga_provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="mangakatana">MangaKatana</option>
                   </select>
@@ -579,7 +568,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.general?.media_api || "anilist")}
                     onChange={(e) => updateField("general", "media_api", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="anilist">AniList</option>
                     <option value="jikan">Jikan (MyAnimeList - Fallback)</option>
@@ -597,7 +586,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <select
                     value={String(config.stream?.translation_type || "sub")}
                     onChange={(e) => updateField("stream", "translation_type", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white"
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="sub">Subtitled (Japanese)</option>
                     <option value="dub">Dubbed (English)</option>
@@ -640,23 +629,23 @@ export function SettingsView({ health }: SettingsViewProps) {
 
               <CardSection title="Keyboard Shortcuts">
                 <div className="space-y-4 text-xs leading-relaxed">
-                  <p className="text-gray-400">When playing media in the external MPV window, you can use these shortcuts:</p>
+                  <p className="text-muted-foreground">When playing media in the external MPV window, you can use these shortcuts:</p>
                   <div>
-                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-bold mb-2">Settings — Ctrl + number</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Upscaling</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 1</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Auto-skip Intro</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 2</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Smooth Motion</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 3</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Ctrl + 4</kbd></div>
+                    <p className="meta-mono text-muted-foreground mb-2">Settings — Ctrl + number</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border p-4 rounded-lg bg-foreground/[0.02]">
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Upscaling</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Auto-skip Intro</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Smooth Motion</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 3</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
                     </div>
                   </div>
                   <div>
-                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-bold mb-2">Actions — Shift + letter</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] border border-white/[0.05] p-4 rounded-2xl">
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Reload Episode</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + R</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Skip Segment</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + S</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">Shift + T</kbd></div>
-                      <div className="flex justify-between py-1.5 border-b border-white/[0.02]"><span className="text-gray-400">Nudge Skip Timing</span><kbd className="px-2 py-0.5 bg-white/[0.08] border border-white/[0.1] rounded text-[10px] text-white font-mono font-bold">[ / ]</kbd></div>
+                    <p className="meta-mono text-muted-foreground mb-2">Actions — Shift + letter</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border p-4 rounded-lg bg-foreground/[0.02]">
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Reload Episode</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Skip Segment</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Nudge Skip Timing</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">[ / ]</kbd></div>
                     </div>
                   </div>
                 </div>
@@ -702,7 +691,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                           }
                         }}
                         placeholder="Paste redirect URL or token..."
-                        className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                        className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all placeholder:text-muted-foreground"
                       />
                     </SettingField>
                     <div className="pt-2">
@@ -749,7 +738,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                             setAuthPending(false);
                           });
                         }}
-                        className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl bg-accent/10 border border-accent/20 hover:bg-accent/20 text-accent font-semibold text-sm transition-all"
+                        className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-md bg-accent/10 border border-accent/20 hover:bg-accent/20 text-accent font-semibold text-sm transition-all"
                       >
                         {authPending ? (
                           <>
@@ -782,26 +771,26 @@ export function SettingsView({ health }: SettingsViewProps) {
                           }
                         }}
                         placeholder="Paste redirect URL or token..."
-                        className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
+                        className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all placeholder:text-muted-foreground"
                       />
                     </SettingField>
                   </>
                 )}
-                <div className="mt-4 p-3 bg-white/[0.02] border border-white/[0.05] rounded-lg space-y-1 text-xs font-mono">
-                  <div className="flex justify-between"><span className="text-gray-500">Token saved</span><span className={tokenPresent ? "text-green-400" : "text-gray-600"}>{tokenPresent ? "yes" : "no"}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Backend connected</span><span className={apiConnected ? "text-green-400" : "text-red-400"}>{apiConnected ? "yes" : "no"}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">AniList validated</span><span className={apiAuthenticated ? "text-green-400" : "text-red-400"}>{apiAuthenticated ? "yes" : "no"}</span></div>
+                <div className="mt-4 p-3 border border-border rounded-lg space-y-1.5 text-xs font-mono bg-foreground/[0.02]">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Token saved</span><span className={tokenPresent ? "text-green-400" : "text-muted-foreground/60"}>{tokenPresent ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Backend connected</span><span className={apiConnected ? "text-green-400" : "text-red-400"}>{apiConnected ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">AniList validated</span><span className={apiAuthenticated ? "text-green-400" : "text-red-400"}>{apiAuthenticated ? "yes" : "no"}</span></div>
                   {authError && (
                     authError.startsWith("anilist_down:") ? (
                       <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-[10px] leading-snug">
                         AniList is temporarily down: {authError.slice("anilist_down:".length)}
                       </div>
                     ) : (
-                      <div className="flex justify-between"><span className="text-gray-500">Error</span><span className="text-red-400 ml-2 text-[10px] leading-snug break-all">{authError}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Error</span><span className="text-red-400 ml-2 text-[10px] leading-snug break-all">{authError}</span></div>
                     )
                   )}
                   {health?.viewer_name && (
-                    <div className="flex justify-between"><span className="text-gray-500">Signed in as</span><span className="text-accent">{health.viewer_name}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Signed in as</span><span className="text-accent">{health.viewer_name}</span></div>
                   )}
                 </div>
               </CardSection>
@@ -812,9 +801,9 @@ export function SettingsView({ health }: SettingsViewProps) {
             <div className="space-y-6 animate-fade-in">
               {/* Update */}
               <CardSection title="Updates" description="Keep the app up to date.">
-                <div className="flex items-center justify-between pb-4 border-b border-white/[0.04]">
-                  <div className="text-sm text-gray-400">
-                    Current version: <span className="font-mono text-white">{health?.current_version || "unknown"}</span>
+                <div className="flex items-center justify-between pb-2">
+                  <div className="text-sm text-muted-foreground">
+                    Current version: <span className="font-mono text-foreground">{health?.current_version || "unknown"}</span>
                   </div>
                 </div>
 
@@ -822,9 +811,9 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <button
                     onClick={handleUpdate}
                     disabled={checkingUpdate}
-                    className={`w-full flex items-center justify-center space-x-2 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 ${hasUpdate
+                    className={`w-full flex items-center justify-center space-x-2 py-3 rounded-md font-bold transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 ${hasUpdate
                       ? "bg-green-600 hover:bg-green-500 text-white shadow-green-500/20"
-                      : "bg-accent text-white hover:bg-accent-light shadow-accent/20"
+                      : "bg-accent text-white hover:bg-accent-light"
                       }`}
                   >
                     {checkingUpdate ? (
@@ -844,7 +833,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   </button>
 
                   {updateMessage.text && (
-                    <div className={`p-4 rounded-xl text-xs font-semibold flex items-start space-x-3 animate-fade-in ${updateMessage.type === "success"
+                    <div className={`p-4 rounded-md text-xs font-semibold flex items-start space-x-3 animate-fade-in ${updateMessage.type === "success"
                       ? "bg-green-500/10 text-green-400 border border-green-500/20"
                       : "bg-red-500/10 text-red-400 border border-red-500/20"
                       }`}>
@@ -858,8 +847,8 @@ export function SettingsView({ health }: SettingsViewProps) {
                   )}
 
                   {releaseNotes && (
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] text-xs text-gray-400 max-h-48 overflow-y-auto animate-fade-in">
-                      <div className="font-bold text-gray-300 mb-2 text-[10px] uppercase tracking-wider">Release Notes</div>
+                    <div className="p-4 rounded-md border border-border text-xs text-muted-foreground max-h-48 overflow-y-auto animate-fade-in bg-foreground/[0.02]">
+                      <div className="meta-mono text-muted-foreground mb-2">Release Notes</div>
                       <div className="whitespace-pre-wrap leading-relaxed">{releaseNotes}</div>
                       {releaseUrl && (
                         <a
@@ -901,12 +890,12 @@ export function SettingsView({ health }: SettingsViewProps) {
                       setTimeout(() => setErrorMessage(null), 6000);
                     }
                   }}
-                  className="w-full py-2.5 bg-white/[0.04] hover:bg-white/[0.07] text-white/70 rounded-xl text-xs font-bold transition-all border border-white/5 flex items-center justify-center space-x-2"
+                  className="w-full py-2.5 border-border text-foreground/70 hover:text-foreground rounded-md text-xs font-bold transition-all border border-border flex items-center justify-center space-x-2 hover:bg-foreground/[0.03]"
                 >
                   <Save size={14} />
                   <span>Copy Debug Report</span>
                 </button>
-                <div className="w-full h-40 bg-black/40 rounded-xl p-3 text-[10px] font-mono text-gray-400 overflow-y-auto border border-white/5 whitespace-pre-wrap text-left font-sans leading-normal">
+                <div className="w-full h-40 bg-foreground/[0.03] rounded-md p-3 text-[10px] font-mono text-muted-foreground overflow-y-auto border border-border whitespace-pre-wrap text-left font-sans leading-normal">
                   {logsText}
                 </div>
               </CardSection>
@@ -920,30 +909,30 @@ export function SettingsView({ health }: SettingsViewProps) {
                       type="text"
                       placeholder="Anime name"
                       onKeyDown={(e) => { if (e.key === "Enter") runProviderTest(); }}
-                      className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white placeholder-gray-500"
+                      className="flex-1 bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground placeholder:text-muted-foreground"
                     />
-                    <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all text-white" />
-                    <select ref={debugProviderRef} defaultValue="mkissa" aria-label="Provider" className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-3 text-sm font-medium focus:border-accent/40 outline-none transition-all appearance-none cursor-pointer text-white">
-                      <option value="mkissa" className="bg-[#121212]">Mkissa</option>
-                      <option value="anineko" className="bg-[#121212]">AniNeko</option>
+                    <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground" />
+                    <select ref={debugProviderRef} defaultValue="mkissa" aria-label="Provider" className="bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground">
+                      <option value="mkissa" className="bg-surface">Mkissa</option>
+                      <option value="anineko" className="bg-surface">AniNeko</option>
                     </select>
                     <button
                       onClick={runProviderTest}
                       disabled={debugBusy}
-                      className="px-4 py-3 rounded-xl bg-accent hover:bg-accent-light text-white font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                      className="px-4 py-3 rounded-md bg-accent hover:bg-accent-light text-white font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                     >
                       {debugBusy ? <Loader2 size={16} className="animate-spin" /> : null}
                       Test
                     </button>
                   </div>
                   {debugResult && (
-                    <div className={`flex items-start gap-2 rounded-xl p-3 text-sm border ${debugResult.ok ? "bg-green-500/10 border-green-500/20 text-green-300" : "bg-red-500/10 border-red-500/20 text-red-300"}`}>
+                    <div className={`flex items-start gap-2 rounded-md p-3 text-sm border ${debugResult.ok ? "bg-green-500/10 border-green-500/20 text-green-300" : "bg-red-500/10 border-red-500/20 text-red-300"}`}>
                       {debugResult.ok ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <XCircle size={16} className="shrink-0 mt-0.5" />}
                       <span className="flex-1 leading-relaxed">{debugResult.summary}</span>
                       {debugResult.raw && (
                         <button
                           onClick={() => navigator.clipboard.writeText(debugResult.raw)}
-                          className="shrink-0 p-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-gray-400 hover:text-white transition-all"
+                          className="shrink-0 p-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/[0.10] text-muted-foreground hover:text-foreground transition-all"
                           title="Copy raw response for a bug report"
                         >
                           <Copy size={13} />
@@ -972,7 +961,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     }
                   }}
                   disabled={registryState === "wiping" || registryState === "done"}
-                  className={`w-full py-3 rounded-xl text-sm font-bold transition-all ${
+                  className={`w-full py-3 rounded-md text-sm font-bold transition-all ${
                     registryState === "wiping"
                       ? "bg-red-500/10 text-red-400/40 border border-red-500/10 cursor-not-allowed"
                       : registryState === "done"
@@ -993,10 +982,10 @@ export function SettingsView({ health }: SettingsViewProps) {
                       setResetOnboardingState("confirming");
                     }
                   }}
-                  className={`w-full py-3 px-4 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center space-x-2 ${
+                  className={`w-full py-3 px-4 rounded-md text-[10px] font-bold transition-all flex items-center justify-center space-x-2 ${
                     resetOnboardingState === "confirming"
                       ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                      : "bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 border border-white/[0.08]"
+                      : "bg-foreground/[0.03] hover:bg-foreground/[0.06] text-muted-foreground border border-border"
                   }`}
                 >
                   <RotateCcw size={12} />
@@ -1005,7 +994,6 @@ export function SettingsView({ health }: SettingsViewProps) {
               </CardSection>
             </div>
           )}
-
         </div>
       </div>
     </div>
@@ -1017,22 +1005,22 @@ export function SettingsView({ health }: SettingsViewProps) {
    are compact and right-aligned. */
 function CardSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="px-1 pb-2">
-        <h3 className="text-[13px] font-semibold text-gray-400">{title}</h3>
-        {description && <p className="text-xs text-gray-600 mt-0.5 max-w-xl leading-relaxed">{description}</p>}
+    <section className="glass-panel overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-border bg-foreground/[0.02]">
+        <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>
+        {description && <p className="text-xs text-muted-foreground mt-0.5 max-w-xl leading-relaxed">{description}</p>}
       </div>
-      <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] divide-y divide-white/[0.05]">{children}</div>
+      <div className="p-4 space-y-3">{children}</div>
     </section>
   );
 }
 
 function SettingField({ label, description, children, stack }: { label: string; description?: string; children: React.ReactNode; stack?: boolean }) {
   return (
-    <div className={`px-4 py-3 ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-3"}`}>
+    <div className={`py-2.5 ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-3"}`}>
       <div className="flex-1 min-w-0">
-        <label className="text-[13px] font-medium text-white">{label}</label>
-        {description && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{description}</p>}
+        <label className="text-[13px] font-medium text-foreground">{label}</label>
+        {description && <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>}
       </div>
       <div className={stack ? "" : "w-full sm:w-56 shrink-0 sm:text-right"}>{children}</div>
     </div>
@@ -1046,12 +1034,12 @@ function SettingToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: 
       aria-checked={on}
       disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`relative inline-block h-[24px] w-[40px] shrink-0 rounded-full transition-colors duration-200 align-middle ${
-        on ? "bg-[#30d158]" : "bg-white/[0.16]"
+      className={`relative inline-block h-[22px] w-[38px] shrink-0 rounded-full transition-colors duration-200 align-middle ${
+        on ? "bg-accent" : "bg-foreground/20"
       } disabled:opacity-40`}
     >
       <span
-        className={`absolute top-[2px] h-[20px] w-[20px] rounded-full bg-white shadow transition-all duration-200 ${
+        className={`absolute top-[2px] h-[18px] w-[18px] rounded-full bg-foreground shadow-sm transition-all duration-200 ${
           on ? "left-[18px]" : "left-[2px]"
         }`}
       />

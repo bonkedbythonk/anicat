@@ -1,192 +1,105 @@
-import { motion } from "framer-motion";
 import { useAppStore } from "@/stores/app";
-import { usesOverlayTitlebar } from "@/lib/platform";
-import {
-  Home,
-  Search,
-  Download,
-  Settings,
-  Monitor,
-  Bell,
-  User,
-  Calendar,
-  BookOpen,
-  PanelLeftClose,
-  PanelLeft,
-} from "lucide-react";
+import { usesOverlayTitlebar, isMacOS } from "@/lib/platform";
+import type { ViewType } from "@/lib/types";
 
-const navItems = [
-  { icon: Home, label: "Home", view: "home" as const, shortcut: "H" },
-  { icon: BookOpen, label: "Manga", view: "manga" as const, shortcut: "M" },
-  { icon: Search, label: "Search", view: "search" as const, shortcut: "/" },
-  { icon: Monitor, label: "My Lists", view: "lists" as const, shortcut: "L" },
-  { icon: Download, label: "Downloads", view: "downloads" as const, shortcut: "D" },
-  { icon: Calendar, label: "Schedule", view: "schedule" as const },
+interface NavItem {
+  label: string;
+  view: ViewType;
+  shortcut?: string;
+}
+
+const libraryItems: NavItem[] = [
+  { label: "Up Next", view: "home", shortcut: "H" },
+  { label: "Schedule", view: "schedule" },
+  { label: "Library", view: "lists", shortcut: "L" },
+  { label: "Manga", view: "manga", shortcut: "M" },
+  { label: "Search", view: "search" },
+  { label: "History", view: "profile" },
 ];
 
-const secondaryItems = [
-  { icon: Bell, label: "Notifications", view: "notifications" as const, shortcut: "N" },
-  { icon: User, label: "Profile", view: "profile" as const },
-  { icon: Settings, label: "Settings", view: "settings" as const },
+const systemItems: NavItem[] = [
+  { label: "Downloads", view: "downloads", shortcut: "D" },
+  { label: "Settings", view: "settings" },
 ];
 
-export function Sidebar() {
+function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
   const currentView = useAppStore((s) => s.currentView);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const selectedItem = useAppStore((s) => s.selectedItem);
   const closeDetail = useAppStore((s) => s.closeDetail);
-  const compact = useAppStore((s) => s.sidebarCompact);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
-  const handleNavigate = (view: typeof currentView) => {
+  const handleNavigate = (view: ViewType) => {
     if (selectedItem) closeDetail();
     setCurrentView(view);
   };
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 z-50 flex flex-col py-6 transition-all duration-300 glass-fixed" style={{ width: compact ? 72 : 248 }}>
+    <div>
+      <div className="meta-mono px-5 pb-1.5 pt-4 text-muted-foreground/70 select-none">{title}</div>
+      {items.map((item) => {
+        const isActive = currentView === item.view;
+        return (
+          <button
+            key={item.view}
+            onClick={() => handleNavigate(item.view)}
+            className={`group relative w-full flex items-center justify-between py-[7px] pl-5 pr-4 text-[13px] cursor-pointer text-left ${
+              isActive
+                ? "text-foreground bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] font-semibold"
+                : "text-foreground/55 hover:text-foreground/85"
+            }`}
+          >
+            <span>{item.label}</span>
+            {item.shortcut && (
+              <kbd
+                aria-hidden="true"
+                className="meta-mono hidden group-hover:inline-block text-[9px] px-1.5 py-0.5 rounded bg-foreground/[0.06] text-muted-foreground border border-border/50"
+              >
+                {item.shortcut}
+              </kbd>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Sidebar() {
+  const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
+  const apiConnected = useAppStore((s) => s.apiConnected);
+  const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const isOffline = useAppStore((s) => s.isOffline);
+
+  const syncLabel = isOffline
+    ? "Offline"
+    : apiConnected && apiAuthenticated
+      ? "Synced with AniList"
+      : apiConnected
+        ? "Not signed in"
+        : "Connecting";
+
+  return (
+    <aside className="fixed left-0 top-0 bottom-0 z-50 flex flex-col glass-fixed" style={{ width: 200 }}>
       <div
         data-tauri-drag-region
-        className={`flex flex-col items-center justify-center mb-10 cursor-default select-none w-full bg-black/[0.001] transition-all duration-300 ${
-          usesOverlayTitlebar ? "pt-14" : "pt-6"
-        } ${
-          compact ? "px-2" : "px-4 lg:px-6"
-        }`}
-      >
-        <img
-          src="/anicat_logo.png"
-          alt="Anicat Logo"
-          className={`opacity-95 hover:opacity-100 transition-all duration-300 object-contain pointer-events-none anicat-logo ${
-            compact ? "w-8 h-8" : "w-24 lg:w-32 max-h-20 lg:max-h-24"
-          }`}
-        />
-        {import.meta.env.DEV && !compact && (
-          <span className="mt-1.5 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-400 border border-purple-500/25 rounded-md select-none font-mono pointer-events-none animate-fade-in">
-            Local Dev
-          </span>
-        )}
-      </div>
+        className={`w-full cursor-default select-none ${usesOverlayTitlebar ? "h-[38px]" : "h-4"} shrink-0`}
+      />
 
-      <nav className={`flex-1 space-y-1 pt-2 overflow-y-auto scrollbar-hide transition-all duration-300 ${
-        compact ? "px-2" : "px-3 lg:px-6"
-      }`}>
-        {navItems.map((item) => {
-          const isActive = currentView === item.view;
-          return (
-            <button
-              key={item.view}
-              onClick={() => handleNavigate(item.view)}
-              className={`relative w-full flex items-center transition-colors duration-200 group border cursor-pointer border-transparent py-2.5 rounded-xl ${
-                compact 
-                  ? "justify-center px-0" 
-                  : "justify-start pl-3 pr-6 space-x-3"
-              }`}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId={compact ? "nav-active-pill-compact" : "nav-active-pill-primary"}
-                  className="absolute inset-0 rounded-lg bg-white/[0.08]"
-                  transition={{ type: "spring", stiffness: 380, damping: 35 }}
-                />
-              )}
-              <item.icon
-                size={20}
-                className={`relative shrink-0 transition-colors ${
-                  isActive
-                    ? "text-accent"
-                    : "text-gray-500 dark:text-gray-400 group-hover:text-gray-200"
-                }`}
-              />
-              <span className={`relative items-center justify-between flex-1 text-[13px] font-medium ${
-                compact ? "hidden" : "flex"
-              }`}>
-                <span className={isActive ? "text-white font-semibold" : "text-gray-400"}>
-                  {item.label}
-                </span>
-                {item.shortcut && (
-                  <kbd
-                    aria-hidden="true"
-                    className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 hidden group-hover:inline-block"
-                  >
-                    {item.shortcut}
-                  </kbd>
-                )}
-              </span>
-            </button>
-          );
-        })}
-
-        <div className={`my-4 border-t border-border transition-all duration-300 ${compact ? "mx-4" : "mx-3"}`} />
-
-        {secondaryItems.map((item) => {
-          const isActive = currentView === item.view;
-          return (
-            <button
-              key={item.view}
-              onClick={() => handleNavigate(item.view)}
-              className={`relative w-full flex items-center transition-colors duration-200 group border cursor-pointer border-transparent py-2.5 rounded-xl ${
-                compact 
-                  ? "justify-center px-0" 
-                  : "justify-start pl-3 pr-6 space-x-3"
-              }`}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId={compact ? "nav-active-pill-secondary-compact" : "nav-active-pill-secondary"}
-                  className="absolute inset-0 rounded-lg bg-white/[0.08]"
-                  transition={{ type: "spring", stiffness: 380, damping: 35 }}
-                />
-              )}
-              <div className="relative shrink-0 flex items-center justify-center">
-                <item.icon
-                  size={20}
-                  className={`transition-colors ${
-                    isActive
-                      ? "text-accent"
-                      : "text-gray-500 dark:text-gray-400 group-hover:text-gray-200"
-                  }`}
-                />
-              </div>
-              <span className={`relative items-center justify-between flex-1 text-[13px] font-medium ${
-                compact ? "hidden" : "flex"
-              }`}>
-                <span className={isActive ? "text-white font-semibold" : "text-gray-400"}>
-                  {item.label}
-                </span>
-                {item.shortcut && (
-                  <kbd
-                    aria-hidden="true"
-                    className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-foreground/[0.06] text-muted-foreground border border-border/50 hidden group-hover:inline-block"
-                  >
-                    {item.shortcut}
-                  </kbd>
-                )}
-              </span>
-            </button>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto scrollbar-hide pb-2">
+        <NavGroup title="Library" items={libraryItems} />
+        <NavGroup title="System" items={systemItems} />
       </nav>
 
-      <div className={`mt-2 transition-all duration-300 ${compact ? "px-2" : "px-3 lg:px-6"}`}>
+      <div className="px-4 pb-4 space-y-3">
+        <div className="flex justify-center pb-2 opacity-10 pointer-events-none select-none mix-blend-luminosity">
+          <img src="/anicat_logo.png" alt="Anicat Logo" className="h-20 object-contain filter grayscale" />
+        </div>
         <button
-          onClick={toggleSidebar}
-          className={`w-full flex items-center transition-colors duration-200 group border border-transparent hover:bg-white/[0.04] cursor-pointer text-gray-500 py-2.5 rounded-xl ${
-            compact 
-              ? "justify-center px-0" 
-              : "justify-start pl-3 pr-6 space-x-3"
-          }`}
-          title={compact ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => setPaletteOpen(true)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border text-[12px] text-foreground/45 hover:text-foreground/75 hover:border-foreground/25 cursor-pointer"
         >
-          {compact ? (
-            <PanelLeft size={20} className="shrink-0" />
-          ) : (
-            <PanelLeftClose size={20} className="shrink-0" />
-          )}
-          <span className={`relative items-center text-[13px] font-semibold tracking-wide text-gray-400 ${
-            compact ? "hidden" : "flex"
-          }`}>
-            Collapse
-          </span>
+          <span>Search anything</span>
+          <kbd className="meta-mono text-[9px] text-muted-foreground">{isMacOS ? "⌘K" : "Ctrl K"}</kbd>
         </button>
       </div>
     </aside>

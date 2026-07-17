@@ -47,6 +47,10 @@ interface AppState {
   updatesOpen: boolean;
   setHelpOpen: (open: boolean) => void;
   setUpdatesOpen: (open: boolean) => void;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
+  pickerOpen: boolean;
+  setPickerOpen: (open: boolean) => void;
 
   // Connection
   apiConnected: boolean;
@@ -140,6 +144,10 @@ export const useAppStore = create<AppState>((set) => ({
   updatesOpen: false,
   setHelpOpen: (helpOpen) => set({ helpOpen }),
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  pickerOpen: false,
+  setPickerOpen: (pickerOpen) => set({ pickerOpen }),
 
   apiConnected: false,
   apiAuthenticated: false,
@@ -182,8 +190,17 @@ export const useAppStore = create<AppState>((set) => ({
   setLibraryType: (libraryType) => set({ libraryType }),
   profileFavType: "ANIME",
   setProfileFavType: (profileFavType) => set({ profileFavType }),
-  scheduleWatchingOnly: false,
-  setScheduleWatchingOnly: (scheduleWatchingOnly) => set({ scheduleWatchingOnly }),
+  scheduleWatchingOnly: (() => {
+    if (typeof window === "undefined") return true;
+    const saved = localStorage.getItem("anicat_schedule_watching_only");
+    return saved === null ? true : saved === "true";
+  })(),
+  setScheduleWatchingOnly: (scheduleWatchingOnly) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("anicat_schedule_watching_only", String(scheduleWatchingOnly));
+    }
+    set({ scheduleWatchingOnly });
+  },
   downloadsTab: "library",
   setDownloadsTab: (downloadsTab) => set({ downloadsTab }),
 

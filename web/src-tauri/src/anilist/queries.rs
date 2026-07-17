@@ -145,7 +145,7 @@ query ($userName: String, $type: MediaType, $status: MediaListStatus, $sort: [Me
           id type
           title { romaji english native }
           coverImage { large medium }
-          bannerImage episodes chapters duration format status season seasonYear genres averageScore meanScore
+          bannerImage episodes chapters duration format status season seasonYear genres tags { name rank } averageScore meanScore
           nextAiringEpisode { airingAt episode timeUntilAiring }
         }
       }
@@ -259,6 +259,34 @@ query ($genre: [String], $format: MediaFormat, $status: MediaStatus, $seasonYear
       bannerImage format status season seasonYear episodes duration genres averageScore meanScore
       mediaListEntry { id status }
       siteUrl
+    }
+  }
+}
+"#;
+
+// Batched per-seed recommendations: fetches AniList's own "people who watched
+// this also liked" edges for many seed titles in one round trip (Page.media
+// accepts id_in), instead of one MEDIA_DETAIL_QUERY per seed. Feeds the local
+// picker's candidate pool — trending/seasonal would only surface currently
+// airing shows, which makes for a weak recommender.
+pub const MEDIA_BATCH_RECOMMENDATIONS_QUERY: &str = r#"
+query ($ids: [Int], $perPage: Int, $type: MediaType) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids, type: $type) {
+      id
+      recommendations(page: 1, perPage: $perPage, sort: [RATING_DESC]) {
+        nodes {
+          rating
+          mediaRecommendation {
+            id type
+            title { romaji english native }
+            coverImage { large medium }
+            bannerImage format status season seasonYear episodes duration genres tags { name rank } averageScore meanScore
+            mediaListEntry { id status score progress }
+            siteUrl
+          }
+        }
+      }
     }
   }
 }

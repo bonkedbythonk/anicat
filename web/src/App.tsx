@@ -9,12 +9,11 @@ import { initProxyPort } from "@/lib/proxy";
 import { usesOverlayTitlebar, isWindows, isMacOS } from "@/lib/platform";
 
 import { Sidebar } from "@/components/layout/Sidebar";
-import { AmbientBackground } from "@/components/layout/AmbientBackground";
 import { HomeView } from "@/components/views/HomeView";
 import { SearchView } from "@/components/views/SearchView";
 import { ListsView } from "@/components/views/ListsView";
 import { ScheduleView } from "@/components/views/ScheduleView";
-import { NotificationsView } from "@/components/views/NotificationsView";
+
 import { ProfileView } from "@/components/views/ProfileView";
 
 // Heavy views code-split — loaded only when first navigated to
@@ -26,6 +25,8 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { Onboarding } from "@/components/layout/Onboarding";
 import { KeyboardShortcutsOverlay } from "@/components/layout/KeyboardShortcutsOverlay";
+import { CommandPalette } from "@/components/layout/CommandPalette";
+import { Picker } from "@/components/layout/Picker";
 
 async function loadConfig() {
   try {
@@ -44,9 +45,7 @@ export default function App() {
   const setConnectionState = useAppStore((s) => s.setConnectionState);
   const openDetail = useAppStore((s) => s.openDetail);
   const closeDetail = useAppStore((s) => s.closeDetail);
-  const sidebarCompact = useAppStore((s) => s.sidebarCompact);
-
-  const sidebarW = sidebarCompact ? 72 : 248;
+  const sidebarW = 200;
 
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [onboardingSeen, setOnboardingSeen] = useState(true);
@@ -193,7 +192,6 @@ export default function App() {
       case "search": return <SearchView onSelect={onSelect} />;
       case "lists": return <ListsView onSelect={onSelect} />;
       case "schedule": return <ScheduleView onSelect={onSelect} />;
-      case "notifications": return <NotificationsView onSelect={onSelect} />;
       case "profile": return <ProfileView onSelect={onSelect} />;
       case "settings": return <SettingsView health={health} />;
       case "downloads": return <DownloadsView />;
@@ -256,7 +254,6 @@ export default function App() {
 
   return (
     <div className={`flex h-screen w-screen overflow-hidden text-foreground relative ${isWindows ? "bg-black/[0.85]" : isMacOS ? "bg-transparent" : "bg-background"}`}>
-      <AmbientBackground />
       <Sidebar />
       <AnimatePresence>
         {notification && (
@@ -265,7 +262,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0, x: "-50%", scale: 1 }}
             exit={{ opacity: 0, y: -20, x: "-50%", scale: 0.95 }}
             transition={{ type: "spring", stiffness: 350, damping: 25 }}
-            className="fixed top-4 left-1/2 z-[999] flex items-center gap-3 px-5 py-3 rounded-2xl bg-card border border-border backdrop-blur-xl text-foreground text-sm font-semibold shadow-2xl shadow-black/40"
+            className="fixed top-4 left-1/2 z-[999] flex items-center gap-3 px-5 py-3 rounded-2xl bg-card border border-border text-foreground text-sm font-semibold shadow-2xl shadow-black/40"
           >
             <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
               <svg
@@ -316,15 +313,15 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="popLayout">
           {selectedItem ? (
             <motion.div
               key={`detail-${selectedItem.id}`}
-              initial={{ opacity: 0, y: 18 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className="flex-1 overflow-y-auto scroll-container transform-gpu"
+              className="flex-1 overflow-y-auto scroll-container transform-gpu h-full w-full"
             >
               <MediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
             </motion.div>
@@ -333,11 +330,11 @@ export default function App() {
               key={currentView}
               ref={restoreScroll}
               onScroll={saveScroll}
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10"
+              exit={{ opacity: 0, y: -5 }}
+              transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className="flex-1 overflow-y-auto scroll-container px-6 lg:px-10 pb-8 pt-10 h-full w-full"
             >
               <Suspense fallback={null}>
                 {renderView()}
@@ -352,6 +349,8 @@ export default function App() {
       </AnimatePresence>
 
       <KeyboardShortcutsOverlay />
+      <CommandPalette />
+      <Picker />
     </div>
   );
 }

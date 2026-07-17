@@ -358,7 +358,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 </label>
                 <div className="grid grid-cols-3 gap-3">
                   {([
-                    { key: "neon-abyss" as const, label: "Neon Abyss" },
+                    { key: "neon-abyss" as const, label: "Ink & Index" },
                     { key: "sakura-zen" as const, label: "Sakura Zen" },
                     { key: "retro-manga" as const, label: "Retro Manga" }
                   ]).map((t) => (

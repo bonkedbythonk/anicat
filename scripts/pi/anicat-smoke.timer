@@ -1,0 +1,10 @@
+[Unit]
+Description=Run anicat provider smoke test daily
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

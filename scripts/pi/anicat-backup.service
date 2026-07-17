@@ -1,0 +1,8 @@
+[Unit]
+Description=anicat registry + config backup
+
+[Service]
+Type=oneshot
+User=pi
+Environment=HOME=/home/pi
+ExecStart=/opt/anicat/bin/anicat-backup.sh

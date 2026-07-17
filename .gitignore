@@ -139,3 +139,7 @@ web/src/*.js
 
 scraper-bin/
 mpv-shot*.jpg
+
+# Editor/tooling artifacts
+.kilocode/
+skills-lock.json

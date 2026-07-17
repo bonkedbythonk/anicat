@@ -1,0 +1,11 @@
+[Unit]
+Description=anicat daily provider smoke test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Environment=HOME=/home/pi
+ExecStart=/opt/anicat/bin/anicat-smoke.sh
+TimeoutStartSec=1200

@@ -6,9 +6,8 @@
 # Idempotent -- rerun after editing any of the scripts/units in scripts/pi/.
 # Also ships scraper/smoke_test.py so the Pi's clone doesn't need a git pull.
 #
-# On first run it generates a random ntfy.sh topic (stored on the Pi at
-# /opt/anicat/ntfy-topic) and prints it -- subscribe to it in the ntfy app to
-# get failure alerts.
+# No push alerting -- check results with:
+#   ssh pi@anicatpi.local 'journalctl -u anicat-smoke.service -n 20'
 
 set -e
 
@@ -35,16 +34,9 @@ ssh "pi@${PI_HOST}" '
         /tmp/anicat-backup.service /tmp/anicat-backup.timer /etc/systemd/system/
     sudo install -m 644 -o pi /tmp/smoke_test.py /opt/anicat/src/scraper/smoke_test.py
     rm -f /tmp/anicat-smoke.* /tmp/anicat-backup.* /tmp/smoke_test.py
-    if [ ! -f /opt/anicat/ntfy-topic ]; then
-        echo "anicat-$(head -c16 /dev/urandom | od -An -tx1 | tr -d " \n")" \
-            | sudo tee /opt/anicat/ntfy-topic >/dev/null
-    fi
     sudo systemctl daemon-reload
     sudo systemctl enable --now anicat-smoke.timer anicat-backup.timer
 '
 
 echo "[3/3] Done. Timers:"
 ssh "pi@${PI_HOST}" 'systemctl list-timers anicat-smoke.timer anicat-backup.timer --no-pager | head -5'
-echo ""
-echo "ntfy alert topic (subscribe in the ntfy app or at https://ntfy.sh/<topic>):"
-ssh "pi@${PI_HOST}" 'cat /opt/anicat/ntfy-topic'

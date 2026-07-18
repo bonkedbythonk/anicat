@@ -7,9 +7,61 @@ import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem, type SearchFilters } from "@/lib/api";
+import { FocusScope, useFocusable, useSpatialNavigation } from "@/focus";
 
 interface SearchViewProps {
   onSelect: (item: MediaItem) => void;
+}
+
+function SuggestionButton({ item, onSelect }: { item: MediaItem; onSelect: (item: MediaItem) => void }) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  const title = item.title.english || item.title.romaji || "Media";
+  return (
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={() => onSelect(item)}
+      className="flex items-center gap-3 rounded-md border border-border p-2 text-left transition-colors hover:border-foreground/25 hover:bg-surface/70 cursor-pointer"
+    >
+      <img
+        src={item.cover_image?.large}
+        alt={title}
+        className="h-14 w-10 rounded-lg object-cover"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium text-foreground">{title}</p>
+        <p className="meta-mono truncate text-muted-foreground mt-0.5">
+          {item.season && item.seasonYear ? `${item.season.charAt(0) + item.season.slice(1).toLowerCase()} ${item.seasonYear}` : item.status || "Anime"}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+function SuggestionItems({ suggestions, onSelect }: { suggestions: MediaItem[]; onSelect: (item: MediaItem) => void }) {
+  useSpatialNavigation();
+  return (
+    <>
+      {suggestions.map((item) => (
+        <div key={item.id} role="listitem">
+          <SuggestionButton item={item} onSelect={onSelect} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function MediaGrid({ items, onSelect, className }: { items: MediaItem[]; onSelect: (item: MediaItem) => void; className?: string }) {
+  useSpatialNavigation();
+  return (
+    <>
+      {items.map((item) => (
+        <div key={item.id} role="listitem" className={className}>
+          <MediaCard item={item} onSelect={onSelect} />
+        </div>
+      ))}
+    </>
+  );
 }
 
 export function SearchView({ onSelect }: SearchViewProps) {
@@ -19,6 +71,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
   const setType = useAppStore(s => s.setSearchType);
   const filters = useAppStore(s => s.searchFilters);
   const setFilters = useAppStore(s => s.setSearchFilters);
+  const setActiveFocusScope = useAppStore(s => s.setActiveFocusScope);
+  const shuffleFocus = useFocusable<HTMLButtonElement>();
+  const randomFocus = useFocusable<HTMLButtonElement>();
+
+  useEffect(() => {
+    setActiveFocusScope("search-default");
+  }, [setActiveFocusScope]);
 
   const [debouncedQuery, setDebouncedQuery] = useState(() => query.trim().length >= 2 ? query.trim() : "");
   const [showFilters, setShowFilters] = useState(() => Object.keys(filters).length > 0);
@@ -161,33 +220,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
               <p className="meta-mono text-muted-foreground">Suggestions</p>
               {loadingSuggestions && <Loader2 className="animate-spin text-accent" size={14} />}
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {suggestions.map((item) => {
-                const title = item.title.english || item.title.romaji || "Media";
-
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      onSelect(item);
-                    }}
-                    className="flex items-center gap-3 rounded-md border border-border p-2 text-left transition-colors hover:border-foreground/25 hover:bg-surface/70 cursor-pointer"
-                  >
-                    <img
-                      src={item.cover_image?.large}
-                      alt={title}
-                      className="h-14 w-10 rounded-lg object-cover"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium text-foreground">{title}</p>
-                      <p className="meta-mono truncate text-muted-foreground mt-0.5">
-                        {item.season && item.seasonYear ? `${item.season.charAt(0) + item.season.slice(1).toLowerCase()} ${item.seasonYear}` : item.status || "Anime"}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <FocusScope name="search-suggestions" orientation="vertical" role="list" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <SuggestionItems suggestions={suggestions} onSelect={onSelect} />
+            </FocusScope>
           </div>
         )}
 
@@ -309,17 +344,17 @@ export function SearchView({ onSelect }: SearchViewProps) {
                           <p className="meta-mono mt-1 text-muted-foreground">Trending · seasonal · recent</p>
                         </div>
                         <button
+                          ref={shuffleFocus.ref}
+                          tabIndex={shuffleFocus.tabIndex}
                           onClick={handleShuffle}
                           className="rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:border-foreground/25 hover:text-foreground cursor-pointer"
                         >
                           Shuffle
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                        {discovery.map((item) => (
-                          <MediaCard key={item.id} item={item} onSelect={onSelect} />
-                        ))}
-                      </div>
+                      <FocusScope name="search-discovery" orientation="grid" columns={6} role="list" className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                        <MediaGrid items={discovery} onSelect={onSelect} />
+                      </FocusScope>
                     </div>
                   )}
 
@@ -331,6 +366,8 @@ export function SearchView({ onSelect }: SearchViewProps) {
                           <p className="meta-mono mt-1 text-muted-foreground">From across the whole database</p>
                         </div>
                         <button
+                          ref={randomFocus.ref}
+                          tabIndex={randomFocus.tabIndex}
                           onClick={() => { refetchRandom(); }}
                           disabled={fetchingRandom}
                           className="rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:border-foreground/25 hover:text-foreground disabled:opacity-50 cursor-pointer"
@@ -338,11 +375,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
                           {fetchingRandom ? "Loading..." : "New Random"}
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                        {randomList.map((item) => (
-                          <MediaCard key={item.id} item={item} onSelect={onSelect} />
-                        ))}
-                      </div>
+                      <FocusScope name="search-random" orientation="grid" columns={6} role="list" className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                        <MediaGrid items={randomList} onSelect={onSelect} />
+                      </FocusScope>
                     </div>
                   )}
 
@@ -366,11 +401,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
         if (results.length > 0) {
           return (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-              {results.map((item) => (
-                <MediaCard key={item.id} item={item} onSelect={onSelect} />
-              ))}
-            </div>
+            <FocusScope name="search-results" orientation="grid" columns={6} role="list" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+              <MediaGrid items={results} onSelect={onSelect} />
+            </FocusScope>
           );
         }
 

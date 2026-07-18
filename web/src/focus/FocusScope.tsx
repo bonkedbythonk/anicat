@@ -1,4 +1,4 @@
-import { createContext, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useMemo, useRef, useState, type ReactNode, type ElementType } from "react";
 import type { FocusOrientation, FocusScopeValue, FocusableItem } from "./types";
 
 export const FocusContext = createContext<FocusScopeValue | null>(null);
@@ -11,6 +11,7 @@ interface FocusScopeProps {
   role?: string;
   className?: string;
   onFocus?: () => void;
+  as?: ElementType;
 }
 
 export function FocusScope({
@@ -21,6 +22,7 @@ export function FocusScope({
   role,
   className,
   onFocus,
+  as: Component = "div",
 }: FocusScopeProps) {
   const itemsRef = useRef<FocusableItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -154,14 +156,14 @@ export function FocusScope({
 
   return (
     <FocusContext.Provider value={value}>
-      <div
+      <Component
         role={role}
         className={className}
         onFocus={onFocus}
         data-focus-scope={name}
       >
         {children}
-      </div>
+      </Component>
     </FocusContext.Provider>
   );
 }

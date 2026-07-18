@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { MediaCard } from "@/components/media/MediaCard";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
@@ -8,6 +8,7 @@ import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { formatRelativeTimeFromUnix } from "@/lib/date";
 import { useAppStore, type WatchStatus } from "@/stores/app";
+import { FocusScope, useFocusable, useSpatialNavigation } from "@/focus";
 
 const LIST_TABS: { key: WatchStatus; label: string }[] = [
   { key: "watching", label: "Watching" },
@@ -20,6 +21,128 @@ const LIST_TABS: { key: WatchStatus; label: string }[] = [
 
 interface ListsViewProps {
   onSelect: (item: MediaItem) => void;
+}
+
+function TabButton({
+  tab,
+  activeTab,
+  type,
+  onClick,
+}: {
+  tab: { key: WatchStatus; label: string };
+  activeTab: WatchStatus;
+  type: "ANIME" | "MANGA";
+  onClick: () => void;
+}) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  const label =
+    tab.key === "watching"
+      ? type === "MANGA" ? "Reading" : "Watching"
+      : tab.key === "repeating"
+        ? type === "MANGA" ? "Rereading" : "Rewatching"
+        : tab.label;
+  return (
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={onClick}
+      aria-selected={activeTab === tab.key}
+      role="tab"
+      className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium whitespace-nowrap cursor-pointer ${
+        activeTab === tab.key
+          ? "bg-accent/15 text-accent"
+          : "text-foreground/50 hover:text-foreground/80"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function GridItems({ items, onSelect }: { items: MediaItem[]; onSelect: (item: MediaItem) => void }) {
+  useSpatialNavigation();
+  return (
+    <>
+      {items.map((item) => (
+        <div key={item.id} role="listitem">
+          <MediaCard item={item} onSelect={onSelect} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TableRow({
+  item,
+  type,
+  onSelect,
+}: {
+  item: MediaItem;
+  type: "ANIME" | "MANGA";
+  onSelect: (item: MediaItem) => void;
+}) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  const progress = item.user_status?.progress ?? item.media_list_entry?.progress ?? 0;
+  const total = (type === "MANGA" ? item.chapters : item.episodes) || 0;
+  const pct = total > 0 ? Math.min(100, (progress / total) * 100) : 0;
+  const score = item.user_status?.score ?? item.media_list_entry?.score ?? 0;
+  const updated = item.user_status?.updated_at || item.media_list_entry?.updated_at;
+  return (
+    <tr
+      ref={ref as React.Ref<HTMLTableRowElement>}
+      tabIndex={tabIndex}
+      onClick={() => onSelect(item)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(item);
+        }
+      }}
+      className="cursor-pointer hover:bg-surface/70 border-b border-border last:border-b-0"
+    >
+      <td className="px-4 py-2.5 font-medium text-foreground max-w-[380px] truncate">
+        {item.title.english || item.title.romaji}
+      </td>
+      <td className="px-4 py-2.5 whitespace-nowrap">
+        <span className="inline-block align-middle w-16 h-[2px] rounded-full bg-foreground/10 mr-3">
+          <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="meta-mono text-muted-foreground">
+          {progress}{total ? ` / ${total}` : ""}
+        </span>
+      </td>
+      <td className="meta-mono px-4 py-2.5 text-muted-foreground">
+        {score > 0 ? score : "—"}
+      </td>
+      <td className="meta-mono px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+        {updated ? formatRelativeTimeFromUnix(updated) : "—"}
+      </td>
+    </tr>
+  );
+}
+
+function TableItems({
+  items,
+  type,
+  onSelect,
+}: {
+  items: MediaItem[];
+  type: "ANIME" | "MANGA";
+  onSelect: (item: MediaItem) => void;
+}) {
+  useSpatialNavigation();
+  return (
+    <tbody>
+      {items.map((item) => (
+        <TableRow key={item.id} item={item} type={type} onSelect={onSelect} />
+      ))}
+    </tbody>
+  );
+}
+
+function SpatialNav() {
+  useSpatialNavigation();
+  return null;
 }
 
 // Skeleton card grid shown during tab switches instead of a blinding spinner
@@ -45,9 +168,14 @@ export function ListsView({ onSelect }: ListsViewProps) {
   const type = useAppStore((s) => s.listsType);
   const setType = useAppStore((s) => s.setListsType);
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
   const [layout, setLayout] = useState<"grid" | "table">(
     () => (localStorage.getItem("anicat_library_layout") === "table" ? "table" : "grid")
   );
+
+  useEffect(() => {
+    setActiveFocusScope("lists-default");
+  }, [setActiveFocusScope]);
 
   const switchLayout = (next: "grid" | "table") => {
     setLayout(next);
@@ -66,13 +194,6 @@ export function ListsView({ onSelect }: ListsViewProps) {
       queryKey: ["lists", activeTab, type],
       enabled: isAuthenticated,
     });
-
-  const tabLabel = (tab: { key: WatchStatus; label: string }) =>
-    tab.key === "watching"
-      ? type === "MANGA" ? "Reading" : "Watching"
-      : tab.key === "repeating"
-        ? type === "MANGA" ? "Rereading" : "Rewatching"
-        : tab.label;
 
   return (
     <div className="space-y-5 animate-fade-in max-w-[1200px]">
@@ -102,21 +223,18 @@ export function ListsView({ onSelect }: ListsViewProps) {
       </div>
 
       {/* Status filter: plain words, active in indigo. */}
-      <div className="flex gap-1 flex-wrap">
+      <FocusScope name="lists-tabs" orientation="horizontal" role="tablist" className="flex gap-1 flex-wrap">
+        <SpatialNav />
         {LIST_TABS.map((tab) => (
-          <button
+          <TabButton
             key={tab.key}
+            tab={tab}
+            activeTab={activeTab}
+            type={type}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium whitespace-nowrap cursor-pointer ${
-              activeTab === tab.key
-                ? "bg-accent/15 text-accent"
-                : "text-foreground/50 hover:text-foreground/80"
-            }`}
-          >
-            {tabLabel(tab)}
-          </button>
+          />
         ))}
-      </div>
+      </FocusScope>
 
       <div className="relative">
         {loading && items.length > 0 && (
@@ -130,11 +248,9 @@ export function ListsView({ onSelect }: ListsViewProps) {
 
         {items.length > 0 ? (
           layout === "grid" ? (
-            <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5 animate-fade-in transition-opacity duration-200 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
-              {items.map((item) => (
-                <MediaCard key={item.id} item={item} onSelect={onSelect} />
-              ))}
-            </div>
+            <FocusScope name="lists-grid" orientation="grid" columns={6} role="list" className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5 animate-fade-in transition-opacity duration-200 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
+              <GridItems items={items} onSelect={onSelect} />
+            </FocusScope>
           ) : (
             <div className={`overflow-x-auto rounded-lg border border-border animate-fade-in transition-opacity duration-200 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
               <table className="w-full text-[13px] border-collapse">
@@ -147,40 +263,9 @@ export function ListsView({ onSelect }: ListsViewProps) {
                     ))}
                   </tr>
                 </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const progress = item.user_status?.progress ?? item.media_list_entry?.progress ?? 0;
-                    const total = (type === "MANGA" ? item.chapters : item.episodes) || 0;
-                    const pct = total > 0 ? Math.min(100, (progress / total) * 100) : 0;
-                    const score = item.user_status?.score ?? item.media_list_entry?.score ?? 0;
-                    const updated = item.user_status?.updated_at || item.media_list_entry?.updated_at;
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => onSelect(item)}
-                        className="cursor-pointer hover:bg-surface/70 border-b border-border last:border-b-0"
-                      >
-                        <td className="px-4 py-2.5 font-medium text-foreground max-w-[380px] truncate">
-                          {item.title.english || item.title.romaji}
-                        </td>
-                        <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className="inline-block align-middle w-16 h-[2px] rounded-full bg-foreground/10 mr-3">
-                            <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-                          </span>
-                          <span className="meta-mono text-muted-foreground">
-                            {progress}{total ? ` / ${total}` : ""}
-                          </span>
-                        </td>
-                        <td className="meta-mono px-4 py-2.5 text-muted-foreground">
-                          {score > 0 ? score : "—"}
-                        </td>
-                        <td className="meta-mono px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                          {updated ? formatRelativeTimeFromUnix(updated) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
+                <FocusScope name="lists-table" orientation="vertical" role="rowgroup" as="tbody">
+                  <TableItems items={items} type={type} onSelect={onSelect} />
+                </FocusScope>
               </table>
             </div>
           )

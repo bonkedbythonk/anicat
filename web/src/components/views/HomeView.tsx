@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
+import { useFocusable } from "@/focus";
 
 interface HomeViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
@@ -73,6 +74,13 @@ function MediaRowSkeleton({ title }: { title: string }) {
 
 export function HomeView({ onSelect }: HomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+  const pickMeFocus = useFocusable<HTMLButtonElement>();
+  const customizeFocus = useFocusable<HTMLButtonElement>();
+
+  useEffect(() => {
+    setActiveFocusScope("home-default");
+  }, [setActiveFocusScope]);
 
 
   // 2. Playback Status — shared query key with NowPlaying component (deduped)
@@ -335,6 +343,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
           </div>
           {isAuthenticated && continueWatchingList.length > 1 && (
             <button
+              ref={pickMeFocus.ref}
+              tabIndex={pickMeFocus.tabIndex}
               onClick={() => useAppStore.getState().setPickerOpen(true)}
               className="shrink-0 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
             >
@@ -399,6 +409,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
       {/* Layout editor */}
       <div className="flex flex-col items-center gap-4 pt-4">
         <button
+          ref={customizeFocus.ref}
+          tabIndex={customizeFocus.tabIndex}
           onClick={() => setShowLayoutEditor(true)}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.05] border border-white/[0.06] transition-all"
         >

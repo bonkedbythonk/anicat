@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { MediaItem } from "@/lib/api";
 import { parseAiringTime } from "@/lib/date";
+import { FocusScope, useFocusable, useSpatialNavigation } from "@/focus";
 
 interface UpNextQueueProps {
   items: MediaItem[];
@@ -26,80 +27,111 @@ function relativeDay(iso: string | undefined): string | null {
   return `${weeks}w ago`;
 }
 
+function QueueItem({
+  item,
+  index,
+  newEpisodeIds,
+  lastWatched,
+  onSelect,
+  unit,
+}: {
+  item: MediaItem;
+  index: number;
+  newEpisodeIds: Set<number>;
+  lastWatched: Record<string, string>;
+  onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
+  unit: "EP" | "CH";
+}) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  const name = item.title.english || item.title.romaji || "Media";
+  const art = item.banner_image || item.cover_image?.large || item.cover_image?.medium;
+  const progress = item.user_status?.progress || item.media_list_entry?.progress || 0;
+  const total = (unit === "CH" ? item.chapters : item.episodes) || 0;
+  const isRepeating =
+    (item.user_status?.status || item.media_list_entry?.status || "").toUpperCase() === "REPEATING";
+  // A rewatch whose progress still sits at the old total restarts at EP 1.
+  const restarting = isRepeating && total > 0 && progress >= total;
+  const nextEp = restarting ? 1 : progress + 1;
+  const pct = restarting ? 0 : total > 0 ? Math.min(100, (progress / total) * 100) : 0;
+  const hasNew = newEpisodeIds.has(item.id);
+  const watched = relativeDay(lastWatched[item.id] || lastWatched[String(item.id)] || undefined);
+  const first = index === 0;
+
+  return (
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={() => onSelect(item)}
+      aria-label={`${name}, ${unit} ${nextEp}${total > 0 ? ` / ${total}` : ""}`}
+      className={`flex items-center gap-4 px-4 py-3 w-full text-left cursor-pointer border-b border-border last:border-b-0 ${
+        first ? "bg-surface" : "hover:bg-surface/60"
+      }`}
+    >
+      <div className="relative w-[104px] h-[60px] shrink-0 rounded overflow-hidden bg-surface">
+        {art && (
+          <img src={art} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className={`truncate leading-tight text-foreground ${first ? "text-[15px] font-semibold" : "text-[13.5px] font-medium"}`}>
+          {name}
+        </p>
+        <p className="meta-mono mt-1.5 text-muted-foreground flex items-center gap-4">
+          <span>
+            {unit} {nextEp}{total > 0 ? ` / ${total}` : ""}
+          </span>
+          {isRepeating && <span>{unit === "CH" ? "Reread" : "Rewatch"}</span>}
+          {hasNew ? (
+            <span className="text-accent">{unit === "CH" ? "New chapter out" : "New episode out"}</span>
+          ) : watched ? (
+            <span>Watched {watched}</span>
+          ) : null}
+        </p>
+        {total > 0 && (
+          <div className="mt-2 h-[2px] max-w-[420px] rounded-full bg-foreground/10">
+            <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(item, "play");
+        }}
+        className={`shrink-0 rounded-md px-4 py-2 text-[12.5px] font-semibold cursor-pointer ${
+          first
+            ? "bg-accent text-black hover:bg-accent-light"
+            : "border border-border text-foreground/70 hover:text-foreground hover:border-foreground/25"
+        }`}
+      >
+        {first ? (unit === "CH" ? "Continue" : "Resume") : (unit === "CH" ? "Read" : "Play")}
+      </span>
+    </button>
+  );
+}
+
 /** The front page: a dense resume queue. First row is the primary target
  * (solid Resume button); everything below is one click away. Poster art
  * carries the color; all metadata is mono. */
 export function UpNextQueue({ items, newEpisodeIds, lastWatched, onSelect, unit = "EP" }: UpNextQueueProps) {
+  useSpatialNavigation();
   if (!items.length) return null;
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      {items.map((item, i) => {
-        const name = item.title.english || item.title.romaji || "Media";
-        const art = item.banner_image || item.cover_image?.large || item.cover_image?.medium;
-        const progress = item.user_status?.progress || item.media_list_entry?.progress || 0;
-        const total = (unit === "CH" ? item.chapters : item.episodes) || 0;
-        const isRepeating =
-          (item.user_status?.status || item.media_list_entry?.status || "").toUpperCase() === "REPEATING";
-        // A rewatch whose progress still sits at the old total restarts at EP 1.
-        const restarting = isRepeating && total > 0 && progress >= total;
-        const nextEp = restarting ? 1 : progress + 1;
-        const pct = restarting ? 0 : total > 0 ? Math.min(100, (progress / total) * 100) : 0;
-        const hasNew = newEpisodeIds.has(item.id);
-        const watched = relativeDay(lastWatched[item.id] || lastWatched[String(item.id)] || undefined);
-        const first = i === 0;
-
-        return (
-          <div
-            key={item.id}
-            className={`flex items-center gap-4 px-4 py-3 cursor-pointer border-b border-border last:border-b-0 ${
-              first ? "bg-surface" : "hover:bg-surface/60"
-            }`}
-            onClick={() => onSelect(item)}
-          >
-            <div className="relative w-[104px] h-[60px] shrink-0 rounded overflow-hidden bg-surface">
-              {art && (
-                <img src={art} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className={`truncate leading-tight text-foreground ${first ? "text-[15px] font-semibold" : "text-[13.5px] font-medium"}`}>
-                {name}
-              </p>
-              <p className="meta-mono mt-1.5 text-muted-foreground flex items-center gap-4">
-                <span>
-                  {unit} {nextEp}{total > 0 ? ` / ${total}` : ""}
-                </span>
-                {isRepeating && <span>{unit === "CH" ? "Reread" : "Rewatch"}</span>}
-                {hasNew ? (
-                  <span className="text-accent">{unit === "CH" ? "New chapter out" : "New episode out"}</span>
-                ) : watched ? (
-                  <span>Watched {watched}</span>
-                ) : null}
-              </p>
-              {total > 0 && (
-                <div className="mt-2 h-[2px] max-w-[420px] rounded-full bg-foreground/10">
-                  <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-                </div>
-              )}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect(item, "play");
-              }}
-              className={`shrink-0 rounded-md px-4 py-2 text-[12.5px] font-semibold cursor-pointer ${
-                first
-                  ? "bg-accent text-black hover:bg-accent-light"
-                  : "border border-border text-foreground/70 hover:text-foreground hover:border-foreground/25"
-              }`}
-            >
-              {first ? (unit === "CH" ? "Continue" : "Resume") : (unit === "CH" ? "Read" : "Play")}
-            </button>
-          </div>
-        );
-      })}
-    </div>
+    <FocusScope name="home-queue" orientation="vertical" role="list" className="rounded-lg border border-border overflow-hidden">
+      {items.map((item, i) => (
+        <div key={item.id} role="listitem">
+          <QueueItem
+            item={item}
+            index={i}
+            newEpisodeIds={newEpisodeIds}
+            lastWatched={lastWatched}
+            onSelect={onSelect}
+            unit={unit}
+          />
+        </div>
+      ))}
+    </FocusScope>
   );
 }
 

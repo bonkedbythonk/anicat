@@ -21,6 +21,7 @@ export function useKeyboardShortcuts() {
   const closeDetail = useAppStore((s) => s.closeDetail);
   const selectedItem = useAppStore((s) => s.selectedItem);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
 
   useEffect(() => {
     function navigate(view: ViewType) {
@@ -28,6 +29,7 @@ export function useKeyboardShortcuts() {
       // actually visible and the sidebar highlight stays in sync.
       if (selectedItem) closeDetail();
       setCurrentView(view);
+      setActiveFocusScope(`${view}-default`);
     }
 
     function handleKeyDown(e: KeyboardEvent) {
@@ -81,5 +83,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setCurrentView, selectedItem, closeDetail, setPaletteOpen]);
+  }, [setCurrentView, selectedItem, closeDetail, setPaletteOpen, setActiveFocusScope]);
 }

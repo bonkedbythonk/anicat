@@ -1,5 +1,6 @@
 import { useAppStore } from "@/stores/app";
 import { usesOverlayTitlebar, isMacOS } from "@/lib/platform";
+import { useFocusable } from "@/focus";
 import type { ViewType } from "@/lib/types";
 
 interface NavItem {
@@ -42,6 +43,7 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
           <button
             key={item.view}
             onClick={() => handleNavigate(item.view)}
+            aria-current={isActive ? "page" : undefined}
             className={`group relative w-full flex items-center justify-between py-[7px] pl-5 pr-4 text-[13px] cursor-pointer text-left ${
               isActive
                 ? "text-foreground bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] font-semibold"
@@ -69,6 +71,7 @@ export function Sidebar() {
   const apiConnected = useAppStore((s) => s.apiConnected);
   const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const isOffline = useAppStore((s) => s.isOffline);
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
 
   const syncLabel = isOffline
     ? "Offline"
@@ -95,6 +98,8 @@ export function Sidebar() {
           <img src="/anicat_logo.png" alt="Anicat Logo" className="h-20 object-contain filter grayscale" />
         </div>
         <button
+          ref={ref}
+          tabIndex={tabIndex}
           onClick={() => setPaletteOpen(true)}
           className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border text-[12px] text-foreground/45 hover:text-foreground/75 hover:border-foreground/25 cursor-pointer"
         >

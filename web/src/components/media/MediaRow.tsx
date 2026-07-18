@@ -2,6 +2,7 @@
 import { useRef, useState, useEffect, useCallback, memo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { MediaCard } from "./MediaCard";
+import { FocusScope, useSpatialNavigation } from "@/focus";
 import type { MediaItem } from "@/lib/api";
 
 interface MediaRowProps {
@@ -26,6 +27,7 @@ const MediaRow = memo(function MediaRow({
   secondaryItems,
   secondaryLabel = "Smart Picks",
 }: MediaRowProps) {
+  useSpatialNavigation();
   const rowRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const totalItems = items.length + (secondaryItems?.length ?? 0);
@@ -100,47 +102,56 @@ const MediaRow = memo(function MediaRow({
           ref={rowRef}
           className="flex space-x-4 overflow-x-auto scrollbar-hide scroll-smooth pb-2 snap-x snap-proximity"
         >
-          {/* Primary items */}
-          {items.map((item, idx) => (
-            <div
-              key={`primary-${item.id}-${idx}`}
-              className="w-[150px] md:w-[180px] flex-none snap-start"
-            >
-              {idx < visibleEnd ? (
-                <MediaCard item={item} onSelect={onSelect} />
-              ) : (
-                <div className="w-full rounded-lg bg-white/[0.03]" style={{ aspectRatio: '2/3' }} />
-              )}
-            </div>
-          ))}
-
-          {/* Divider — only shown when there are secondary items */}
-          {hasSecondary && (
-            <div className="flex-none flex flex-col items-center justify-center gap-2 px-2 select-none">
-              <div className="w-px flex-1 bg-white/[0.06]" />
-              <span className="px-2.5 py-1 rounded-full bg-white/[0.04] text-[11px] font-medium text-white/40 whitespace-nowrap">
-                {secondaryLabel}
-              </span>
-              <div className="w-px flex-1 bg-white/[0.06]" />
-            </div>
-          )}
-
-          {/* Secondary items */}
-          {hasSecondary && secondaryItems!.map((item, idx) => {
-            const globalIdx = items.length + 1 + idx; // +1 for divider
-            return (
+          <FocusScope
+            name={`row-${title || "media"}`}
+            orientation="horizontal"
+            role="list"
+            className="flex space-x-4"
+          >
+            {/* Primary items */}
+            {items.map((item, idx) => (
               <div
-                key={`secondary-${item.id}-${idx}`}
-                className="w-[150px] md:w-[180px] flex-none opacity-80 hover:opacity-100 transition-opacity"
+                key={`primary-${item.id}-${idx}`}
+                className="w-[150px] md:w-[180px] flex-none snap-start"
+                role="listitem"
               >
-                {globalIdx < visibleEnd + BUFFER ? (
+                {idx < visibleEnd ? (
                   <MediaCard item={item} onSelect={onSelect} />
                 ) : (
                   <div className="w-full rounded-lg bg-white/[0.03]" style={{ aspectRatio: '2/3' }} />
                 )}
               </div>
-            );
-          })}
+            ))}
+
+            {/* Divider — only shown when there are secondary items */}
+            {hasSecondary && (
+              <div className="flex-none flex flex-col items-center justify-center gap-2 px-2 select-none" aria-hidden="true">
+                <div className="w-px flex-1 bg-white/[0.06]" />
+                <span className="px-2.5 py-1 rounded-full bg-white/[0.04] text-[11px] font-medium text-white/40 whitespace-nowrap">
+                  {secondaryLabel}
+                </span>
+                <div className="w-px flex-1 bg-white/[0.06]" />
+              </div>
+            )}
+
+            {/* Secondary items */}
+            {hasSecondary && secondaryItems!.map((item, idx) => {
+              const globalIdx = items.length + 1 + idx; // +1 for divider
+              return (
+                <div
+                  key={`secondary-${item.id}-${idx}`}
+                  className="w-[150px] md:w-[180px] flex-none opacity-80 hover:opacity-100 transition-opacity"
+                  role="listitem"
+                >
+                  {globalIdx < visibleEnd + BUFFER ? (
+                    <MediaCard item={item} onSelect={onSelect} />
+                  ) : (
+                    <div className="w-full rounded-lg bg-white/[0.03]" style={{ aspectRatio: '2/3' }} />
+                  )}
+                </div>
+              );
+            })}
+          </FocusScope>
         </div>
 
         {/* Right arrow */}

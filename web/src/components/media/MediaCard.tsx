@@ -3,6 +3,7 @@ import { useCallback, useRef, memo, useState } from "react";
 import { Play, BookOpen, Star } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type MediaItem, mediaApi } from "@/lib/api";
+import { useFocusable } from "@/focus";
 
 interface MediaCardProps {
   item: MediaItem;
@@ -11,19 +12,12 @@ interface MediaCardProps {
 
 const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
   const queryClient = useQueryClient();
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
 
-  const handlePlay = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (onSelect) {
-      onSelect(item, "play");
-    }
-  };
-
-  // Smart pre-fetch: when user hovers for 300ms+, pre-load the detail
+  // Smart pre-fetch: when user hovers or focuses for 300ms+, pre-load the detail
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleMouseEnter = useCallback(() => {
+  const handlePrefetchStart = useCallback(() => {
     prefetchTimerRef.current = setTimeout(() => {
       // Prefetch only the AniList detail — it's a single cached GraphQL call
       // and makes opening the card feel instant. Do NOT prefetch episodes
@@ -38,7 +32,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
     }, 300);
   }, [item.id, queryClient]);
 
-  const handleMouseLeave = useCallback(() => {
+  const handlePrefetchEnd = useCallback(() => {
     if (prefetchTimerRef.current) {
       clearTimeout(prefetchTimerRef.current);
       prefetchTimerRef.current = null;
@@ -53,19 +47,19 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
   const status = rawStatus?.toLowerCase();
   const totalCount = item.episodes || item.chapters || 0;
   const nextEp = item.next_airing?.episode;
-  
+
   let currentReleased = 0;
   if (nextEp) {
     currentReleased = nextEp - 1;
   } else if (totalCount > 0) {
     currentReleased = totalCount;
   }
-  
+
   const isFinished = item.status === 'FINISHED' || (item.end_date && new Date(item.end_date + "T00:00:00Z") < new Date());
-  
-  const hasNewEpisodes = 
-    (status === 'watching' || status === 'current') && 
-    item.status === 'RELEASING' && 
+
+  const hasNewEpisodes =
+    (status === 'watching' || status === 'current') &&
+    item.status === 'RELEASING' &&
     !isFinished &&
     progress < currentReleased &&
     (totalCount === 0 || progress < totalCount);
@@ -73,16 +67,21 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
 
   return (
-    <div 
-      onClick={() => onSelect?.(item)} 
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={() => onSelect?.(item)}
+      onMouseEnter={handlePrefetchStart}
+      onMouseLeave={handlePrefetchEnd}
+      onFocus={handlePrefetchStart}
+      onBlur={handlePrefetchEnd}
+      aria-label={title}
       className="group cursor-pointer flex flex-col space-y-2.5 w-full text-left relative"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface card-glow border border-border">
-        <img 
-          src={item.cover_image?.large || item.cover_image?.medium} 
-          alt={title} 
+      <div className={`relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface border border-border card-glow ${tabIndex === 0 ? "focus-active" : ""}`}>
+        <img
+          src={item.cover_image?.large || item.cover_image?.medium}
+          alt={title}
           loading="lazy"
           decoding="async"
           onLoad={() => setImageLoaded(true)}
@@ -90,19 +89,16 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
             imageLoaded ? "opacity-100" : "opacity-0"
           }`}
         />
-        
-        {/* Play overlay */}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-[400ms] flex items-center justify-center z-10">
-          <button 
-            onClick={handlePlay}
-            className="glass-button p-3.5 rounded-full active:scale-95 transition-transform duration-150"
-          >
+
+        {/* Play overlay — visual affordance only; the card opens detail on activation */}
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-[400ms] flex items-center justify-center z-10" aria-hidden="true">
+          <span className="glass-button p-3.5 rounded-full">
             {isManga ? (
               <BookOpen size={20} />
             ) : (
               <Play size={20} fill="currentColor" />
             )}
-          </button>
+          </span>
         </div>
 
         {/* Progress tick — thin bar over a dark scrim, the skin's poster language */}
@@ -134,7 +130,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           {!entry && item.playlist_reason && <span className="truncate">{item.playlist_reason}</span>}
         </p>
       </div>
-    </div>
+    </button>
   );
 });
 export { MediaCard };

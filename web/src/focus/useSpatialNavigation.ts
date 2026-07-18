@@ -1,12 +1,15 @@
 import { useEffect, useContext } from "react";
 import { FocusContext } from "./FocusScope";
+import { useAppStore } from "@/stores/app";
 
 export function useSpatialNavigation() {
   const scope = useContext(FocusContext);
+  const activeFocusScope = useAppStore((s) => s.activeFocusScope);
 
   useEffect(() => {
     if (!scope) return;
     const handler = (e: KeyboardEvent) => {
+      if (activeFocusScope && scope.name !== activeFocusScope) return;
       const target = e.target as HTMLElement | null;
       const inField =
         target &&
@@ -49,5 +52,5 @@ export function useSpatialNavigation() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [scope]);
+  }, [scope, activeFocusScope]);
 }

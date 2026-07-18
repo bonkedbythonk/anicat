@@ -52,6 +52,10 @@ interface AppState {
   pickerOpen: boolean;
   setPickerOpen: (open: boolean) => void;
 
+  // Focus
+  activeFocusScope: string | null;
+  setActiveFocusScope: (scope: string | null) => void;
+
   // Connection
   apiConnected: boolean;
   apiAuthenticated: boolean;
@@ -148,6 +152,9 @@ export const useAppStore = create<AppState>((set) => ({
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   pickerOpen: false,
   setPickerOpen: (pickerOpen) => set({ pickerOpen }),
+
+  activeFocusScope: null,
+  setActiveFocusScope: (activeFocusScope) => set({ activeFocusScope }),
 
   apiConnected: false,
   apiAuthenticated: false,

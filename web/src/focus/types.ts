@@ -13,8 +13,10 @@ export interface FocusScopeValue {
   orientation: FocusOrientation;
   columns: number;
   activeIndex: number;
+  version: number;
   register: (item: FocusableItem) => number;
   unregister: (id: string) => void;
+  getIndex: (id: string) => number;
   focusItem: (index: number) => void;
   focusNext: () => void;
   focusPrev: () => void;

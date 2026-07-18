@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FocusScope } from "./FocusScope";
 import { useFocusable } from "./useFocusable";
 import { useSpatialNavigation } from "./useSpatialNavigation";
+import { useAppStore } from "@/stores/app";
 
 function GridItem({ label }: { label: string }) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
@@ -26,6 +27,11 @@ function Grid() {
       <GridItems />
     </FocusScope>
   );
+}
+
+function ActiveScopeSetter({ name }: { name: string }) {
+  useAppStore.getState().setActiveFocusScope(name);
+  return null;
 }
 
 describe("useSpatialNavigation", () => {
@@ -75,5 +81,18 @@ describe("useSpatialNavigation", () => {
     act(() => buttons[0].focus());
     fireEvent.keyDown(window, { key: "End" });
     expect(document.activeElement).toBe(buttons[8]);
+  });
+
+  it("ignores arrow keys when another scope is active", () => {
+    render(
+      <>
+        <ActiveScopeSetter name="other" />
+        <Grid />
+      </>
+    );
+    const buttons = screen.getAllByRole("button");
+    act(() => buttons[0].focus());
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(buttons[0]);
   });
 });

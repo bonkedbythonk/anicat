@@ -24,43 +24,78 @@ export function FocusScope({
 }: FocusScopeProps) {
   const itemsRef = useRef<FocusableItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [version, setVersion] = useState(0);
+
+  const bumpVersion = useCallback(() => setVersion((v) => v + 1), []);
+
+  const getIndex = useCallback((id: string) => {
+    return itemsRef.current.findIndex((i) => i.id === id);
+  }, []);
+
+  const findNextEnabled = useCallback((start: number, direction: 1 | -1) => {
+    const items = itemsRef.current;
+    if (items.length === 0) return -1;
+    let index = start;
+    for (let i = 0; i < items.length; i++) {
+      if (index < 0 || index >= items.length) return -1;
+      if (!items[index]?.disabled) return index;
+      index += direction;
+    }
+    return -1;
+  }, []);
 
   const focusItem = useCallback((index: number) => {
     const items = itemsRef.current;
     const clamped = Math.max(0, Math.min(index, items.length - 1));
-    setActiveIndex(clamped);
-    const el = items[clamped]?.ref.current;
-    if (el && typeof el.focus === "function") {
+    const target = findNextEnabled(clamped, 1);
+    const finalIndex = target >= 0 ? target : clamped;
+    setActiveIndex(finalIndex);
+    const el = items[finalIndex]?.ref.current;
+    if (el && typeof el.focus === "function" && !items[finalIndex]?.disabled) {
       el.focus({ preventScroll: true });
       if (typeof el.scrollIntoView === "function") {
         el.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
     }
-  }, []);
+  }, [findNextEnabled]);
 
   const register = useCallback((item: FocusableItem) => {
     const items = itemsRef.current;
     const existing = items.findIndex((i) => i.id === item.id);
     if (existing >= 0) {
       items[existing] = item;
+      bumpVersion();
       return existing;
     }
     items.push(item);
+    bumpVersion();
     return items.length - 1;
-  }, []);
+  }, [bumpVersion]);
 
   const unregister = useCallback((id: string) => {
+    const prevIndex = itemsRef.current.findIndex((i) => i.id === id);
     itemsRef.current = itemsRef.current.filter((i) => i.id !== id);
-    setActiveIndex((prev) => Math.min(prev, Math.max(0, itemsRef.current.length - 1)));
-  }, []);
+    setActiveIndex((prev) => {
+      const nextLength = itemsRef.current.length;
+      if (nextLength === 0) return 0;
+      const next = Math.min(prev, nextLength - 1);
+      if (prevIndex >= 0 && prev > prevIndex) {
+        return Math.max(0, prev - 1);
+      }
+      return next;
+    });
+    bumpVersion();
+  }, [bumpVersion]);
 
   const focusNext = useCallback(() => {
-    focusItem(activeIndex + 1);
-  }, [activeIndex, focusItem]);
+    const next = findNextEnabled(activeIndex + 1, 1);
+    if (next >= 0) focusItem(next);
+  }, [activeIndex, findNextEnabled, focusItem]);
 
   const focusPrev = useCallback(() => {
-    focusItem(activeIndex - 1);
-  }, [activeIndex, focusItem]);
+    const prev = findNextEnabled(activeIndex - 1, -1);
+    if (prev >= 0) focusItem(prev);
+  }, [activeIndex, findNextEnabled, focusItem]);
 
   const focusUp = useCallback(() => {
     if (orientation !== "grid") {
@@ -68,8 +103,11 @@ export function FocusScope({
       return;
     }
     const next = activeIndex - columns;
-    if (next >= 0) focusItem(next);
-  }, [activeIndex, columns, focusItem, focusPrev, orientation]);
+    if (next >= 0) {
+      const enabled = findNextEnabled(next, 1);
+      if (enabled >= 0) focusItem(enabled);
+    }
+  }, [activeIndex, columns, findNextEnabled, focusItem, focusPrev, orientation]);
 
   const focusDown = useCallback(() => {
     if (orientation !== "grid") {
@@ -77,11 +115,21 @@ export function FocusScope({
       return;
     }
     const next = activeIndex + columns;
-    if (next < itemsRef.current.length) focusItem(next);
-  }, [activeIndex, columns, focusItem, focusNext, orientation]);
+    if (next < itemsRef.current.length) {
+      const enabled = findNextEnabled(next, 1);
+      if (enabled >= 0) focusItem(enabled);
+    }
+  }, [activeIndex, columns, findNextEnabled, focusItem, focusNext, orientation]);
 
-  const focusFirst = useCallback(() => focusItem(0), [focusItem]);
-  const focusLast = useCallback(() => focusItem(itemsRef.current.length - 1), [focusItem]);
+  const focusFirst = useCallback(() => {
+    const first = findNextEnabled(0, 1);
+    if (first >= 0) focusItem(first);
+  }, [findNextEnabled, focusItem]);
+
+  const focusLast = useCallback(() => {
+    const last = findNextEnabled(itemsRef.current.length - 1, -1);
+    if (last >= 0) focusItem(last);
+  }, [findNextEnabled, focusItem]);
 
   const value = useMemo<FocusScopeValue>(
     () => ({
@@ -89,8 +137,10 @@ export function FocusScope({
       orientation,
       columns,
       activeIndex,
+      version,
       register,
       unregister,
+      getIndex,
       focusItem,
       focusNext,
       focusPrev,
@@ -99,7 +149,7 @@ export function FocusScope({
       focusFirst,
       focusLast,
     }),
-    [name, orientation, columns, activeIndex, register, unregister, focusItem, focusNext, focusPrev, focusUp, focusDown, focusFirst, focusLast]
+    [name, orientation, columns, activeIndex, version, register, unregister, getIndex, focusItem, focusNext, focusPrev, focusUp, focusDown, focusFirst, focusLast]
   );
 
   return (

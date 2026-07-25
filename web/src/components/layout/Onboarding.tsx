@@ -10,8 +10,7 @@ import {
   ShieldAlert,
   Clock,
   Sparkles,
-  Palette,
-  Gauge
+  Palette
 } from "lucide-react";
 import { mediaApi, dispatchRefresh } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
@@ -27,25 +26,25 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [connectedUser, setConnectedUser] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
-  const [uiStyle, setUiStyle] = useState<"neon-abyss" | "sakura-zen" | "retro-manga">("neon-abyss");
+  const [uiStyle, setUiStyle] = useState<"ink-and-index" | "sakura-zen" | "retro-manga">("ink-and-index");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
-  const [interpolation, setInterpolation] = useState<"on" | "off">("off");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
   const [authPending, setAuthPending] = useState(false);
 
   useEffect(() => {
-    const savedStyle = (localStorage.getItem("anicat_ui_style") as "neon-abyss" | "sakura-zen" | "retro-manga" | null) || "neon-abyss";
+    const savedStyle = (localStorage.getItem("anicat_ui_style") as "ink-and-index" | "sakura-zen" | "retro-manga" | null) || "ink-and-index";
     setUiStyle(savedStyle);
+    const savedTheme = localStorage.getItem("anicat_theme") as "system" | "dark" | "light" | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
   }, []);
 
   useEffect(() => {
     mediaApi.getConfig().then((cfg) => {
       if (cfg?.stream?.shader_profile === "on" || cfg?.stream?.shader_profile === "off") {
         setGpuUpscaling(cfg.stream.shader_profile);
-      }
-      if (cfg?.stream?.interpolation === "on" || cfg?.stream?.interpolation === "off") {
-        setInterpolation(cfg.stream.interpolation);
       }
       if (cfg?.general?.time_format === "12h" || cfg?.general?.time_format === "24h") {
         setTimeFormat(cfg.general.time_format);
@@ -60,13 +59,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setGpuUpscaling(val);
     try {
       await mediaApi.updateConfig({ stream: { shader_profile: val } });
-    } catch {}
-  };
-
-  const handleInterpolationChange = async (val: "on" | "off") => {
-    setInterpolation(val);
-    try {
-      await mediaApi.updateConfig({ stream: { interpolation: val } });
     } catch {}
   };
 
@@ -133,7 +125,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     window.dispatchEvent(new StorageEvent("storage", { key: "anicat_theme", newValue: newTheme }));
   };
 
-  const handleUiStyleChange = (style: "neon-abyss" | "sakura-zen" | "retro-manga") => {
+  const handleUiStyleChange = (style: "ink-and-index" | "sakura-zen" | "retro-manga") => {
     setUiStyle(style);
     localStorage.setItem("anicat_ui_style", style);
     document.documentElement.setAttribute("data-style", style);
@@ -357,11 +349,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                   <span>Visual Theme Skin</span>
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  {([
-                    { key: "neon-abyss" as const, label: "Ink & Index" },
+                  {[
+                    { key: "ink-and-index" as const, label: "Ink & Index" },
                     { key: "sakura-zen" as const, label: "Sakura Zen" },
                     { key: "retro-manga" as const, label: "Retro Manga" }
-                  ]).map((t) => (
+                  ].map((t) => (
                     <button
                       key={t.key}
                       onClick={() => handleUiStyleChange(t.key)}
@@ -446,31 +438,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 </div>
               </div>
 
-              {/* Smooth Motion (Frame Interpolation) */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Gauge size={12} className="text-accent" />
-                  <span>Smooth Motion</span>
-                </label>
-                <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-                  Frame interpolation for smoother panning, up to your display's refresh rate. Best left off for on-twos anime — may look soap-opera-y.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["off", "on"] as const).map((g) => (
-                    <button
-                      key={g}
-                      onClick={() => handleInterpolationChange(g)}
-                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                        interpolation === g
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {g === "off" ? "Off (Recommended)" : "On"}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             <div className="pt-4 border-t border-border space-y-3">
@@ -510,7 +477,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
                   <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Upscaling</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
                   <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Auto-skip Intro</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Smooth Motion</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 3</kbd></div>
                   <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Autoplay Next</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
                 </div>
               </div>
@@ -521,8 +487,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
                   <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Reload Episode</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
                   <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Nudge Skip Timing</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">[ / ]</kbd></div>
+                  <div className="flex justify-between py-1"><span className="text-muted-foreground">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
+                  <div className="flex justify-between py-1"><span className="text-muted-foreground">Rotate Video</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + V</kbd></div>
                 </div>
               </div>
 

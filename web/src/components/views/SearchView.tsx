@@ -207,7 +207,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search for ${type.toLowerCase()}...`}
-            className="w-full bg-transparent border border-border rounded-lg py-3 pl-12 pr-6 text-[15px] focus:outline-none focus:border-accent transition-colors placeholder:text-muted-foreground/60"
+            className="w-full bg-transparent border border-border rounded-lg py-3 pl-12 pr-6 text-[15px] focus:outline-none transition-colors placeholder:text-muted-foreground/60"
           />
           {loading && (
             <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 text-accent animate-spin" size={22} />

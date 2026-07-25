@@ -8,7 +8,7 @@
     <script>
       (function() {
         const theme = localStorage.getItem("anicat_theme") || "system";
-        const style = localStorage.getItem("anicat_ui_style") || "neon-abyss";
+        const style = localStorage.getItem("anicat_ui_style") || "ink-and-index";
         const isDarkSystem = window.matchMedia("(prefers-color-scheme: dark)").matches;
         const isLight = theme === "light" || (theme === "system" && !isDarkSystem);
         document.documentElement.classList.add(isLight ? "light" : "dark");

@@ -64,6 +64,17 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let app_state_clone = app_state.clone();
 
+            // Surface a broken scraper sidecar (spawn/health failure) as a
+            // visible toast instead of only a buried log line.
+            let scraper_notify_handle = app.handle().clone();
+            state.scraper_manager.set_failure_notifier(move |msg| {
+                use tauri::Emitter;
+                let _ = scraper_notify_handle.emit(
+                    "show_notification",
+                    serde_json::json!({ "message": msg }),
+                );
+            });
+
             let proxy_port_arc = app_state.inner.proxy_port.clone();
             let handle1 = tauri::async_runtime::spawn(async move {
                 let bound = proxy::server::start_proxy(client, Some(app_handle), app_state_clone).await;
@@ -106,6 +117,8 @@ pub fn run() {
             commands::media::search_provider,
             commands::media::map_provider_slug,
             commands::media::clear_provider_cache,
+            commands::media::get_media_prefs,
+            commands::media::set_media_prefs,
             commands::media::debug_provider_streams,
             commands::media::get_library,
             commands::media::add_to_library,

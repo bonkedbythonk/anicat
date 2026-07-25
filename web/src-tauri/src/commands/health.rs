@@ -277,7 +277,6 @@ async fn trigger_update_macos(url: String) -> Result<(), String> {
     std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
     let dmg_path = tmp_dir.join("Anicat.dmg");
 
-    // Download the DMG
     log::info!("Downloading update from {}", url);
     let resp = reqwest::get(&url)
         .await
@@ -288,7 +287,6 @@ async fn trigger_update_macos(url: String) -> Result<(), String> {
     std::fs::write(&dmg_path, &bytes).map_err(|e| e.to_string())?;
     log::info!("Downloaded {} bytes to {:?}", bytes.len(), dmg_path);
 
-    // Mount the DMG
     let mount_output = std::process::Command::new("hdiutil")
         .args(["attach", "-nobrowse", "-noautoopen"])
         .arg(&dmg_path)
@@ -318,7 +316,6 @@ async fn trigger_update_macos(url: String) -> Result<(), String> {
         .ok_or_else(|| "Could not find mount point".to_string())?;
     log::info!("DMG mounted at: {}", mount_point);
 
-    // Find the .app in the mounted volume
     let app_path = format!("{}/Anicat.app", mount_point);
     if !std::path::Path::new(&app_path).exists() {
         let _ = std::process::Command::new("hdiutil")
@@ -327,7 +324,6 @@ async fn trigger_update_macos(url: String) -> Result<(), String> {
         return Err("Anicat.app not found in DMG".to_string());
     }
 
-    // Copy over the existing installation
     let dst = "/Applications/Anicat.app";
     log::info!("Copying {} to {}", app_path, dst);
     let copy_output = std::process::Command::new("ditto")
@@ -342,17 +338,14 @@ async fn trigger_update_macos(url: String) -> Result<(), String> {
         return Err(format!("Failed to copy app: {}", stderr));
     }
 
-    // Remove quarantine
     let _ = std::process::Command::new("xattr")
         .args(["-dr", "com.apple.quarantine", dst])
         .output();
 
-    // Unmount DMG
     let _ = std::process::Command::new("hdiutil")
         .args(["detach", &mount_point, "-quiet"])
         .output();
 
-    // Clean up temp files
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
     log::info!("Update installed successfully to {}", dst);

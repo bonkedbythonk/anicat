@@ -28,7 +28,6 @@ pub async fn get_user_list_impl(
     // Acquire lock to prevent concurrent redundant fetches (coalescing)
     let _lock = state.inner.user_list_lock.lock().await;
 
-    // Cache key for the unified/full list collection containing all statuses
     let cache_key_all = AniListCache::key("get_user_list", &[
         ("status", "all"),
         ("type", &resolved_type),
@@ -37,7 +36,6 @@ pub async fn get_user_list_impl(
     let full_collection = match state.cache.get(&cache_key_all) {
         Some(cached) => cached,
         None => {
-            // Resolve authenticated Viewer username if user_name is not specified
             let mut resolved_user_name = user_name.clone();
             if resolved_user_name.is_none() || resolved_user_name.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
                 if let Some(cached_name) = state.anilist_client.get_username() {
@@ -50,7 +48,6 @@ pub async fn get_user_list_impl(
                     if let Some(name) = profile_result.get("Viewer").and_then(|v| v.get("name")).and_then(|n| n.as_str()) {
                         let name_str = name.to_string();
                         state.anilist_client.set_username(Some(name_str.clone()));
-                        // Save username to configuration
                         let mut config = state.inner.config.write().await;
                         if config.api.anilist_username.as_ref() != Some(&name_str) {
                             config.api.anilist_username = Some(name_str.clone());
@@ -74,10 +71,14 @@ pub async fn get_user_list_impl(
             // "completed" that's whatever you most recently finished.
             vars.insert("sort".to_string(), serde_json::json!(["UPDATED_TIME_DESC"]));
 
-            let result: Value = state
+            let result: Value = match state
                 .anilist_client
                 .execute(queries::USER_LIST_QUERY, vars)
-                .await?;
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => state.cache.stale_or_err(&cache_key_all, e)?,
+            };
 
             if let Some(lists) = result.get("MediaListCollection").and_then(|m| m.get("lists")).and_then(|l| l.as_array()) {
                 for (idx, list) in lists.iter().enumerate() {
@@ -95,7 +96,6 @@ pub async fn get_user_list_impl(
     // Release the lock early before processing and filtering the JSON
     drop(_lock);
 
-    // If a specific status is requested, filter in-place to keep only the matching list
     if let Some(ref target_status) = status {
         let mut filtered_collection = full_collection;
         if let Some(mlc) = filtered_collection.get_mut("MediaListCollection") {
@@ -129,10 +129,14 @@ pub async fn get_user_profile_impl(state: &AppState) -> Result<Value, String> {
 
     let _has_token = state.anilist_client.has_token();
     let vars = HashMap::new();
-    let result: Value = state
+    let result: Value = match state
         .anilist_client
         .execute(queries::USER_PROFILE_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&cache_key, e),
+    };
     state.cache.set(cache_key, result.clone(), "get_user_profile");
     Ok(result)
 }
@@ -324,9 +328,13 @@ pub async fn get_airing_schedule_impl(
         }
     }
 
-    let result: Value = state.anilist_client
+    let result: Value = match state.anilist_client
         .execute(queries::AIRING_SCHEDULE_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&cache_key, e),
+    };
     if let Some(_scheds) = result.get("Page").and_then(|p| p.get("airingSchedules")).and_then(|s| s.as_array()) {
     }
     state.cache.set(cache_key, result.clone(), "get_airing_schedule");

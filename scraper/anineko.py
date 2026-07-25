@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from curl_cffi import requests
@@ -30,7 +30,6 @@ BASE_URL = "https://anineko.to"
 
 def clean_title_for_search(title: str) -> str:
     """Remove season/part/cour suffixes that AniNeko slugs won't match."""
-    # Remove season syntax: "Season 4", "Season 4 2nd Year", "1st Semester", etc.
     title = re.sub(
         r'\s*([-–]\s*)?('
         r'season\s*\d+|part\s*\d+|cour\s*\d+|\d+(st|nd|rd|th)\s*season'
@@ -39,9 +38,7 @@ def clean_title_for_search(title: str) -> str:
         r')\s*$',
         '', title, flags=re.IGNORECASE,
     ).strip()
-    # Remove trailing parenthetical content
     title = re.sub(r'\s*[\(\[].*?[\)\]]\s*$', '', title).strip()
-    # Collapse multiple spaces
     title = re.sub(r'\s+', ' ', title).strip()
     return title
 
@@ -75,11 +72,9 @@ class StreamServer:
     headers: Optional[dict] = None
     group: str = "unknown"
     source_type: str = "unknown"
+    subtitle_url: Optional[str] = None
 
 
-# ── Cloudflare challenge solver ─────────────────────────
-
-# How long a cf_clearance cookie is considered valid before proactive refresh
 _CF_COOKIE_TTL = 1500  # 25 minutes (Cloudflare typically gives 30 min)
 
 
@@ -154,7 +149,6 @@ class CloudflareSolver:
             )
             page = await browser.get(f"{BASE_URL}/home")
 
-            # Wait for the challenge to resolve — poll for cf_clearance cookie
             cf_clearance = None
             for attempt in range(24):  # up to ~12 seconds
                 await asyncio.sleep(0.5)
@@ -174,7 +168,6 @@ class CloudflareSolver:
                     "Failed to obtain cf_clearance cookie after challenge"
                 )
 
-            # Collect all cookies
             all_cookies = {}
             try:
                 cookies = await browser.cookies.get_all()
@@ -183,7 +176,6 @@ class CloudflareSolver:
             except Exception:
                 all_cookies["cf_clearance"] = cf_clearance
 
-            # Get the actual User-Agent the browser is using
             ua = None
             try:
                 ua = await page.evaluate("navigator.userAgent")
@@ -231,7 +223,6 @@ class AniNekoProvider:
         if self._solver.is_valid:
             return
         async with self._clearance_lock:
-            # Double-check after acquiring lock
             if self._solver.is_valid:
                 return
             cookies, ua = await self._solver.solve()
@@ -243,7 +234,6 @@ class AniNekoProvider:
                 new_session.headers.update(self.session.headers)
                 new_session.cookies.update(self.session.cookies)
                 self.session = new_session
-            # Inject cookies into curl_cffi session
             for name, value in cookies.items():
                 self.session.cookies.set(name, value, domain=".anineko.to")
             # Match the User-Agent that solved the challenge
@@ -253,7 +243,6 @@ class AniNekoProvider:
     def _handle_cf_block(self, resp) -> bool:
         """Check if response is a Cloudflare challenge. Returns True if blocked."""
         if resp.status_code == 403:
-            # Check for CF challenge page signature
             if "cf-mitigated" in resp.headers.get("cf-mitigated", "") or \
                "Just a moment" in resp.text[:500]:
                 log.warning("Cloudflare challenge detected, invalidating clearance")
@@ -272,12 +261,10 @@ class AniNekoProvider:
         no browser is needed at all.
         """
         kwargs.setdefault("timeout", 20)
-        # Use cached clearance if we have one, otherwise try without
         if self._solver.is_valid:
             pass  # cookies already in session from last solve
         resp = self.session.get(url, **kwargs)
         if self._handle_cf_block(resp):
-            # CF is actively challenging — solve and retry
             await self._ensure_clearance()
             resp = self.session.get(url, **kwargs)
         return resp
@@ -298,7 +285,6 @@ class AniNekoProvider:
                 log.warning("Search attempt for '%s' failed: %s", attempt, e)
                 return []
 
-        # Run all attempts concurrently
         tasks = [run_attempt(att) for att in attempts]
         all_results = await asyncio.gather(*tasks)
 
@@ -391,7 +377,6 @@ class AniNekoProvider:
                 if debug:
                     debug_log.append(debug_d)
 
-                # Deduplicate by URL
                 seen = set()
                 unique = []
                 for s in sources:
@@ -399,7 +384,6 @@ class AniNekoProvider:
                         seen.add(s.url)
                         unique.append(s)
 
-                # Resolve embed URLs to direct stream URLs concurrently
                 loop = asyncio.get_running_loop()
                 
                 def resolve_server(s: StreamServer) -> StreamServer:
@@ -430,8 +414,6 @@ class AniNekoProvider:
                 await self._sleep(1 + attempt)
 
         return [], []
-
-    # ── Parsers ────────────────────────────────────────
 
     @staticmethod
     def _parse_search(html: str) -> list[AnimeRef]:
@@ -508,29 +490,48 @@ class AniNekoProvider:
         m = re.search(r"<title>([^<]+)</title>", html)
         return m.group(1).strip() if m else ""
 
+    @staticmethod
+    def _extract_subtitle_url(data_video_url: str) -> Optional[str]:
+        """Soft-sub/dub servers attach an external VTT as a query param on the
+        data-video URL instead of the video itself carrying subtitles — the
+        site's own three per-host variants: `sub=`, `caption_1=` (paired with
+        a `sub_N=` label), and `c1_file=` (paired with `c1_label=`)."""
+        qs = parse_qs(urlparse(data_video_url).query)
+        for key in ("sub", "caption_1", "c1_file"):
+            if qs.get(key):
+                return qs[key][0]
+        return None
+
     # ── Pass A: DOM data-video elements ─────────────────
 
     def _pass_dom(self, html: str) -> Tuple[List[StreamServer], dict]:
         found, notes = [], []
-        # data-video attributes on server buttons
+        # data-video attributes on server buttons. Button markup now spans
+        # multiple lines (attrs and the group <span> each on their own
+        # line), so this needs DOTALL — without it the pattern never matches
+        # and every server falls back to Pass B/D's group="unknown", which
+        # made get_stream_group() treat all of them as hard_sub regardless
+        # of what they actually were.
         matches = re.findall(
             r'<button[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</button>',
             html,
+            re.DOTALL,
         )
         for url, rest_attrs, inner in matches:
-            # Server name from text inside button
             name = re.sub(r"<[^>]+>", "", inner).strip()[:40]
-            # Group from span inside button
             group = "unknown"
             span_m = re.search(r"<span[^>]*>([^<]+)</span>", inner)
             if span_m:
                 group = span_m.group(1).strip().lower().replace(" ", "_")
                 if "hard" in group:
                     group = "hard_sub"
-                elif "soft" in group:
-                    group = "soft_sub"
                 elif "dub" in group:
                     group = "dub"
+                else:
+                    # Covers "Soft Sub" and the site's current "Sort Sub"
+                    # label (typo on their end, not ours) — anything that's
+                    # neither hard-baked nor dub is a soft-sub server.
+                    group = "soft_sub"
 
             found.append(
                 StreamServer(
@@ -538,9 +539,9 @@ class AniNekoProvider:
                     url=url,
                     group=group,
                     source_type="dom_data_video",
+                    subtitle_url=self._extract_subtitle_url(url),
                 )
             )
-        # Also check iframe src
         iframes = re.findall(r'<iframe[^>]+src\s*=\s*"([^"]+)"', html)
         for url in iframes:
             found.append(
@@ -596,7 +597,6 @@ class AniNekoProvider:
             s = s.strip()
             if not s:
                 continue
-            # Try to find JSON objects in the script
             json_objects = re.findall(r"\{[^{}]*\}", s)
             for obj_str in json_objects:
                 try:
@@ -612,7 +612,6 @@ class AniNekoProvider:
                         obj = json.loads(obj_str)
                     except (json.JSONDecodeError, ValueError):
                         continue
-                # Look for video URLs in the JSON
                 for key in ["sources", "file", "src", "url", "stream", "hls", "video"]:
                     if isinstance(obj, dict) and key in obj:
                         val = obj[key]
@@ -651,7 +650,6 @@ class AniNekoProvider:
 
     def _pass_server_groups(self, html: str) -> Tuple[List[StreamServer], dict]:
         found = []
-        # Match server buttons with data-video AND extract group from span
         matches = re.findall(
             r'data-video\s*=\s*"([^"]+)"',
             html,
@@ -693,8 +691,7 @@ class AniNekoProvider:
             if resp.status_code != 200:
                 return None
             text = resp.text
-            
-            # Check for packed scripts and decode them
+
             packed_matches = re.finditer(
                 r"eval\(function\(p,a,c,k,e,d\).*?\}\('(.*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*?)'\.split\('\|'\)\)\)",
                 text,
@@ -746,8 +743,6 @@ class AniNekoProvider:
     async def _sleep(self, seconds: float):
         await asyncio.sleep(seconds)
 
-
-# ── Quick test ─────────────────────────────────────────
 
 if __name__ == "__main__":
 

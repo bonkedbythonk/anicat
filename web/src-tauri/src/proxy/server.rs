@@ -148,7 +148,6 @@ pub async fn start_proxy(
         .route("/player/stop", get(player_stop_handler))
         .route("/player/toggle-translation", get(player_toggle_translation_handler))
         .route("/player/toggle-upscale", get(player_toggle_upscale_handler))
-        .route("/player/toggle-interpolation", get(player_toggle_interpolation_handler))
         .route("/player/toggle-auto-next", get(player_toggle_auto_next_handler))
         .route("/player/toggle-autoskip", get(player_toggle_autoskip_handler))
         .route("/player/progress", get(player_progress_handler))
@@ -281,6 +280,22 @@ fn notify_frontend(app_handle: &Option<tauri::AppHandle>, message: &str) {
     let _ = app_handle.emit("show_notification", serde_json::json!({ "message": message }));
 }
 
+/// Tell the webview a media's AniList progress/status may have changed, so it
+/// re-fetches the watching list, detail drawer, etc. (see App.tsx's
+/// `progress_updated` listener). Previously this only fired when the whole
+/// mpv window closed, so `record_playback_progress`'s writes on next/prev/stop
+/// (including the COMPLETED write on a finale, since there's no next episode
+/// to auto-advance into and mpv just sits open) never reached the frontend
+/// until the user closed mpv — Up Next stayed stale until then.
+fn notify_progress_updated(app_handle: &Option<tauri::AppHandle>, media_id: i64, episode_number: i64) {
+    let Some(app_handle) = app_handle else { return };
+    use tauri::Emitter;
+    let _ = app_handle.emit("progress_updated", serde_json::json!({
+        "media_id": media_id,
+        "episode_number": episode_number,
+    }));
+}
+
 async fn player_next_handler(
     State(state): State<ProxyState>,
     auth @ session::AuthedUser(user_id): session::AuthedUser,
@@ -310,8 +325,9 @@ async fn player_next_handler(
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
+                let app_handle = state.app_handle.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = crate::commands::playback::record_playback_progress(
+                    match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
                         user_id,
                         media_id,
@@ -321,7 +337,8 @@ async fn player_next_handler(
                         total_eps,
                     )
                     .await {
-                        log::error!("Failed to record progress on next episode transition: {}", e);
+                        Ok(()) => notify_progress_updated(&app_handle, media_id, ep_num),
+                        Err(e) => log::error!("Failed to record progress on next episode transition: {}", e),
                     }
                 });
             }
@@ -334,7 +351,27 @@ async fn player_next_handler(
             if let Err(e) = crate::commands::playback::cancel_mpv_next("Already at the last episode.").await {
                 log::error!("Failed to cancel mpv next: {}", e);
             }
-            notify_frontend(&state.app_handle, "No more episodes available.");
+            // Season handoff: when AniList knows a sequel, say so instead of
+            // dead-ending — the detail page's primary button picks it up.
+            let sequel_title = crate::commands::media::fetch_media_detail_cached(&scoped, play_info.media_id, false)
+                .await
+                .ok()
+                .and_then(|d| d.media)
+                .and_then(|m| m.relations)
+                .and_then(|r| r.edges)
+                .and_then(|edges| {
+                    edges.into_iter().find(|e| e.relation_type.as_deref() == Some("SEQUEL"))
+                })
+                .and_then(|e| e.node)
+                .and_then(|n| n.title)
+                .and_then(|t| t.english.or(t.romaji));
+            match sequel_title {
+                Some(t) => notify_frontend(
+                    &state.app_handle,
+                    &format!("Season finished. Next up: {}.", t),
+                ),
+                None => notify_frontend(&state.app_handle, "No more episodes available."),
+            }
             return Ok("ok");
         }
         log::info!(
@@ -365,6 +402,7 @@ async fn player_next_handler(
                 Some(episode_title),
                 Some(cover_image),
                 Some(play_info.total_episodes),
+                None,
             )
             .await;
             if let Err(ref e) = result {
@@ -406,8 +444,9 @@ async fn player_prev_handler(
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
+                let app_handle = state.app_handle.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = crate::commands::playback::record_playback_progress(
+                    match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
                         user_id,
                         media_id,
@@ -417,7 +456,8 @@ async fn player_prev_handler(
                         total_eps,
                     )
                     .await {
-                        log::error!("Failed to record progress on previous episode transition: {}", e);
+                        Ok(()) => notify_progress_updated(&app_handle, media_id, ep_num),
+                        Err(e) => log::error!("Failed to record progress on previous episode transition: {}", e),
                     }
                 });
             }
@@ -458,6 +498,7 @@ async fn player_prev_handler(
                 Some(episode_title),
                 Some(cover_image),
                 Some(play_info.total_episodes),
+                None,
             )
             .await;
             if let Err(ref e) = result {
@@ -499,8 +540,9 @@ async fn player_stop_handler(
                 let media_id = play_info.media_id;
                 let ep_num = play_info.episode_number;
                 let total_eps = play_info.total_episodes;
+                let app_handle = state.app_handle.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = crate::commands::playback::record_playback_progress(
+                    match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
                         user_id,
                         media_id,
@@ -510,7 +552,8 @@ async fn player_stop_handler(
                         total_eps,
                     )
                     .await {
-                        log::error!("Failed to record progress on player stop: {}", e);
+                        Ok(()) => notify_progress_updated(&app_handle, media_id, ep_num),
+                        Err(e) => log::error!("Failed to record progress on player stop: {}", e),
                     }
                 });
             }
@@ -523,7 +566,7 @@ async fn player_stop_handler(
 
 async fn player_progress_handler(
     State(state): State<ProxyState>,
-    auth: session::AuthedUser,
+    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     // Progress ticks (every 30s and once per completed seek) re-anchor the
@@ -531,22 +574,42 @@ async fn player_progress_handler(
     // Only re-anchor while playing — a tick during pause must not revive the
     // timer.
     let scoped = state.scoped_for(auth).await;
-    let play_info = {
+    let (play_info, persist_info) = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
             if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
                 pb.last_position = pos;
                 pb.last_duration = duration;
             }
+            let persist = Some((pb.media_id, pb.episode_number));
             if pb.paused {
-                None
+                (None, persist)
             } else {
-                Some(pb.clone())
+                (Some(pb.clone()), persist)
             }
         } else {
-            None
+            (None, None)
         }
     };
+    // Persist the position on every tick, not just on exit — a crash or power
+    // loss between ticks costs at most 30s of resume position. SQLite upsert
+    // only; AniList writes stay on the stop/next/exit paths.
+    if let (Some((media_id, episode_number)), Some(pos), Some(duration)) =
+        (persist_info, params.pos, params.duration)
+    {
+        if pos > 0 && duration > 0 {
+            if let Ok(db) = scoped.open_db() {
+                if let Err(e) = crate::registry::service::record_watched_episode(
+                    &db, user_id, media_id, episode_number, pos, duration,
+                ) {
+                    log::error!(
+                        "Failed to persist progress tick (media {} ep {} pos {}): {}",
+                        media_id, episode_number, pos, e
+                    );
+                }
+            }
+        }
+    }
     if let Some(pb) = play_info {
         if let (Some(pos), Some(dur)) = (params.pos, params.duration) {
             scoped.discord.set_presence(
@@ -675,6 +738,20 @@ async fn player_preload_handler(
             }
         }
     }
+    // Low Data Mode: don't start the next episode's torrent while the current
+    // one is still downloading — on a slow connection they'd fight for the
+    // same bandwidth and stall the episode being watched. If the current
+    // download already finished, the preload goes through and auto-next stays
+    // instant; otherwise the next episode resolves at play time instead.
+    if pb.provider == "nyaa" && scoped.config.read().await.stream.data_saver {
+        if scoped.torrent.any_download_active().await {
+            log::info!(
+                "Low data mode: deferring next-episode torrent preload (media {} ep {}) until current download finishes",
+                pb.media_id, next_ep
+            );
+            return Ok("ok");
+        }
+    }
     let app_state = scoped.clone();
     tokio::spawn(async move {
         match crate::commands::playback::resolve_stream_for_provider(
@@ -687,7 +764,7 @@ async fn player_preload_handler(
         )
         .await
         {
-            Ok((raw_url, headers)) => {
+            Ok((raw_url, headers, subtitle_url)) => {
                 let mut slot = app_state.preloaded_stream.lock().await;
                 *slot = Some(crate::state::PreloadedStream {
                     media_id: pb.media_id,
@@ -695,6 +772,7 @@ async fn player_preload_handler(
                     provider: pb.provider.clone(),
                     raw_url,
                     headers,
+                    subtitle_url,
                     at: std::time::Instant::now(),
                 });
                 log::info!("Preloaded next episode stream: media {} ep {}", pb.media_id, next_ep);
@@ -710,33 +788,52 @@ async fn player_toggle_translation_handler(
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested translation toggle (sub/dub): pos={:?}, duration={:?}", params.pos, params.duration);
-    let new_type = {
-        let mut cfg = state.app_state.config.write().await;
-        let current = cfg.stream.translation_type.clone();
-        let next = if current == "dub" { "sub".to_string() } else { "dub".to_string() };
-        cfg.stream.translation_type = next.clone();
-        next
-    };
-    if let Err(e) = state.app_state.save_config().await {
-        log::error!("Failed to save config on translation toggle: {}", e);
-    }
-    notify_frontend(&state.app_handle, &format!("Switched to {} translation.", new_type));
-
-    // Reload the current episode with the new translation type
     let play_info = {
         let guard = state.app_state.current_playback.lock().await;
         guard.clone()
     };
+    // If the playing show carries a per-show audio override, the toggle flips
+    // that override — flipping the global value would visibly do nothing,
+    // since the override wins at stream resolution. Otherwise flip the global.
+    let per_show_pref = play_info.as_ref().and_then(|pb| {
+        let db = state.app_state.open_db().ok()?;
+        crate::registry::service::get_media_prefs(&db, 0, pb.media_id)
+            .filter(|p| p.translation_type.is_some())
+            .map(|p| (pb.media_id, p))
+    });
+    let new_type = if let Some((media_id, mut prefs)) = per_show_pref {
+        let current = prefs.translation_type.as_deref().unwrap_or("sub");
+        let next = if current == "dub" { "sub".to_string() } else { "dub".to_string() };
+        prefs.translation_type = Some(next.clone());
+        if let Ok(db) = state.app_state.open_db() {
+            if let Err(e) = crate::registry::service::set_media_prefs(&db, 0, media_id, &prefs) {
+                log::error!("Failed to save per-show translation toggle: {}", e);
+            }
+        }
+        next
+    } else {
+        let next = {
+            let mut cfg = state.app_state.config.write().await;
+            let current = cfg.stream.translation_type.clone();
+            let next = if current == "dub" { "sub".to_string() } else { "dub".to_string() };
+            cfg.stream.translation_type = next.clone();
+            next
+        };
+        if let Err(e) = state.app_state.save_config().await {
+            log::error!("Failed to save config on translation toggle: {}", e);
+        }
+        next
+    };
+    notify_frontend(&state.app_handle, &format!("Switched to {} translation.", new_type));
     if let Some(play_info) = play_info {
         // Persist the current position to watch_history before reloading.
-        // Otherwise start_playback's resume logic reads a stale/absent entry
-        // (the 30s progress ticks only update an in-memory field, never the DB)
-        // and the sub/dub switch restarts the episode from the beginning
-        // instead of resuming where the viewer is.
+        // The 30s progress ticks also persist, but the last one can be up to
+        // 30s stale — without this write the sub/dub switch would resume up
+        // to half a minute behind where the viewer actually is.
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
                 // Sub/dub toggle is desktop-only (mobile never calls this route).
-                let _ = crate::commands::playback::record_playback_progress(
+                if let Err(e) = crate::commands::playback::record_playback_progress(
                     &state.app_state,
                     0,
                     play_info.media_id,
@@ -745,7 +842,13 @@ async fn player_toggle_translation_handler(
                     duration,
                     play_info.total_episodes,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to persist progress on sub/dub switch (media {} ep {}): {}",
+                        play_info.media_id, play_info.episode_number, e
+                    );
+                }
             }
         }
         if let Some(app_handle) = state.app_handle.clone() {
@@ -756,19 +859,28 @@ async fn player_toggle_translation_handler(
                 let provider = play_info.provider.clone();
                 let episode_title = play_info.episode_title.clone();
                 let cover_image = play_info.cover_image.clone();
-                let _ = crate::commands::playback::start_playback(
+                let media_id = play_info.media_id;
+                let episode_number = play_info.episode_number;
+                if let Err(e) = crate::commands::playback::start_playback(
                     app_handle.clone(),
                     tauri_state,
-                    play_info.media_id,
-                    play_info.episode_number,
+                    media_id,
+                    episode_number,
                     Some(provider),
                     None, // Pass None to let it auto-select the server based on the new sub/dub preference
                     Some(title),
                     Some(episode_title),
                     Some(cover_image),
                     None,
+                    None,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to restart playback after sub/dub switch (media {} ep {}): {}",
+                        media_id, episode_number, e
+                    );
+                }
             });
         }
     }
@@ -800,28 +912,6 @@ async fn player_toggle_upscale_handler(
     if let Some(ah) = &state.app_handle {
         use tauri::Emitter;
         let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "shader_profile", "value": new_val }));
-    }
-    Ok("ok")
-}
-
-async fn player_toggle_interpolation_handler(
-    State(state): State<ProxyState>,
-) -> Result<&'static str, StatusCode> {
-    log::info!("Player requested smooth-motion (interpolation) toggle");
-    let new_val = {
-        let mut cfg = state.app_state.config.write().await;
-        let next = if cfg.stream.interpolation == "off" { "on" } else { "off" };
-        cfg.stream.interpolation = next.to_string();
-        next.to_string()
-    };
-    if let Err(e) = state.app_state.save_config().await {
-        log::error!("Failed to save config on interpolation toggle: {}", e);
-    }
-    let enabled = new_val != "off";
-    notify_frontend(&state.app_handle, &format!("Smooth motion {}.", if enabled { "enabled" } else { "disabled" }));
-    if let Some(ah) = &state.app_handle {
-        use tauri::Emitter;
-        let _ = ah.emit("anicat_setting_toggled", serde_json::json!({ "key": "interpolation", "value": new_val }));
     }
     Ok("ok")
 }

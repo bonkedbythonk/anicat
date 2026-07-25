@@ -25,6 +25,13 @@ async fn main() {
     let app_state = AppState::new();
     let client = app_state.http_client.clone();
 
+    // Prewarm the scraper sidecar at boot instead of on the first mobile
+    // request, so its startup cost isn't on some friend's critical path.
+    let scraper_manager_clone = app_state.scraper_manager.clone();
+    tokio::spawn(async move {
+        scraper_manager_clone.prewarm().await;
+    });
+
     let bound = anicat::proxy::server::start_proxy(client, None, app_state.clone()).await;
     log::info!("anicat-server listening on {}", bound);
 

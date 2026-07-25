@@ -29,11 +29,6 @@ function Grid() {
   );
 }
 
-function ActiveScopeSetter({ name }: { name: string }) {
-  useAppStore.getState().setActiveFocusScope(name);
-  return null;
-}
-
 describe("useSpatialNavigation", () => {
   it("moves down by columns", () => {
     render(<Grid />);
@@ -84,14 +79,13 @@ describe("useSpatialNavigation", () => {
   });
 
   it("ignores arrow keys when another scope is active", () => {
-    render(
-      <>
-        <ActiveScopeSetter name="other" />
-        <Grid />
-      </>
-    );
+    render(<Grid />);
     const buttons = screen.getAllByRole("button");
+    // Focusing the grid auto-activates it (FocusScope.onFocus). Simulate a
+    // different scope then taking over the active slot; arrows must be ignored
+    // here even though a grid item still holds DOM focus.
     act(() => buttons[0].focus());
+    act(() => useAppStore.getState().setActiveFocusScope("other"));
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(document.activeElement).toBe(buttons[0]);
   });

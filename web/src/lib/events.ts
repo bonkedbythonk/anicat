@@ -45,6 +45,7 @@ export function invalidateProgressQueries(qc: QueryClient, mediaId?: number) {
   if (mediaId !== undefined) {
     qc.invalidateQueries({ queryKey: ["media-detail", mediaId], refetchType: "all" });
     qc.invalidateQueries({ queryKey: ["media-episodes", mediaId], refetchType: "all" });
+    qc.invalidateQueries({ queryKey: ["watch-history", mediaId], refetchType: "all" });
   }
 }
 

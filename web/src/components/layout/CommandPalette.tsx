@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { proxyImage } from "@/lib/proxy";
 import { useAppStore } from "@/stores/app";
+import { FocusScope, useFocusable } from "@/focus";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
+import { FocusContext } from "@/focus/FocusScope";
 import type { ViewType } from "@/lib/types";
 
 interface PaletteRow {
@@ -26,6 +29,99 @@ const NAV_TARGETS: { label: string; view: ViewType }[] = [
   { label: "Go to Settings", view: "settings" },
 ];
 
+function PaletteRowButton({ row }: { row: PaletteRow }) {
+  const { ref, isFocused, tabIndex } = useFocusable<HTMLButtonElement>();
+
+  return (
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={row.run}
+      onMouseMove={() => ref.current?.focus()}
+      className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-pointer ${
+        isFocused ? "bg-accent/12 text-foreground" : "text-foreground/60"
+      }`}
+    >
+      {row.cover && (
+        <img src={proxyImage(row.cover)} alt="" className="w-6 h-8 rounded-sm object-cover shrink-0" />
+      )}
+      <span className="flex-1 truncate text-[13px]">{row.label}</span>
+      {row.hint && <span className="meta-mono text-muted-foreground shrink-0">{row.hint}</span>}
+    </button>
+  );
+}
+
+function PaletteResults({
+  rows,
+  query,
+  inputRef,
+}: {
+  rows: PaletteRow[];
+  query: string;
+  inputRef: RefObject<HTMLInputElement | null>;
+}) {
+  const scope = useContext(FocusContext);
+
+  useEffect(() => {
+    if (!scope) return;
+    const handler = (e: KeyboardEvent) => {
+      const inputFocused = document.activeElement === inputRef.current;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (inputFocused) {
+          scope.focusFirst();
+        } else {
+          scope.focusNext();
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (inputFocused) {
+          scope.focusLast();
+        } else {
+          scope.focusPrev();
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const index = inputFocused ? 0 : scope.activeIndex;
+        rows[index]?.run();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [rows, scope, inputRef]);
+
+  const sections: { title: string; rows: PaletteRow[] }[] = [];
+  rows.forEach((row) => {
+    const title =
+      row.kind === "library" || row.kind === "action"
+        ? "Your library"
+        : row.kind === "nav"
+          ? "Navigate"
+          : "AniList";
+    const section = sections.find((s) => s.title === title);
+    if (section) section.rows.push(row);
+    else sections.push({ title, rows: [row] });
+  });
+
+  return (
+    <>
+      {sections.length === 0 && (
+        <p className="meta-mono px-4 py-6 text-muted-foreground text-center">
+          {query ? "No matches" : "Type to search"}
+        </p>
+      )}
+      {sections.map((section) => (
+        <div key={section.title} className="px-1.5 pb-1">
+          <div className="meta-mono px-2.5 pt-2 pb-1 text-muted-foreground/70 select-none">{section.title}</div>
+          {section.rows.map((row) => (
+            <PaletteRowButton key={row.key} row={row} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 /** Cmd-K: one palette for everything. Library matches first (they're what
  * you almost always want), then actions on the top match, then AniList for
  * things not in your library yet. */
@@ -36,11 +132,12 @@ export function CommandPalette() {
   const closeDetail = useAppStore((s) => s.closeDetail);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const activeFocusScope = useAppStore((s) => s.activeFocusScope);
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
 
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const previousScopeRef = useRef<string | null>(null);
 
   // Library pool: watching + repeating + planning (the lists you actually
   // jump to). Shares query keys with the home view, so usually cache-warm.
@@ -76,7 +173,6 @@ export function CommandPalette() {
   const close = () => {
     setOpen(false);
     setQuery("");
-    setSelected(0);
   };
 
   const rows = useMemo<PaletteRow[]>(() => {
@@ -159,58 +255,31 @@ export function CommandPalette() {
   }, [query, watchingQ.data, repeatingQ.data, planningQ.data, anilistQ.data]);
 
   useEffect(() => {
-    setSelected(0);
-  }, [query]);
-
-  useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 30);
+    if (!open) return;
+    previousScopeRef.current = activeFocusScope;
+    setActiveFocusScope("command-palette");
+    const t = setTimeout(() => inputRef.current?.focus(), 30);
+    return () => {
+      clearTimeout(t);
+      setActiveFocusScope(previousScopeRef.current);
+    };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelected((s) => Math.min(s + 1, rows.length - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelected((s) => Math.max(s - 1, 0));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        rows[selected]?.run();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, rows, selected]);
 
-  useEffect(() => {
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${selected}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+  const modalRef = useModalDismiss<HTMLDivElement>(open, close);
+
 
   if (!open) return null;
 
-  const sections: { title: string; rows: { row: PaletteRow; idx: number }[] }[] = [];
-  rows.forEach((row, idx) => {
-    const title =
-      row.kind === "library" || row.kind === "action"
-        ? "Your library"
-        : row.kind === "nav"
-          ? "Navigate"
-          : "AniList";
-    const section = sections.find((s) => s.title === title);
-    if (section) section.rows.push({ row, idx });
-    else sections.push({ title, rows: [{ row, idx }] });
-  });
-
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-[300] bg-black/50 flex items-start justify-center pt-[14vh]"
       onClick={close}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command Palette"
+      tabIndex={-1}
     >
       <div
         className="w-[min(560px,92vw)] rounded-lg border border-border bg-surface shadow-2xl shadow-black/50 overflow-hidden animate-fade-in-fast"
@@ -227,35 +296,14 @@ export function CommandPalette() {
           {anilistQ.isFetching && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
           <kbd className="meta-mono text-[9px] text-muted-foreground border border-border rounded px-1.5 py-0.5">Esc</kbd>
         </div>
-        <div ref={listRef} className="max-h-[46vh] overflow-y-auto py-1.5">
-          {sections.length === 0 && (
-            <p className="meta-mono px-4 py-6 text-muted-foreground text-center">
-              {query ? "No matches" : "Type to search"}
-            </p>
-          )}
-          {sections.map((section) => (
-            <div key={section.title} className="px-1.5 pb-1">
-              <div className="meta-mono px-2.5 pt-2 pb-1 text-muted-foreground/70 select-none">{section.title}</div>
-              {section.rows.map(({ row, idx }) => (
-                <button
-                  key={row.key}
-                  data-idx={idx}
-                  onClick={row.run}
-                  onMouseMove={() => setSelected(idx)}
-                  className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-pointer ${
-                    idx === selected ? "bg-accent/12 text-foreground" : "text-foreground/60"
-                  }`}
-                >
-                  {row.cover && (
-                    <img src={proxyImage(row.cover)} alt="" className="w-6 h-8 rounded-sm object-cover shrink-0" />
-                  )}
-                  <span className="flex-1 truncate text-[13px]">{row.label}</span>
-                  {row.hint && <span className="meta-mono text-muted-foreground shrink-0">{row.hint}</span>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
+        <FocusScope
+          name="command-palette-list"
+          orientation="vertical"
+          role="listbox"
+          className="max-h-[46vh] overflow-y-auto py-1.5"
+        >
+          <PaletteResults rows={rows} query={query} inputRef={inputRef} />
+        </FocusScope>
       </div>
     </div>
   );

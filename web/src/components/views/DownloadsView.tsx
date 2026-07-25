@@ -110,7 +110,6 @@ export function DownloadsView() {
     }
   };
 
-  // Group completed items by media_id
   const completedGroups = queue
     .filter((item) => item.status === "completed")
     .reduce((groups: Record<number, { title: string; cover?: string; episodes: QueueItem[] }>, item) => {

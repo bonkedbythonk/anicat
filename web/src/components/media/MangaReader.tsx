@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight, Loader2, Maximize2, Minimize2, Book, FileText, ScrollText, BookX } from "lucide-react";
 import { apiOrigin, mediaApi } from "@/lib/api";
+import { useSettingsStore } from "@/stores/app";
 
 declare global {
   interface Window {
@@ -49,7 +50,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   // on close the whole app gets stuck fullscreen.
   const enteredFullscreenRef = useRef(false);
 
-  // Load reading direction preference on mount and clear presence on unmount
   useEffect(() => {
     const savedDirection = localStorage.getItem("anicat_manga_reading_direction");
     if (savedDirection === "ltr" || savedDirection === "rtl") {
@@ -90,7 +90,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     localStorage.setItem(`anicat_manga_mode_${mediaId}`, mode);
   };
 
-  // Sync fullscreen state with browser
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isFull = !!(
@@ -115,7 +114,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     };
   }, []);
 
-  // Persist current page
   useEffect(() => {
     if (!loading && pages.length > 0) {
       localStorage.setItem(`anicat_manga_${mediaId}_${chapterNumber}_page`, currentPage.toString());
@@ -134,8 +132,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       .then(data => {
         setPages(data.thumbnails || []);
         setLoading(false);
-        
-        // Restore saved page if not provided in props
+
         if (initialPage === 0) {
           const savedPage = localStorage.getItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
           if (savedPage) {
@@ -150,22 +147,46 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       });
   }, [mediaId, chapterNumber, initialPage, reloadKey]);
 
-  // Pre-load next pages logic
+  const dataSaver = useSettingsStore((s) => s.dataSaver);
+
   useEffect(() => {
-    if (pages.length > 0) {
-      const nextPages = pages.slice(currentPage, currentPage + 6);
-      nextPages.forEach((src, idx) => {
+    if (pages.length === 0) return;
+    // Low Data Mode: 2 pages ahead, loaded strictly one at a time — on a slow
+    // connection six parallel image fetches delay the very page the reader is
+    // turning to. Otherwise: 6 ahead in parallel, as before.
+    const ahead = dataSaver ? 2 : 6;
+    const nextPages = pages.slice(currentPage, currentPage + ahead);
+    if (dataSaver) {
+      let cancelled = false;
+      const loadOne = (idx: number) => {
+        if (cancelled || idx >= nextPages.length) return;
         const globalIdx = currentPage + idx;
-        if (!loadedImages.has(globalIdx)) {
-          const img = new Image();
-          img.src = getProxyUrl(src);
-          img.onload = () => {
-            setLoadedImages(prev => new Set(prev).add(globalIdx));
-          };
+        if (loadedImages.has(globalIdx)) {
+          loadOne(idx + 1);
+          return;
         }
-      });
+        const img = new Image();
+        img.src = getProxyUrl(nextPages[idx]);
+        img.onload = () => {
+          setLoadedImages(prev => new Set(prev).add(globalIdx));
+          loadOne(idx + 1);
+        };
+        img.onerror = () => loadOne(idx + 1);
+      };
+      loadOne(0);
+      return () => { cancelled = true; };
     }
-  }, [currentPage, pages, loadedImages]);
+    nextPages.forEach((src, idx) => {
+      const globalIdx = currentPage + idx;
+      if (!loadedImages.has(globalIdx)) {
+        const img = new Image();
+        img.src = getProxyUrl(src);
+        img.onload = () => {
+          setLoadedImages(prev => new Set(prev).add(globalIdx));
+        };
+      }
+    });
+  }, [currentPage, pages, loadedImages, dataSaver]);
 
   const handleNext = useCallback(() => {
     const now = Date.now();
@@ -653,11 +674,29 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
             <div 
               className={`absolute inset-y-0 left-0 w-1/4 z-10 ${readingDirection === 'rtl' ? 'cursor-e-resize' : 'cursor-w-resize'}`} 
               onClick={readingDirection === "rtl" ? handleNext : handlePrev} 
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (readingDirection === "rtl") handleNext(); else handlePrev();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label={readingDirection === "rtl" ? "Next page" : "Previous page"}
             />
             {/* Right Zone (Prev in RTL, Next in LTR) */}
             <div 
               className={`absolute inset-y-0 right-0 w-1/4 z-10 ${readingDirection === 'rtl' ? 'cursor-w-resize' : 'cursor-e-resize'}`} 
               onClick={readingDirection === "rtl" ? handlePrev : handleNext} 
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (readingDirection === "rtl") handlePrev(); else handleNext();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label={readingDirection === "rtl" ? "Previous page" : "Next page"}
             />
             {/* Center Zone */}
             <div 
@@ -666,6 +705,15 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                 if ((e.target as HTMLElement).closest('button')) return;
                 setShowControls(p => !p);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setShowControls(p => !p);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="Toggle controls"
             />
 
             <div

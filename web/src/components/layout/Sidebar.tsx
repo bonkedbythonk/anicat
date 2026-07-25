@@ -1,6 +1,6 @@
 import { useAppStore } from "@/stores/app";
 import { usesOverlayTitlebar, isMacOS } from "@/lib/platform";
-import { useFocusable } from "@/focus";
+import { useFocusable, FocusScope, ScopeNav } from "@/focus";
 import type { ViewType } from "@/lib/types";
 
 interface NavItem {
@@ -23,6 +23,41 @@ const systemItems: NavItem[] = [
   { label: "Settings", view: "settings" },
 ];
 
+function FocusableNavItem({
+  item,
+  isActive,
+  onClick,
+}: {
+  item: NavItem;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  return (
+    <button
+      ref={ref}
+      tabIndex={tabIndex}
+      onClick={onClick}
+      aria-current={isActive ? "page" : undefined}
+      className={`group relative w-full flex items-center justify-between py-[7px] pl-5 pr-4 text-[13px] cursor-pointer text-left ${
+        isActive
+          ? "text-foreground bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] font-semibold"
+          : "text-foreground/55 hover:text-foreground/85"
+      }`}
+    >
+      <span>{item.label}</span>
+      {item.shortcut && (
+        <kbd
+          aria-hidden="true"
+          className="meta-mono hidden group-hover:inline-block text-[9px] px-1.5 py-0.5 rounded bg-foreground/[0.06] text-muted-foreground border border-border/50"
+        >
+          {item.shortcut}
+        </kbd>
+      )}
+    </button>
+  );
+}
+
 function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
   const currentView = useAppStore((s) => s.currentView);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
@@ -37,31 +72,14 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
   return (
     <div>
       <div className="meta-mono px-5 pb-1.5 pt-4 text-muted-foreground/70 select-none">{title}</div>
-      {items.map((item) => {
-        const isActive = currentView === item.view;
-        return (
-          <button
-            key={item.view}
-            onClick={() => handleNavigate(item.view)}
-            aria-current={isActive ? "page" : undefined}
-            className={`group relative w-full flex items-center justify-between py-[7px] pl-5 pr-4 text-[13px] cursor-pointer text-left ${
-              isActive
-                ? "text-foreground bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] font-semibold"
-                : "text-foreground/55 hover:text-foreground/85"
-            }`}
-          >
-            <span>{item.label}</span>
-            {item.shortcut && (
-              <kbd
-                aria-hidden="true"
-                className="meta-mono hidden group-hover:inline-block text-[9px] px-1.5 py-0.5 rounded bg-foreground/[0.06] text-muted-foreground border border-border/50"
-              >
-                {item.shortcut}
-              </kbd>
-            )}
-          </button>
-        );
-      })}
+      {items.map((item) => (
+        <FocusableNavItem
+          key={item.view}
+          item={item}
+          isActive={currentView === item.view}
+          onClick={() => handleNavigate(item.view)}
+        />
+      ))}
     </div>
   );
 }
@@ -82,7 +100,8 @@ export function Sidebar() {
         : "Connecting";
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 z-50 flex flex-col glass-fixed" style={{ width: 200 }}>
+    <FocusScope as="aside" name="sidebar" orientation="vertical" className="fixed left-0 top-0 bottom-0 z-50 flex flex-col glass-fixed" style={{ width: 200 }}>
+      <ScopeNav />
       <div
         data-tauri-drag-region
         className={`w-full cursor-default select-none ${usesOverlayTitlebar ? "h-[38px]" : "h-4"} shrink-0`}
@@ -107,6 +126,6 @@ export function Sidebar() {
           <kbd className="meta-mono text-[9px] text-muted-foreground">{isMacOS ? "⌘K" : "Ctrl K"}</kbd>
         </button>
       </div>
-    </aside>
+    </FocusScope>
   );
 }

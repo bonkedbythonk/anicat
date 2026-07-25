@@ -162,6 +162,8 @@ export interface StreamServer {
   isM3U8?: boolean;
   headers?: Record<string, string>;
   group?: string;
+  /** Torrent releases only — swarm health, shown in the picker. */
+  seeders?: number;
 }
 
 export interface Character {

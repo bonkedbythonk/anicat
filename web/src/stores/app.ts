@@ -14,7 +14,6 @@ interface AppConfig {
   stream?: {
     data_saver?: boolean;
     shader_profile?: string;
-    interpolation?: string;
     translation_type?: string;
   };
   api?: {
@@ -87,6 +86,32 @@ interface AppState {
   // Notifications
   notification: { message: string; type: "info" | "error" } | null;
   setNotification: (n: { message: string; type: "info" | "error" } | null) => void;
+
+  // Stream loading overlay
+  playbackLoading: {
+    isLoading: boolean;
+    mediaId?: number;
+    episodeNumber?: number;
+    title?: string;
+    coverImage?: string;
+    statusText: string;
+    step: number;
+  };
+  setPlaybackLoading: (loading: {
+    isLoading: boolean;
+    mediaId?: number;
+    episodeNumber?: number;
+    title?: string;
+    coverImage?: string;
+    statusText?: string;
+    step?: number;
+  }) => void;
+
+  // True while the external mpv window is open (backend emits
+  // anicat_playback_state on spawn/exit). Low Data Mode uses this to pause
+  // background traffic (home polling, hover prefetch) while streaming.
+  playerActive: boolean;
+  setPlayerActive: (active: boolean) => void;
 
   // My Lists tab/type — lifted out of ListsView because it unmounts whenever
   // the detail page opens (a sibling branch in App.tsx's AnimatePresence
@@ -216,6 +241,24 @@ export const useAppStore = create<AppState>((set) => ({
 
   notification: null,
   setNotification: (notification) => set({ notification }),
+
+  playbackLoading: {
+    isLoading: false,
+    statusText: "",
+    step: 1,
+  },
+  setPlaybackLoading: (loading) =>
+    set((state) => ({
+      playbackLoading: {
+        ...state.playbackLoading,
+        ...loading,
+        statusText: loading.statusText ?? state.playbackLoading.statusText,
+        step: loading.step ?? state.playbackLoading.step,
+      },
+    })),
+
+  playerActive: false,
+  setPlayerActive: (playerActive) => set({ playerActive }),
 }));
 
 // Separate store for playback to avoid re-rendering non-playback components
@@ -256,7 +299,6 @@ interface SettingsState {
   notifications: boolean;
   translationType: "sub" | "dub";
   shaderProfile: string;
-  interpolation: string;
   setDefaultProvider: (p: string) => void;
   setAutoplay: (v: boolean) => void;
   setAutoskip: (v: boolean) => void;
@@ -267,7 +309,6 @@ interface SettingsState {
   setAnilistToken: (t: string | null) => void;
   setTranslationType: (v: "sub" | "dub") => void;
   setShaderProfile: (v: string) => void;
-  setInterpolation: (v: string) => void;
   loadFromConfig: (config: AppConfig) => void;
 }
 
@@ -283,7 +324,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   notifications: true,
   translationType: "sub",
   shaderProfile: "balanced",
-  interpolation: "off",
   setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
   setAutoplay: (autoplay) => set({ autoplay }),
   setAutoskip: (autoskip) => set({ autoskip }),
@@ -295,7 +335,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAnilistToken: (anilistToken) => set({ anilistToken }),
   setTranslationType: (translationType) => set({ translationType }),
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
-  setInterpolation: (interpolation) => set({ interpolation }),
   loadFromConfig: (config) =>
     set({
       defaultProvider: config?.general?.provider || "mkissa",
@@ -309,6 +348,5 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       anilistToken: config?.api?.anilist_token || null,
       translationType: (config?.stream?.translation_type as "sub" | "dub") || "sub",
       shaderProfile: config?.stream?.shader_profile || "balanced",
-      interpolation: config?.stream?.interpolation || "off",
     }),
 }));

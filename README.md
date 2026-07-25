@@ -69,7 +69,7 @@ AniList is only used for tracking. Playback and the episode list do not require 
 - **Up Next** — A single "continue where you left off" queue across every show in progress, plus a "Pick for me" random-episode button for when you can't decide.
 - **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip). Mkissa and AniNeko scraper providers with automatic fallback between them, plus a torrent-backed provider (SubsPlease API + Nyaa RSS) that streams straight from the swarm while it downloads — no waiting for the file to finish. Sub/dub selection, resume position, auto-next into the following episode.
 - **Trailers** — View a title's trailer directly from the detail page.
-- **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, and AniList progress sync.
+- **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, vertical sidebars for unobstructive desktop reading, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
 - **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
 - **Schedule** — 7-day airing calendar filtered to your watching list.

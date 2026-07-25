@@ -6,14 +6,10 @@ import { mediaApi, type UserProfile, type MediaItem, type WatchActivityEntry } f
 import { proxyImage } from "@/lib/proxy";
 import { useAppStore } from "@/stores/app";
 import { LazyCard } from "@/components/media/LazyCard";
+import { parseWatchedAt } from "@/lib/date";
 
 interface ProfileViewProps {
   onSelect?: (item: MediaItem) => void;
-}
-
-// SQLite datetime('now') strings are UTC without a zone suffix.
-function parseWatchedAt(s: string): Date {
-  return new Date(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
 }
 
 function dayKey(d: Date): string {

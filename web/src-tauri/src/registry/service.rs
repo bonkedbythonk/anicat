@@ -54,7 +54,6 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
 
-        // Migration: rename provider key gogoanime → anineko
         let _ = conn.execute(
             "UPDATE media_records SET provider_mapping = REPLACE(provider_mapping, ?1, ?2)
              WHERE provider_mapping LIKE ?3",
@@ -64,7 +63,6 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
         conn.pragma_update(None, "user_version", 2)
             .map_err(|e| e.to_string())?;
     } else if version < 2 {
-        // Migrations for download_queue columns
         let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN media_title TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN cover_image TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE download_queue ADD COLUMN error_message TEXT", []);
@@ -157,6 +155,24 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    // Migration (v5): per-show preference overrides. A NULL column means
+    // "inherit the global config value"; a row exists only while at least one
+    // override is set (set_media_prefs deletes all-NULL rows).
+    if version < 5 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media_prefs (
+                user_id INTEGER NOT NULL DEFAULT 0,
+                media_id INTEGER NOT NULL,
+                provider TEXT,
+                translation_type TEXT,
+                PRIMARY KEY (user_id, media_id)
+            );",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 5)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: SQLite's default
     // rollback-journal mode serializes all writers, which is fine for one
     // desktop user but starts to matter once several people's progress
@@ -202,6 +218,59 @@ pub fn set_provider_slug(
     )
     .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MediaPrefs {
+    pub provider: Option<String>,
+    pub translation_type: Option<String>,
+}
+
+pub fn get_media_prefs(
+    conn: &rusqlite::Connection,
+    user_id: i64,
+    media_id: i64,
+) -> Option<MediaPrefs> {
+    conn.query_row(
+        "SELECT provider, translation_type FROM media_prefs
+         WHERE user_id = ?1 AND media_id = ?2",
+        params![user_id, media_id],
+        |row| {
+            Ok(MediaPrefs {
+                provider: row.get(0)?,
+                translation_type: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn set_media_prefs(
+    conn: &rusqlite::Connection,
+    user_id: i64,
+    media_id: i64,
+    prefs: &MediaPrefs,
+) -> Result<(), String> {
+    if prefs.provider.is_none() && prefs.translation_type.is_none() {
+        conn.execute(
+            "DELETE FROM media_prefs WHERE user_id = ?1 AND media_id = ?2",
+            params![user_id, media_id],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO media_prefs (user_id, media_id, provider, translation_type)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(user_id, media_id) DO UPDATE SET
+           provider = excluded.provider,
+           translation_type = excluded.translation_type",
+        params![user_id, media_id, prefs.provider, prefs.translation_type],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -712,10 +781,32 @@ mod tests {
     }
 
     #[test]
-    fn migration_lands_on_v4() {
+    fn migration_lands_on_v5() {
         let conn = migrated_conn();
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
+    }
+
+    #[test]
+    fn media_prefs_roundtrip_and_all_null_delete() {
+        let conn = migrated_conn();
+        assert!(get_media_prefs(&conn, 0, 42).is_none());
+
+        let prefs = MediaPrefs {
+            provider: Some("nyaa".into()),
+            translation_type: Some("dub".into()),
+        };
+        set_media_prefs(&conn, 0, 42, &prefs).unwrap();
+        let got = get_media_prefs(&conn, 0, 42).unwrap();
+        assert_eq!(got.provider.as_deref(), Some("nyaa"));
+        assert_eq!(got.translation_type.as_deref(), Some("dub"));
+
+        // Another user's prefs stay isolated.
+        assert!(get_media_prefs(&conn, 1, 42).is_none());
+
+        // Clearing both overrides removes the row entirely.
+        set_media_prefs(&conn, 0, 42, &MediaPrefs::default()).unwrap();
+        assert!(get_media_prefs(&conn, 0, 42).is_none());
     }
 
     #[test]

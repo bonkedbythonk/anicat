@@ -12,7 +12,6 @@ import sys
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(levelname)s] %(name)s: %(message)s",

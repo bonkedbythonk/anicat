@@ -16,11 +16,11 @@ import { ScheduleView } from "@/components/views/ScheduleView";
 
 import { ProfileView } from "@/components/views/ProfileView";
 
-// Heavy views code-split — loaded only when first navigated to
 const MangaView = lazy(() => import("@/components/views/MangaView").then(m => ({ default: m.MangaView })));
 const SettingsView = lazy(() => import("@/components/views/SettingsView").then(m => ({ default: m.SettingsView })));
 const DownloadsView = lazy(() => import("@/components/views/DownloadsView").then(m => ({ default: m.DownloadsView })));
 import { MediaDetail } from "@/components/media/MediaDetail";
+import { StreamLoadingModal } from "@/components/media/StreamLoadingModal";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { Onboarding } from "@/components/layout/Onboarding";
@@ -243,12 +243,17 @@ export default function App() {
       if (key === "autoskip") useSettingsStore.getState().setAutoskip(Boolean(value));
       if (key === "autoplay") useSettingsStore.getState().setAutoplay(Boolean(value));
       if (key === "shader_profile") useSettingsStore.getState().setShaderProfile(String(value));
-      if (key === "interpolation") useSettingsStore.getState().setInterpolation(String(value));
+    });
+    // Backend emits this when the external mpv window spawns and when it
+    // exits. Low Data Mode gates background traffic on it.
+    const unlistenPlayback = listen<{ active: boolean }>("anicat_playback_state", (event) => {
+      useAppStore.getState().setPlayerActive(Boolean(event.payload.active));
     });
     return () => {
       unlisten.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
       unlistenSetting.then((fn) => fn());
+      unlistenPlayback.then((fn) => fn());
     };
   }, [setNotification]);
 
@@ -351,6 +356,7 @@ export default function App() {
       <KeyboardShortcutsOverlay />
       <CommandPalette />
       <Picker />
+      <StreamLoadingModal />
     </div>
   );
 }

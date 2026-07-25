@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-export type UiStyle = "neon-abyss" | "sakura-zen" | "retro-manga";
+export type UiStyle = "ink-and-index" | "sakura-zen" | "retro-manga";
 
 const SAKURA_ZEN_FONT_URL =
   "https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&display=swap";
@@ -44,7 +44,7 @@ function loadRetroMangaFont() {
 }
 
 function applyStyle() {
-  const style = (localStorage.getItem("anicat_ui_style") as UiStyle) || "neon-abyss";
+  const style = (localStorage.getItem("anicat_ui_style") as UiStyle) || "ink-and-index";
   document.documentElement.setAttribute("data-style", style);
   if (style === "sakura-zen") {
     loadSakuraFont();

@@ -101,6 +101,14 @@ pub async fn cancel_mpv_next(message: &str) -> Result<(), String> {
     try_send_ipc(&ipc_path, vec![cmd_osd, cmd_cancel]).await
 }
 
+/// Tells the webview whether the external mpv window is open. Low Data Mode
+/// uses this to pause background traffic (home polling, hover prefetch) while
+/// a stream is running. Emitted on successful playback start (fresh spawn or
+/// IPC reuse) and from the exit monitor when mpv closes.
+fn emit_playback_active(app: &AppHandle, active: bool) {
+    let _ = app.emit("anicat_playback_state", serde_json::json!({ "active": active }));
+}
+
 pub async fn kill_current_mpv() {
     let child = {
         if let Ok(mut guard) = CURRENT_MPV.lock() {
@@ -249,10 +257,6 @@ fn server_speed_rank(server: &crate::scraper::client::StreamServer) -> u8 {
     4
 }
 
-/// There is no lower-quality preference worth keeping around — 1080p is
-/// always the target when it's available, full stop.
-const TARGET_QUALITY: u32 = 1080;
-
 /// Numeric resolution parsed from a server's quality label ("1080p" -> 1080),
 /// or 0 when the label isn't a resolution (e.g. "hls", "mp4", "unknown").
 fn resolution_rank(server: &crate::scraper::client::StreamServer) -> u32 {
@@ -269,23 +273,30 @@ fn quality_sort_key(server: &crate::scraper::client::StreamServer) -> (u8, std::
     (server_speed_rank(server), std::cmp::Reverse(resolution_rank(server)))
 }
 
-/// Picks the fastest 1080p server across every CDN if one exists at all;
-/// otherwise falls back to the fastest CDN, preferring the highest
-/// resolution it has on offer.
-fn pick_best_server(servers: &[crate::scraper::client::StreamServer]) -> Option<&crate::scraper::client::StreamServer> {
+/// Picks the fastest target_quality server (1080p for normal mode, 720p for data_saver)
+/// across every CDN if one exists; otherwise falls back to the fastest CDN with the highest
+/// resolution on offer.
+fn pick_best_server<'a>(
+    servers: &'a [crate::scraper::client::StreamServer],
+    target_quality: u32,
+) -> Option<&'a crate::scraper::client::StreamServer> {
     servers.iter()
-        .filter(|s| resolution_rank(s) == TARGET_QUALITY)
+        .filter(|s| resolution_rank(s) == target_quality)
         .min_by_key(|s| server_speed_rank(s))
         .or_else(|| servers.iter().min_by_key(|s| quality_sort_key(s)))
 }
 
-fn pick_best_server_in_group<'a>(servers: &'a [crate::scraper::client::StreamServer], groups: &[&str]) -> Option<&'a crate::scraper::client::StreamServer> {
+fn pick_best_server_in_group<'a>(
+    servers: &'a [crate::scraper::client::StreamServer],
+    groups: &[&str],
+    target_quality: u32,
+) -> Option<&'a crate::scraper::client::StreamServer> {
     let in_group: Vec<&crate::scraper::client::StreamServer> = servers.iter().filter(|s| {
         let g = get_stream_group(s);
         groups.contains(&g)
     }).collect();
     in_group.iter()
-        .filter(|s| resolution_rank(s) == TARGET_QUALITY)
+        .filter(|s| resolution_rank(s) == target_quality)
         .min_by_key(|s| server_speed_rank(s))
         .copied()
         .or_else(|| in_group.iter().min_by_key(|s| quality_sort_key(s)).copied())
@@ -320,6 +331,24 @@ pub(crate) fn provider_label(provider: &str) -> &str {
 /// its slug, scrape the episode, and pick the best server for the configured
 /// sub/dub preference. Returns Err with a reason if anything in that chain
 /// fails, so the caller can try a fallback provider.
+/// Per-show audio override (registry media_prefs) wins over the global
+/// `stream.translation_type`. Prefs are keyed to the desktop owner (user 0);
+/// Pi friends inherit the global default.
+pub(crate) async fn effective_translation_type(state: &AppState, media_id: i64) -> String {
+    let pref = {
+        // Scoped so the non-Sync rusqlite Connection drops before any await.
+        state
+            .open_db()
+            .ok()
+            .and_then(|db| crate::registry::service::get_media_prefs(&db, 0, media_id))
+            .and_then(|p| p.translation_type)
+    };
+    match pref {
+        Some(t) if !t.is_empty() => t,
+        _ => state.config.read().await.stream.translation_type.clone(),
+    }
+}
+
 pub(crate) async fn resolve_stream_for_provider(
     state: &AppState,
     media_id: i64,
@@ -327,14 +356,11 @@ pub(crate) async fn resolve_stream_for_provider(
     provider_name: &str,
     server: &Option<String>,
     title: Option<String>,
-) -> Result<(String, Option<std::collections::HashMap<String, String>>), String> {
+) -> Result<(String, Option<std::collections::HashMap<String, String>>, Option<String>), String> {
     // Torrents don't go through the scraper: search Nyaa/SubsPlease, start
     // the embedded torrent session, and hand mpv the local range-stream URL.
     if provider_name == "nyaa" {
-        let prefer_dub = {
-            let cfg = state.config.read().await;
-            cfg.stream.translation_type == "dub"
-        };
+        let prefer_dub = effective_translation_type(state, media_id).await == "dub";
         let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
         let (titles, episode_count) =
             crate::torrent::gather_media_info(state, media_id, title).await;
@@ -351,11 +377,15 @@ pub(crate) async fn resolve_stream_for_provider(
                     titles: &titles,
                     allow_episodeless,
                     prefer_dub,
+                    // The stream picker passes the chosen release name back as
+                    // `server`; honor it. Auto-play (Continue button) sends
+                    // None and takes the best-scored candidate.
+                    chosen_name: server.clone(),
                 },
                 proxy_port,
             )
             .await?;
-        return Ok((url, None));
+        return Ok((url, None, None));
     }
 
     // Read any cached slug in a scoped block so the (non-Sync) DB connection is
@@ -364,52 +394,83 @@ pub(crate) async fn resolve_stream_for_provider(
         let db = state.open_db()?;
         crate::registry::service::get_provider_slug(&db, media_id, provider_name)
     };
-    let slug = match cached_slug {
+    let slug_opt = match cached_slug {
         Some(s) => Some(s),
-        None => super::media::resolve_and_save_provider_slug(
+        None => super::media::resolve_and_save_provider_slug_for_episode(
             state,
             media_id,
             provider_name,
             false,
-            title,
+            title.clone(),
+            Some(episode_number as i32),
         )
         .await
         .ok()
         .flatten(),
-    }
-    .ok_or_else(|| format!("No provider mapping for media {} on {}", media_id, provider_name))?;
-
-    let servers = state
-        .scraper_manager
-        .get_streams(&slug, episode_number as i32, provider_name)
-        .await?;
-
-    let translation_type = {
-        let cfg = state.config.read().await;
-        cfg.stream.translation_type.clone()
     };
+
+    let mut servers = if let Some(ref s) = slug_opt {
+        state
+            .scraper_manager
+            .get_streams(s, episode_number as i32, provider_name)
+            .await
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    // If cached slug yielded 0 streams, force a fresh slug resolution with stream validation!
+    if servers.is_empty() {
+        if let Ok(Some(fresh_slug)) = super::media::resolve_and_save_provider_slug_for_episode(
+            state,
+            media_id,
+            provider_name,
+            false,
+            title.clone(),
+            Some(episode_number as i32),
+        )
+        .await
+        {
+            if let Ok(fresh_servers) = state
+                .scraper_manager
+                .get_streams(&fresh_slug, episode_number as i32, provider_name)
+                .await
+            {
+                servers = fresh_servers;
+            }
+        }
+    }
+
+    if servers.is_empty() {
+        return Err(format!("No stream URL found on {}", provider_name));
+    }
+
+    let translation_type = effective_translation_type(state, media_id).await;
+    let data_saver = state.config.read().await.stream.data_saver;
+    let target_quality: u32 = if data_saver { 720 } else { 1080 };
 
     let selected_server = if let Some(ref s_name) = server {
         servers.iter().find(|s| s.name == *s_name)
-            .or_else(|| pick_best_server(&servers))
+            .or_else(|| pick_best_server(&servers, target_quality))
     } else if translation_type == "dub" {
-        pick_best_server_in_group(&servers, &["dub"])
-            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub"]))
-            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"]))
-            .or_else(|| pick_best_server(&servers))
+        pick_best_server_in_group(&servers, &["dub"], target_quality)
+            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub"], target_quality))
+            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
+            .or_else(|| pick_best_server(&servers, target_quality))
     } else {
-        pick_best_server_in_group(&servers, &["hard_sub"])
-            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"]))
-            .or_else(|| pick_best_server_in_group(&servers, &["dub"]))
-            .or_else(|| pick_best_server(&servers))
+        pick_best_server_in_group(&servers, &["hard_sub"], target_quality)
+            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
+            .or_else(|| pick_best_server_in_group(&servers, &["dub"], target_quality))
+            .or_else(|| pick_best_server(&servers, target_quality))
     };
 
     let raw_stream_url = selected_server.map(|s| s.url.clone()).unwrap_or_default();
     let headers = selected_server.and_then(|s| s.headers.clone());
+    let subtitle_url = selected_server.and_then(|s| s.subtitle_url.clone());
     if raw_stream_url.is_empty() {
         return Err(format!("No stream URL found on {}", provider_name));
     }
-    Ok((raw_stream_url, headers))
+    Ok((raw_stream_url, headers, subtitle_url))
 }
 
 /// Resolve and cache a stream ahead of time so the eventual `start_playback`
@@ -435,7 +496,23 @@ pub async fn preload_episode_impl(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<(), String> {
-    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
+
+    // Low Data Mode: a nyaa preload starts an actual torrent download, not
+    // just URL resolution — on a slow connection that competes with whatever
+    // is currently streaming, and browsing detail pages would kick off
+    // downloads for episodes that may never be played. Resolve at play time
+    // instead. Scraper providers stay preloaded either way (cheap requests).
+    if provider_name == "nyaa" && state.config.read().await.stream.data_saver {
+        log::info!(
+            "Low data mode: skipping torrent preload for media {} ep {}",
+            media_id, episode_number
+        );
+        return Ok(());
+    }
 
     // Already preloaded (or being worked on) for this exact target — skip.
     {
@@ -450,7 +527,7 @@ pub async fn preload_episode_impl(
     let state_inner = state.clone();
     tokio::spawn(async move {
         match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title).await {
-            Ok((raw_url, headers)) => {
+            Ok((raw_url, headers, subtitle_url)) => {
                 let mut slot = state_inner.preloaded_stream.lock().await;
                 *slot = Some(crate::state::PreloadedStream {
                     media_id,
@@ -458,6 +535,7 @@ pub async fn preload_episode_impl(
                     provider: provider_name.clone(),
                     raw_url,
                     headers,
+                    subtitle_url,
                     at: std::time::Instant::now(),
                 });
                 log::info!("Preloaded stream for media {} ep {} ({})", media_id, episode_number, provider_name);
@@ -602,8 +680,12 @@ pub async fn start_playback(
     episode_title: Option<String>,
     cover_image: Option<String>,
     total_episodes: Option<i64>,
+    start_over: Option<bool>,
 ) -> Result<PlaybackStart, String> {
-    let mut provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let mut provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
 
     let title_str = title.clone().unwrap_or_default();
     let episode_title_str = episode_title.clone().unwrap_or_default();
@@ -637,7 +719,10 @@ pub async fn start_playback(
 
     let db = state.open_db()?;
 
-    let resume_seconds = {
+    let resume_seconds = if start_over.unwrap_or(false) {
+        // The user explicitly chose "start over" — ignore any stored position.
+        0
+    } else {
         let mut sec = 0;
         if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, 0, media_id) {
             if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
@@ -699,6 +784,7 @@ pub async fn start_playback(
     };
 
     let mut stream_headers = None;
+    let mut subtitle_url: Option<String> = None;
 
     let stream_url = if let Some(local_path) = local_file_path {
         log::info!("Playing offline local download: {}", local_path);
@@ -707,9 +793,9 @@ pub async fn start_playback(
         // Try the primary provider; if it can't produce a playable stream
         // (provider down, no slug match, no servers), fall back to the
         // configured fallback provider instead of failing the play button.
-        let fallback_provider = {
+        let (fallback_provider, secondary_fallback) = {
             let cfg = state.config.read().await;
-            cfg.general.fallback_provider.clone()
+            (cfg.general.fallback_provider.clone(), cfg.general.secondary_fallback_provider.clone())
         };
 
         // Instant transition: if the previous episode preloaded this one's
@@ -733,38 +819,28 @@ pub async fn start_playback(
             }
         };
 
-        let (raw_stream_url, headers) = if let Some(p) = preloaded {
+        let (raw_stream_url, headers, sub_url) = if let Some(p) = preloaded {
             log::info!("Using preloaded stream for media {} ep {}", media_id, episode_number);
-            (p.raw_url, p.headers)
+            (p.raw_url, p.headers, p.subtitle_url)
         } else {
-            match resolve_stream_for_provider(
-            &state, media_id, episode_number, &provider_name, &server, title.clone(),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(primary_err) => {
-                let has_fallback = !fallback_provider.is_empty()
-                    && fallback_provider != "none"
-                    && fallback_provider != provider_name;
-                if has_fallback {
-                    log::warn!(
-                        "Primary provider '{}' failed ({}); trying fallback '{}'",
-                        provider_name, primary_err, fallback_provider
-                    );
-                    match resolve_stream_for_provider(
-                        &state, media_id, episode_number, &fallback_provider, &server, title.clone(),
-                    )
-                    .await
-                    {
-                        Ok(res) => {
-                            // Switch the live session to the working provider so
-                            // auto-next/prev and Discord follow it, and tell the user.
-                            let working = fallback_provider.clone();
+            let candidates = vec![provider_name.clone(), fallback_provider, secondary_fallback];
+            let mut tried = Vec::new();
+            let mut last_err = String::new();
+            let mut resolved = None;
+
+            for prov in candidates {
+                if prov.is_empty() || prov == "none" || tried.contains(&prov) {
+                    continue;
+                }
+                tried.push(prov.clone());
+
+                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone()).await {
+                    Ok(res) => {
+                        if prov != provider_name {
                             {
                                 let mut guard = state.current_playback.lock().await;
                                 if let Some(ref mut pb) = *guard {
-                                    pb.provider = working.clone();
+                                    pb.provider = prov.clone();
                                 }
                             }
                             use tauri::Emitter;
@@ -772,29 +848,29 @@ pub async fn start_playback(
                                 "message": format!(
                                     "Couldn't reach {} — playing from {}",
                                     provider_label(&provider_name),
-                                    provider_label(&fallback_provider),
+                                    provider_label(&prov),
                                 )
                             }));
-                            provider_name = working;
-                            res
+                            provider_name = prov;
                         }
-                        Err(fb_err) => {
-                            return Err(format!(
-                                "No stream from {} or {}: {} / {}",
-                                provider_label(&provider_name),
-                                provider_label(&fallback_provider),
-                                primary_err, fb_err
-                            ));
-                        }
+                        resolved = Some(res);
+                        break;
                     }
-                } else {
-                    return Err(primary_err);
+                    Err(e) => {
+                        log::warn!("Provider '{}' failed for media {} ep {}: {}", prov, media_id, episode_number, e);
+                        last_err = e;
+                    }
                 }
             }
+
+            match resolved {
+                Some(res) => res,
+                None => return Err(format!("No stream found on any provider (last error: {})", last_err)),
             }
         };
 
         stream_headers = headers;
+        subtitle_url = sub_url;
 
         let mut stream_url = raw_stream_url.clone();
         if stream_url.contains("vibeplayer.site") || stream_url.contains("m3u8") {
@@ -941,9 +1017,9 @@ pub async fn start_playback(
         let encoded = skip_times_arg.replace(",", "%2C");
         script_opts.push(format!("anicat_ui-skip_times={}", encoded));
     }
-    let (shader_profile, interpolation) = {
+    let shader_profile = {
         let cfg = state.config.read().await;
-        (cfg.stream.shader_profile.clone(), cfg.stream.interpolation.clone())
+        cfg.stream.shader_profile.clone()
     };
     script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
@@ -990,18 +1066,6 @@ pub async fn start_playback(
         }
     }
 
-    // Smooth-motion / frame interpolation (Ctrl+3). Interpolates the source up
-    // to the display refresh. This requires display-sync (video-sync=audio,
-    // the default, does nothing with --interpolation), so it's only turned on
-    // when the setting is enabled — otherwise audio stays on its own clock.
-    // tscale=oversample is the lowest-artifact filter, best for anime's held
-    // frames. The Lua Ctrl+3 handler flips these same properties live.
-    if interpolation != "off" {
-        cmd.arg("--interpolation=yes");
-        cmd.arg("--video-sync=display-resample");
-        cmd.arg("--tscale=oversample");
-    }
-
     // Torrent streams come off the local proxy from an in-progress download,
     // so reads can block for seconds while a piece arrives. Tune mpv for that:
     // never time the connection out (the default abort → retry loop is what
@@ -1014,7 +1078,12 @@ pub async fn start_playback(
         cmd.arg("--cache=yes");
         cmd.arg("--cache-pause=yes");
         cmd.arg("--cache-pause-initial=yes");
-        cmd.arg("--cache-pause-wait=3");
+        // 30s of media, not the 3s it used to be: resuming after 3s buffered
+        // meant any starved stretch played as a play-3s/freeze/play-3s
+        // stutter loop. A healthy swarm fills 30s of media in a few wall
+        // seconds, so the worst case is one slightly longer rebuffer with
+        // real playback between stalls.
+        cmd.arg("--cache-pause-wait=30");
         cmd.arg("--demuxer-max-bytes=1GiB");
         cmd.arg("--demuxer-max-back-bytes=256MiB");
         cmd.arg("--demuxer-readahead-secs=120");
@@ -1037,6 +1106,14 @@ pub async fn start_playback(
         if !fields.is_empty() {
             cmd.arg(format!("--http-header-fields={}", fields.join(",")));
         }
+    }
+
+    // anineko's soft_sub/dub servers deliver captions as an external VTT
+    // instead of baking them into the video (see anineko.py's
+    // _extract_subtitle_url) — mpv loads a remote --sub-file the same as a
+    // local one and auto-selects it.
+    if let Some(ref sub_url) = subtitle_url {
+        cmd.arg(format!("--sub-file={}", sub_url));
     }
 
     cmd.arg(&stream_url);
@@ -1132,12 +1209,37 @@ pub async fn start_playback(
         // episode, dropping the user into it at the previous episode's
         // position. resume_seconds is 0 for a fresh episode, so this starts it
         // at the beginning; for a partially-watched one it resumes correctly.
+        // anineko's soft_sub/dub servers deliver captions as an external VTT
+        // (see anineko.py's _extract_subtitle_url) rather than baking them
+        // into the video — loadfile's per-file options string accepts
+        // sub-file the same as any other property override.
+        let mut load_options = format!("start={}", resume_seconds);
+        if let Some(ref sub_url) = subtitle_url {
+            load_options.push_str(&format!(",sub-file={}", sub_url));
+        }
+        // The torrent-friendly cache/network options below are CLI args on a
+        // fresh mpv launch (see is_torrent_stream above), which apply to every
+        // file mpv opens afterward — but `loadfile … replace` on an already-
+        // running mpv (auto-next reusing the window) doesn't re-read the CLI,
+        // so a torrent episode loaded this way got mpv's defaults instead:
+        // network-timeout's normal abort-on-stall behavior with no cache
+        // tolerance, on a stream that's still actively downloading. That's
+        // what made it hang right after the start instead of buffering.
+        // loadfile's options string takes the same per-file option overrides
+        // CLI args do, so set them the same way here.
+        if is_torrent_stream {
+            load_options.push_str(
+                ",network-timeout=0,cache=yes,cache-pause=yes,cache-pause-initial=yes,\
+                 cache-pause-wait=30,demuxer-max-bytes=1GiB,demuxer-max-back-bytes=256MiB,\
+                 demuxer-readahead-secs=120,force-seekable=yes",
+            );
+        }
         let load_cmd = vec![
             serde_json::json!("loadfile"),
             serde_json::json!(stream_url),
             serde_json::json!("replace"),
             serde_json::json!("0"), // index argument
-            serde_json::json!(format!("start={}", resume_seconds)),
+            serde_json::json!(load_options),
         ];
         commands.push(serde_json::json!({
             "command": load_cmd
@@ -1193,6 +1295,7 @@ pub async fn start_playback(
             last_duration: 0,
             paused: false,
         });
+        emit_playback_active(&app, true);
         return Ok(PlaybackStart { stream_url });
     }
 
@@ -1251,7 +1354,13 @@ pub async fn start_playback(
             let exited = {
                 let mut guard = match CURRENT_MPV.lock() {
                     Ok(g) => g,
-                    Err(_) => return,
+                    Err(e) => {
+                        log::error!(
+                            "mpv exit monitor: CURRENT_MPV mutex poisoned, stopping monitor for media {} ep {}: {}",
+                            monitor_media_id, monitor_episode, e
+                        );
+                        return;
+                    }
                 };
                 match guard.as_mut() {
                     Some(child) => match child.try_wait() {
@@ -1260,7 +1369,11 @@ pub async fn start_playback(
                             true
                         }
                         Ok(None) => false,
-                        Err(_) => {
+                        Err(e) => {
+                            log::warn!(
+                                "mpv exit monitor: try_wait failed for media {} ep {}, treating as exited: {}",
+                                monitor_media_id, monitor_episode, e
+                            );
                             let _ = guard.take();
                             true
                         }
@@ -1316,6 +1429,7 @@ pub async fn start_playback(
                     "media_id": monitor_media_id,
                     "episode_number": monitor_episode,
                 }));
+                emit_playback_active(&app_handle, false);
                 discord.clear_presence();
                 // Window closed: pause the torrent so it stops using the
                 // network in the background. Auto-next reuses (and unpauses)
@@ -1331,6 +1445,7 @@ pub async fn start_playback(
         }
     });
 
+    emit_playback_active(&app, true);
     Ok(PlaybackStart { stream_url })
 }
 
@@ -1362,14 +1477,19 @@ pub async fn record_playback_progress(
     }
 
     let db = state.open_db()?;
-    let _ = crate::registry::service::record_watched_episode(
+    if let Err(e) = crate::registry::service::record_watched_episode(
         &db,
         user_id,
         media_id,
         episode_number,
         stop_time,
         duration,
-    );
+    ) {
+        log::error!(
+            "Failed to persist watch progress (media {} ep {} pos {}): {}",
+            media_id, episode_number, stop_time, e
+        );
+    }
 
     if duration > 0 {
         // Completion is the ONLY automatic way AniList progress advances: you
@@ -1454,7 +1574,14 @@ pub async fn record_playback_progress(
                     crate::anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION,
                     vars,
                 )
-                .await?;
+                .await
+                .map_err(|e| {
+                    log::error!(
+                        "Failed to write AniList progress (media {} ep {} status {}): {}",
+                        media_id, write_progress, status, e
+                    );
+                    e
+                })?;
 
             state.cache.update_user_list_progress(media_id, Some(write_progress), Some(status), None);
             state.cache.invalidate("get_user_list");

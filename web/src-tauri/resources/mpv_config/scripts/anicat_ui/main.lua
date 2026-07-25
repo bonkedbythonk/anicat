@@ -294,24 +294,41 @@ local function toggle_shaders()
   notify_backend("toggle-upscale")
 end
 
--- Ctrl+3: toggle smooth motion (frame interpolation up to the display refresh).
--- Interpolation only works under display-sync, so flip video-sync alongside it;
--- when off we return audio to its own clock (video-sync=audio) so nothing
--- resamples the audio. Reads the live property to decide direction, like the
--- shader toggle above. Also persisted into the app config via the backend.
-local function toggle_interpolation()
-  local on = mp.get_property_native('interpolation')
-  if on then
-    mp.set_property_native('interpolation', false)
-    mp.set_property('video-sync', 'audio')
-    mp.osd_message("Smooth Motion: Disabled", 2.0)
-  else
-    mp.set_property('video-sync', 'display-resample')
-    mp.set_property('tscale', 'oversample')
-    mp.set_property_native('interpolation', true)
-    mp.osd_message("Smooth Motion: Enabled", 2.0)
+-- Shift+V: sideways mode. --video-rotate spins only the video plane, leaving
+-- libass subs on the unrotated OSD (sideways/squished subs). The `sub` video
+-- filter instead bakes subtitle rendering into the frames BEFORE the
+-- transpose, so subs rotate with the picture — hardsubs at playback time,
+-- works with any softsub release. Session-only on purpose: it tracks how the
+-- screen is physically turned right now, not a per-show preference.
+--
+-- Hardware decode must be off while sideways: with videotoolbox frames the
+-- `sub` filter silently claims subtitle rendering without drawing anything
+-- (subs vanish) and lavfi fails to configure entirely ("Impossible to
+-- convert between the formats"), so the transpose is dropped too. Verified
+-- on mpv 0.41/macOS. Software decode of anime is cheap; hwdec is restored
+-- when leaving sideways mode.
+local sideways_state = 0 -- 0 = off, 1 = 90 CW, 2 = 90 CCW
+local sideways_saved_hwdec = nil
+local function toggle_sideways()
+  sideways_state = (sideways_state + 1) % 3
+  if sideways_state == 1 then
+    sideways_saved_hwdec = mp.get_property('hwdec')
+    mp.set_property('hwdec', 'no')
   end
-  notify_backend("toggle-interpolation")
+  if sideways_state == 0 then
+    mp.commandv('vf', 'clr', '')
+    if sideways_saved_hwdec then
+      mp.set_property('hwdec', sideways_saved_hwdec)
+      sideways_saved_hwdec = nil
+    end
+    mp.osd_message('Sideways: Off', 2.0)
+  elseif sideways_state == 1 then
+    mp.commandv('vf', 'set', 'sub,lavfi=[transpose=clock]')
+    mp.osd_message('Sideways: 90 CW', 2.0)
+  else
+    mp.commandv('vf', 'set', 'sub,lavfi=[transpose=cclock]')
+    mp.osd_message('Sideways: 90 CCW', 2.0)
+  end
 end
 
 local function render(force)
@@ -395,20 +412,6 @@ local function toggle_autoskip()
   notify_backend("toggle-autoskip")
 end
 
-local function shift_skips(offset)
-  if not state.skips or #state.skips == 0 then
-    mp.osd_message("No skip times to shift", 1.5)
-    return
-  end
-  for _, skip in ipairs(state.skips) do
-    skip.start = skip.start + offset
-    skip.endt = skip.endt + offset
-    skip.notified = false
-  end
-  local sign = offset > 0 and "+" or ""
-  mp.osd_message(string.format("Skip timings shifted: %s%.1fs", sign, offset), 1.5)
-end
-
 notify_backend = function(action, sync, manual)
   local pos = mp.get_property_number('time-pos')
   if not pos or pos <= 0 then
@@ -472,6 +475,15 @@ local function play_next(sync, manual)
   local current_ep = get_current_episode_opt()
   local total_eps = get_total_episodes_opt()
   if total_eps > 0 and current_ep >= total_eps then
+    -- There's no next episode to load, but the one that just finished still
+    -- needs its final position recorded — every other transition (stop/prev/
+    -- a mid-series next) does this via notify_backend, but this early return
+    -- used to skip it entirely. The fallbacks that could otherwise catch it
+    -- (the pause-property observer, the mpv-exit monitor) are racy: end-file
+    -- can flip state.file_loaded to false before the pause event fires,
+    -- silently skipping that notification too. Record explicitly (sync, so
+    -- it lands before the OSD/return) instead of trusting that chain.
+    notify_backend("stop", true)
     mp.osd_message('Already at the last episode.', 3.0)
     return
   end
@@ -510,10 +522,10 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
-  mp.register_script_message('anicat-toggle-interpolation', toggle_interpolation)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
   mp.register_script_message('anicat-toggle-autoskip', toggle_autoskip)
+  mp.register_script_message('anicat-toggle-sideways', toggle_sideways)
   mp.register_script_message('anicat-next-episode', play_next)
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)
@@ -527,8 +539,6 @@ local function register_script_messages()
     mp.add_forced_key_binding('N', 'anicat-next-key', function() play_next(nil, true) end)
     mp.add_forced_key_binding('P', 'anicat-prev-key', function() play_prev(nil) end)
     mp.add_forced_key_binding('S', 'anicat-skip-shifts', skip_current_segment)
-    mp.add_forced_key_binding('[', 'anicat-skip-shift-back', function() shift_skips(-1) end)
-    mp.add_forced_key_binding(']', 'anicat-skip-shift-forward', function() shift_skips(1) end)
   end
 end
 
@@ -544,20 +554,11 @@ mp.observe_property('mouse-pos', 'native', render_unforced)
 mp.observe_property('seeking', 'native', render_unforced)
 mp.observe_property('script-opts', 'native', function()
   if state.file_loaded then
-    local skips = parse_skip_times(get_skip_times_opt())
-    local chapter_skips = parse_chapters_for_skips()
-    for _, cs in ipairs(chapter_skips) do
-      local duplicate = false
-      for _, s in ipairs(skips) do
-        if math.abs(s.start - cs.start) < 2.0 then
-          duplicate = true
-          break
-        end
-      end
-      if not duplicate then
-        skips[#skips + 1] = cs
-      end
-    end
+    -- The background AniSkip resolver pushes skip_times here well after
+    -- file-loaded already ran merge_skips once; redo the same merge (not the
+    -- old ad-hoc start-time proximity check) so chapter-sourced entries keep
+    -- winning and every entry still carries its source tag for autoskip.
+    local skips = merge_skips(parse_skip_times(get_skip_times_opt()), parse_chapters_for_skips())
     state.skips = skips
     msg.info("script-opts updated: total skip segments = " .. #skips)
   end
@@ -615,8 +616,14 @@ mp.register_event('playback-restart', function()
   end
 end)
 
--- Periodically report playback position to Rust backend for crash recovery
+-- Periodically report playback position to Rust backend for crash recovery.
+-- Skipped while paused: position can't have changed, so a paused/idle mpv
+-- window (which can sit for a long time) would otherwise ping the backend
+-- with the same stale pos/duration every 30s indefinitely.
 local progress_timer = mp.add_periodic_timer(30, function()
+  if mp.get_property_native("pause") then
+    return
+  end
   notify_backend("progress")
 
   -- Once we're most of the way through, ask the backend to resolve the next

@@ -4,7 +4,9 @@ Exercises each provider with a known-good query so scraper breakage is
 noticed before anyone tries to watch something:
 
   - anineko:     search (goes through the Cloudflare clearance path)
-  - mkissa:      search + get (exercises the AES-GCM/aaReq handshake)
+  - mkissa:      search + get + episode stream resolution (exercises the
+                 AES-GCM/aaReq handshake and the response decrypt — the
+                 part that silently breaks when the site rotates its build)
   - mangakatana: search
   - nyaa:        SubsPlease API + Nyaa RSS reachability (the Rust side owns
                  the real logic; this just proves the upstreams answer)
@@ -51,7 +53,19 @@ async def check_mkissa() -> str:
     info = await prov.get(refs[0].id)
     if info is None or not info.episodes:
         raise RuntimeError(f"get('{refs[0].id}') returned no episodes")
-    return f"{len(refs)} results, {info.title}: {len(info.episodes)} episodes"
+    # Stream resolution exercises the aaReq crypto token AND the response
+    # decrypt — the July 2026 build rotation broke exactly this while search
+    # and get kept working, so the old smoke test stayed green through it.
+    servers, _ = await prov.streams(refs[0].id, 1)
+    if not servers:
+        raise RuntimeError(
+            f"streams('{refs[0].id}', ep 1) resolved 0 servers "
+            "(stale aaReq crypto constants? check bundle buildId/mask)"
+        )
+    return (
+        f"{len(refs)} results, {info.title}: {len(info.episodes)} episodes, "
+        f"{len(servers)} stream servers"
+    )
 
 
 async def check_mangakatana() -> str:
@@ -93,7 +107,9 @@ async def main() -> int:
     # anineko may spin up headless Chromium for Cloudflare clearance, so it
     # gets a much larger timeout than the plain-HTTP checks.
     await run_check("anineko", check_anineko(), timeout=300)
-    await run_check("mkissa", check_mkissa(), timeout=120)
+    # streams resolution + a possible crypto-constant re-extraction crawl
+    # push mkissa well past the old search+get budget.
+    await run_check("mkissa", check_mkissa(), timeout=180)
     await run_check("mangakatana", check_mangakatana(), timeout=60)
     await run_check("subsplease", check_subsplease(), timeout=45)
     await run_check("nyaa-rss", check_nyaa_rss(), timeout=45)

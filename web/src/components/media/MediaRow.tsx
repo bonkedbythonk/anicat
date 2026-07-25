@@ -2,7 +2,7 @@
 import { useRef, useState, useEffect, useCallback, memo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { MediaCard } from "./MediaCard";
-import { FocusScope, useSpatialNavigation } from "@/focus";
+import { FocusScope, ScopeNav } from "@/focus";
 import type { MediaItem } from "@/lib/api";
 
 interface MediaRowProps {
@@ -27,7 +27,6 @@ const MediaRow = memo(function MediaRow({
   secondaryItems,
   secondaryLabel = "Smart Picks",
 }: MediaRowProps) {
-  useSpatialNavigation();
   const rowRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const totalItems = items.length + (secondaryItems?.length ?? 0);
@@ -108,6 +107,7 @@ const MediaRow = memo(function MediaRow({
             role="list"
             className="flex space-x-4"
           >
+            <ScopeNav />
             {/* Primary items */}
             {items.map((item, idx) => (
               <div

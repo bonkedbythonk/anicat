@@ -5,8 +5,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 
-// ── Public types ──────────────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimeRef {
     pub id: String,
@@ -32,6 +30,10 @@ pub struct StreamServer {
     pub is_m3u8: Option<bool>,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub group: Option<String>,
+    /// External VTT sidecar (anineko's soft_sub/dub servers attach one via
+    /// a query param instead of baking captions into the video).
+    #[serde(default)]
+    pub subtitle_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,8 +41,6 @@ pub struct AnimeInfo {
     pub title: String,
     pub episodes: Vec<Episode>,
 }
-
-// ── Manager ───────────────────────────────────────────────
 
 const IDLE_TIMEOUT_SECS: u64 = 120;
 const READY_RETRY_MS: u64 = 100;
@@ -61,12 +61,19 @@ impl Drop for ScraperProcess {
     }
 }
 
+type FailureNotifier = Box<dyn Fn(&str) + Send + Sync>;
+
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
     spawn_lock: tokio::sync::Mutex<()>,
     http_client: reqwest::Client,
     python_path: String,
     scraper_script: String,
+    // Surfaces "the sidecar itself is broken" (spawn/health failure — not a
+    // provider returning zero results) to the user. Fired once per breakage,
+    // re-armed by a successful start so a later relapse notifies again.
+    failure_notifier: Arc<std::sync::Mutex<Option<FailureNotifier>>>,
+    failure_notified: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Clone for ScraperManager {
@@ -77,6 +84,8 @@ impl Clone for ScraperManager {
             http_client: self.http_client.clone(),
             python_path: self.python_path.clone(),
             scraper_script: self.scraper_script.clone(),
+            failure_notifier: self.failure_notifier.clone(),
+            failure_notified: self.failure_notified.clone(),
         }
     }
 }
@@ -93,11 +102,46 @@ impl ScraperManager {
             http_client,
             python_path,
             scraper_script,
+            failure_notifier: Arc::new(std::sync::Mutex::new(None)),
+            failure_notified: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    pub fn set_failure_notifier(&self, f: impl Fn(&str) + Send + Sync + 'static) {
+        if let Ok(mut guard) = self.failure_notifier.lock() {
+            *guard = Some(Box::new(f));
+        }
+    }
+
+    fn notify_fatal(&self, detail: &str) {
+        use std::sync::atomic::Ordering;
+        if self.failure_notified.swap(true, Ordering::SeqCst) {
+            return; // already notified for this breakage
+        }
+        log::error!("[scraper] Sidecar is broken: {}", detail);
+        if let Ok(guard) = self.failure_notifier.lock() {
+            if let Some(ref notify) = *guard {
+                notify(
+                    "Scraper failed to start — streaming providers are unavailable. \
+                     Torrents still work. Please report this issue.",
+                );
+            }
         }
     }
 
     pub fn python_path(&self) -> &str {
         &self.python_path
+    }
+
+    /// Spawns the scraper sidecar ahead of the first search, so the process's
+    /// startup cost (cold-start extraction, first-run OS binary scan, etc.)
+    /// lands during app launch instead of stalling the user's first search.
+    /// Best-effort: a failure here just means the first real request pays the
+    /// startup cost (and reports it) as before.
+    pub async fn prewarm(&self) {
+        if let Err(e) = self.ensure_running().await {
+            log::warn!("[scraper] Prewarm failed, will retry on first request: {}", e);
+        }
     }
 
     /// Synchronously kill the running scraper (and its process tree). Called
@@ -130,7 +174,10 @@ impl ScraperManager {
             .timeout(Duration::from_secs(90))
             .send()
             .await
-            .map_err(|e| format!("Scraper search failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper search request failed (query={}, provider={}): {}", query, provider, e);
+                format!("Scraper search failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
         match serde_json::from_str::<Vec<AnimeRef>>(&body) {
             Ok(results) => {
@@ -153,9 +200,15 @@ impl ScraperManager {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Scraper get_anime failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper get_anime request failed (slug={}, provider={}): {}", slug, provider, e);
+                format!("Scraper get_anime failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse anime: {}", e))
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper get_anime response: {}, error: {}", body, e);
+            format!("Parse anime: {}", e)
+        })
     }
 
     pub async fn get_streams(
@@ -176,7 +229,10 @@ impl ScraperManager {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Scraper streams failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper streams request failed (slug={}, episode={}, provider={}): {}", slug, episode, provider, e);
+                format!("Scraper streams failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
         match serde_json::from_str::<Vec<StreamServer>>(&body) {
             Ok(servers) => {
@@ -203,9 +259,15 @@ impl ScraperManager {
             .timeout(Duration::from_secs(90))
             .send()
             .await
-            .map_err(|e| format!("Scraper search failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper manga search request failed (query={}): {}", query, e);
+                format!("Scraper search failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse search: {}", e))
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper manga search response: {}, error: {}", body, e);
+            format!("Parse search: {}", e)
+        })
     }
 
     pub async fn get_manga(&self, slug: &str) -> Result<AnimeInfo, String> {
@@ -221,9 +283,15 @@ impl ScraperManager {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| format!("Scraper get_manga failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper get_manga request failed (slug={}): {}", slug, e);
+                format!("Scraper get_manga failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse manga: {}", e))
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper get_manga response: {}, error: {}", body, e);
+            format!("Parse manga: {}", e)
+        })
     }
 
     pub async fn get_chapter_pages(
@@ -244,9 +312,15 @@ impl ScraperManager {
             .timeout(Duration::from_secs(45))
             .send()
             .await
-            .map_err(|e| format!("Scraper get_chapter_pages failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper get_chapter_pages request failed (slug={}, chapter={}): {}", slug, chapter, e);
+                format!("Scraper get_chapter_pages failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse chapter pages: {}", e))
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper chapter pages response: {}, error: {}", body, e);
+            format!("Parse chapter pages: {}", e)
+        })
     }
 
     pub async fn debug_streams(
@@ -266,15 +340,18 @@ impl ScraperManager {
             .timeout(Duration::from_secs(60))
             .send()
             .await
-            .map_err(|e| format!("Debug streams request failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("Scraper debug_streams request failed (slug={}, episode={}, provider={}): {}", slug, episode, provider, e);
+                format!("Debug streams request failed: {}", e)
+            })?;
         let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| format!("Parse debug response: {}", e))
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper debug_streams response: {}, error: {}", body, e);
+            format!("Parse debug response: {}", e)
+        })
     }
 
-    // ── Lifecycle ──────────────────────────────────────
-
     async fn ensure_running(&self) -> Result<u16, String> {
-        // Check if existing process is alive
         {
             let mut proc = self.process.lock().await;
             if let Some(ref mut sp) = *proc {
@@ -287,10 +364,8 @@ impl ScraperManager {
             }
         }
 
-        // Serialize spawns: only one thread starts a new process
         let _lock = self.spawn_lock.lock().await;
 
-        // Double-check after acquiring lock (another thread may have started it)
         {
             let mut proc = self.process.lock().await;
             if let Some(ref mut sp) = *proc {
@@ -303,7 +378,18 @@ impl ScraperManager {
             }
         }
 
-        self.start_process().await
+        match self.start_process().await {
+            Ok(port) => {
+                // A healthy start re-arms the one-shot failure notification.
+                self.failure_notified
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                Ok(port)
+            }
+            Err(e) => {
+                self.notify_fatal(&e);
+                Err(e)
+            }
+        }
     }
 
     async fn start_process(&self) -> Result<u16, String> {
@@ -350,8 +436,6 @@ impl ScraperManager {
     }
 }
 
-// ── Idle watchdog ─────────────────────────────────────────
-
 async fn idle_watchdog(
     process: Arc<Mutex<Option<ScraperProcess>>>,
     _client: reqwest::Client,
@@ -361,11 +445,9 @@ async fn idle_watchdog(
 
         let mut proc = process.lock().await;
         let should_kill = if let Some(ref mut sp) = *proc {
-            // Check if child exited on its own
             if let Ok(Some(_status)) = sp.child.try_wait() {
                 true
             } else {
-                // Check idle time
                 sp.last_used.elapsed().as_secs() >= IDLE_TIMEOUT_SECS
             }
         } else {
@@ -381,8 +463,6 @@ async fn idle_watchdog(
         }
     }
 }
-
-// ── Helpers ───────────────────────────────────────────────
 
 fn find_free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")

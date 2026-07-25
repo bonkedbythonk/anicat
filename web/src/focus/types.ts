@@ -18,10 +18,10 @@ export interface FocusScopeValue {
   unregister: (id: string) => void;
   getIndex: (id: string) => number;
   focusItem: (index: number) => void;
-  focusNext: () => void;
-  focusPrev: () => void;
-  focusUp: () => void;
-  focusDown: () => void;
-  focusFirst: () => void;
-  focusLast: () => void;
+  focusNext: () => boolean;
+  focusPrev: () => boolean;
+  focusUp: () => boolean;
+  focusDown: () => boolean;
+  focusFirst: () => boolean;
+  focusLast: () => boolean;
 }

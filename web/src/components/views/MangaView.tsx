@@ -1,18 +1,25 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { MediaRow } from "@/components/media/MediaRow";
 import { UpNextQueue } from "@/components/media/UpNextQueue";
 import { mediaApi } from "@/lib/api";
 import type { MediaItem } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
+import { useAppStore } from "@/stores/app";
 
 interface MangaViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
 export function MangaView({ onSelect }: MangaViewProps) {
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+
+  useEffect(() => {
+    setActiveFocusScope("manga-default");
+  }, [setActiveFocusScope]);
+
   const { data, isLoading } = useQuery({
     queryKey: ["manga-data"],
     queryFn: async () => {

@@ -95,7 +95,12 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
 
-  const actualProgress = fullItem?.media_list_entry?.progress ?? fullItem?.user_status?.progress ?? 0;
+  const actualProgress =
+    fullItem?.media_list_entry?.progress ??
+    fullItem?.user_status?.progress ??
+    item?.media_list_entry?.progress ??
+    item?.user_status?.progress ??
+    0;
   const actualScore = fullItem?.media_list_entry?.score ?? fullItem?.user_status?.score ?? null;
   const actualProgressVolumes = fullItem?.media_list_entry?.progress_volumes ?? fullItem?.user_status?.progress_volumes ?? null;
 

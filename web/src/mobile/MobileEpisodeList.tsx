@@ -183,8 +183,11 @@ export function MobileEpisodeList({
           serverPicker?.streams.map((s, i) => (
             <SheetRow key={`${s.name}-${i}`} onClick={() => handlePlay(serverPicker.epNum, s.name)}>
               <Play size={16} fill="currentColor" />
-              <span className="flex-1 truncate">{s.name}</span>
-              <span className="text-xs font-normal text-muted-foreground">{s.quality || "HD"}</span>
+              {/* Torrent releases differ only near the end (source/codec/CRC) —
+                  single-line truncate clipped exactly that, making different
+                  releases look identical. Wrap instead. */}
+              <span className="flex-1 line-clamp-2 break-words">{s.name}</span>
+              <span className="text-xs font-normal text-muted-foreground shrink-0">{s.quality || "HD"}</span>
             </SheetRow>
           ))
         )}

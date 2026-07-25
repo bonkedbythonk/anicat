@@ -340,19 +340,19 @@ html.light .media-detail-drawer {
               transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* ── Native-materials pass (default "neon-abyss" skin only — the sakura-zen
+/* ── Native-materials pass (default "ink-and-index" skin only — the sakura-zen
    and retro-manga skins define their own card/typography language and are
    deliberately left alone). Native macOS hierarchy comes from size and
    spacing at <=700 weight, and hover feedback is a raise, never a bloom. ── */
-html[data-style="neon-abyss"] .font-black,
+html[data-style="ink-and-index"] .font-black,
 html:not([data-style]) .font-black {
   font-weight: 700 !important;
 }
-html[data-style="neon-abyss"] .font-extrabold,
+html[data-style="ink-and-index"] .font-extrabold,
 html:not([data-style]) .font-extrabold {
   font-weight: 700 !important;
 }
-html[data-style="neon-abyss"] .card-glow:hover,
+html[data-style="ink-and-index"] .card-glow:hover,
 html:not([data-style]) .card-glow:hover {
   border-color: var(--border-color) !important;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
@@ -462,7 +462,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent-color), 0 0 0 4px var(--background);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 70%, transparent), 0 0 0 4px var(--background);
 }
 
 @media (prefers-reduced-motion: reduce) {

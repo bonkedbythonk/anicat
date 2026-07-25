@@ -42,7 +42,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
-  const [uiStyle, setUiStyle] = useState<UiStyle>("neon-abyss");
+  const [uiStyle, setUiStyle] = useState<UiStyle>("ink-and-index");
   const [logoutState, setLogoutState] = useState<"idle" | "confirming" | "loggingOut">("idle");
   const [registryState, setRegistryState] = useState<"idle" | "confirming" | "wiping" | "done">("idle");
   const [resetOnboardingState, setResetOnboardingState] = useState<"idle" | "confirming">("idle");
@@ -95,20 +95,16 @@ export function SettingsView({ health }: SettingsViewProps) {
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("anicat_theme") as "system" | "dark" | "light" | null;
       const savedStyle = localStorage.getItem("anicat_ui_style") as UiStyle | null;
-
-      setTimeout(() => {
-        if (savedTheme) {
-          setTheme(savedTheme);
-        }
-        if (savedStyle) {
-          setUiStyle(savedStyle);
-        }
-      }, 0);
+      if (savedTheme) {
+        setTheme(savedTheme);
+      }
+      if (savedStyle) {
+        setUiStyle(savedStyle);
+      }
     }
   }, []);
 
   const handleThemeChange = (newTheme: "system" | "dark" | "light") => {
-    // Inject the theme-transition class temporarily to animate variables
     document.documentElement.classList.add("theme-transition");
 
     setTheme(newTheme);
@@ -124,7 +120,6 @@ export function SettingsView({ health }: SettingsViewProps) {
     }
     window.dispatchEvent(new StorageEvent('storage', { key: 'anicat_theme', newValue: newTheme }));
 
-    // Clean up transition class after animation completes
     setTimeout(() => {
       document.documentElement.classList.remove("theme-transition");
     }, 300);
@@ -201,9 +196,6 @@ export function SettingsView({ health }: SettingsViewProps) {
         }
         if (key === "shader_profile") {
           return { ...prev, stream: { ...prev.stream, shader_profile: value } };
-        }
-        if (key === "interpolation") {
-          return { ...prev, stream: { ...prev.stream, interpolation: value } };
         }
         return prev;
       });
@@ -404,9 +396,9 @@ export function SettingsView({ health }: SettingsViewProps) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* Ink & Index */}
                     <button
-                      onClick={() => handleStyleChange("neon-abyss")}
+                      onClick={() => handleStyleChange("ink-and-index")}
                       className={`group relative rounded-lg overflow-hidden border-2 transition-all text-left ${
-                        uiStyle === "neon-abyss"
+                        uiStyle === "ink-and-index"
                           ? "border-accent shadow-sm"
                           : "border-border hover:border-foreground/25"
                       }`}
@@ -421,7 +413,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                         <div className="text-xs font-bold text-foreground">Ink & Index</div>
                         <div className="text-[10px] text-muted-foreground mt-0.5">Warm ink / Indigo accent</div>
                       </div>
-                      {uiStyle === "neon-abyss" && (
+                      {uiStyle === "ink-and-index" && (
                         <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-accent flex items-center justify-center">
                           <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="var(--dynamic-black)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
@@ -531,26 +523,39 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField label="Anime Provider" description="Primary streaming source.">
                   <select
-                    value={String(config.general?.provider || "mkissa")}
+                    value={String(config.general?.provider || "nyaa")}
                     onChange={(e) => updateField("general", "provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
+                    <option value="nyaa">Torrents</option>
                     <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
-                    <option value="nyaa">Torrents (1080p)</option>
                   </select>
                 </SettingField>
 
-                <SettingField label="Fallback Provider" description="Used when the primary provider fails.">
+                <SettingField label="Fallback Provider 1" description="First fallback when primary provider fails.">
                   <select
-                    value={String(config.general?.fallback_provider || "anineko")}
+                    value={String(config.general?.fallback_provider || "mkissa")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="none">None</option>
+                    <option value="nyaa">Torrents</option>
                     <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
-                    <option value="nyaa">Torrents (1080p)</option>
+                  </select>
+                </SettingField>
+
+                <SettingField label="Fallback Provider 2" description="Second fallback when primary and fallback 1 fail.">
+                  <select
+                    value={String(config.general?.secondary_fallback_provider || "anineko")}
+                    onChange={(e) => updateField("general", "secondary_fallback_provider", e.target.value)}
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
+                  >
+                    <option value="none">None</option>
+                    <option value="nyaa">Torrents</option>
+                    <option value="mkissa">Mkissa</option>
+                    <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
 
@@ -617,14 +622,18 @@ export function SettingsView({ health }: SettingsViewProps) {
                 </SettingField>
 
                 <SettingField
-                  label="Smooth Motion"
-                  description="Frame interpolation — fills in extra frames for smoother panning, up to your display's refresh rate. Best left off for on-twos anime; may look soap-opera-y. Ctrl+3 in-player toggles this too."
+                  label="Low Data Mode"
+                  description="For slow connections. While something is playing, background traffic pauses so the stream gets all the bandwidth: no home-screen polling, no hover prefetching, and the next episode's torrent won't start downloading until the current one finishes. Manga pages load one at a time instead of six in parallel."
                 >
                   <SettingToggle
-                    on={(config.stream?.interpolation || "off") !== "off"}
-                    onChange={(v) => updateField("stream", "interpolation", v ? "on" : "off")}
+                    on={Boolean(config.stream?.data_saver)}
+                    onChange={(v) => {
+                      updateField("stream", "data_saver", v);
+                      useSettingsStore.getState().setDataSaver(v);
+                    }}
                   />
                 </SettingField>
+
               </CardSection>
 
               <CardSection title="Keyboard Shortcuts">
@@ -635,7 +644,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border p-4 rounded-lg bg-foreground/[0.02]">
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Upscaling</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Auto-skip Intro</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Smooth Motion</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 3</kbd></div>
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
                     </div>
                   </div>
@@ -645,7 +653,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Reload Episode</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Skip Segment</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
                       <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Nudge Skip Timing</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">[ / ]</kbd></div>
+                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Rotate Video</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + V</kbd></div>
                     </div>
                   </div>
                 </div>

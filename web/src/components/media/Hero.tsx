@@ -25,7 +25,6 @@ interface CommandCenterItem {
   unwatchedCount?: number;
 }
 
-// Live ticking countdown badge component
 function AiringCountdown({ airingAt }: { airingAt: string | number }) {
   const [timeLeft, setTimeLeft] = useState("");
 
@@ -86,7 +85,6 @@ const Hero = memo(function Hero({
     return () => clearInterval(interval);
   }, []);
 
-  // 1. Build the priority queue
   const queue = useMemo(() => {
     // If a single item is passed directly, use a single-item featured queue (backwards compatibility)
     if (singleItem) {
@@ -155,7 +153,7 @@ const Hero = memo(function Hero({
                            airingDate.getFullYear() === tomorrowDate.getFullYear();
 
         if (timeDiff <= 0) {
-          const progress = item.user_status?.progress || 0;
+          const progress = item.user_status?.progress || item.media_list_entry?.progress || 0;
           const nextEpNum = nextAiring.episode ?? 0;
           const isUnwatched = nextEpNum > progress;
           const label = isSameDay ? `Episode ${nextEpNum} aired today` : `Episode ${nextEpNum} aired`;
@@ -164,7 +162,7 @@ const Hero = memo(function Hero({
             type: "airing_today",
             reasonText: label,
             badgeColor: "bg-gradient-to-r from-emerald-500 to-teal-500 shadow-md shadow-emerald-500/20 text-white border-t border-white/10",
-            playEpisode: isUnwatched ? String(nextEpNum) : null,
+            playEpisode: isUnwatched ? String(progress + 1) : null,
           });
         } else {
           const label = isSameDay
@@ -217,7 +215,6 @@ const Hero = memo(function Hero({
     return items;
   }, [singleItem, continueList, recentReleases, airingToday, fallbackList, refreshTick]);
 
-  // Adjust focused index if out of bounds
   const activeIndex = Math.min(focusedIndex, Math.max(0, queue.length - 1));
   const activeCcItem = queue[activeIndex] || null;
   const item = activeCcItem?.item || null;
@@ -229,14 +226,12 @@ const Hero = memo(function Hero({
     }
   }, [item, onFocusChange]);
 
-  // 2. Query for configuration (e.g. video auto-play setting)
   const { data: config = null } = useQuery({
     queryKey: ["media-config"],
     queryFn: () => mediaApi.getConfig(),
     staleTime: 30_000,
   });
 
-  // 3. Intersection observer for video autoplay
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -254,9 +249,7 @@ const Hero = memo(function Hero({
     };
   }, []);
 
-  // 4. Trailer autoplay removed
-
-  // 5. Auto-cycle / rotate slides every 8 seconds when not hovered and visible
+  // Auto-cycle / rotate slides every 8 seconds when not hovered and visible.
   useEffect(() => {
     if (queue.length <= 1 || isHovered || !isIntersecting) return;
 

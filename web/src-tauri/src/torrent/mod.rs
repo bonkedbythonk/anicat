@@ -11,14 +11,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use librqbit::{AddTorrent, AddTorrentOptions, AddTorrentResponse, Session, SessionOptions};
+use librqbit::{AddTorrent, AddTorrentOptions, AddTorrentResponse, PeerConnectionOptions, Session, SessionOptions};
 
 const VIDEO_EXTS: &[&str] = &["mkv", "mp4", "avi", "ts", "webm", "m4v"];
 /// Metadata fetch (magnet -> torrent info via trackers/DHT) timeout.
 const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 /// Keep the stream cache under this many bytes; least-recently-touched
 /// torrents are evicted first.
-const CACHE_CAP_BYTES: u64 = 15 * 1024 * 1024 * 1024;
+const CACHE_CAP_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 struct Resolved {
@@ -39,6 +39,17 @@ pub struct ResolveTarget<'a> {
     /// Movies/OVAs legitimately have no episode number in their release
     /// names; allow an episodeless match for those.
     pub allow_episodeless: bool,
+    pub prefer_dub: bool,
+    /// When the user picked a specific release from the server list, its
+    /// name. That candidate is tried first; the rest stay as fallbacks so a
+    /// pick that turns out to be dead still plays something.
+    pub chosen_name: Option<String>,
+}
+
+/// One selectable torrent release, surfaced to the stream-server picker.
+pub struct TorrentChoice {
+    pub name: String,
+    pub seeders: u64,
     pub prefer_dub: bool,
 }
 
@@ -64,6 +75,8 @@ impl TorrentManager {
     }
 
     fn with_cache_dir(cache_dir: PathBuf) -> Self {
+        let dir = cache_dir.clone();
+        std::thread::spawn(move || cleanup_cache(&dir));
         Self {
             session: tokio::sync::OnceCell::new(),
             cache_dir,
@@ -78,6 +91,21 @@ impl TorrentManager {
                 let opts = SessionOptions {
                     // Never seed — see the Cargo.toml note on the feature.
                     disable_upload: true,
+                    // A dead/unreachable peer under the library's 10s default
+                    // holds its connection slot for that whole time before
+                    // it's abandoned. Anime torrent swarms are often mostly
+                    // stale peer-list entries (long-offline seeders trackers
+                    // never pruned), so with the default this spends most of
+                    // its time waiting on peers that were never coming — at
+                    // the cost of not trying the ones that would actually
+                    // answer. Failing faster cycles through candidates
+                    // quicker, which is what actually helps buffering when we
+                    // can't make ourselves more attractive to the swarm
+                    // (never uploading is a deliberate, separate choice).
+                    peer_opts: Some(PeerConnectionOptions {
+                        connect_timeout: Some(std::time::Duration::from_secs(4)),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 };
                 Session::new_with_opts(self.cache_dir.clone(), opts)
@@ -97,7 +125,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media_id, episode, titles, allow_episodeless, prefer_dub } = target;
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, prefer_dub, chosen_name } = target;
         let session = self.session().await?;
 
         // Reuse a previous resolution if the torrent is still in the session.
@@ -116,8 +144,13 @@ impl TorrentManager {
         if titles.is_empty() {
             return Err("No title to search torrents for".into());
         }
-        let candidates =
+        let mut candidates =
             search::find_candidates(client, titles, episode, allow_episodeless, prefer_dub).await;
+        // Honor an explicit release pick: float the matching candidate to the
+        // front (stable partition keeps the rest as ordered fallbacks).
+        if let Some(ref chosen) = chosen_name {
+            candidates.sort_by_key(|c| c.name != *chosen);
+        }
         log::info!(
             "torrent: {} candidates for '{}' ep {} (best: {})",
             candidates.len(),
@@ -157,6 +190,31 @@ impl TorrentManager {
         Err(format!("All torrent candidates failed (last error: {})", last_err))
     }
 
+    /// Search-only: list the release candidates for an episode without adding
+    /// any torrent to the session. Powers the stream-server picker so the user
+    /// can choose a specific release (fansub group, batch, seeder count)
+    /// instead of always taking the auto-picked best. Returns descriptors,
+    /// best first.
+    pub async fn list_candidates(
+        &self,
+        client: &reqwest::Client,
+        target: ResolveTarget<'_>,
+    ) -> Vec<TorrentChoice> {
+        let ResolveTarget { episode, titles, allow_episodeless, prefer_dub, .. } = target;
+        if titles.is_empty() {
+            return vec![];
+        }
+        search::find_candidates(client, titles, episode, allow_episodeless, prefer_dub)
+            .await
+            .into_iter()
+            .map(|c| TorrentChoice {
+                name: c.name,
+                seeders: c.seeders,
+                prefer_dub,
+            })
+            .collect()
+    }
+
     /// Pause every active torrent. Called when playback stops so the download
     /// (and its DHT/peer traffic) goes quiet the moment mpv closes, instead of
     /// finishing the episode in the background. Files stay on disk, so pressing
@@ -176,8 +234,27 @@ impl TorrentManager {
         }
     }
 
-    /// Read the first few MB of the chosen file so playback starts on warm
-    /// data and dead torrents fail fast. Bounded by time, not just bytes, so a
+    /// True while any torrent in the session is still downloading (live and
+    /// not yet finished). Low Data Mode uses this to defer the near-end
+    /// next-episode preload until the current episode's download is done, so
+    /// the two never compete for bandwidth on a slow connection.
+    pub async fn any_download_active(&self) -> bool {
+        let Some(session) = self.session.get().cloned() else { return false };
+        let active = std::sync::Mutex::new(false);
+        session.with_torrents(|it| {
+            let mut a = active.lock().unwrap();
+            for (_, h) in it {
+                let stats = h.stats();
+                if stats.live.is_some() && !stats.finished {
+                    *a = true;
+                }
+            }
+        });
+        active.into_inner().unwrap()
+    }
+
+    /// Read the first bit of the chosen file so playback starts on warm data
+    /// and dead torrents fail fast. Bounded by time, not just bytes, so a
     /// slow-but-alive swarm still passes.
     async fn prebuffer(
         &self,
@@ -185,8 +262,39 @@ impl TorrentManager {
         file_id: usize,
     ) -> Result<(), String> {
         use tokio::io::AsyncReadExt;
-        const PREBUFFER_BYTES: usize = 6 * 1024 * 1024;
+        // Was 6MB: on a slow-but-alive swarm this alone was the wait (a
+        // ~180KB/s peer took 33s just to deliver 6MB before mpv even
+        // started). This only needs to (a) prove the swarm is actually
+        // delivering bytes and (b) hand mpv a header it can parse — a
+        // container header is comfortably under 1MB. mpv's own
+        // --cache-pause/--demuxer-readahead-secs (see the is_torrent_stream
+        // args) already handle gracefully pausing/rebuffering mid-playback
+        // if it catches up to the download edge, so there's no need to front-
+        // load minutes of runway here — that tradeoff belongs to mpv's cache,
+        // not this one-time startup gate.
+        const PREBUFFER_BYTES: usize = 1024 * 1024;
         const PREBUFFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
+        // A candidate that never connects a single peer is dead — don't make
+        // the user sit through the full PREBUFFER_TIMEOUT to learn that. A
+        // swarm that DOES have peers still gets the full timeout below, even
+        // if those peers are slow to actually send data.
+        const PEER_GRACE: std::time::Duration = std::time::Duration::from_millis(3500);
+        const PEER_POLL: std::time::Duration = std::time::Duration::from_millis(1000);
+        let grace_start = std::time::Instant::now();
+        loop {
+            let live = handle
+                .stats()
+                .live
+                .map(|l| l.snapshot.peer_stats.live)
+                .unwrap_or(0);
+            if live > 0 {
+                break;
+            }
+            if grace_start.elapsed() >= PEER_GRACE {
+                return Err("no seeders (no peers connected)".to_string());
+            }
+            tokio::time::sleep(PEER_POLL).await;
+        }
 
         let mut stream = handle
             .clone()
@@ -248,9 +356,9 @@ impl TorrentManager {
             .add_torrent(add, Some(opts))
             .await
             .map_err(|e| format!("add_torrent failed: {}", e))?;
-        let handle = match resp {
-            AddTorrentResponse::Added(_, h) => h,
-            AddTorrentResponse::AlreadyManaged(_, h) => h,
+        let (handle, already_managed) = match resp {
+            AddTorrentResponse::Added(_, h) => (h, false),
+            AddTorrentResponse::AlreadyManaged(_, h) => (h, true),
             AddTorrentResponse::ListOnly(_) => return Err("unexpected list-only response".into()),
         };
         let torrent_id = handle.id();
@@ -304,8 +412,22 @@ impl TorrentManager {
             return Err(format!("episode {} not found inside torrent", episode));
         };
 
+        // Select the wanted file — as a union with whatever is already
+        // selected, not a replacement. Preloading the next episode reuses the
+        // same batch torrent, and replacing the selection would deselect the
+        // episode currently streaming to mpv: librqbit cancels its queued
+        // pieces, capping it to the 32MB rolling stream-lookahead window while
+        // the preloaded file downloads full-speed in natural piece order.
+        // That bandwidth theft + tiny runway is exactly what showed up as
+        // "cache 0.0MB, chunk, freeze" mid-playback.
+        let mut wanted: std::collections::HashSet<usize> = std::iter::once(file_id).collect();
+        if already_managed {
+            if let Some(prev) = handle.only_files() {
+                wanted.extend(prev);
+            }
+        }
         session
-            .update_only_files(&handle, &std::iter::once(file_id).collect())
+            .update_only_files(&handle, &wanted)
             .await
             .map_err(|e| format!("file selection failed: {}", e))?;
         // Errors if the torrent isn't paused — that's the normal case.
@@ -501,6 +623,7 @@ mod tests {
                     titles: &titles,
                     allow_episodeless: false,
                     prefer_dub: false,
+                    chosen_name: None,
                 },
                 13370,
             )

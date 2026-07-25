@@ -4,6 +4,7 @@ import { Play, BookOpen, Star } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type MediaItem, mediaApi } from "@/lib/api";
 import { useFocusable } from "@/focus";
+import { useAppStore, useSettingsStore } from "@/stores/app";
 
 interface MediaCardProps {
   item: MediaItem;
@@ -18,6 +19,9 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handlePrefetchStart = useCallback(() => {
+    // Low Data Mode: while the mpv window is open, hover prefetches compete
+    // with the running stream — skip them; details load on actual open.
+    if (useSettingsStore.getState().dataSaver && useAppStore.getState().playerActive) return;
     prefetchTimerRef.current = setTimeout(() => {
       // Prefetch only the AniList detail — it's a single cached GraphQL call
       // and makes opening the card feel instant. Do NOT prefetch episodes

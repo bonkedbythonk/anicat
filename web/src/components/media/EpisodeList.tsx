@@ -1,10 +1,16 @@
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Play, Download, Loader2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check, HardDriveDownload } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
-import { useSettingsStore } from "@/stores/app";
+import { useSettingsStore, useAppStore } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
+import { FocusScope, ScopeNav, useFocusable } from "@/focus";
+
+function FocusableButton({ disabled, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>({ disabled });
+  return <button ref={ref} tabIndex={disabled ? -1 : tabIndex} disabled={disabled} {...props}>{children}</button>;
+}
 
 interface EpisodeListProps {
   mediaId: number;
@@ -62,14 +68,7 @@ export function EpisodeList({
     setStreamFilter(translationType === "dub" ? "dub" : null);
   }, [translationType]);
 
-  // Removed automatic scrolling entirely to ensure UI stability.
-  // The list will always start at the top (Episode 1).
   useEffect(() => {
-    // Manual scroll only
-  }, [mediaId]);
-
-  useEffect(() => {
-    // Sync initial episodes statuses with localDownloadStatus when episodes change
     const initialStatus: Record<string, string> = {};
     episodes.forEach(ep => {
       if (ep.download_status) {
@@ -117,6 +116,42 @@ export function EpisodeList({
     };
   }, [mediaId]);
 
+  // Re-fetch expanded stream servers immediately when selectedProvider changes
+  useEffect(() => {
+    if (!expandedEpStreams) return;
+
+    let isMounted = true;
+    const currentEp = expandedEpStreams;
+
+    const refreshStreams = async () => {
+      setLoadingStreamsEp(currentEp);
+      setStreamsError(null);
+      setResolvedStreams([]);
+
+      try {
+        const data = await mediaApi.getStreams(mediaId, parseInt(currentEp, 10), selectedProvider) as { streams?: StreamServer[] };
+        if (isMounted) {
+          setResolvedStreams(data.streams || []);
+        }
+      } catch (err: unknown) {
+        if (isMounted) {
+          console.error("Failed to load stream servers:", err);
+          setStreamsError((err as Error)?.message || "Failed to load stream servers.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingStreamsEp(null);
+        }
+      }
+    };
+
+    refreshStreams();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedProvider, expandedEpStreams, mediaId]);
+
   const getStreamGroup = (name: string) => {
     const lower = (name || "").toLowerCase();
     if (lower.includes("dub")) return "dub";
@@ -154,15 +189,29 @@ export function EpisodeList({
     return 4;
   };
 
+  const dataSaver = useSettingsStore((s) => s.dataSaver);
   const getSortedStreams = (streams: StreamServer[]) => {
     if (!streams) return [];
     
     let filtered = [...streams];
     
+    // Filter by stream group (sub vs dub)
     if (streamFilter) {
       filtered = filtered.filter(s => getStreamGroupFromServer(s) === streamFilter);
+    } else if (translationType !== "dub" && streams.some(s => getStreamGroupFromServer(s) !== "dub")) {
+      // If user prefers Sub, filter out Dub streams when Sub streams exist
+      filtered = filtered.filter(s => getStreamGroupFromServer(s) !== "dub");
     }
-    
+
+    // Filter by resolution preference (1080p vs 720p)
+    if (!dataSaver && filtered.some(s => (s.quality || "").includes("1080"))) {
+      // Non Low Data Mode: if 1080p exists, hide 720p, 480p, 360p
+      filtered = filtered.filter(s => !(s.quality || "").includes("720") && !(s.quality || "").includes("480") && !(s.quality || "").includes("360"));
+    } else if (dataSaver && filtered.some(s => (s.quality || "").includes("720"))) {
+      // Low Data Mode: if 720p exists, hide 1080p
+      filtered = filtered.filter(s => !(s.quality || "").includes("1080"));
+    }
+
     const getGroupWeight = (group: string) => {
       switch (group) {
         case "hard_sub": return 1;
@@ -244,15 +293,31 @@ export function EpisodeList({
   const handlePlaySpecificStream = async (epNum: string, serverName: string) => {
     const serverKey = `${epNum}-${serverName}`;
     setLoadingServer(serverKey);
-
     setPlayingEp(epNum);
+
+    const ep = episodes.find((e) => String(e.number) === epNum);
+    const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+
+    useAppStore.getState().setPlaybackLoading({
+      isLoading: true,
+      mediaId: mediaId,
+      episodeNumber: parseInt(epNum, 10),
+      title: mediaTitle,
+      coverImage: coverImage,
+      statusText: selectedProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+      step: selectedProvider === "nyaa" ? 2 : 1,
+    });
+
     try {
-      const ep = episodes.find((e) => String(e.number) === epNum);
-      const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
       await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, serverName, mediaTitle, epTitle, coverImage, episodes.length);
       dispatchRefresh();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to play stream:", error);
+      useAppStore.getState().setPlaybackLoading({
+        isLoading: true,
+        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        step: 0,
+      });
     } finally {
       setPlayingEp(null);
       setLoadingServer(null);
@@ -319,15 +384,25 @@ export function EpisodeList({
             
             return (
               <div key={`${epNum}-${idx}`} className="space-y-1.5">
+                <FocusScope
+                  name={`ep-${epNum}`}
+                orientation="horizontal"
+                key={`${epNum}-${idx}`}
+                className="space-y-1.5"
+              >
+                <ScopeNav />
                 <div
-                  onClick={() => !isUnaired && handlePlay(epNum)}
-                  className={`flex items-center justify-between px-4 py-2.5 rounded-lg transition-all group episode-row-item ${!isUnaired ? 'cursor-pointer' : ''} ${
-                    isNext && !isUnaired ? 'bg-accent/10 border border-accent/20 shadow-lg shadow-accent/5' : 
-                    isWatched ? 'opacity-50 hover:bg-foreground/[0.04] border border-transparent' : 
+                  className={`flex items-center justify-between px-4 py-2.5 rounded-lg transition-all group episode-row-item ${
+                    isNext && !isUnaired ? 'bg-accent/10 border border-accent/20 shadow-lg shadow-accent/5' :
+                    isWatched ? 'opacity-50 hover:bg-foreground/[0.04] border border-transparent' :
                     'bg-foreground/[0.02] border border-border hover:bg-foreground/[0.06] hover:border-border/60'
                   }`}
                 >
-                <div className="flex items-center space-x-4 min-w-0">
+                <FocusableButton
+                  disabled={isUnaired}
+                  onClick={() => handlePlay(epNum)}
+                  className={`flex items-center space-x-4 min-w-0 flex-1 text-left ${!isUnaired ? 'cursor-pointer' : ''}`}
+                >
                   {/* Clean Episode Badge */}
                   <div className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-[14px] font-bold text-sm transition-all episode-badge-box ${
                     isWatched ? "bg-foreground/5 text-gray-500" :
@@ -345,7 +420,7 @@ export function EpisodeList({
                     )}
                   </div>
                   
-                  <div className="flex flex-col min-w-0">
+                  <div className="flex flex-col min-w-0 pr-4">
                     <span className={`text-sm font-medium truncate transition-colors ${
                       isWatched ? "text-gray-500" : 
                       isUnaired ? "text-gray-600" : 
@@ -364,7 +439,7 @@ export function EpisodeList({
                     </span>
                   </div>
                   {statusIcon(localDownloadStatus[epNum] || ep.download_status)}
-                </div>
+                </FocusableButton>
 
                 {!isUnaired ? (
                   <div className="flex items-center space-x-1.5 shrink-0">
@@ -373,7 +448,7 @@ export function EpisodeList({
                         it being hidden behind hover made it easy to never notice
                         a provider had more than one stream to choose from. */}
                     {!isManga && (
-                      <button
+                      <FocusableButton
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleStreams(epNum);
@@ -390,10 +465,10 @@ export function EpisodeList({
                         ) : (
                           <Video size={16} />
                         )}
-                      </button>
+                      </FocusableButton>
                     )}
                     <div className="flex items-center space-x-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
+                    <FocusableButton
                       onClick={(e) => {
                         e.stopPropagation();
                         handleQueue(epNum);
@@ -407,9 +482,9 @@ export function EpisodeList({
                       ) : (
                         <Download size={16} />
                       )}
-                    </button>
+                    </FocusableButton>
                      {isWatched ? (
-                       <button
+                       <FocusableButton
                          onClick={(e) => {
                            e.stopPropagation();
                            if (onUnwatch) onUnwatch(epNum);
@@ -418,9 +493,9 @@ export function EpisodeList({
                          className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-red-500/20 hover:text-red-400 transition-all active:scale-90"
                        >
                          <XCircle size={16} />
-                       </button>
+                       </FocusableButton>
                      ) : (
-                       <button
+                       <FocusableButton
                          onClick={(e) => {
                            e.stopPropagation();
                            if (onWatch) onWatch(epNum);
@@ -429,7 +504,7 @@ export function EpisodeList({
                          className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-green-500/20 hover:text-green-400 transition-all active:scale-90"
                        >
                          <Check size={16} />
-                       </button>
+                       </FocusableButton>
                      )}
                     </div>
                   </div>
@@ -438,7 +513,8 @@ export function EpisodeList({
                     Airing Soon
                   </span>
                 )}
-              </div>
+                </div>
+              </FocusScope>
 
               {expandedEpStreams === epNum && (
                 <div className="ml-15 p-4 rounded-2xl bg-foreground/[0.02] border border-border space-y-3 animate-fade-in text-xs" onClick={(e) => e.stopPropagation()}>
@@ -448,7 +524,7 @@ export function EpisodeList({
                       {(["hard_sub", "soft_sub", "dub"] as const)
                         .filter(mode => resolvedStreams.length === 0 || resolvedStreams.some(s => getStreamGroupFromServer(s) === mode))
                         .map((mode) => (
-                        <button
+                        <FocusableButton
                           key={mode}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -461,7 +537,7 @@ export function EpisodeList({
                           }`}
                         >
                           {mode.replace("_", " ")}
-                        </button>
+                        </FocusableButton>
                       ))}
                     </div>
                   </div>
@@ -483,7 +559,7 @@ export function EpisodeList({
                         const isAnyLoading = loadingServer !== null || playingEp !== null;
                         
                         return (
-                          <button
+                          <FocusableButton
                             key={`${s.name}-${idx}`}
                             disabled={isAnyLoading}
                             onClick={() => handlePlaySpecificStream(epNum, s.name)}
@@ -496,13 +572,19 @@ export function EpisodeList({
                             }`}
                           >
                             <div className="min-w-0 flex-1 pr-2">
-                              <div className={`font-bold text-[11px] truncate ${
+                              {/* Torrent release names are long and differ only near the
+                                  end (source/codec/CRC) — a single-line truncate clipped
+                                  exactly that part, making genuinely different releases
+                                  look like duplicates. Wrap instead so the whole name (and
+                                  what actually distinguishes it) stays visible. */}
+                              <div className={`font-bold text-[11px] line-clamp-2 break-words ${
                                 isCurrentLoading ? "text-accent" : "text-gray-200 group-hover/btn:text-white"
                               }`}>
                                 {(s.name || "").trim()}
                               </div>
                               <div className="text-[9px] text-gray-500 mt-0.5">
                                 {getStreamGroupFromServer(s).replace(/_/g, " ")} &bull; {s.quality || "HD"}
+                                {typeof s.seeders === "number" && <> &bull; {s.seeders} seeders</>}
                               </div>
                             </div>
                             {isCurrentLoading ? (
@@ -510,7 +592,7 @@ export function EpisodeList({
                             ) : (
                               <Play size={12} className="text-muted-foreground group-hover/btn:text-accent group-hover/btn:scale-110 transition-all shrink-0" fill="currentColor" />
                             )}
-                          </button>
+                          </FocusableButton>
                         );
                       })}
                     </div>

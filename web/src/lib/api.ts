@@ -61,7 +61,6 @@ export async function getConfig(): Promise<{
   stream: {
     data_saver: boolean;
     shader_profile?: string;
-    interpolation?: string;
     translation_type?: string;
   };
   api: {
@@ -217,13 +216,16 @@ export async function getChapterPages(
   return invoke("get_chapter_pages", { mediaId, chapterNumber });
 }
 
-export async function resolveStream(
+export async function getStreams(
   mediaId: number,
   episodeNumber: number,
   provider?: string,
+  title?: string,
 ): Promise<StreamServer[]> {
-  return invoke("resolve_stream", { mediaId, episodeNumber, provider });
+  return invoke("resolve_stream", { mediaId, episodeNumber, provider, title });
 }
+
+export const resolveStream = getStreams;
 
 export async function preloadEpisode(
   mediaId: number,
@@ -407,6 +409,22 @@ export async function playTrailer(trailerId: string): Promise<void> {
   return invoke("play_trailer", { trailerId });
 }
 
+// ── Per-show preference overrides ─────────────────────────
+
+export interface MediaPrefs {
+  provider: string | null;
+  translation_type: string | null;
+}
+
+export async function getMediaPrefs(mediaId: number): Promise<MediaPrefs> {
+  return invoke("get_media_prefs", { mediaId });
+}
+
+/** null clears an override back to "inherit the global setting". */
+export async function setMediaPrefs(mediaId: number, prefs: MediaPrefs): Promise<void> {
+  return invoke("set_media_prefs", { mediaId, provider: prefs.provider, translationType: prefs.translation_type });
+}
+
 // ── Health ────────────────────────────────────────────────
 
 export async function getHealth(): Promise<{
@@ -531,6 +549,8 @@ export const mediaApi = {
   trackPlayback: stopPlayback,
   playTrailer,
   getWatchHistory,
+  getMediaPrefs,
+  setMediaPrefs,
   checkHealth: getHealth,
   getAppVersion,
   // Stub methods for old component compatibility — delegate to real commands where possible
@@ -572,8 +592,8 @@ export const mediaApi = {
       console.warn("[updateStatus] failed:", err);
     }
   },
-  play: async (mediaId: number, epNum: number, provider?: string, server?: string, title?: string, episodeTitle?: string, coverImage?: string, totalEpisodes?: number) => {
-    return invoke("start_playback", { mediaId, episodeNumber: epNum, provider, server, title, episodeTitle, coverImage, totalEpisodes });
+  play: async (mediaId: number, epNum: number, provider?: string, server?: string, title?: string, episodeTitle?: string, coverImage?: string, totalEpisodes?: number, startOver?: boolean) => {
+    return invoke("start_playback", { mediaId, episodeNumber: epNum, provider, server, title, episodeTitle, coverImage, totalEpisodes, startOver });
   },
   getStreams: async (mediaId: number, epNum: number, provider?: string) => {
     return invoke("resolve_stream", { mediaId, episodeNumber: epNum, provider });

@@ -77,10 +77,14 @@ pub async fn search_media_impl(
         vars.insert("averageScoreGreater".to_string(), serde_json::json!(s));
     }
 
-    let result: PageResponse<crate::anilist::types::MediaItem> = state
+    let result: PageResponse<crate::anilist::types::MediaItem> = match state
         .anilist_client
         .execute(queries::MEDIA_SEARCH_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&cache_key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(cache_key, val.clone(), "search_media");
@@ -137,10 +141,14 @@ pub async fn get_trending_impl(
     vars.insert("type".to_string(), serde_json::json!(mtype));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
 
-    let result: PageResponse<crate::anilist::types::MediaItem> = state
+    let result: PageResponse<crate::anilist::types::MediaItem> = match state
         .anilist_client
         .execute(queries::MEDIA_TRENDING_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(key, val.clone(), "get_trending");
@@ -179,10 +187,14 @@ pub async fn get_seasonal_impl(
     vars.insert("type".to_string(), serde_json::json!(mtype));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
 
-    let result: PageResponse<crate::anilist::types::MediaItem> = state
+    let result: PageResponse<crate::anilist::types::MediaItem> = match state
         .anilist_client
         .execute(queries::MEDIA_SEASONAL_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(key, val.clone(), "get_seasonal");
@@ -213,10 +225,14 @@ pub async fn get_upcoming_impl(
     vars.insert("type".to_string(), serde_json::json!(mtype));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
 
-    let result: PageResponse<crate::anilist::types::MediaItem> = state
+    let result: PageResponse<crate::anilist::types::MediaItem> = match state
         .anilist_client
         .execute(queries::MEDIA_UPCOMING_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(key, val.clone(), "get_upcoming");
@@ -243,10 +259,14 @@ pub async fn get_media_characters_impl(
     vars.insert("page".to_string(), serde_json::json!(1));
     vars.insert("perPage".to_string(), serde_json::json!(25));
 
-    let result: crate::anilist::responses::CharacterResponse = state
+    let result: crate::anilist::responses::CharacterResponse = match state
         .anilist_client
         .execute(queries::MEDIA_CHARACTERS_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(key, val.clone(), "get_media_characters");
@@ -271,10 +291,14 @@ pub async fn get_smart_playlist_impl(
     vars.insert("sort".to_string(), serde_json::json!(["SCORE_DESC"]));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
 
-    let result: PageResponse<crate::anilist::types::MediaItem> = state
+    let result: PageResponse<crate::anilist::types::MediaItem> = match state
         .anilist_client
         .execute(queries::SMART_PLAYLIST_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
 
     let val = serde_json::to_value(result).map_err(|e| e.to_string())?;
     state.cache.set(key, val.clone(), "get_smart_playlist");
@@ -309,7 +333,10 @@ pub async fn get_episodes_impl(
     episode_count: Option<i64>,
     notify: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
@@ -473,7 +500,6 @@ pub async fn get_episodes_impl(
         }
     }
 
-    // Query download statuses from DB
     if let Ok(mut stmt) = db.prepare("SELECT episode_number, status FROM download_queue WHERE media_id = ?1") {
         if let Ok(status_rows) = stmt.query_map(rusqlite::params![media_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -499,8 +525,9 @@ pub async fn resolve_stream(
     media_id: i64,
     episode_number: i32,
     provider: Option<String>,
+    title: Option<String>,
 ) -> Result<Value, String> {
-    resolve_stream_impl(state.inner(), media_id, episode_number, provider).await
+    resolve_stream_impl(state.inner(), media_id, episode_number, provider, title).await
 }
 
 pub async fn resolve_stream_impl(
@@ -508,50 +535,117 @@ pub async fn resolve_stream_impl(
     media_id: i64,
     episode_number: i32,
     provider: Option<String>,
+    title: Option<String>,
 ) -> Result<Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
     };
 
     if provider_name == "nyaa" {
-        let (url, _) = super::playback::resolve_stream_for_provider(
-            state, media_id, episode_number as i64, "nyaa", &None, None,
-        )
-        .await?;
-        return Ok(serde_json::json!({ "streams": [{
-            "name": "Torrent (1080p)",
-            "url": url,
-            "quality": "1080p",
-            "isM3U8": false,
-            "headers": null,
-            "group": "hard_sub",
-        }] }));
+        // List the available releases (search only, no download) so the
+        // picker can offer each as a selectable server. The `url` is a
+        // sentinel: torrents resolve lazily at play time (start_playback ->
+        // resolve_stream_for_provider), keyed by the chosen release name, so
+        // we never download every candidate just to populate the list.
+        let prefer_dub =
+            super::playback::effective_translation_type(state, media_id).await == "dub";
+        let (titles, episode_count) =
+            crate::torrent::gather_media_info(state, media_id, None).await;
+        let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
+        let choices = state
+            .torrent
+            .list_candidates(
+                &state.http_client,
+                crate::torrent::ResolveTarget {
+                    media_id,
+                    episode: episode_number as i64,
+                    titles: &titles,
+                    allow_episodeless,
+                    prefer_dub,
+                    chosen_name: None,
+                },
+            )
+            .await;
+        let streams: Vec<Value> = choices
+            .into_iter()
+            .map(|c| {
+                // Fansub torrent releases mux subtitles as a selectable track,
+                // not burned into the video — "hard_sub" was wrong for every
+                // non-dub release here.
+                let group = if c.prefer_dub { "dub" } else { "soft_sub" };
+                serde_json::json!({
+                    "name": c.name,
+                    // Sentinel — resolved lazily when the user picks it.
+                    "url": "",
+                    "quality": "1080p",
+                    "seeders": c.seeders,
+                    "isM3U8": false,
+                    "headers": null,
+                    "group": group,
+                })
+            })
+            .collect();
+        return Ok(serde_json::json!({ "streams": streams }));
     }
 
     let db = state.open_db()?;
 
-    // Try primary provider
-    if let Some(slug) = registry::service::get_provider_slug(&db, media_id, &provider_name) {
-        if let Ok(servers) = state
+    // 1. Try saved slug first, or auto-search if missing
+    let mut slug_opt = registry::service::get_provider_slug(&db, media_id, &provider_name);
+    if slug_opt.is_none() {
+        slug_opt = resolve_and_save_provider_slug_for_episode(state, media_id, &provider_name, false, title.clone(), Some(episode_number)).await.ok().flatten();
+    }
+
+    let mut servers = Vec::new();
+    if let Some(ref slug) = slug_opt {
+        if let Ok(res) = state
             .scraper_manager
-            .get_streams(&slug, episode_number, &provider_name)
+            .get_streams(slug, episode_number, &provider_name)
             .await
         {
-            return Ok(serde_json::json!({ "streams": servers }));
+            servers = res;
         }
     }
 
-    // Try fallback provider
+    if servers.is_empty() {
+        if let Ok(Some(fresh_slug)) = resolve_and_save_provider_slug_for_episode(state, media_id, &provider_name, false, title.clone(), Some(episode_number)).await {
+            if let Ok(res) = state
+                .scraper_manager
+                .get_streams(&fresh_slug, episode_number, &provider_name)
+                .await
+            {
+                servers = res;
+            }
+        }
+    }
+
+    if !servers.is_empty() {
+        return Ok(serde_json::json!({ "streams": servers }));
+    }
+
+    // 2. Fallback provider if primary returned 0 streams
     if fallback != provider_name {
         log::info!("resolve_stream: primary provider '{}' failed, trying fallback '{}'", provider_name, fallback);
-        if let Some(slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
-            let servers = state
+        let fb_slug = match registry::service::get_provider_slug(&db, media_id, &fallback) {
+            Some(s) => Some(s),
+            None => resolve_and_save_provider_slug_for_episode(state, media_id, &fallback, false, title.clone(), Some(episode_number)).await.ok().flatten(),
+        };
+
+        if let Some(ref slug) = fb_slug {
+            if let Ok(servers) = state
                 .scraper_manager
-                .get_streams(&slug, episode_number, &fallback)
-                .await?;
-            return Ok(serde_json::json!({ "streams": servers }));
+                .get_streams(slug, episode_number, &fallback)
+                .await
+            {
+                if !servers.is_empty() {
+                    return Ok(serde_json::json!({ "streams": servers }));
+                }
+            }
         }
     }
 
@@ -572,7 +666,10 @@ pub async fn search_provider_impl(
     query: String,
     provider: Option<String>,
 ) -> Result<Vec<crate::scraper::AnimeRef>, String> {
-    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
@@ -619,6 +716,31 @@ pub async fn map_provider_slug_impl(
 }
 
 #[tauri::command]
+pub async fn get_media_prefs(
+    state: State<'_, AppState>,
+    media_id: i64,
+) -> Result<registry::service::MediaPrefs, String> {
+    let db = state.open_db()?;
+    Ok(registry::service::get_media_prefs(&db, 0, media_id).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn set_media_prefs(
+    state: State<'_, AppState>,
+    media_id: i64,
+    provider: Option<String>,
+    translation_type: Option<String>,
+) -> Result<(), String> {
+    let db = state.open_db()?;
+    registry::service::set_media_prefs(
+        &db,
+        0,
+        media_id,
+        &registry::service::MediaPrefs { provider, translation_type },
+    )
+}
+
+#[tauri::command]
 pub async fn clear_provider_cache(
     state: State<'_, AppState>,
     media_id: i64,
@@ -641,14 +763,16 @@ pub async fn debug_provider_streams(
     episode_number: i32,
     provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let provider_name = provider.unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
     let fallback = {
         let cfg = state.config.read().await;
         cfg.general.fallback_provider.clone()
     };
     let db = state.open_db()?;
 
-    // Try each provider in order: primary → fallback
     let providers = if fallback != provider_name {
         vec![provider_name.as_str(), fallback.as_str()]
     } else {
@@ -663,7 +787,6 @@ pub async fn debug_provider_streams(
             resolved_provider = prov.to_string();
             break;
         }
-        // Auto-search: get title from AniList, search provider, save slug
         if let Some(found_slug) = resolve_and_save_provider_slug(
             &state,
             media_id,
@@ -720,8 +843,6 @@ pub async fn get_chapter_pages_impl(
 
     Ok(pages)
 }
-
-// ── Local library commands ────────────────────────────────
 
 #[tauri::command]
 pub async fn get_library(
@@ -828,18 +949,19 @@ pub async fn start_download_worker(app_handle: tauri::AppHandle, state: crate::s
         );
     }
 
+    let mut sleep_duration = tokio::time::Duration::from_secs(2);
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(sleep_duration).await;
 
         let db = match state.open_db() {
             Ok(d) => d,
             Err(e) => {
                 log::error!("Download worker failed to open db: {}", e);
+                sleep_duration = tokio::time::Duration::from_secs(15);
                 continue;
             }
         };
 
-        // Check if there is already an active download
         let active_count: Result<i64, _> = db.query_row(
             "SELECT COUNT(*) FROM download_queue WHERE status = 'downloading'",
             [],
@@ -848,17 +970,17 @@ pub async fn start_download_worker(app_handle: tauri::AppHandle, state: crate::s
 
         match active_count {
             Ok(count) if count > 0 => {
-                // Downloader is busy, wait for next tick
+                sleep_duration = tokio::time::Duration::from_secs(2);
                 continue;
             }
             Err(e) => {
                 log::error!("Failed to check active downloads: {}", e);
+                sleep_duration = tokio::time::Duration::from_secs(15);
                 continue;
             }
             _ => {}
         }
 
-        // Fetch the next queued item
         let next_item: Result<(i64, i64, String), _> = db.query_row(
             "SELECT media_id, episode_number, media_title FROM download_queue WHERE status = 'queued' ORDER BY id ASC LIMIT 1",
             [],
@@ -867,6 +989,7 @@ pub async fn start_download_worker(app_handle: tauri::AppHandle, state: crate::s
 
         if let Ok((media_id, ep_num, title)) = next_item {
             log::info!("Download worker: Starting download for media_id={}, episode={}", media_id, ep_num);
+            sleep_duration = tokio::time::Duration::from_secs(2);
             download_episode(
                 app_handle.clone(),
                 state.clone(),
@@ -874,6 +997,9 @@ pub async fn start_download_worker(app_handle: tauri::AppHandle, state: crate::s
                 ep_num,
                 title,
             ).await;
+        } else {
+            // Queue is empty — sleep 15 seconds to eliminate idle CPU & DB polling
+            sleep_duration = tokio::time::Duration::from_secs(15);
         }
     }
 }
@@ -887,12 +1013,10 @@ async fn download_episode(
 ) {
     let notify = |msg: &str| notify_download(&app_handle, msg);
 
-    // Update status to downloading
     if let Ok(db) = state.open_db() {
         let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "downloading", None);
     }
 
-    // Get stream URL
     let db = match state.open_db() {
         Ok(d) => d,
         Err(_) => {
@@ -946,7 +1070,6 @@ async fn download_episode(
 
     notify(&format!("Downloading episode {}...", episode_number));
 
-    // Determine download path
     let downloads_path = {
         let cfg = state.config.read().await;
         let path = cfg.general.downloads_path.clone();
@@ -1026,7 +1149,6 @@ async fn download_episode(
 
     cmd.arg(&raw_url);
 
-    // Pass custom HTTP headers if present (e.g. Referer, User-Agent)
     if let Some(server) = servers.first() {
         if let Some(ref headers) = server.headers {
             for (key, val) in headers {
@@ -1044,7 +1166,6 @@ async fn download_episode(
 
     log::info!("Spawning download command: {:?}", cmd);
 
-    // Run the download command
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -1068,7 +1189,6 @@ async fn download_episode(
     let app_handle_clone = app_handle.clone();
     let state_clone = state.clone();
 
-    // Spawn a task to read stdout and parse progress
     let stdout_handle = tokio::spawn(async move {
         let mut last_progress = -1.0;
         let mut buf = [0u8; 4096];
@@ -1161,7 +1281,6 @@ async fn download_episode(
                     let _ = crate::registry::service::update_queue_progress(&db, media_id, episode_number, 100.0);
                 }
                 notify(&format!("Downloaded: {}", filename));
-                // Emit final 100% progress event
                 use tauri::Emitter;
                 let _ = app_handle.emit("download_progress", serde_json::json!({
                     "media_id": media_id,
@@ -1296,8 +1415,7 @@ pub async fn remove_from_queue(
     episode_number: i64,
 ) -> Result<(), String> {
     let db = state.open_db()?;
-    
-    // Attempt to delete downloaded files
+
     let queue_items = crate::registry::service::get_all_queue(&db)?;
     let item = queue_items.iter().find(|i| i.media_id == media_id && i.episode_number == episode_number);
     if let Some(i) = item {
@@ -1567,7 +1685,6 @@ fn base_similarity(target: &str, candidate: &str) -> f64 {
         return 1.0 - (len_diff * 0.01);
     }
 
-    // Check if one is a substring of another
     if candidate_norm.contains(&target_norm) {
         let ratio = target_norm.len() as f64 / candidate_norm.len() as f64;
         return ratio * 0.9;
@@ -1608,10 +1725,19 @@ pub(crate) async fn fetch_media_detail_cached(
     let mut vars = std::collections::HashMap::new();
     vars.insert("id".to_string(), serde_json::json!(media_id));
     vars.insert("type".to_string(), serde_json::json!(media_type));
-    let result: crate::anilist::responses::MediaResponse = state
+    let result: crate::anilist::responses::MediaResponse = match state
         .anilist_client
         .execute(crate::anilist::queries::MEDIA_DETAIL_QUERY, vars)
-        .await?;
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            // Stale fallback: expired metadata still beats an empty detail
+            // page when AniList itself is unreachable.
+            let stale = state.cache.stale_or_err(&key, e)?;
+            return serde_json::from_value(stale).map_err(|e| e.to_string());
+        }
+    };
     if let Ok(v) = serde_json::to_value(&result) {
         state.cache.set(key, v, "media_detail");
     }
@@ -1629,12 +1755,13 @@ async fn media_is_finished(state: &AppState, media_id: i64) -> bool {
     }
 }
 
-pub async fn resolve_and_save_provider_slug(
+pub async fn resolve_and_save_provider_slug_for_episode(
     state: &AppState,
     media_id: i64,
     provider_name: &str,
     is_manga: bool,
     frontend_title: Option<String>,
+    episode_number: Option<i32>,
 ) -> Result<Option<String>, String> {
     // The torrent provider has no scraper catalog to search against; its
     // "slug" is only ever a user-entered search-title override.
@@ -1733,53 +1860,102 @@ pub async fn resolve_and_save_provider_slug(
         cfg.stream.translation_type.clone()
     };
 
-    if let Some(best) = find_best_match(&target_titles, results, |r| &r.title, &translation_type) {
-        log::info!("resolve_and_save_provider_slug: matched '{}' to slug '{}'", best.title, best.id);
-        let db = state.open_db()?;
-        let _ = registry::service::set_provider_slug(&db, media_id, provider_name, &best.id);
-        Ok(Some(best.id))
-    } else {
+    let matches = find_all_matches(&target_titles, results, |r| &r.title, &translation_type);
+    if matches.is_empty() {
         log::warn!("resolve_and_save_provider_slug: no match found for media_id={}", media_id);
-        Ok(None)
+        return Ok(None);
     }
+
+    for cand in matches {
+        if let Some(ep) = episode_number {
+            if !is_manga && provider_name != "nyaa" {
+                if let Ok(servers) = state.scraper_manager.get_streams(&cand.id, ep, provider_name).await {
+                    if servers.is_empty() {
+                        log::info!(
+                            "resolve_and_save_provider_slug: candidate '{}' (slug '{}') returned 0 streams for ep {}, trying next candidate",
+                            cand.title,
+                            cand.id,
+                            ep
+                        );
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        log::info!("resolve_and_save_provider_slug: matched '{}' to slug '{}'", cand.title, cand.id);
+        let db = state.open_db()?;
+        let _ = registry::service::set_provider_slug(&db, media_id, provider_name, &cand.id);
+        return Ok(Some(cand.id));
+    }
+
+    log::warn!("resolve_and_save_provider_slug: all matching candidates yielded 0 streams for media_id={}", media_id);
+    Ok(None)
+}
+
+pub async fn resolve_and_save_provider_slug(
+    state: &AppState,
+    media_id: i64,
+    provider_name: &str,
+    is_manga: bool,
+    frontend_title: Option<String>,
+) -> Result<Option<String>, String> {
+    resolve_and_save_provider_slug_for_episode(
+        state,
+        media_id,
+        provider_name,
+        is_manga,
+        frontend_title,
+        None,
+    )
+    .await
+}
+
+pub fn find_all_matches<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F, preferred_translation: &str) -> Vec<T>
+where
+    F: Fn(&T) -> &str,
+{
+    let mut scored: Vec<(f64, T)> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let cand_title = get_title(&candidate);
+            let cand_lower = cand_title.to_lowercase();
+            let has_dub = cand_lower.contains("dub") && (cand_lower.contains("(dub)") || cand_lower.contains("[dub]"));
+            let mismatched_translation = (preferred_translation == "sub" && has_dub)
+                || (preferred_translation == "dub"
+                    && !has_dub
+                    && false);
+            let translation_penalty = if mismatched_translation { 0.5 } else { 1.0 };
+
+            let mut max_score = 0.0_f64;
+            for &target in target_titles {
+                if target.is_empty() {
+                    continue;
+                }
+                let score = calculate_similarity(target, cand_title) * translation_penalty;
+                if score > max_score {
+                    max_score = score;
+                }
+            }
+            if max_score >= 0.4 {
+                Some((max_score, candidate))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().map(|(_, cand)| cand).collect()
 }
 
 pub fn find_best_match<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F, preferred_translation: &str) -> Option<T>
 where
     F: Fn(&T) -> &str,
 {
-    let mut best_index = None;
-    let mut best_score = 0.4_f64;
-
-    for (idx, candidate) in candidates.iter().enumerate() {
-        let cand_title = get_title(candidate);
-        let cand_lower = cand_title.to_lowercase();
-        
-        let has_dub = cand_lower.contains("dub") && (cand_lower.contains("(dub)") || cand_lower.contains("[dub]"));
-        let mismatched_translation = (preferred_translation == "sub" && has_dub)
-            || (preferred_translation == "dub"
-                && !has_dub
-                && candidates.iter().any(|c| get_title(c).to_lowercase().contains("dub")));
-        let translation_penalty = if mismatched_translation { 0.5 } else { 1.0 };
-
-        for &target in target_titles {
-            if target.is_empty() {
-                continue;
-            }
-            let score = calculate_similarity(target, cand_title) * translation_penalty;
-            if score > best_score {
-                best_score = score;
-                best_index = Some(idx);
-            }
-        }
-    }
-
-    if let Some(idx) = best_index {
-        let mut candidates = candidates;
-        Some(candidates.remove(idx))
-    } else {
-        None
-    }
+    find_all_matches(target_titles, candidates, get_title, preferred_translation).into_iter().next()
 }
 
 fn is_progress_line(line: &str) -> bool {

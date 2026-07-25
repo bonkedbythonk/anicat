@@ -10,9 +10,46 @@ import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from
 import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, parseAiringTime } from "@/lib/date";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
+import { FocusScope, ScopeNav, useFocusable } from "@/focus";
 import { EpisodeList } from "./EpisodeList";
 import { WatchGrid } from "./WatchGrid";
 import MangaReader from "./MangaReader";
+import { useModalDismiss } from "@/hooks/useModalDismiss";
+
+type DetailTabKey = "episodes" | "characters" | "seasons" | "more";
+
+function FocusableButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  return <button ref={ref} tabIndex={tabIndex} {...props}>{children}</button>;
+}
+
+function FocusableSelect({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  const { ref, tabIndex } = useFocusable<HTMLSelectElement>();
+  return <select ref={ref} tabIndex={tabIndex} {...props}>{children}</select>;
+}
+
+// Focusable tab button — a child component so useFocusable runs per-tab inside
+// the tabs FocusScope (hooks can't be called in a .map).
+function DetailTab({
+  tab, label, active, onSelect,
+}: { tab: DetailTabKey; label: string; active: boolean; onSelect: (t: DetailTabKey) => void }) {
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  return (
+    <button
+      ref={ref}
+      role="tab"
+      aria-selected={active}
+      tabIndex={tabIndex}
+      onClick={() => onSelect(tab)}
+      className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+    >
+      {label}
+      {active && (
+        <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full" />
+      )}
+    </button>
+  );
+}
 
 // AniList airing timestamps are ISO strings without a zone suffix (UTC).
 function airingCountdown(airingAt?: string | number): string | null {
@@ -61,9 +98,23 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  
+  const characterModalRef = useModalDismiss<HTMLDivElement>(
+    !!selectedCharacter,
+    () => setSelectedCharacter(null)
+  );
   const [isResolvingTrailer, setIsResolvingTrailer] = useState(false);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
   const setNotification = useAppStore((s) => s.setNotification);
+  const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+
+  useEffect(() => {
+    // When MediaDetail mounts (e.g. user clicked a card and navigated here),
+    // we must claim the active focus scope so useSpatialNavigation knows to
+    // route arrow keys into this page rather than discarding them because the
+    // old page's scope no longer matches.
+    setActiveFocusScope("detail-actions");
+  }, [setActiveFocusScope]);
 
   // Surface a failed action to the user instead of only logging it — an
   // optimistic UI update can otherwise silently diverge from AniList.
@@ -82,19 +133,52 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
   const [selectedProvider, setSelectedProvider] = useState<string>("mkissa");
 
-  // Debug overlay state (DEV only)
-
+  // Per-show overrides (registry media_prefs): a saved provider or audio
+  // choice for this show wins over the global config defaults.
+  const { data: mediaPrefs } = useQuery({
+    queryKey: ["media-prefs", item.id],
+    queryFn: () => mediaApi.getMediaPrefs(item.id),
+  });
 
   useEffect(() => {
-    if (config?.general?.provider) {
+    if (mediaPrefs?.provider) {
+      setSelectedProvider(mediaPrefs.provider);
+    } else if (config?.general?.provider) {
       setSelectedProvider(config.general.provider as string);
     }
-  }, [config]);
+  }, [config, mediaPrefs]);
+
+  const handleSelectProvider = async (provider: string) => {
+    setSelectedProvider(provider);
+    // Remember the choice for this show: picking the global default clears
+    // the override, anything else saves it.
+    const globalProvider = (config?.general?.provider as string) || "mkissa";
+    try {
+      await mediaApi.setMediaPrefs(item.id, {
+        provider: provider === globalProvider ? null : provider,
+        translation_type: mediaPrefs?.translation_type ?? null,
+      });
+      queryClient.invalidateQueries({ queryKey: ["media-prefs", item.id] });
+    } catch (err) {
+      console.error("Failed to save per-show provider:", err);
+    }
+  };
+
+  const handleSelectAudio = async (audio: string) => {
+    try {
+      await mediaApi.setMediaPrefs(item.id, {
+        provider: mediaPrefs?.provider ?? null,
+        translation_type: audio === "default" ? null : audio,
+      });
+      queryClient.invalidateQueries({ queryKey: ["media-prefs", item.id] });
+    } catch (err) {
+      console.error("Failed to save per-show audio:", err);
+    }
+  };
 
   // Derived values (computed from state/props, must precede hooks that consume them)
   const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
 
-  // Initial detail load via React Query
   const {
     data: fullItemData,
     isLoading: loading,
@@ -129,7 +213,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     }
   };
 
-  // Extracted hooks
   const progressEditor = useProgressEditor();
   const scoreEditor = useProgressEditor();
 
@@ -147,10 +230,20 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
 
+  // Local watch history for this show — powers the "Resume from X / Start
+  // over" affordance on the primary button.
+  const { data: watchHistory = [] } = useQuery({
+    queryKey: ["watch-history", item.id],
+    queryFn: () => mediaApi.getWatchHistory(item.id),
+    enabled: !isManga,
+  });
+
   // Fallback chain: prefer raw AniList media_list_entry over derived user_status alias
   const actualProgress =
     fullItem?.media_list_entry?.progress ??
     fullItem?.user_status?.progress ??
+    item?.media_list_entry?.progress ??
+    item?.user_status?.progress ??
     0;
   const actualScore =
     fullItem?.media_list_entry?.score ??
@@ -259,9 +352,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   useEffect(() => {
     if (initialAction === "play" && !loading && config && !hasTriggeredInitial) {
       setHasTriggeredInitial(true);
-      handlePlayNext(initialPlayEpisode ? Number(initialPlayEpisode) : undefined, config?.general?.provider as string);
+      handlePlayNext(initialPlayEpisode ? Number(initialPlayEpisode) : undefined, selectedProvider);
     }
-  }, [initialAction, loading, config, hasTriggeredInitial]);
+  }, [initialAction, loading, config, hasTriggeredInitial, selectedProvider]);
 
   // Measure whether synopsis actually overflows the collapsed height
   useEffect(() => {
@@ -292,6 +385,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     try {
       const allEpNums = episodes.map(ep => parseInt(String(ep.number), 10));
       await mediaApi.addToQueue(item.id, allEpNums, fullItem?.title?.english || fullItem?.title?.romaji || item.title?.english || item.title?.romaji || '', fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || '');
+      useAppStore.getState().setNotification({
+        message: `Queued ${allEpNums.length} episodes for download`,
+        type: "info",
+      });
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to queue all:", error);
@@ -307,7 +404,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   // 1` — otherwise a stale `initialPlayEpisode` left over from how this page
   // was originally opened would keep getting replayed on every later click,
   // even after watching further episodes from within the same open session.
-  const handlePlayNext = async (overrideEpisode?: number, providerOverride?: string) => {
+  const handlePlayNext = async (overrideEpisode?: number, providerOverride?: string, startOver?: boolean) => {
     if (isPlayingNext || isProcessingAction.current) return;
 
     isProcessingAction.current = true;
@@ -319,7 +416,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       } else {
         if (!overrideEpisode && (!fullItem.status || fullItem.status === "FINISHED" || fullItem.status === "CANCELLED")) {
           if (fullItem.episodes && actualProgress >= fullItem.episodes) {
-            // Already watched all episodes — nothing to play
             return;
           }
         }
@@ -329,15 +425,29 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         const nextEpTitle = episodeTitleMap?.[nextEpNum] || "";
         const totalEps = fullItem?.episodes || episodes?.length || 0;
         const activeProvider = providerOverride || selectedProvider;
-        await mediaApi.play(item.id, nextEpNum, activeProvider, undefined, title, nextEpTitle, coverImg, totalEps);
+
+        useAppStore.getState().setPlaybackLoading({
+          isLoading: true,
+          mediaId: item.id,
+          episodeNumber: nextEpNum,
+          title: title,
+          coverImage: coverImg,
+          statusText: activeProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+          step: activeProvider === "nyaa" ? 2 : 1,
+        });
+
+        await mediaApi.play(item.id, nextEpNum, activeProvider, undefined, title, nextEpTitle, coverImg, totalEps, startOver);
         dispatchRefresh();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to play next:", error);
+      useAppStore.getState().setPlaybackLoading({
+        isLoading: true,
+        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        step: 0,
+      });
     } finally {
       setIsPlayingNext(false);
-      // Keep locked for a short moment to prevent accidental double-clicks 
-      // even after the request finished
       setTimeout(() => {
         isProcessingAction.current = false;
       }, 500);
@@ -450,7 +560,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     } catch (err) {
       console.error("Failed to toggle favourite:", err);
       notifyError(next ? "Couldn't add to AniList favourites." : "Couldn't remove from AniList favourites.");
-      // Roll back the optimistic flip on failure.
       queryClient.setQueryData(["media-detail", item.id], (old: MediaItem | undefined) => {
         if (!old) return old;
         return { ...old, is_favourite: !next };
@@ -481,7 +590,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       ["home-watching"],
       ["home-repeating"],
     ];
-    // Snapshot each list cache for rollback
     interface ListPage { media?: MediaItem[]; page_info?: unknown; }
     const snapshots: Map<string, ListPage | undefined> = new Map();
     for (const key of listQueryKeys) {
@@ -496,10 +604,24 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     // may still be mounted during exit animation and would crash on null data).
     qc.invalidateQueries({ queryKey: ["media-detail", item.id] });
 
-    mediaApi.deleteFromList(fullItem?.user_status?.id || fullItem?.media_list_entry?.id || 0)
+    const entryId = fullItem?.user_status?.id || fullItem?.media_list_entry?.id || 0;
+    if (!entryId) {
+      // No real AniList list-entry id to delete — happens when a cached copy
+      // was stamped with the `{ id: 0, ... }` placeholder that
+      // updateProgressInQueries fabricates for an item it hasn't seen a real
+      // entry for yet (e.g. right after adding to the list, before the next
+      // refetch lands). Calling deleteFromList(0) would just 400 and the
+      // catch below rolls the optimistic removal back — putting the stale
+      // entry right back and making it look undeletable. There's nothing on
+      // the server to delete in that case, so just purge it locally.
+      removeMediaFromQueries(qc, item.id);
+      dispatchRefresh();
+      return;
+    }
+
+    mediaApi.deleteFromList(entryId)
       .then(() => {
         removeMediaFromQueries(qc, item.id);
-        // Invalidate to ensure consistency with server
         for (const key of listQueryKeys) {
           qc.invalidateQueries({ queryKey: key as unknown[] });
         }
@@ -509,7 +631,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       .catch((error) => {
         console.error("Failed to remove from list:", error);
         notifyError("Couldn't remove this from your AniList list.");
-        // Rollback: restore snapshots
         for (const [keyStr, snapshot] of snapshots) {
           qc.setQueryData(JSON.parse(keyStr) as unknown[], snapshot);
         }
@@ -523,6 +644,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
   const title = fullItem?.title?.english || fullItem?.title?.romaji || item?.title?.english || item?.title?.romaji || '';
 
+  // Mirror the backend's resume rules (playback.rs resume_position): a stored
+  // position only counts past a 30s floor and below the 85% watched threshold.
+  // The backend is still the authority — this only drives the button label.
+  const resumeSeconds = useMemo(() => {
+    if (isManga) return 0;
+    const entry = watchHistory.find((e) => e.episode_number === actualProgress + 1);
+    if (!entry || entry.duration <= 0 || entry.stop_time < 30) return 0;
+    if ((entry.stop_time / entry.duration) * 100 >= 85) return 0;
+    return entry.stop_time;
+  }, [isManga, watchHistory, actualProgress]);
+
   const primaryActionButton = (() => {
     const currentProgress = actualProgress;
     const total = fullItem.episodes || fullItem.chapters || 0;
@@ -534,24 +666,44 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     const nextEpisode = actualProgress + 1;
     const isFinished = total > 0 && currentProgress >= total && fullItem.status !== 'RELEASING';
     const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
+    const showResume = resumeSeconds > 0 && !isFinished && !isCaughtUp && !isManga;
+    // Sequel handoff: a finished season's primary button flows straight into
+    // the next one instead of dead-ending at "Completed".
+    const handoffSequel = isFinished && !isManga ? sequel : null;
+    const sequelTitle = handoffSequel?.title?.english || handoffSequel?.title?.romaji || '';
     return (
-      <button
-        onClick={() => handlePlayNext()}
-        disabled={isPlayingNext || isCaughtUp}
-        className="flex items-center gap-2 px-5 py-3 bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
-      >
-        {isPlayingNext ? (
-          <Loader2 className="animate-spin" size={18} />
-        ) : (
-          <>
-            {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
-            <span>
-              {isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
-                : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
-            </span>
-          </>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => handoffSequel ? selectItem(handoffSequel, "play") : handlePlayNext()}
+          disabled={isPlayingNext || isCaughtUp || (isFinished && !handoffSequel)}
+          className="flex items-center gap-2 px-5 py-3 bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
+        >
+          {isPlayingNext ? (
+            <Loader2 className="animate-spin" size={18} />
+          ) : (
+            <>
+              {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
+              <span>
+                {handoffSequel ? `Start ${sequelTitle}`
+                  : isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
+                  : showResume ? `Resume Episode ${nextEpisode} · ${formatTime(resumeSeconds)}`
+                  : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
+              </span>
+            </>
+          )}
+        </button>
+        {showResume && (
+          <button
+            onClick={() => handlePlayNext(undefined, undefined, true)}
+            disabled={isPlayingNext}
+            title="Start this episode from the beginning"
+            className="flex items-center gap-1.5 px-4 py-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50"
+          >
+            <RotateCcw size={16} />
+            <span>Start over</span>
+          </button>
         )}
-      </button>
+      </div>
     );
   })();
 
@@ -567,15 +719,16 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           )}
           <div className="absolute inset-0 hero-gradient" />
           <div className="absolute inset-x-0 top-0 z-20 px-4 sm:px-8 lg:px-14 pt-6">
-            <div className="max-w-[1150px] mx-auto">
-              <button
+            <FocusScope name="detail-header" className="max-w-[1150px] mx-auto">
+              <ScopeNav />
+              <FocusableButton
                 onClick={onClose}
                 className="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground/70 hover:text-foreground cursor-pointer"
               >
                 <ChevronLeft size={14} />
                 Back
-              </button>
-            </div>
+              </FocusableButton>
+            </FocusScope>
           </div>
         </div>
 
@@ -590,7 +743,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 className="w-36 h-52 sm:w-44 sm:h-64 lg:w-48 lg:h-[272px] rounded-lg object-cover border border-border shadow-2xl"
               />
               {/* Compact stats under cover */}
-              <div className="w-36 sm:w-44 lg:w-48 space-y-3">
+              <FocusScope name="detail-stats" orientation="vertical" className="w-36 sm:w-44 lg:w-48 space-y-3">
+                <ScopeNav />
                 <div className="group/progress">
                   <div className="meta-mono text-muted-foreground mb-1">Progress</div>
                   {progressEditor.isEditing ? (
@@ -606,8 +760,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         }}
                         className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
                       />
-                      <button onClick={() => handleUpdateProgress(parseInt(progressEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></button>
-                      <button onClick={() => progressEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></button>
+                      <FocusableButton onClick={() => handleUpdateProgress(parseInt(progressEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></FocusableButton>
+                      <FocusableButton onClick={() => progressEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></FocusableButton>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
@@ -616,9 +770,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         <span className="text-muted-foreground/45 mx-1 font-medium">/</span>
                         <span className="text-muted-foreground">{isManga ? (fullItem.chapters || '?') : (fullItem.episodes || '?')}</span>
                       </p>
-                      <button onClick={() => progressEditor.startEditing(actualProgress)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-hover/progress:opacity-100">
+                      <FocusableButton onClick={() => progressEditor.startEditing(actualProgress)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-focus-within/progress:opacity-100 group-hover/progress:opacity-100">
                         <Edit2 size={11} />
-                      </button>
+                      </FocusableButton>
                     </div>
                   )}
                   {isManga && actualProgressVolumes != null && actualProgressVolumes > 0 && (
@@ -638,17 +792,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         if (scoreFormat === 'POINT_5') {
                           const active = (actualScore || 0) >= n;
                           return (
-                            <button key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
+                            <FocusableButton key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
                               <Star size={16} className={active ? 'text-accent' : 'text-muted-foreground/30'} fill={active ? 'currentColor' : 'none'} />
-                            </button>
+                            </FocusableButton>
                           );
                         }
                         const Icon = n === 1 ? Frown : n === 2 ? Meh : Smile;
                         const selected = (actualScore || 0) === n;
                         return (
-                          <button key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
+                          <FocusableButton key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
                             <Icon size={18} className={selected ? 'text-accent' : 'text-muted-foreground/30'} />
-                          </button>
+                          </FocusableButton>
                         );
                       })}
                     </div>
@@ -668,8 +822,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         }}
                         className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
                       />
-                      <button onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></button>
-                      <button onClick={() => scoreEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></button>
+                      <FocusableButton onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></FocusableButton>
+                      <FocusableButton onClick={() => scoreEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></FocusableButton>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 mt-0.5">
@@ -678,13 +832,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                           ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-xs">/ {SCORE_FORMAT_MAX[scoreFormat] ?? 100}</span></>
                           : <span className="text-muted-foreground/60">—</span>}
                       </span>
-                      <button onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-hover/score:opacity-100">
+                      <FocusableButton onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-focus-within/score:opacity-100 group-hover/score:opacity-100">
                         <Edit2 size={11} />
-                      </button>
+                      </FocusableButton>
                     </div>
                   )}
                 </div>
-              </div>
+              </FocusScope>
             </div>
 
             {/* Info — right column */}
@@ -708,25 +862,43 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 )}
               </div>
 
+              {/* Genres — AniList's `tags` field is also fetched but can
+                  contain plot-relevant/spoiler tags (our query doesn't pull
+                  the isMediaSpoiler flag needed to filter those out), so only
+                  the always-safe, high-level genres show here. */}
+              {fullItem.genres && fullItem.genres.length > 0 && (
+                <div className="flex items-center flex-wrap gap-1.5">
+                  {fullItem.genres.map((genre) => (
+                    <span
+                      key={genre}
+                      className="meta-mono text-[10px] px-2 py-1 rounded-full border border-border text-foreground/70"
+                    >
+                      {genre}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {/* Title */}
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-foreground leading-tight tracking-tight">{title}</h1>
 
               {/* Action bar */}
-              <div className="flex items-center gap-3 flex-wrap">
+              <FocusScope name="detail-actions" orientation="horizontal" className="flex items-center gap-3 flex-wrap">
+                <ScopeNav />
                 {primaryActionButton}
 
                 {hasTrailer && (
-                  <button
+                  <FocusableButton
                     onClick={handlePlayTrailer}
                     disabled={isResolvingTrailer}
                     className="flex items-center gap-2 px-5 py-3 bg-surface border border-border text-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] rounded-md text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
                   >
                     {isResolvingTrailer ? <Loader2 size={18} className="animate-spin" /> : <Film size={18} />}
                     <span>Trailer</span>
-                  </button>
+                  </FocusableButton>
                 )}
 
-                <button
+                <FocusableButton
                   onClick={handleToggleFavourite}
                   disabled={isTogglingFavourite}
                   title={fullItem?.is_favourite ? "Remove from AniList favourites" : "Add to AniList favourites"}
@@ -737,10 +909,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   }`}
                 >
                   <Heart size={18} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
-                </button>
+                </FocusableButton>
 
                 <div className="relative">
-                  <select
+                  <FocusableSelect
                     value={(() => { const s = fullItem.user_status?.status?.toLowerCase(); return s === 'current' ? 'watching' : (s || 'none'); })()}
                     onChange={(e) => {
                       const newStatus = e.target.value;
@@ -748,9 +920,20 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         handleRemoveFromList(true);
                       } else {
                         setIsUpdatingStatus(true);
-                        mediaApi.updateStatus(item.id, newStatus)
+                        // AniList's enum is CURRENT, not WATCHING — the dropdown's
+                        // "watching" value is a display-only label (see the reverse
+                        // current->watching mapping on `value` above); every other
+                        // option's UI value already matches the enum uppercased.
+                        const anilistStatus = newStatus === 'watching' ? 'CURRENT' : newStatus.toUpperCase();
+                        const updates: Record<string, unknown> = { status: anilistStatus };
+                        let newProgress = actualProgress;
+                        if (newStatus === 'repeating') {
+                          updates.progress = 0;
+                          newProgress = 0;
+                        }
+                        mediaApi.saveMediaListEntry(item.id, updates)
                           .then(() => {
-                            updateProgressInQueries(queryClient, item.id, actualProgress, newStatus);
+                            updateProgressInQueries(queryClient, item.id, newProgress, newStatus);
                             queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
                             queryClient.invalidateQueries({ queryKey: ['lists'] });
                             queryClient.invalidateQueries({ queryKey: ['home-watching'], refetchType: 'all' });
@@ -771,13 +954,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     <option value="completed">Completed</option>
                     <option value="paused">Paused</option>
                     <option value="dropped">Dropped</option>
-                  </select>
+                  </FocusableSelect>
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
                     <ChevronDown size={16} />
                   </div>
                 </div>
 
-                <button
+                <FocusableButton
                   onClick={handleRemoveFromList}
                   title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
                   className={`p-3 rounded-md transition-all border active:scale-95 ${
@@ -787,8 +970,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   }`}
                 >
                   <Trash2 size={20} />
-                </button>
-              </div>
+                </FocusableButton>
+              </FocusScope>
 
               {/* Synopsis */}
               {fullItem.description && (
@@ -803,10 +986,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
                   </motion.div>
                   {synopsisOverflows && (
-                    <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
-                      <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
-                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
-                    </button>
+                    <FocusScope name="detail-synopsis">
+                      <ScopeNav />
+                      <FocusableButton onClick={() => setIsExpanded(!isExpanded)} className="flex items-center space-x-1.5 text-[11px] font-bold text-foreground/50 hover:text-foreground transition-colors group">
+                        <span>{isExpanded ? 'Show Less' : 'Read Full Synopsis'}</span>
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />}
+                      </FocusableButton>
+                    </FocusScope>
                   )}
                 </div>
               )}
@@ -827,14 +1013,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
               {/* Season chain: previous / next */}
               {(prequel || sequel) && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <FocusScope name="detail-relations" orientation="horizontal" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <ScopeNav />
                   {[
                     { rel: prequel, label: 'Previous', side: 'prev' as const },
                     { rel: sequel, label: 'Next', side: 'next' as const },
                   ].filter((s) => s.rel).map(({ rel, label, side }) => {
                     const cover = rel?.cover_image?.large || rel?.coverImage?.large;
                     return (
-                      <button
+                      <FocusableButton
                         key={side}
                         onClick={() => rel && selectItem(rel)}
                         className={`group flex items-center gap-3 p-2.5 border border-border rounded-md bg-foreground/[0.02] hover:bg-surface/70 hover:border-foreground/20 transition-all text-left ${side === 'next' ? 'sm:flex-row-reverse sm:text-right' : ''}`}
@@ -848,77 +1035,91 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                           <div className="text-sm font-bold text-foreground truncate group-hover:text-accent transition-colors">{rel?.title?.english || rel?.title?.romaji}</div>
                           {rel?.format && <div className="text-[10px] text-muted-foreground mt-0.5">{rel.format}</div>}
                         </div>
-                      </button>
+                      </FocusableButton>
                     );
                   })}
-                </div>
+                </FocusScope>
               )}
             </div>
           </div>
 
           {/* Tabs */}
           <div className="mt-8 space-y-6">
-            <div className="flex border-b border-border pb-0 relative">
+            <FocusScope
+              name="detail-tabs"
+              orientation="horizontal"
+              role="tablist"
+              className="flex border-b border-border pb-0 relative"
+            >
+              <ScopeNav />
               {(['episodes', 'characters', 'seasons', 'more'] as const).map((tab) => (
-                <button
+                <DetailTab
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${activeTab === tab ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {tab === 'episodes' ? (isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  {activeTab === tab && (
-                    <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full" />
-                  )}
-                </button>
+                  tab={tab}
+                  active={activeTab === tab}
+                  onSelect={setActiveTab}
+                  label={tab === 'episodes' ? (isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                />
               ))}
-            </div>
+            </FocusScope>
 
             <div className="min-h-[300px]">
               <AnimatePresence mode="popLayout">
                 {activeTab === 'episodes' && (
                   <motion.div key="episodes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     {!isManga && (
-                      <div className="glass-panel p-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <FocusScope name="detail-episode-options" orientation="horizontal" className="glass-panel p-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <ScopeNav />
                         <div className="flex flex-wrap gap-2">
-                          <button
+                          <FocusableButton
                             onClick={handleToggleAutoskip}
                             className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoskip ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
                           >
                             <SkipForward size={14} fill={autoskip ? 'currentColor' : 'none'} />
                             <span>Auto Skip Intro</span>
-                          </button>
-                          <button
+                          </FocusableButton>
+                          <FocusableButton
                             onClick={handleToggleUpscaling}
                             className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${shaderProfile !== 'off' ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
                           >
                             <Sparkles size={14} className={shaderProfile !== 'off' ? 'text-accent' : ''} />
                             <span>Upscaling</span>
-                          </button>
-                          <button
+                          </FocusableButton>
+                          <FocusableButton
                             onClick={handleToggleAutoNext}
                             className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoplay ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
                           >
                             <PlayCircle size={14} className={autoplay ? 'text-accent' : ''} />
                             <span>Auto Next</span>
-                          </button>
+                          </FocusableButton>
                         </div>
                         <div className="flex items-center gap-2">
                           {(!isManga && episodes.length > 0) && (
-                            <button
+                            <FocusableButton
                               onClick={handleDownloadAll}
                               disabled={queueingAll}
                               className="p-1.5 rounded-lg glass-button transition-all active:scale-95 text-accent disabled:opacity-50"
                               title="Download All Episodes"
                             >
                               {queueingAll ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                            </button>
+                            </FocusableButton>
                           )}
-                          <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
+                          <FocusableSelect
+                            value={mediaPrefs?.translation_type ?? "default"}
+                            onChange={(e) => handleSelectAudio(e.target.value)}
+                            title="Audio for this show (overrides the global setting)"
+                            className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none"
+                          >
+                            <option value="default">Audio: Default</option>
+                            <option value="sub">Audio: Sub</option>
+                            <option value="dub">Audio: Dub</option>
+                          </FocusableSelect>
+                          <FocusableSelect value={selectedProvider} onChange={(e) => handleSelectProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
                             <option value="mkissa">Mkissa</option>
                             <option value="anineko">AniNeko</option>
-                            <option value="nyaa">Torrents (1080p)</option>
-                          </select>
-                          <button
+                            <option value="nyaa">Torrents</option>
+                          </FocusableSelect>
+                          <FocusableButton
                             onClick={async () => {
                               await mediaApi.clearProviderCache(item.id).catch(() => {});
                               queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id] });
@@ -928,9 +1129,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                             title="Re-match source"
                           >
                             <RotateCcw size={14} />
-                          </button>
+                          </FocusableButton>
                         </div>
-                      </div>
+                      </FocusScope>
                     )}
                     {(() => {
                       const total = isManga
@@ -974,23 +1175,24 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 )}
                 {activeTab === 'characters' && (
                   <motion.div key="characters" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <FocusScope name="detail-characters" orientation="horizontal" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      <ScopeNav />
                       {loadingChars ? (
                         <div className="col-span-4 py-20 flex justify-center"><Loader2 className="animate-spin text-accent" size={24} /></div>
                       ) : characters.length > 0 ? (
                         characters.map((char: Character) => (
-                          <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 glass-panel hover:bg-foreground/[0.03] transition-colors group character-card text-left">
+                          <FocusableButton key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 glass-panel hover:bg-foreground/[0.03] transition-colors group character-card text-left">
                             {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
                             <div className="min-w-0">
                               <div className="text-[13px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
                               <div className="text-[10px] text-muted-foreground">{char.role?.replace(/_/g, ' ')?.toLowerCase()}</div>
                             </div>
-                          </button>
+                          </FocusableButton>
                         ))
                       ) : (
                         <div className="col-span-4 py-20 text-center text-muted-foreground text-xs font-bold">No character data available.</div>
                       )}
-                    </div>
+                    </FocusScope>
                   </motion.div>
                 )}
                 {activeTab === 'seasons' && (
@@ -1005,41 +1207,43 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                           {seasonRels.length > 0 && (
                             <div className="space-y-3">
                               <p className="text-xs font-semibold text-foreground">Seasons & Adaptations</p>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                              <FocusScope name="detail-seasons-grid" orientation="horizontal" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <ScopeNav />
                                 {seasonRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
-                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
+                                    <FocusableButton key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
                                       {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
                                         {rel.relationType && <div className="text-[9px] font-bold text-accent/80 mt-0.5">{rel.relationType.replace(/_/g, ' ')}</div>}
                                         {m.format && <div className="text-[10px] text-muted-foreground mt-0.5">{m.format}</div>}
                                       </div>
-                                    </button>
+                                    </FocusableButton>
                                   );
                                 })}
-                              </div>
+                              </FocusScope>
                             </div>
                           )}
                           {otherRels.length > 0 && (
                             <div className="space-y-3">
                               <p className="text-xs font-semibold text-foreground">Other Relations</p>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                              <FocusScope name="detail-others-grid" orientation="horizontal" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <ScopeNav />
                                 {otherRels.map((rel: { relationType: string; node?: MediaItem }) => {
                                   const m = rel.node; if (!m) return null;
                                   return (
-                                    <button key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
+                                    <FocusableButton key={m.id} onClick={() => selectItem(m)} className="flex items-start gap-3 group text-left p-2 rounded-md hover:bg-foreground/[0.03] transition-colors">
                                       {(m.cover_image?.large || m.coverImage?.large) && <img src={proxyImage(m.cover_image?.large || m.coverImage?.large)} className="w-12 h-16 rounded-lg object-cover shrink-0" />}
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-foreground group-hover:text-accent transition-colors">{m.title?.english || m.title?.romaji}</div>
                                         {rel.relationType && <div className="text-[9px] font-bold text-accent/80 mt-0.5">{rel.relationType.replace(/_/g, ' ')}</div>}
                                         {m.format && <div className="text-[10px] text-muted-foreground mt-0.5">{m.format}</div>}
                                       </div>
-                                    </button>
+                                    </FocusableButton>
                                   );
                                 })}
-                              </div>
+                              </FocusScope>
                             </div>
                           )}
                         </div>
@@ -1052,20 +1256,21 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     {recommendations.length > 0 ? (
                       <div className="space-y-4">
                         <p className="text-xs font-semibold text-foreground">Recommendations</p>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+                        <FocusScope name="detail-recommendations" orientation="horizontal" className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+                          <ScopeNav />
                           {(recommendations as { mediaRecommendation?: MediaItem; cover_image?: { large?: string }; coverImage?: { large?: string }; rating?: number }[]).map((rec) => {
                             const m = rec.mediaRecommendation; if (!m) return null;
                             return (
-                              <button key={m.id} onClick={() => selectItem(m)} className="group space-y-2 text-left relative">
+                              <FocusableButton key={m.id} onClick={() => selectItem(m)} className="group space-y-2 text-left relative">
                                 <div className="aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-lg">
                                   <img src={proxyImage(rec.cover_image?.large || m.coverImage?.large)} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                                 </div>
                                 {(rec.rating ?? 0) > 0 && <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-background text-[9px] font-bold">{rec.rating}%</span>}
                                 <div className="text-[11px] font-bold text-muted-foreground line-clamp-2 group-hover:text-foreground transition-colors">{m.title?.english || m.title?.romaji}</div>
-                              </button>
+                              </FocusableButton>
                             );
                           })}
-                        </div>
+                        </FocusScope>
                       </div>
                     ) : (
                       <div className="py-20 text-center text-muted-foreground text-xs font-bold">No additional content.</div>
@@ -1080,7 +1285,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
 
       {/* Character detail modal */}
       {selectedCharacter && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={() => setSelectedCharacter(null)}>
+        <div 
+          ref={characterModalRef}
+          className="fixed inset-0 z-[200] flex items-center justify-center" 
+          onClick={() => setSelectedCharacter(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedCharacter.name?.full || "Character Details"}
+          tabIndex={-1}
+        >
           <div className="absolute inset-0 bg-black/60" />
           <div className="relative max-w-md w-[90%] bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setSelectedCharacter(null)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>

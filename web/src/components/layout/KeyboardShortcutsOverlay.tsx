@@ -16,6 +16,16 @@ const GLOBAL_SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["?"], label: "Show this help" },
 ];
 
+// Spatial navigation inside a focused list/grid/scope. Handled by the focus
+// system: components/media/*, views/*, and focus/useSpatialNavigation.ts.
+const FOCUS_SHORTCUTS: { keys: string[]; label: string }[] = [
+  { keys: ["Tab"], label: "Move between sections (sidebar, content, actions)" },
+  { keys: ["↑", "↓", "←", "→"], label: "Move focus inside a list or grid" },
+  { keys: ["Enter"], label: "Open or play the focused item" },
+  { keys: ["Space"], label: "Activate the focused button" },
+  { keys: ["Home", "End"], label: "First / last item in a list or grid" },
+];
+
 const READER_SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["→", "Space"], label: "Next page (Previous in right-to-left)" },
   { keys: ["←"], label: "Previous page (Next in right-to-left)" },
@@ -87,6 +97,10 @@ export function KeyboardShortcutsOverlay() {
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
       onClick={() => setOpen(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard Shortcuts"
+      tabIndex={-1}
     >
       <div
         className="w-full max-w-lg rounded-lg bg-surface border border-white/[0.1] shadow-2xl p-6 max-h-[85vh] overflow-y-auto"
@@ -107,6 +121,7 @@ export function KeyboardShortcutsOverlay() {
         </div>
         <div className="space-y-5">
           <Section title="Navigation" rows={GLOBAL_SHORTCUTS} />
+          <Section title="Focus & selection" rows={FOCUS_SHORTCUTS} />
           <Section title="Manga reader" rows={READER_SHORTCUTS} />
         </div>
       </div>

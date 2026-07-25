@@ -6,8 +6,9 @@ import { UpNextQueue, WeekStrip } from "@/components/media/UpNextQueue";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
-import { useAppStore } from "@/stores/app";
+import { useAppStore, useSettingsStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
+import { parseWatchedAt } from "@/lib/date";
 import { useFocusable } from "@/focus";
 
 interface HomeViewProps {
@@ -75,6 +76,10 @@ function MediaRowSkeleton({ title }: { title: string }) {
 export function HomeView({ onSelect }: HomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+  // Low Data Mode: while the mpv window is open, the 60s release-poll below
+  // competes with the stream for bandwidth — pause it and refetch on return.
+  const playerActive = useAppStore((s) => s.playerActive);
+  const dataSaver = useSettingsStore((s) => s.dataSaver);
   const pickMeFocus = useFocusable<HTMLButtonElement>();
   const customizeFocus = useFocusable<HTMLButtonElement>();
 
@@ -83,13 +88,13 @@ export function HomeView({ onSelect }: HomeViewProps) {
   }, [setActiveFocusScope]);
 
 
-  // 2. Playback Status — shared query key with NowPlaying component (deduped)
+  // Shared query key with the NowPlaying component (deduped).
   useQuery({
     queryKey: ["playback-status"],
     queryFn: () => mediaApi.getPlaybackStatus().catch(() => null),
   });
 
-  // 3. AniList Watching List — used for hero fallback and "New for You"
+  // Used for hero fallback and "New for You".
   const watchingQuery = useQuery({
     queryKey: ["home-watching"],
     queryFn: () => mediaApi.getUserList("watching", "ANIME"),
@@ -117,14 +122,13 @@ export function HomeView({ onSelect }: HomeViewProps) {
     queryFn: () => mediaApi.search('', 'ANIME', 1, { status: 'RELEASING' }),
   });
 
-  // 5. Smart Playlist — kept for cache compatibility, replaced by smartPicks below
+  // Kept for cache compatibility; replaced by smartPicks below.
   const smartPlaylistQuery = useQuery({
     queryKey: ["home-smart-playlist"],
     queryFn: () => mediaApi.getSmartPlaylist(),
     enabled: false,
   });
 
-  // 6. Planning List — user's plan-to-watch
   const planningQuery = useQuery({
     queryKey: ["home-planning"],
     queryFn: () => mediaApi.getUserList("planning", "ANIME"),
@@ -146,11 +150,18 @@ export function HomeView({ onSelect }: HomeViewProps) {
     return [...shuffled, ...fill].slice(0, 20);
   }, [planningQuery.data, trendingQuery.data]);
 
-  // 6. "New for You" — based on AniList watching list + schedule
   const watchingMedia = useMemo(() => {
     const watching = watchingQuery.data?.media || [];
     const repeating = repeatingQuery.data?.media || [];
-    return [...watching, ...repeating];
+    // These come from two separate AniList status queries that should be
+    // mutually exclusive, but a status-change mutation only ever updates a
+    // cached item's fields in place (see updateProgressInQueries) — it never
+    // moves the item between the home-watching/home-repeating query caches.
+    // Until both caches finish refetching post-mutation (or if a request in
+    // between errors), the same show can transiently sit in both arrays.
+    // Repeating wins the dedupe since it's the more specific/current status.
+    const seen = new Set(repeating.map((m) => m.id));
+    return [...watching.filter((m) => !seen.has(m.id)), ...repeating];
   }, [watchingQuery.data, repeatingQuery.data]);
   const watchingIds = useMemo(() => watchingMedia.map((m) => m.id), [watchingMedia]);
 
@@ -171,9 +182,9 @@ export function HomeView({ onSelect }: HomeViewProps) {
     return () => window.removeEventListener("anicat_home_rows_changed", handler);
   }, []);
 
-  // 6. Continue Watching = items from the user's AniList watching list
-  //    that have unwatched episodes, sorted by local last watched time first,
-  //    falling back to AniList update time.
+  // Continue Watching = items from the user's AniList watching list that
+  // have unwatched episodes, sorted by local last watched time first,
+  // falling back to AniList update time.
   const continueWatchingList = useMemo(() => {
     const lastWatchedMap = (lastWatchedQuery.data || {}) as Record<string, string>;
     // Rewatches always stay in the queue: a REPEATING entry whose progress
@@ -185,8 +196,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
       const aLocal = lastWatchedMap[a.id] || lastWatchedMap[String(a.id)];
       const bLocal = lastWatchedMap[b.id] || lastWatchedMap[String(b.id)];
       if (aLocal || bLocal) {
-        const aVal = aLocal ? new Date(aLocal).getTime() : 0;
-        const bVal = bLocal ? new Date(bLocal).getTime() : 0;
+        const aVal = aLocal ? parseWatchedAt(aLocal).getTime() : 0;
+        const bVal = bLocal ? parseWatchedAt(bLocal).getTime() : 0;
         if (aVal !== bVal) {
           return bVal - aVal;
         }
@@ -202,7 +213,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const recentReleasesQuery = useQuery({
     queryKey: ["home-recent-releases", watchingIds],
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: dataSaver && playerActive ? false : 60_000,
     queryFn: async () => {
       // Fetch watching/repeating fresh here rather than trusting the
       // watchingMedia/watchingIds closure above: invalidateProgressQueries
@@ -245,7 +256,6 @@ export function HomeView({ onSelect }: HomeViewProps) {
         const seenIds = new Set(releases.map((m) => m.id));
         for (const m of scheduledMedia) {
           if (!seenIds.has(m.id)) {
-            // Skip if the user has caught up on this show
             const userProgress = progressMap.get(m.id) || 0;
             const latestReleased = m.next_airing?.episode
               ? m.next_airing.episode - 1

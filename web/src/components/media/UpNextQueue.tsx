@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { MediaItem } from "@/lib/api";
-import { parseAiringTime } from "@/lib/date";
-import { FocusScope, useFocusable, useSpatialNavigation } from "@/focus";
+import { parseAiringTime, parseWatchedAt } from "@/lib/date";
+import { FocusScope, useFocusable, ScopeNav } from "@/focus";
 
 interface UpNextQueueProps {
   items: MediaItem[];
@@ -14,7 +14,7 @@ interface UpNextQueueProps {
 
 function relativeDay(iso: string | undefined): string | null {
   if (!iso) return null;
-  const then = new Date(iso).getTime();
+  const then = parseWatchedAt(iso).getTime();
   if (!then) return null;
   const diff = Date.now() - then;
   const hours = Math.floor(diff / 3_600_000);
@@ -114,11 +114,11 @@ function QueueItem({
  * (solid Resume button); everything below is one click away. Poster art
  * carries the color; all metadata is mono. */
 export function UpNextQueue({ items, newEpisodeIds, lastWatched, onSelect, unit = "EP" }: UpNextQueueProps) {
-  useSpatialNavigation();
   if (!items.length) return null;
 
   return (
     <FocusScope name="home-queue" orientation="vertical" role="list" className="rounded-lg border border-border overflow-hidden">
+      <ScopeNav />
       {items.map((item, i) => (
         <div key={item.id} role="listitem">
           <QueueItem

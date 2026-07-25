@@ -50,7 +50,10 @@ use super::session::AuthedUser;
 
 fn ok_or_500<T: serde::Serialize>(r: Result<T, String>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     r.map(|v| Json(serde_json::to_value(v).unwrap_or(Value::Null)))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))
+        .map_err(|e| {
+            log::error!("mobile-api request failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+        })
 }
 
 pub fn routes() -> Router<ProxyState> {
@@ -119,7 +122,7 @@ async fn update_config(
 fn sanitize_mobile_config_updates(updates: Value) -> Value {
     const ALLOWED: &[(&str, &[&str])] = &[
         ("general", &["autoplay", "autoskip", "anime_preview", "preferred_title_language", "time_format"]),
-        ("stream", &["shader_profile", "interpolation", "translation_type", "quality"]),
+        ("stream", &["shader_profile", "translation_type", "quality"]),
     ];
     let mut out = serde_json::Map::new();
     if let Some(obj) = updates.as_object() {
@@ -258,7 +261,10 @@ async fn connect_anilist(
     };
 
     crate::registry::service::set_user_anilist_token(&db, user_id, Some(&body.token), Some(&username))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+        .map_err(|e| {
+            log::error!("Failed to save AniList token for user {}: {}", user_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+        })?;
 
     // Drop the cached UserAniList entry (if any) so the next request picks
     // up the new token/username immediately instead of a stale prior one.
@@ -439,7 +445,7 @@ async fn resolve_stream(
     Query(q): Query<ResolveStreamQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Stream server list is scraper-derived, not per-viewer.
-    ok_or_500(crate::commands::media::resolve_stream_impl(&state.app_state, id, q.episode_number, q.provider).await)
+    ok_or_500(crate::commands::media::resolve_stream_impl(&state.app_state, id, q.episode_number, q.provider, None).await)
 }
 
 #[derive(Deserialize)]
@@ -615,7 +621,10 @@ async fn resolve_playback(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let app_state = state.scoped_for(AuthedUser(user_id)).await;
     let app_state = &app_state;
-    let provider_name = body.provider.clone().unwrap_or_else(|| "mkissa".to_string());
+    let provider_name = match body.provider.clone() {
+        Some(p) if !p.is_empty() => p,
+        _ => app_state.config.read().await.general.provider.clone(),
+    };
     let fallback_provider = {
         let cfg = app_state.config.read().await;
         cfg.general.fallback_provider.clone()
@@ -631,7 +640,11 @@ async fn resolve_playback(
     )
     .await
     {
-        Ok((url, headers)) => (url, headers, provider_name.clone()),
+        // Mobile's <video> element has no external-subtitle-track wiring yet
+        // (see anineko.py's _extract_subtitle_url / desktop's --sub-file
+        // handling in playback.rs) — discard the subtitle URL for now rather
+        // than half-thread it through with nowhere to use it.
+        Ok((url, headers, _subtitle_url)) => (url, headers, provider_name.clone()),
         Err(primary_err) => {
             let has_fallback = !fallback_provider.is_empty() && fallback_provider != "none" && fallback_provider != provider_name;
             if !has_fallback {
@@ -642,7 +655,7 @@ async fn resolve_playback(
             )
             .await
             {
-                Ok((url, headers)) => (url, headers, fallback_provider.clone()),
+                Ok((url, headers, _subtitle_url)) => (url, headers, fallback_provider.clone()),
                 Err(fb_err) => {
                     return Err((
                         StatusCode::BAD_GATEWAY,
@@ -744,6 +757,11 @@ struct WhoamiResponse {
     display_name: String,
     anilist_connected: bool,
     anilist_username: Option<String>,
+    /// Version handshake: nothing keeps the Pi's `anicat-server` binary and
+    /// the PWA bundle it serves in sync with a desktop release automatically
+    /// (deploy-pi.sh is manual) — the PWA compares this against its own
+    /// bundled version and shows a drift warning instead of failing weirdly.
+    server_version: &'static str,
 }
 
 /// Tells the PWA who's logged in and whether they still need the
@@ -761,17 +779,22 @@ async fn whoami(
             display_name: cfg.api.anilist_username.clone().unwrap_or_else(|| "You".to_string()),
             anilist_connected: cfg.api.anilist_token.is_some(),
             anilist_username: cfg.api.anilist_username.clone(),
+            server_version: env!("CARGO_PKG_VERSION"),
         }));
     }
     let db = state.app_state.open_db().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
     let user = crate::registry::service::get_user_by_id(&db, user_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?
+        .map_err(|e| {
+            log::error!("Failed to look up user {}: {}", user_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+        })?
         .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "user not found" }))))?;
     Ok(Json(WhoamiResponse {
         user_id: user.id,
         display_name: user.display_name,
         anilist_connected: user.anilist_token.is_some(),
         anilist_username: user.anilist_username,
+        server_version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -790,7 +813,10 @@ pub struct UserNameEntry {
 pub async fn list_user_names(State(state): State<ProxyState>) -> Result<Json<Vec<UserNameEntry>>, (StatusCode, Json<Value>)> {
     let db = state.app_state.open_db().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
     let users = crate::registry::service::list_users(&db)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))))?;
+        .map_err(|e| {
+            log::error!("Failed to list users: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+        })?;
     Ok(Json(users.into_iter().map(|u| UserNameEntry { display_name: u.display_name }).collect()))
 }
 

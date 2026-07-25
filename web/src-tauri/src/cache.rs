@@ -7,6 +7,11 @@ use serde_json::Value;
 const MAX_ENTRIES: usize = 500;
 const PRUNE_EVERY_N_INSERTS: usize = 100;
 
+/// How long an expired entry stays around as a stale fallback. When AniList
+/// is down or rate-limiting, serving yesterday's home rows beats a blank
+/// screen — `get` still never returns expired data on the happy path.
+const STALE_GRACE: Duration = Duration::from_secs(24 * 3600);
+
 #[derive(Clone)]
 pub struct AniListCache {
     entries: Arc<Mutex<HashMap<String, (Value, Instant)>>>,
@@ -68,6 +73,26 @@ impl AniListCache {
             }
         }
         None
+    }
+
+    /// Like `get`, but also returns entries past their TTL (within
+    /// STALE_GRACE, enforced by `prune`). Only for the degraded path where
+    /// the live AniList fetch already failed.
+    pub fn get_stale(&self, key: &str) -> Option<Value> {
+        let entries = self.entries.lock().unwrap();
+        entries.get(key).map(|(value, _)| value.clone())
+    }
+
+    /// Degraded-mode fallback: when a live fetch failed, serve the stale
+    /// cache entry if one survives, otherwise propagate the error.
+    pub fn stale_or_err(&self, key: &str, err: String) -> Result<Value, String> {
+        match self.get_stale(key) {
+            Some(v) => {
+                log::warn!("AniList fetch failed ({}); serving stale cache for {}", err, key);
+                Ok(v)
+            }
+            None => Err(err),
+        }
     }
 
     pub fn set(&self, key: String, value: Value, cmd: &str) {
@@ -156,7 +181,9 @@ impl AniListCache {
     pub fn prune(&self) {
         let mut entries = self.entries.lock().unwrap();
         let now = Instant::now();
-        entries.retain(|_, (_, expires)| now < *expires);
+        // Expired entries live on for STALE_GRACE as degraded-mode fallbacks
+        // (see get_stale); only truly ancient ones get dropped here.
+        entries.retain(|_, (_, expires)| now < *expires + STALE_GRACE);
         while entries.len() > MAX_ENTRIES {
             let oldest_key = entries
                 .iter()

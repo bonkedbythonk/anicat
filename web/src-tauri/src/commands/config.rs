@@ -72,9 +72,6 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                         if let Some(v) = stream.get("shader_profile").and_then(|v| v.as_str()) {
                             config.stream.shader_profile = v.to_string();
                         }
-                        if let Some(v) = stream.get("interpolation").and_then(|v| v.as_str()) {
-                            config.stream.interpolation = v.to_string();
-                        }
                         if let Some(v) = stream.get("translation_type").and_then(|v| v.as_str()) {
                             config.stream.translation_type = v.to_string();
                         }

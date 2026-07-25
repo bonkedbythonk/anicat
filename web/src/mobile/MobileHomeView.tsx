@@ -5,7 +5,7 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 import { proxyImage } from "@/lib/proxy";
-import { parseAiringTime } from "@/lib/date";
+import { parseAiringTime, parseWatchedAt } from "@/lib/date";
 import { UpNextCard } from "./UpNextCard";
 import { PosterRow } from "./PosterRow";
 import { PosterCard } from "./PosterCard";
@@ -75,7 +75,7 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
       .sort((a, b) => {
         const aLocal = lastWatchedMap[a.id] || lastWatchedMap[String(a.id)];
         const bLocal = lastWatchedMap[b.id] || lastWatchedMap[String(b.id)];
-        return (bLocal ? new Date(bLocal).getTime() : 0) - (aLocal ? new Date(aLocal).getTime() : 0);
+        return (bLocal ? parseWatchedAt(bLocal).getTime() : 0) - (aLocal ? parseWatchedAt(aLocal).getTime() : 0);
       });
   }, [watchingQuery.data, lastWatchedQuery.data]);
 

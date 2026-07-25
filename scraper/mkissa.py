@@ -25,16 +25,20 @@ MKISSA_KEY = hashlib.sha256(b"Xot36i3lK3:v1").hexdigest()
 
 # allanime.day's client-crypto (aaReq) constants, lifted from the site's JS
 # bundle (cdn.mkissa.net/.../_app/immutable/chunks/*.js: the buildId and XOR
-# mask sit next to the string "aaReq signed"). Both rotate every so often;
-# when the API starts returning AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH
-# again, re-read them from the current bundle. The mask is XORed against the
-# fetched partB to derive an AES-GCM key used both to sign the request token
-# (aaReq) and — as of the site's 2026-07 update — to decrypt the response's
-# sourceUrls blob too (the old build used a fixed static key for that; the
-# site now derives it the same way as the signing key, so there's no
-# separate MKISSA_RESPONSE_KEY anymore).
-MKISSA_BUILD_ID = "41"
-MKISSA_MASK_HEX = "5264513ba898cb78c5c646bc1c12f2965a53a99891d91e83a2bf9244c36cca41"
+# mask sit next to the string "aaReq signed"). Both rotate every so often
+# (41 -> 44 over June/July 2026 alone); these are only the *boot* values —
+# when the API answers AA_CRYPTO_STALE / AA_CRYPTO_BUILD_MISMATCH, the
+# provider re-extracts the live pair from the current bundle at runtime
+# (_refresh_crypto_constants) and retries, so a rotation costs one slow
+# request instead of a broken provider. Update the statics whenever that
+# path fires so fresh processes skip the crawl. The mask is XORed against
+# the fetched partB to derive an AES-GCM key used both to sign the request
+# token (aaReq) and — as of the site's 2026-07 update — to decrypt the
+# response's sourceUrls blob too (the old build used a fixed static key for
+# that; the site now derives it the same way as the signing key, so there's
+# no separate MKISSA_RESPONSE_KEY anymore).
+MKISSA_BUILD_ID = "51"
+MKISSA_MASK_HEX = "fe3bfee62898aaf5bbb0dbfed5f1cb33a59faab4ca5036885a42119a56429129"
 
 # Persisted query hash for episode embeds (from ani-cli v4.14.0)
 EPISODE_QUERY_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
@@ -202,7 +206,9 @@ async def get_links(session, provider_path: str) -> list:
                     qualities_match = re.search(r'/,([^/]*),/mp4', url)
                     if qualities_match:
                         qualities = qualities_match.group(1).split(',')
-                        for q in qualities:
+                        high_quals = [q for q in qualities if any(h in q for h in ('1080', '720'))]
+                        target_qualities = high_quals if high_quals else qualities
+                        for q in target_qualities:
                             q_url = re.sub(r',[^/]*', q, cleaned, count=1)
                             all_links.append({'resolution': q, 'url': q_url})
                 else:
@@ -212,6 +218,17 @@ async def get_links(session, provider_path: str) -> list:
     except Exception:
         pass
     return all_links
+
+
+def has_encrypted_blob(api_data: dict) -> bool:
+    """True when the response carries an encrypted sourceUrls blob. Used to
+    tell 'episode genuinely has no sources' apart from 'blob arrived but the
+    derived key is stale so decryption silently produced nothing'."""
+    data_dict = (api_data or {}).get('data') or {}
+    if isinstance(data_dict, dict):
+        if len(str(data_dict.get('_m') or '')) > 10 or data_dict.get('tobeparsed'):
+            return True
+    return bool((api_data or {}).get('tobeparsed'))
 
 
 def parse_source_lines(api_data: dict, key: bytes) -> list:
@@ -297,6 +314,95 @@ class MkissaProvider:
             "Origin": MKISSA_REFR,
         })
         self.auth_data = None
+        # Live crypto constants — start from the statics, replaced at runtime
+        # by _refresh_crypto_constants when the site rotates its build.
+        self.build_id = MKISSA_BUILD_ID
+        self.mask_hex = MKISSA_MASK_HEX
+        self._crypto_refresh_lock = asyncio.Lock()
+        self._last_crypto_refresh = 0.0
+
+    async def _refresh_crypto_constants(self) -> bool:
+        """Re-extract the aaReq build id + XOR mask from the site's live JS
+        bundle. Called when the API reports an AA_CRYPTO_* error — the site
+        rotated its client-crypto build (happens every few weeks). Crawls the
+        _app/immutable chunk graph breadth-first until the chunk holding the
+        string "aaReq" is found, then pulls the single 64-hex mask constant
+        and the x-build-id value out of it. Returns True when usable
+        constants are in place (fresh or already refreshed by a concurrent
+        caller)."""
+        async with self._crypto_refresh_lock:
+            # Sub and dub fetch in parallel and can both hit the stale error;
+            # the second caller reuses the first one's refresh.
+            if time.time() - self._last_crypto_refresh < 300:
+                return True
+            base = "https://cdn.mkissa.net/all/mk/_app/immutable/"
+            try:
+                home = await self.session.get(f"{MKISSA_REFR}/", timeout=10)
+                queue = sorted(set(re.findall(r'https://[\w\-./]+_app/immutable/[\w\-./]+\.js', home.text)))
+                seen: set = set()
+                new_mask = None
+                new_build = None
+                # Several chunks can mention "aaReq" (string tables get split
+                # across chunks), so accumulate across the whole crawl: the
+                # mask and the build id may even live in different files.
+                while queue:
+                    url = queue.pop(0)
+                    if url in seen or len(seen) > 200:
+                        continue
+                    seen.add(url)
+                    try:
+                        r = await self.session.get(url, timeout=10)
+                    except Exception:
+                        continue
+                    if r.status_code != 200:
+                        continue
+                    text = r.text
+                    for m in re.findall(r'["\']\.?\.?/?((?:chunks|nodes)/[\w\-.]+\.js)["\']', text):
+                        queue.append(base + m)
+                    if "aaReq" not in text:
+                        continue
+                    if new_mask is None:
+                        mask_m = re.search(r'["\']([0-9a-f]{64})["\']', text)
+                        if mask_m:
+                            new_mask = mask_m.group(1)
+                            log.info(f"mkissa: found mask candidate in {url}")
+                    if new_build is None:
+                        # Minified shape seen so far: a plain `dv="44"` assign,
+                        # or (2026-07 build) a string-table-obfuscated ternary
+                        # `ol=$r(195)!=="string"?"51":""` that's always-true in
+                        # practice — either way the build id is the first
+                        # quoted number in VAR's own assignment statement, so
+                        # grab that rather than requiring a bare `VAR="NN"`.
+                        for var_m in re.finditer(r'["\']x-build-id["\']:(\w+)\}', text):
+                            assign = re.search(
+                                rf'\b{re.escape(var_m.group(1))}=[^;]{{0,80}}?["\'](\d{{1,4}})["\']', text
+                            )
+                            if assign:
+                                new_build = assign.group(1)
+                                break
+                        if new_build is None:
+                            lit_m = re.search(r'["\']x-build-id["\']:\s*["\'](\d+)["\']', text)
+                            if lit_m:
+                                new_build = lit_m.group(1)
+                        if new_build is not None:
+                            log.info(f"mkissa: found build id {new_build} in {url}")
+                    if new_mask and new_build:
+                        changed = new_mask != self.mask_hex or new_build != self.build_id
+                        self.mask_hex = new_mask
+                        self.build_id = new_build
+                        self._last_crypto_refresh = time.time()
+                        log.warning(
+                            f"mkissa: refreshed crypto constants from bundle: buildId={new_build}, changed={changed}"
+                        )
+                        return True
+                log.error(
+                    f"mkissa: could not extract crypto constants ({len(seen)} files scanned, "
+                    f"mask={'yes' if new_mask else 'no'}, buildId={'yes' if new_build else 'no'}) — crypto scheme changed?"
+                )
+                return False
+            except Exception as e:
+                log.error(f"mkissa: crypto constant refresh failed: {e}")
+                return False
 
     async def _ensure_authconfigs(self):
         # The site's own auth blob carries its rotation schedule (epoch,
@@ -336,7 +442,7 @@ class MkissaProvider:
         if not partB:
             return None
         try:
-            Dn = bytes.fromhex(MKISSA_MASK_HEX)
+            Dn = bytes.fromhex(self.mask_hex)
             partB_bytes = base64.b64decode(partB)
             return bytes([partB_bytes[i] ^ Dn[i] for i in range(32)])
         except Exception as e:
@@ -349,7 +455,7 @@ class MkissaProvider:
         import json
 
         epoch = self.auth_data.get('epoch', 0)
-        cr = MKISSA_BUILD_ID
+        cr = self.build_id
 
         try:
             key = self._derive_key()
@@ -407,8 +513,7 @@ class MkissaProvider:
         raise last_exc if last_exc else RuntimeError("Mkissa API request failed")
 
     async def search(self, query: str) -> list[AnimeRef]:
-        # Clean query: Mkissa's GraphQL API fails when search queries contain apostrophes.
-        # We replace "'s" (case-insensitive) with an empty string and then remove remaining apostrophes.
+        # Mkissa's GraphQL API fails when search queries contain apostrophes.
         cleaned_query = re.sub(r"'s\b", "", query, flags=re.IGNORECASE)
         cleaned_query = cleaned_query.replace("'", "")
         
@@ -600,12 +705,15 @@ class MkissaProvider:
                 ))
             return resolved_servers
 
-        async def fetch_mode(mode):
+        async def fetch_episode_data(mode):
+            """One GET(persisted-query)+POST(fallback) round.
+            Returns (api_data, crypto_stale)."""
             api_data = None
+            crypto_stale = False
             try:
                 await self._ensure_authconfigs()
                 crypto_token = self._get_crypto_token(EPISODE_QUERY_HASH)
-                
+
                 query_vars = json.dumps({"showId": slug, "translationType": mode, "episodeString": ep_no}, separators=(',', ':'))
                 query_ext = json.dumps({"persistedQuery": {"version": 1, "sha256Hash": EPISODE_QUERY_HASH}, "aaReq": crypto_token}, separators=(',', ':'))
                 api_url = f"{MKISSA_API}/api?variables={urllib.parse.quote(query_vars)}&extensions={urllib.parse.quote(query_ext)}"
@@ -614,16 +722,18 @@ class MkissaProvider:
                     'User-Agent': AGENT,
                     'Referer': MKISSA_REFR,
                     'Origin': MKISSA_REFR,
-                    'x-build-id': MKISSA_BUILD_ID
+                    'x-build-id': self.build_id
                 }, timeout=3)
                 if get_resp.status_code == 200:
                     raw_text = get_resp.text
-                    if raw_text and ('tobeparsed' in raw_text or '"_m"' in raw_text):
+                    if raw_text and 'AA_CRYPTO' in raw_text:
+                        crypto_stale = True
+                    elif raw_text and ('tobeparsed' in raw_text or '"_m"' in raw_text):
                         api_data = get_resp.json()
             except Exception as e:
                 log.warning(f"Mkissa GET persisted query failed for {mode}: {e}")
 
-            if not api_data:
+            if not api_data and not crypto_stale:
                 try:
                     payload = {
                         "variables": {
@@ -636,8 +746,29 @@ class MkissaProvider:
                     post_resp = await self.session.post(f"{MKISSA_API}/api", json=payload, timeout=8)
                     post_resp.raise_for_status()
                     api_data = post_resp.json()
+                    for err in (api_data or {}).get("errors") or []:
+                        code = str(((err.get("extensions") or {}).get("code")) or err.get("message") or "")
+                        if code.startswith("AA_CRYPTO"):
+                            crypto_stale = True
+                            api_data = None
+                            break
                 except Exception as e:
                     log.warning(f"Mkissa POST failed for {mode}: {e}")
+
+            return api_data, crypto_stale
+
+        async def fetch_mode(mode):
+            api_data, crypto_stale = await fetch_episode_data(mode)
+            if crypto_stale:
+                # The site rotated its aaReq build — pull the new constants
+                # from the live bundle and retry once.
+                log.warning(f"Mkissa reports stale client-crypto for {mode}; re-extracting constants from bundle")
+                if await self._refresh_crypto_constants():
+                    # The API rate-limits bursts ("try again in 5 seconds") and
+                    # the bundle crawl plus the failed first attempt can trip
+                    # that — give it a beat before the one retry.
+                    await asyncio.sleep(5)
+                    api_data, _ = await fetch_episode_data(mode)
 
             if not api_data:
                 return []
@@ -646,7 +777,19 @@ class MkissaProvider:
             if response_key is None:
                 return []
             resp_lines = parse_source_lines(api_data, response_key)
-            
+
+            if not resp_lines and has_encrypted_blob(api_data):
+                # A blob arrived but nothing decrypted: the request went
+                # through, yet the response key (partB XOR mask) is stale —
+                # the API sometimes still answers a stale-build client
+                # instead of erroring. Refresh the mask and re-derive; the
+                # same blob decrypts with the new key, no refetch needed.
+                log.warning(f"Mkissa response blob failed to decrypt for {mode}; re-extracting constants from bundle")
+                if await self._refresh_crypto_constants():
+                    response_key = self._derive_key()
+                    if response_key is not None:
+                        resp_lines = parse_source_lines(api_data, response_key)
+
             if not resp_lines:
                 return []
 

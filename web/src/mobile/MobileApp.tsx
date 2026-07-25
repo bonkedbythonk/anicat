@@ -48,6 +48,7 @@ interface Whoami {
   display_name: string;
   anilist_connected: boolean;
   anilist_username: string | null;
+  server_version?: string;
 }
 
 export default function MobileApp() {
@@ -181,6 +182,13 @@ export default function MobileApp() {
     );
   }
 
+  // Version handshake: the Pi's server binary and this PWA bundle only stay
+  // in sync via a manual deploy-pi.sh run — surface drift instead of letting
+  // it show up as mysteriously broken views. (Old servers that don't send
+  // server_version yet count as drift too.)
+  const serverVersion = whoami ? (whoami.server_version ?? "pre-handshake") : null;
+  const versionDrift = serverVersion !== null && serverVersion !== __APP_VERSION__;
+
   const onSelect = openDetail;
   const isYouTab = activeTab === "you";
   const title = isYouTab && youSubView ? SUB_TITLES[youSubView] : TITLES[activeTab];
@@ -216,6 +224,11 @@ export default function MobileApp() {
 
   return (
     <div className="mobile-shell flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      {versionDrift && (
+        <div className="shrink-0 bg-amber-500/15 text-amber-500 text-[11px] font-medium px-4 py-1.5 text-center">
+          Server is v{serverVersion}, app is v{__APP_VERSION__} — ask the admin to redeploy.
+        </div>
+      )}
       {!selectedItem && (
         <MobileHeader title={title} onBack={isYouTab && youSubView ? backToYouHub : undefined} />
       )}

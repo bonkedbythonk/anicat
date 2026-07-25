@@ -4,8 +4,14 @@ import tailwindcss from "@tailwindcss/vite";
 import webfontDownload from "vite-plugin-webfont-dl";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import pkg from "./package.json";
 
 export default defineConfig({
+  // Bundled app version, compared against the server's reported version by
+  // the mobile PWA to detect a stale Pi deployment.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     tailwindcss(),

@@ -73,12 +73,14 @@ fn title_matches(query_norm: &str, name_norm: &str) -> bool {
 }
 
 /// Season number expressed in a normalized title: "s2", "season 2",
-/// "2nd season". Absent marker means season 1.
+/// "2nd season", "r2" (Code Geass-style sequel marker, "R2" = "Rebellion 2").
+/// Absent marker means season 1.
 fn season_of(norm: &str) -> u32 {
     for re in [
         r"\bs(\d{1,2})\b",
         r"\bseason (\d{1,2})\b",
         r"\b(\d{1,2})(?:st|nd|rd|th) season\b",
+        r"\br(\d{1,2})\b",
     ] {
         if let Some(c) = regex_lite::Regex::new(re).unwrap().captures(norm) {
             if let Ok(n) = c[1].parse() {
@@ -385,4 +387,27 @@ fn urlencoding_encode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn season1_query_rejects_r2_release() {
+        // "Code Geass" (S1 query, no marker) must not match a season-2
+        // ("R2") release just because the episode number lines up — R1/R2
+        // is Code Geass fansub shorthand for "Rebellion 1/2", not caught by
+        // the S2/"season 2"/"2nd season" patterns alone.
+        let query = normalize("Code Geass");
+        assert!(title_matches(&query, &normalize("Code Geass - 11 [Group] 1080p")));
+        assert!(!title_matches(&query, &normalize("Code Geass R2 - 11 [Group] 1080p")));
+    }
+
+    #[test]
+    fn r2_query_matches_r2_release_only() {
+        let query = normalize("Code Geass R2");
+        assert!(title_matches(&query, &normalize("Code Geass R2 - 11 [Group] 1080p")));
+        assert!(!title_matches(&query, &normalize("Code Geass - 11 [Group] 1080p")));
+    }
 }

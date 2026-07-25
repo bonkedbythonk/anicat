@@ -1,5 +1,12 @@
 
 
+// SQLite datetime('now') strings are UTC without a zone suffix; without this,
+// `new Date(s)` parses them as local time and every "watched Xh ago" display
+// silently drifts by the viewer's UTC offset.
+export function parseWatchedAt(s: string): Date {
+  return new Date(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
+}
+
 export function parseAiringTime(airingAt?: string | number | null): number {
   if (!airingAt) return 0;
   if (typeof airingAt === "number") {

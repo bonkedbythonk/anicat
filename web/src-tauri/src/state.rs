@@ -38,6 +38,8 @@ pub struct GeneralConfig {
     pub manga_provider: String,
     #[serde(default = "default_fallback_provider")]
     pub fallback_provider: String,
+    #[serde(default = "default_secondary_fallback_provider")]
+    pub secondary_fallback_provider: String,
     /// Switches the mobile-facing auth gate from the single shared PIN
     /// (`MobileConfig.pin`, `mobile_auth::require_mobile_auth`) to per-user
     /// login (`proxy::session::require_user_session`) once at least one
@@ -54,8 +56,6 @@ pub struct StreamConfig {
     pub data_saver: bool,
     #[serde(default = "default_shader_profile")]
     pub shader_profile: String,
-    #[serde(default = "default_interpolation")]
-    pub interpolation: String,
     #[serde(default = "default_translation_type")]
     pub translation_type: String,
 }
@@ -93,7 +93,7 @@ fn default_translation_type() -> String {
 }
 
 fn default_provider() -> String {
-    "mkissa".into()
+    "nyaa".into()
 }
 fn default_true() -> bool {
     true
@@ -114,13 +114,13 @@ fn default_manga_provider() -> String {
     "mangakatana".into()
 }
 fn default_fallback_provider() -> String {
+    "mkissa".into()
+}
+fn default_secondary_fallback_provider() -> String {
     "anineko".into()
 }
 fn default_shader_profile() -> String {
     "balanced".into()
-}
-fn default_interpolation() -> String {
-    "off".into()
 }
 
 #[derive(Clone)]
@@ -221,6 +221,7 @@ pub struct PreloadedStream {
     pub provider: String,
     pub raw_url: String,
     pub headers: Option<std::collections::HashMap<String, String>>,
+    pub subtitle_url: Option<String>,
     pub at: std::time::Instant,
 }
 
@@ -338,8 +339,21 @@ impl AppState {
 
     fn load_config(path: &std::path::Path) -> AppConfig {
         let mut config: AppConfig = match std::fs::read_to_string(path) {
-            Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
-            Err(_) => AppConfig::default(),
+            Ok(contents) => toml::from_str(&contents).unwrap_or_else(|e| {
+                log::error!(
+                    "Config at {:?} failed to parse, falling back to defaults (settings reset): {}",
+                    path, e
+                );
+                AppConfig::default()
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
+            Err(e) => {
+                log::error!(
+                    "Failed to read config at {:?}, falling back to defaults (settings reset): {}",
+                    path, e
+                );
+                AppConfig::default()
+            }
         };
         // allanime was renamed to mkissa (same allanime.day backend, new
         // anti-scrape crypto). Old dead providers collapse onto it too.
@@ -366,7 +380,10 @@ impl AppState {
     }
 
     pub fn open_db(&self) -> Result<rusqlite::Connection, String> {
-        rusqlite::Connection::open(&self.inner.db_path).map_err(|e| e.to_string())
+        rusqlite::Connection::open(&self.inner.db_path).map_err(|e| {
+            log::error!("Failed to open registry DB at {:?}: {}", self.inner.db_path, e);
+            e.to_string()
+        })
     }
 
     /// Returns an `AppState` scoped to `user_id`'s own AniList session and

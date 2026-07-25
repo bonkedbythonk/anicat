@@ -276,10 +276,10 @@ fn quality_sort_key(server: &crate::scraper::client::StreamServer) -> (u8, std::
 /// Picks the fastest target_quality server (1080p for normal mode, 720p for data_saver)
 /// across every CDN if one exists; otherwise falls back to the fastest CDN with the highest
 /// resolution on offer.
-fn pick_best_server<'a>(
-    servers: &'a [crate::scraper::client::StreamServer],
+fn pick_best_server(
+    servers: &[crate::scraper::client::StreamServer],
     target_quality: u32,
-) -> Option<&'a crate::scraper::client::StreamServer> {
+) -> Option<&crate::scraper::client::StreamServer> {
     servers.iter()
         .filter(|s| resolution_rank(s) == target_quality)
         .min_by_key(|s| server_speed_rank(s))

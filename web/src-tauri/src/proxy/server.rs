@@ -743,14 +743,15 @@ async fn player_preload_handler(
     // same bandwidth and stall the episode being watched. If the current
     // download already finished, the preload goes through and auto-next stays
     // instant; otherwise the next episode resolves at play time instead.
-    if pb.provider == "nyaa" && scoped.config.read().await.stream.data_saver {
-        if scoped.torrent.any_download_active().await {
-            log::info!(
-                "Low data mode: deferring next-episode torrent preload (media {} ep {}) until current download finishes",
-                pb.media_id, next_ep
-            );
-            return Ok("ok");
-        }
+    if pb.provider == "nyaa"
+        && scoped.config.read().await.stream.data_saver
+        && scoped.torrent.any_download_active().await
+    {
+        log::info!(
+            "Low data mode: deferring next-episode torrent preload (media {} ep {}) until current download finishes",
+            pb.media_id, next_ep
+        );
+        return Ok("ok");
     }
     let app_state = scoped.clone();
     tokio::spawn(async move {

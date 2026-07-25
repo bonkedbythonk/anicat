@@ -1917,6 +1917,7 @@ pub fn find_all_matches<T, F>(target_titles: &[&str], candidates: Vec<T>, get_ti
 where
     F: Fn(&T) -> &str,
 {
+    let any_dub = candidates.iter().any(|c| get_title(c).to_lowercase().contains("dub"));
     let mut scored: Vec<(f64, T)> = candidates
         .into_iter()
         .filter_map(|candidate| {
@@ -1926,7 +1927,7 @@ where
             let mismatched_translation = (preferred_translation == "sub" && has_dub)
                 || (preferred_translation == "dub"
                     && !has_dub
-                    && false);
+                    && any_dub);
             let translation_penalty = if mismatched_translation { 0.5 } else { 1.0 };
 
             let mut max_score = 0.0_f64;

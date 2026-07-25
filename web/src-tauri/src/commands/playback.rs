@@ -459,7 +459,12 @@ pub(crate) async fn resolve_stream_for_provider(
             .or_else(|| pick_best_server(&servers, target_quality))
     } else {
         pick_best_server_in_group(&servers, &["hard_sub"], target_quality)
-            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
+            .or_else(|| {
+                servers.iter()
+                    .filter(|s| get_stream_group(s) == "soft_sub" && s.subtitle_url.is_some())
+                    .find(|s| resolution_rank(s) == target_quality)
+                    .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
+            })
             .or_else(|| pick_best_server_in_group(&servers, &["dub"], target_quality))
             .or_else(|| pick_best_server(&servers, target_quality))
     };

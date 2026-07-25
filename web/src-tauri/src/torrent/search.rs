@@ -350,24 +350,14 @@ pub async fn find_candidates(
 
     for title in &expanded {
         all.extend(search_subsplease(client, title, episode, prefer_dub).await);
-        // Stop early if SubsPlease already produced an exact-episode hit —
-        // it's the highest-quality, best-seeded option for current shows.
-        if all.iter().any(|c| c.score >= 2000) {
-            break;
-        }
     }
 
-    if !all.iter().any(|c| c.score >= 2000) {
-        for title in &expanded {
-            let norm = normalize(title);
-            let single_q = format!("{} - {:02}", title, episode);
-            all.extend(search_nyaa(client, &single_q, &norm, episode, false, prefer_dub).await);
-            let batch_q = format!("{} 1080p", title);
-            all.extend(search_nyaa(client, &batch_q, &norm, episode, allow_episodeless, prefer_dub).await);
-            if all.iter().any(|c| c.score >= 1000) {
-                break;
-            }
-        }
+    for title in &expanded {
+        let norm = normalize(title);
+        let single_q = format!("{} - {:02}", title, episode);
+        all.extend(search_nyaa(client, &single_q, &norm, episode, false, prefer_dub).await);
+        let batch_q = format!("{} 1080p", title);
+        all.extend(search_nyaa(client, &batch_q, &norm, episode, allow_episodeless, prefer_dub).await);
     }
 
     // Dedupe by name, best score wins.

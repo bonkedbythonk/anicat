@@ -59,6 +59,12 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                         if let Some(v) = gen.get("manga_provider").and_then(|v| v.as_str()) {
                             config.general.manga_provider = v.to_string();
                         }
+                        if let Some(v) = gen.get("fallback_provider").and_then(|v| v.as_str()) {
+                            config.general.fallback_provider = v.to_string();
+                        }
+                        if let Some(v) = gen.get("secondary_fallback_provider").and_then(|v| v.as_str()) {
+                            config.general.secondary_fallback_provider = v.to_string();
+                        }
                         if let Some(v) = gen.get("downloads_path").and_then(|v| v.as_str()) {
                             config.general.downloads_path = v.to_string();
                         }

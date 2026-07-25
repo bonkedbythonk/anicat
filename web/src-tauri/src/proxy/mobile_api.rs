@@ -121,7 +121,7 @@ async fn update_config(
 /// etc.) is discarded before it reaches `update_config_impl`.
 fn sanitize_mobile_config_updates(updates: Value) -> Value {
     const ALLOWED: &[(&str, &[&str])] = &[
-        ("general", &["autoplay", "autoskip", "anime_preview", "preferred_title_language", "time_format"]),
+        ("general", &["autoplay", "autoskip", "anime_preview", "preferred_title_language", "time_format", "provider", "fallback_provider", "secondary_fallback_provider"]),
         ("stream", &["shader_profile", "translation_type", "quality"]),
     ];
     let mut out = serde_json::Map::new();

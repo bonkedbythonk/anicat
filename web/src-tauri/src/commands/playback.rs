@@ -179,7 +179,25 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     // mpv can't use a `\\?\`-prefixed config-dir (see strip_verbatim_prefix).
     let config_dir = strip_verbatim_prefix(config_dir);
 
-    // Prefer a system-installed mpv if present. Production macOS apps launched
+    let mpv_name = if cfg!(target_os = "windows") {
+        "mpv.exe"
+    } else {
+        "mpv"
+    };
+    let mpv_bin = base_dir.join(mpv_name);
+    let lib_dir = base_dir.join("lib");
+
+    // Prefer bundled mpv if present (ensures self-contained reliability in release builds)
+    if mpv_bin.exists() {
+        log::info!("Using bundled mpv at: {}", mpv_bin.display());
+        return Ok((
+            mpv_bin.to_string_lossy().to_string(),
+            config_dir,
+            strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
+        ));
+    }
+
+    // Fall back to a system-installed mpv if present. Production macOS apps launched
     // from Finder do not inherit the shell PATH, so /opt/homebrew/bin is not
     // in it — check known install locations first before falling back to which.
     #[cfg(target_os = "macos")]
@@ -198,38 +216,24 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         return Ok((path, config_dir, String::new()));
     }
 
-    let mpv_name = if cfg!(target_os = "windows") {
-        "mpv.exe"
-    } else {
-        "mpv"
-    };
-    let mpv_bin = base_dir.join(mpv_name);
-    if !mpv_bin.exists() {
-        let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Fall back to dev resources directory
+    let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join(mpv_name);
+    if dev_path.exists() {
+        let dev_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
-            .join(mpv_name);
-        if dev_path.exists() {
-            let dev_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("resources")
-                .join("lib");
-            return Ok((
-                dev_path.to_string_lossy().to_string(),
-                config_dir,
-                dev_lib_dir.to_string_lossy().to_string(),
-            ));
-        }
-        return Err(format!(
-            "mpv binary not found at {} or in dev resources",
-            mpv_bin.display()
+            .join("lib");
+        return Ok((
+            dev_path.to_string_lossy().to_string(),
+            config_dir,
+            dev_lib_dir.to_string_lossy().to_string(),
         ));
     }
 
-    let lib_dir = base_dir.join("lib");
-
-    Ok((
-        mpv_bin.to_string_lossy().to_string(),
-        config_dir,
-        strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
+    Err(format!(
+        "mpv binary not found at {} or in system/dev resources",
+        mpv_bin.display()
     ))
 }
 

@@ -33,6 +33,13 @@ if [ -z "$APP_DIR" ]; then
 fi
 
 echo "Copying MPV standalone binary and dynamic libraries..."
+# lib/ is cleared first, not merged into -- a bare `cp -R` onto an existing
+# lib/ layers each run's libraries on top of the last one's without removing
+# anything, so re-running this against a newer mpv cask left two full vintages
+# of ffmpeg/libplacebo/lua sitting side by side (harmless today since nothing
+# resolves the stale ones' install IDs, but it means the shipped bundle
+# depends on the build machine's history instead of being reproducible).
+rm -rf "$RESOURCES_DIR/lib"
 cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv"
 cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv.exe"
 cp -R "$APP_DIR/Contents/MacOS/lib" "$RESOURCES_DIR/"
@@ -61,6 +68,9 @@ EOF
 else
     echo "Warning: molten-vk not found in Homebrew. GPU window initialization may fail."
 fi
+
+echo "=== 2c. Ad-hoc signing every bundled dylib (mpv only had the two top-level binaries signed) ==="
+find "$RESOURCES_DIR/lib" -name "*.dylib" -exec codesign -s - --force {} \; 2>/dev/null || true
 
 echo "=== 3. Setting up isolated themed configuration directories ==="
 mkdir -p "$CONFIG_DIR/scripts"

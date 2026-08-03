@@ -76,6 +76,26 @@ scp "$BUILD_OUT/anicat-server" "pi@${PI_HOST}:/tmp/anicat-server"
 rsync -az --delete "$PROJECT_ROOT/web/dist/" "pi@${PI_HOST}:/opt/anicat/mobile-dist/"
 ssh "pi@${PI_HOST}" '
     set -e
+    # The Pi runs the Python scraper from source (PI_SETUP.md step 4), not from
+    # the frozen sidecar the desktop bundles -- the Docker build above only
+    # touches a placeholder scraper-bin to satisfy the Rust build. So shipping
+    # the binary alone leaves scraper/*.py pinned at whatever commit was last
+    # pulled by hand, and provider fixes that landed weeks ago stay unapplied
+    # while the version banner reports everything as current. Sync it here.
+    #
+    # This is a deploy clone, not a working checkout, so anything divergent is
+    # almost certainly a stray file rather than intentional work -- but stash
+    # it (with -u, to catch untracked) instead of discarding, so a hand-edit
+    # made while debugging on the Pi stays recoverable via `git stash list`.
+    cd /opt/anicat/src
+    if [ -n "$(git status --porcelain)" ]; then
+        git stash push -u -m "deploy-pi autostash $(date +%Y%m%d-%H%M%S)" >/dev/null
+        echo "  scraper: stashed local changes ($(git stash list | head -1 | cut -d: -f1))"
+    fi
+    git fetch --quiet origin
+    git merge --ff-only --quiet origin/master
+    echo "  scraper: $(git log -1 --format=%h)"
+
     sudo mv /tmp/anicat-server /opt/anicat/bin/anicat-server
     sudo chmod +x /opt/anicat/bin/anicat-server
     sudo systemctl restart anicat.service

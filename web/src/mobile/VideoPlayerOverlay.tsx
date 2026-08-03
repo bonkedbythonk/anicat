@@ -21,6 +21,11 @@ export interface VideoPlayerOverlayProps {
  * cycling, and Next Episode — the Crunchyroll/YouTube gesture vocabulary
  * (tap to toggle chrome, double-tap edges to seek 10s).
  *
+ * Soft-sub servers carry an external WebVTT sidecar rather than burned-in
+ * captions; the backend proxies it and hands the URL back on resolve, and it
+ * is attached here as a <track>. Hard-sub servers have no sidecar (captions
+ * are in the video) and correctly get none.
+ *
  * Progress reporting reuses the same /player/* endpoints the desktop mpv Lua
  * script calls — but next/prev episode advancement does NOT go through
  * /player/next or /player/prev, since those launch mpv on the desktop
@@ -61,6 +66,7 @@ function fmtTime(sec: number): string {
 export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
   const [episodeNumber, setEpisodeNumber] = useState(props.episodeNumber);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
   const [resumeSeconds, setResumeSeconds] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +96,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     setErrorDetail(null);
     setStalled(false);
     setStreamUrl(null);
+    setSubtitleUrl(null);
     setSkipSegments([]);
     setActiveSkip(null);
     setCurrentTime(0);
@@ -110,9 +117,10 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
         }),
       });
       if (!res.ok) throw new Error(await res.text().catch(() => "Failed to load stream"));
-      const data = (await res.json()) as { stream_url: string; resume_seconds: number };
-      console.log("[VideoPlayerOverlay] resolved stream_url:", data.stream_url);
+      const data = (await res.json()) as { stream_url: string; resume_seconds: number; subtitle_url?: string | null };
+      console.log("[VideoPlayerOverlay] resolved stream_url:", data.stream_url, "subtitle_url:", data.subtitle_url);
       setStreamUrl(data.stream_url);
+      setSubtitleUrl(data.subtitle_url ?? null);
       setResumeSeconds(data.resume_seconds);
     } catch (e) {
       console.error("[VideoPlayerOverlay] resolve failed:", e);
@@ -226,6 +234,24 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       video.load();
     };
   }, [streamUrl]);
+
+  // `default` on a <track> only picks the track when the browser has no
+  // stored preference, and Safari in particular ignores it for tracks added
+  // after the element mounts — force the mode once the track is live so
+  // soft-sub episodes actually show captions instead of silently shipping a
+  // disabled track.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !subtitleUrl) return;
+    const enable = () => {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        if (video.textTracks[i].kind === "subtitles") video.textTracks[i].mode = "showing";
+      }
+    };
+    enable();
+    video.textTracks.addEventListener?.("addtrack", enable);
+    return () => video.textTracks.removeEventListener?.("addtrack", enable);
+  }, [subtitleUrl, streamUrl]);
 
   // Rotating the phone to landscape should feel like a fullscreen player,
   // not leave the video pinned inside the portrait-sized overlay chrome.
@@ -466,7 +492,11 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
             onError={handleVideoError}
             onCanPlay={() => setStalled(false)}
             onLoadedData={() => setStalled(false)}
-          />
+          >
+            {subtitleUrl && (
+              <track kind="subtitles" srcLang="en" label="English" default src={subtitleUrl} />
+            )}
+          </video>
         )}
         {loading && <Loader2 className="absolute animate-spin text-white/70" size={36} />}
       </div>

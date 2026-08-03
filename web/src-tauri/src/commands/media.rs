@@ -1828,7 +1828,18 @@ pub async fn resolve_and_save_provider_slug_for_episode(
         return Ok(None);
     }
 
-    let mut results = vec![];
+    let translation_type = {
+        let cfg = state.config.read().await;
+        cfg.stream.translation_type.clone()
+    };
+
+    // Match inside the loop, not after it. This used to `break` as soon as a
+    // query returned *any* results and only then try to match them — so a
+    // title whose English name returns unrelated hits (e.g. "86 EIGHTY-SIX"
+    // returning 3 non-matches on anineko) gave up there, and the romaji title
+    // and every synonym were never searched at all. Keep going until a query
+    // produces results that actually match.
+    let mut matches = Vec::new();
     for (idx, query) in search_candidates.iter().enumerate() {
         if idx > 0 {
             log::info!("resolve_and_save_provider_slug: sleeping 1.5s before next query to prevent rate limiting");
@@ -1845,8 +1856,15 @@ pub async fn resolve_and_save_provider_slug_for_episode(
             Ok(res) => {
                 if !res.is_empty() {
                     log::info!("resolve_and_save_provider_slug: found {} results for query '{}'", res.len(), query);
-                    results = res;
-                    break;
+                    let found = find_all_matches(&target_titles, res, |r| &r.title, &translation_type);
+                    if !found.is_empty() {
+                        matches = found;
+                        break;
+                    }
+                    log::info!(
+                        "resolve_and_save_provider_slug: no result for query '{}' matched, trying next title candidate",
+                        query
+                    );
                 }
             }
             Err(e) => {
@@ -1855,12 +1873,6 @@ pub async fn resolve_and_save_provider_slug_for_episode(
         }
     }
 
-    let translation_type = {
-        let cfg = state.config.read().await;
-        cfg.stream.translation_type.clone()
-    };
-
-    let matches = find_all_matches(&target_titles, results, |r| &r.title, &translation_type);
     if matches.is_empty() {
         log::warn!("resolve_and_save_provider_slug: no match found for media_id={}", media_id);
         return Ok(None);

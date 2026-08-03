@@ -635,16 +635,12 @@ async fn resolve_playback(
     let cover_image_str = body.cover_image.clone().unwrap_or_default();
     let total_eps = body.total_episodes.unwrap_or(0);
 
-    let (raw_url, stream_headers, resolved_provider) = match crate::commands::playback::resolve_stream_for_provider(
+    let (raw_url, stream_headers, raw_subtitle_url, resolved_provider) = match crate::commands::playback::resolve_stream_for_provider(
         app_state, body.media_id, body.episode_number, &provider_name, &None, body.title.clone(),
     )
     .await
     {
-        // Mobile's <video> element has no external-subtitle-track wiring yet
-        // (see anineko.py's _extract_subtitle_url / desktop's --sub-file
-        // handling in playback.rs) — discard the subtitle URL for now rather
-        // than half-thread it through with nowhere to use it.
-        Ok((url, headers, _subtitle_url)) => (url, headers, provider_name.clone()),
+        Ok((url, headers, subtitle_url)) => (url, headers, subtitle_url, provider_name.clone()),
         Err(primary_err) => {
             let has_fallback = !fallback_provider.is_empty() && fallback_provider != "none" && fallback_provider != provider_name;
             if !has_fallback {
@@ -655,7 +651,7 @@ async fn resolve_playback(
             )
             .await
             {
-                Ok((url, headers, _subtitle_url)) => (url, headers, fallback_provider.clone()),
+                Ok((url, headers, subtitle_url)) => (url, headers, subtitle_url, fallback_provider.clone()),
                 Err(fb_err) => {
                     return Err((
                         StatusCode::BAD_GATEWAY,
@@ -743,9 +739,27 @@ async fn resolve_playback(
         }
     }
 
+    // Soft-sub servers hand back an external WebVTT sidecar rather than
+    // baking captions into the video (anineko's `sub=`/`caption_1=`/`c1_file=`
+    // query params — see anineko.py's _extract_subtitle_url). Desktop passes
+    // it to mpv as --sub-file; the phone feeds it to a <track> element. It
+    // has to go through /proxy for the same two reasons the stream does: a
+    // <track> fetch is CORS-checked and the sidecar's host is a different
+    // origin, and some hosts reject the request without the stream's Referer.
+    let subtitle_url = raw_subtitle_url.as_ref().map(|sub| {
+        let mut url = format!("/proxy?url={}", crate::util::percent_encode(sub));
+        if let Some(referer) = stream_headers.as_ref().and_then(|h| {
+            h.get("Referer").or_else(|| h.get("referer")).or_else(|| h.get("REFERER"))
+        }) {
+            url.push_str(&format!("&referer={}", crate::util::percent_encode(referer)));
+        }
+        url
+    });
+
     Ok(Json(serde_json::json!({
         "stream_url": stream_url,
         "resume_seconds": resume_seconds,
+        "subtitle_url": subtitle_url,
     })))
 }
 

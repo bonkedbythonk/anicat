@@ -11,20 +11,16 @@ INSTALL_PATH="/Applications/$APP_NAME"
 
 
 echo "Step 1: Finding the latest version..."
-# Fetch the latest non-prerelease release (first in the list that isn't a prerelease)
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    if isinstance(data, list):
-        for r in data:
-            if not r.get('prerelease', False) and not r.get('draft', False):
-                print(json.dumps(r))
-                break
-except: pass
-" 2>/dev/null)
-
-DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -o "https://github.com/bonkedbythonk/anicat/releases/download/[^\"]*\.dmg" | head -n 1)
+# Deliberately no python3 here. A stock macOS has no usable interpreter --
+# /usr/bin/python3 is a stub that prompts for a multi-GB Xcode Command Line
+# Tools install -- and this script has to work on a machine with nothing but
+# Terminal. /releases/latest already excludes drafts and prereleases, so the
+# .dmg asset URL can be pulled straight out with grep. Everything else this
+# script uses (curl, hdiutil, xattr, osascript, lsof, killall) ships with the
+# base system.
+DOWNLOAD_URL=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" \
+    | grep -o "https://github.com/$REPO/releases/download/[^\"]*\.dmg" \
+    | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
     echo "Couldn't find a download link. The latest release might still be building."

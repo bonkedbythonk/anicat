@@ -87,6 +87,25 @@ done
 [ "$SIG_FAIL" -eq 0 ] && echo "  ok — every Mach-O has a valid signature"
 echo ""
 
+echo "=== Checking for leftover quarantine flags ==="
+# A valid ad-hoc signature does not clear com.apple.quarantine -- `cp -R`
+# carries it forward from whatever the file was before (a bottle tarball
+# pulled over the network by `brew fetch`, in this case), and it's what
+# actually produces "Apple could not verify ... is free of malware" even
+# on a correctly signed binary. install_macos.sh strips this for the
+# packaged .app; this check exists so the same class of bug doesn't slip
+# back in through resources/ used directly by `tauri dev`.
+QUARANTINE_FAIL=0
+for f in "${MACHO_FILES[@]}"; do
+    if xattr -p com.apple.quarantine "$f" >/dev/null 2>&1; then
+        echo "FAIL  ${f#$APP_PATH/}: com.apple.quarantine still set"
+        QUARANTINE_FAIL=1
+        FAIL=1
+    fi
+done
+[ "$QUARANTINE_FAIL" -eq 0 ] && echo "  ok — no quarantine flags on any Mach-O"
+echo ""
+
 # ── 3: duplicate library versions ───────────────────────────────────────
 
 echo "=== Checking for duplicate library versions in resources/lib ==="

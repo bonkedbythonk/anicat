@@ -45,6 +45,15 @@ cp -R "$APP_DIR/Contents/MacOS/mpv" "$RESOURCES_DIR/mpv.exe"
 cp -R "$APP_DIR/Contents/MacOS/lib" "$RESOURCES_DIR/"
 
 echo "=== 2a. Ad-hoc signing mpv binary to reduce Gatekeeper warnings ==="
+# `cp -R` on macOS carries extended attributes forward, including
+# com.apple.quarantine on the bottle's extracted contents (it was quarantined
+# the moment `brew fetch` pulled it over the network). Ad-hoc codesign does
+# NOT clear that flag -- it only signs -- so without this, launching mpv
+# straight from resources/ (as `tauri dev` does) hits Gatekeeper's "Apple
+# could not verify... is free of malware" dialog even though the binary is
+# correctly signed. install_macos.sh already strips this for the packaged
+# .app; local dev resources need the same treatment.
+xattr -cr "$RESOURCES_DIR/mpv" "$RESOURCES_DIR/mpv.exe" 2>/dev/null || true
 codesign -s - --force "$RESOURCES_DIR/mpv" "$RESOURCES_DIR/mpv.exe" 2>/dev/null || true
 
 echo "=== 2b. Bundling MoltenVK Vulkan driver for macOS GPU acceleration ==="
@@ -70,6 +79,7 @@ else
 fi
 
 echo "=== 2c. Ad-hoc signing every bundled dylib (mpv only had the two top-level binaries signed) ==="
+xattr -cr "$RESOURCES_DIR/lib" 2>/dev/null || true
 find "$RESOURCES_DIR/lib" -name "*.dylib" -exec codesign -s - --force {} \; 2>/dev/null || true
 
 echo "=== 3. Setting up isolated themed configuration directories ==="

@@ -190,6 +190,8 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     // Prefer bundled mpv if present (ensures self-contained reliability in release builds)
     if mpv_bin.exists() {
         log::info!("Using bundled mpv at: {}", mpv_bin.display());
+        strip_quarantine(&mpv_bin);
+        strip_quarantine(&lib_dir);
         return Ok((
             mpv_bin.to_string_lossy().to_string(),
             config_dir,
@@ -224,6 +226,8 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         let dev_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("lib");
+        strip_quarantine(&dev_path);
+        strip_quarantine(&dev_lib_dir);
         return Ok((
             dev_path.to_string_lossy().to_string(),
             config_dir,
@@ -236,6 +240,26 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         mpv_bin.display()
     ))
 }
+
+/// `cp -R` carries `com.apple.quarantine` forward from wherever a bundled
+/// binary came from (the mpv cask bottle, pulled over the network by `brew
+/// fetch`), and ad-hoc codesign does not clear it. `setup_bundled_player.sh`
+/// strips it once at bundle-prep time, but Tauri makes its own copy of
+/// `resources/` into `target/debug/resources` on every dev build — a copy
+/// that already existed before a prep-time fix runs stays quarantined
+/// forever otherwise, and that's exactly the copy `tauri dev` launches from.
+/// Doing it here, on every resolve, means it self-heals regardless of which
+/// build tree the binary ended up in or when it was copied there.
+#[cfg(target_os = "macos")]
+fn strip_quarantine(path: &std::path::Path) {
+    let _ = std::process::Command::new("/usr/bin/xattr")
+        .args(["-r", "-d", "com.apple.quarantine"])
+        .arg(path)
+        .output();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn strip_quarantine(_path: &std::path::Path) {}
 
 /// Path to a per-launch mpv log, written next to the app logs. Captures which
 /// scripts (anicat_ui, ModernZ) and shaders actually loaded — the only way to

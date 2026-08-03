@@ -102,6 +102,7 @@ async def get_streams(slug: str = Query(...), episode: int = Query(...), provide
                 "headers": s.headers,
                 "group": s.group,
                 "source_type": s.source_type,
+                "subtitle_url": s.subtitle_url,
             }
             for s in servers
         ]
@@ -143,6 +144,7 @@ async def debug_streams(slug: str = Query(...), episode: int = Query(...), provi
                         "is_m3u8": s.is_m3u8 or False,
                         "group": s.group,
                         "source_type": s.source_type,
+                        "subtitle_url": s.subtitle_url,
                     }
                     for s in servers
                 ],

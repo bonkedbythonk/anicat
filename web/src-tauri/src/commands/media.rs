@@ -1828,6 +1828,21 @@ pub async fn resolve_and_save_provider_slug_for_episode(
         return Ok(None);
     }
 
+    // Cap how many queries we actually issue. AniList returns every localized
+    // title as a synonym -- 20-30 of them for a popular show -- and each extra
+    // query costs a scraper round-trip plus the 1.5s rate-limit sleep below.
+    // That was harmless while the loop stopped at the first non-empty result,
+    // but it now keeps going until something *matches*, so an uncapped list
+    // could stall a phone request for the better part of a minute (twice over,
+    // since resolve_stream_for_provider retries this whole call when the slug
+    // yields no streams). English + romaji + two synonyms is plenty: the
+    // failure this fixes needs the second candidate, not the twentieth.
+    // Matching is unaffected -- `target_titles` still holds every synonym, so
+    // a result is scored against all known names regardless of which query
+    // surfaced it.
+    const MAX_SEARCH_QUERIES: usize = 4;
+    search_candidates.truncate(MAX_SEARCH_QUERIES);
+
     let translation_type = {
         let cfg = state.config.read().await;
         cfg.stream.translation_type.clone()

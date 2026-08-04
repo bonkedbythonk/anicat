@@ -1,4 +1,6 @@
 import { ChevronRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { mediaApi, getUserLists } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { saveMobileSetting } from "./mobileSettings";
 
@@ -9,8 +11,8 @@ interface YouViewProps {
   onLogout: () => void;
 }
 
-const PROVIDERS = ["anineko", "mkissa"] as const;
-const PROVIDER_LABELS: Record<string, string> = { anineko: "AniNeko", mkissa: "Mkissa" };
+const PROVIDERS = ["anineko", "mkissa", "nyaa"] as const;
+const PROVIDER_LABELS: Record<string, string> = { anineko: "AniNeko", mkissa: "Mkissa", nyaa: "Torrents" };
 
 function Row({
   label,
@@ -63,6 +65,36 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
+/** List counts for the stats strip. Deliberately not `mediaApi.getUserList`:
+ * that helper slices its result to 50 entries a page, so a completed list of
+ * any real size would report a confidently wrong number. `getUserLists` is
+ * the same single request without the slicing. */
+function useListCounts(enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: ["you-list-counts"],
+    queryFn: async () => {
+      const [current, completed] = await Promise.all([
+        getUserLists(undefined, "CURRENT", "ANIME"),
+        getUserLists(undefined, "COMPLETED", "ANIME"),
+      ]);
+      const count = (res: Awaited<ReturnType<typeof getUserLists>>) =>
+        (res?.MediaListCollection?.lists ?? []).reduce((n, l) => n + (l.entries?.length ?? 0), 0);
+      return { watching: count(current), completed: count(completed) };
+    },
+    enabled,
+  });
+  return data;
+}
+
+function Stat({ value, label, last }: { value: string; label: string; last?: boolean }) {
+  return (
+    <div className={`px-2 py-3 text-center ${last ? "" : "border-r border-border"}`}>
+      <p className="text-[16px] font-bold tabular-nums text-foreground">{value}</p>
+      <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 /** The account tab in the Ink & Index settings idiom: grouped rows on quiet
  * surfaces, plain words (no icon squares), one-line explanations, mono
  * values. Playback settings are per-device via mobileSettings, never
@@ -72,6 +104,14 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
   const autoskip = useSettingsStore((s) => s.autoskip);
   const provider = useSettingsStore((s) => s.defaultProvider);
   const apiConnected = useAppStore((s) => s.apiConnected);
+  const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
+  const counts = useListCounts(isAuthenticated);
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => mediaApi.getProfile(),
+    enabled: isAuthenticated,
+  });
+  const meanScore = profile?.mean_score ? Math.round(profile.mean_score) : null;
 
   const cycleProvider = () => {
     const idx = PROVIDERS.indexOf(provider as (typeof PROVIDERS)[number]);
@@ -99,6 +139,13 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
           </div>
           <ChevronRight size={17} className="text-muted-foreground shrink-0" />
         </button>
+        {/* Stats belong on the hub, not one tap deeper — the numbers are the
+            reason to open this tab at all. */}
+        <div className="grid grid-cols-3 border-t border-border">
+          <Stat value={counts ? String(counts.watching) : "—"} label="Watching" />
+          <Stat value={counts ? String(counts.completed) : "—"} label="Completed" />
+          <Stat value={meanScore ? String(meanScore) : "—"} label="Mean score" last />
+        </div>
       </div>
 
       <p className={groupLabel}>Playback</p>

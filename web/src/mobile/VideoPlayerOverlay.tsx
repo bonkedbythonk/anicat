@@ -109,7 +109,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
         body: JSON.stringify({
           media_id: props.mediaId,
           episode_number: epNum,
-          provider: props.provider === "nyaa" ? "anineko" : props.provider,
+          provider: props.provider,
           title: props.title,
           episode_title: props.episodeTitle,
           cover_image: props.coverImage,

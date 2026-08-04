@@ -22,10 +22,10 @@ export function UpNextCard({ item, onSelect }: UpNextCardProps) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-border">
-      <button onClick={() => onSelect(item)} className="relative block h-[130px] w-full text-left">
+      <button onClick={() => onSelect(item)} className="relative block h-[190px] w-full text-left">
         <img src={proxyImage(art)} alt="" className="absolute inset-0 h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-        <h2 className="absolute bottom-2.5 left-3.5 right-3.5 line-clamp-2 text-[16px] font-semibold leading-tight text-white">
+        <h2 className="absolute bottom-2.5 left-3.5 right-3.5 line-clamp-2 text-[20px] font-bold leading-tight text-white">
           {title}
         </h2>
       </button>

@@ -52,6 +52,27 @@ export default defineConfig({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+    // The mobile PWA fetches /mobile-api, /player and /proxy (stream/image/
+    // subtitle passthrough) as same-origin paths, so iterating on it in
+    // `npm run dev` needs those forwarded to a running backend — without
+    // /proxy specifically, those fetches fall through to Vite's own SPA
+    // fallback and silently return index.html instead of real content. Run
+    // `cargo run --bin anicat-server` alongside for a local backend, or
+    // point ANICAT_BACKEND at the Pi.
+    proxy: {
+      "/mobile-api": {
+        target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
+        changeOrigin: true,
+      },
+      "/player": {
+        target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
+        changeOrigin: true,
+      },
+      "/proxy": {
+        target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
+        changeOrigin: true,
+      },
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

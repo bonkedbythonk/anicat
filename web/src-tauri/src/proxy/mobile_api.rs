@@ -669,11 +669,27 @@ async fn resolve_playback(
     // stream's own Referer through the proxy URL — some CDNs reject the fetch
     // without it (mp4upload returns 403; the desktop path gets it via mpv's
     // --referrer arg). Without this, mkissa playback fails on the PWA.
-    let mut stream_url = format!("/proxy?url={}", crate::util::percent_encode(&raw_url));
+    //
+    // The nyaa provider is the one exception: resolve_stream_for_provider
+    // hands back a loopback URL (http://127.0.0.1:<proxy_port>/torrent-stream)
+    // pointing at this same server's own librqbit range-stream handler, not a
+    // third-party CDN. It's already same-origin and needs no injected
+    // headers, so route the phone straight at it instead of through /proxy —
+    // that also sidesteps /proxy's SSRF allowlist, which deliberately never
+    // permits loopback hosts.
+    let mut stream_url = if let Some(path_and_query) = raw_url.strip_prefix("http://127.0.0.1:").and_then(|rest| {
+        rest.split_once('/').map(|(_, tail)| format!("/{tail}"))
+    }).filter(|p| p.starts_with("/torrent-stream")) {
+        path_and_query
+    } else {
+        format!("/proxy?url={}", crate::util::percent_encode(&raw_url))
+    };
     if let Some(referer) = stream_headers.as_ref().and_then(|h| {
         h.get("Referer").or_else(|| h.get("referer")).or_else(|| h.get("REFERER"))
     }) {
-        stream_url.push_str(&format!("&referer={}", crate::util::percent_encode(referer)));
+        if stream_url.starts_with("/proxy") {
+            stream_url.push_str(&format!("&referer={}", crate::util::percent_encode(referer)));
+        }
     }
 
     {

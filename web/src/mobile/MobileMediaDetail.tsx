@@ -380,10 +380,18 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             {fullItem.status === "RELEASING" && <span className="text-accent">Airing</span>}
           </div>
           <h1 className="text-[24px] font-bold leading-tight tracking-tight text-foreground">{title}</h1>
+          {/* Genres are descriptive text, not structured metadata — normal-case
+              pills, unlike the mono caps of the format/year/studio line above,
+              which stays dense on purpose. */}
           {fullItem.genres && (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
+            <div className="flex flex-wrap gap-1.5">
               {fullItem.genres.slice(0, 4).map((g: string) => (
-                <span key={g}>{g}</span>
+                <span
+                  key={g}
+                  className="rounded-full bg-foreground/[0.06] px-2.5 py-[3px] text-[12px] text-foreground/55"
+                >
+                  {g}
+                </span>
               ))}
             </div>
           )}
@@ -417,7 +425,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
                       style={{ touchAction: "pan-y" }}
                       className={`grid h-[24px] w-[24px] place-items-center rounded-[4px] border font-mono text-[9px] tabular-nums ${
                         watched
-                          ? "border-transparent bg-accent/15 text-accent"
+                          ? "border-transparent bg-foreground/10 text-foreground"
                           : current
                             ? "border-accent text-foreground"
                             : unaired
@@ -497,7 +505,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`shrink-0 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] ${
-                  activeTab === tab ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
+                  activeTab === tab ? "border-transparent bg-foreground/10 text-foreground" : "border-border text-muted-foreground"
                 }`}
               >
                 {tab === "episodes" ? (isManga ? "Chapters" : "Episodes") : tab === "related" ? "Related" : tab.charAt(0).toUpperCase() + tab.slice(1)}

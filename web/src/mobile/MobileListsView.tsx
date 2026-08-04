@@ -53,7 +53,7 @@ export function MobileListsView({ onSelect }: MobileListsViewProps) {
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`shrink-0 rounded-full border px-3.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-colors ${
-                active ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
+                active ? "border-transparent bg-foreground/10 text-foreground" : "border-border text-muted-foreground"
               }`}
             >
               {label}

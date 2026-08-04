@@ -4,6 +4,7 @@ import { mediaApi } from "@/lib/api";
 import type { MediaItem } from "@/lib/types";
 import { proxyImage } from "@/lib/proxy";
 import { PosterRow } from "./PosterRow";
+import { BrowseRow } from "./BrowseRow";
 
 interface MobileMangaViewProps {
   onSelect: (item: MediaItem, action?: "play" | null) => void;
@@ -60,28 +61,32 @@ export function MobileMangaView({ onSelect }: MobileMangaViewProps) {
       {reading.length > 0 && (
         <section>
           <h2 className="mb-2.5 text-[15px] font-semibold tracking-tight text-foreground">Continue Reading</h2>
-          <div className="rounded-md bg-surface border border-border overflow-hidden">
-            {reading.map((item, i) => {
+          {/* Chapter-forward rows, not a poster grid: what you want off this
+              screen is "which chapter am I on", and cover art can't tell you
+              that. Each title is its own card so the chapter line and the
+              progress bar read as belonging to it. */}
+          <div className="space-y-2">
+            {reading.map((item) => {
               const progress = item.user_status?.progress || 0;
               const total = item.chapters || 0;
               const pct = total > 0 ? Math.min(100, (progress / total) * 100) : 0;
               return (
                 <div
                   key={item.id}
-                  className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-border" : ""}`}
+                  className="flex items-center gap-3 rounded-lg border border-border bg-surface p-2.5"
                 >
                   <button onClick={() => onSelect(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <div className="h-16 w-11 shrink-0 overflow-hidden rounded-[4px] bg-surface">
+                    <div className="w-[52px] shrink-0 aspect-[2/3] overflow-hidden rounded-[5px] bg-background">
                       <img src={proxyImage(coverOf(item))} alt="" className="h-full w-full object-cover" loading="lazy" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-foreground">{titleOf(item)}</p>
-                      <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.07em] tabular-nums text-muted-foreground">
-                        CH {progress}{total > 0 ? ` / ` : ""}
+                      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.05em] tabular-nums text-muted-foreground">
+                        CH {progress} / {total || "?"}
                       </p>
                       {total > 0 && (
-                        <div className="mt-1.5 h-[2px] rounded-[1px] bg-foreground/10">
-                          <div className="h-full rounded-[1px] bg-accent" style={{ width: `${pct}%` }} />
+                        <div className="mt-1.5 h-[3px] rounded-[1.5px] bg-foreground/10">
+                          <div className="h-full rounded-[1.5px] bg-accent" style={{ width: `${pct}%` }} />
                         </div>
                       )}
                     </div>
@@ -102,7 +107,7 @@ export function MobileMangaView({ onSelect }: MobileMangaViewProps) {
 
       {planning.length > 0 && <PosterRow title="Plan to Read" items={planning} onSelect={onSelect} />}
 
-      <PosterRow title="Trending Manga" items={trending} onSelect={onSelect} />
+      <BrowseRow title="Trending manga" items={trending} onSelect={onSelect} />
 
       {reading.length === 0 && planning.length === 0 && trending.length === 0 && (
         <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground">

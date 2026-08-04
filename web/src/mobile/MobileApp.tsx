@@ -12,6 +12,7 @@ const MobileMangaView = lazy(() => import("./MobileMangaView").then((m) => ({ de
 import { PinGate } from "./PinGate";
 import { ConnectAniList } from "./ConnectAniList";
 import { BottomNav, type PrimaryTab } from "./BottomNav";
+import { useAiringSoon } from "./useAiringSoon";
 import { MobileHeader } from "./MobileHeader";
 import { YouView } from "./YouView";
 import { MobileHomeView } from "./MobileHomeView";
@@ -65,6 +66,10 @@ export default function MobileApp() {
 
   const selectedItem = useAppStore((s) => s.selectedItem);
   const initialAction = useAppStore((s) => s.initialAction);
+  // The tab bar's something-new dot is decided here, not in BottomNav: the
+  // bar stays purely prop-driven, and this reads the same `home-watching`
+  // cache entry Home's "Airing soon" shelf does, so the two agree.
+  const hasSomethingNew = useAiringSoon().length > 0;
   const openDetail = useAppStore((s) => s.openDetail);
   const closeDetail = useAppStore((s) => s.closeDetail);
 
@@ -214,11 +219,11 @@ export default function MobileApp() {
       }
     }
     switch (activeTab) {
-      case "home": return <MobileHomeView onSelect={onSelect} />;
+      case "home": return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} />;
       case "search": return <MobileSearchView onSelect={onSelect} />;
       case "library": return <MobileListsView onSelect={onSelect} />;
       case "manga": return <MobileMangaView onSelect={onSelect} />;
-      default: return <MobileHomeView onSelect={onSelect} />;
+      default: return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} />;
     }
   };
 
@@ -265,7 +270,7 @@ export default function MobileApp() {
         </AnimatePresence>
       </main>
 
-      <BottomNav activeTab={activeTab} onTabChange={goToTab} />
+      <BottomNav activeTab={activeTab} onTabChange={goToTab} hasSomethingNew={hasSomethingNew} />
 
       {player && <VideoPlayerOverlay {...player} onClose={() => setPlayer(null)} />}
     </div>

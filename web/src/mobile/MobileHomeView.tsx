@@ -5,33 +5,23 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 import { proxyImage } from "@/lib/proxy";
-import { parseAiringTime, parseWatchedAt } from "@/lib/date";
+import { parseWatchedAt } from "@/lib/date";
+import { pickAiringSoon, airingLabel } from "./useAiringSoon";
 import { UpNextCard } from "./UpNextCard";
 import { PosterRow } from "./PosterRow";
+import { BrowseRow } from "./BrowseRow";
 import { PosterCard } from "./PosterCard";
 import { EpisodeCard } from "./EpisodeCard";
 
-// `airing_at` is unix seconds when snakify copied AniList's raw airingAt
-// over, or an ISO string when it came from the schedule mapping — accept
-// both (same tolerance Hero.tsx needs).
-function airingAtMs(item: MediaItem): number | null {
-  const raw = item.next_airing?.airing_at;
-  if (raw == null) return null;
-  const ms = parseAiringTime(raw);
-  return ms === 0 || isNaN(ms) ? null : ms;
-}
-
-function airingLabel(ms: number): string {
-  const diff = ms - Date.now();
-  if (diff <= 0) return "aired";
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 1) return `in ${Math.max(1, Math.floor(diff / 60_000))}m`;
-  if (hours < 48) return `in ${hours}h`;
-  return `in ${Math.floor(hours / 24)}d`;
-}
+// Home's Watching grid is a summary, not the exhaustive list — the Library
+// tab (backed by real server-side pagination via MobileListsView) is where
+// "all of it" lives. Capping here keeps this count honest instead of
+// silently dropping anything past `getUserList`'s client-side page-1 slice.
+const WATCHING_GRID_LIMIT = 9;
 
 interface MobileHomeViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
+  onSeeAllWatching: () => void;
 }
 
 /** Ink & Index mobile home: resume is the product. One dominant Up Next
@@ -40,7 +30,7 @@ interface MobileHomeViewProps {
  * poster rows. The hero carousel is deleted, not restyled — billboards
  * sell, archives resume. Reuses the same queries/cache keys as desktop's
  * HomeView so both surfaces share warm cache. */
-export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
+export function MobileHomeView({ onSelect, onSeeAllWatching }: MobileHomeViewProps) {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
 
   const watchingQuery = useQuery({
@@ -84,16 +74,7 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
   const seasonal = seasonalQuery.data?.media || [];
   const planning = planningQuery.data?.media || [];
 
-  // Watching-list entries with a known upcoming episode, soonest first —
-  // the phone equivalent of glancing at the Schedule tab for "anything
-  // I follow airing today?".
-  const airingSoon = useMemo(() => {
-    return watching
-      .map((m) => ({ item: m, at: airingAtMs(m) }))
-      .filter((e): e is { item: MediaItem; at: number } => e.at !== null && e.at > Date.now() - 6 * 3_600_000)
-      .sort((a, b) => a.at - b.at)
-      .slice(0, 10);
-  }, [watching]);
+  const airingSoon = useMemo(() => pickAiringSoon(watching), [watching]);
 
   const upNext = continueWatching[0];
   const queueRest = continueWatching.slice(1);
@@ -156,10 +137,15 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
         <div className="space-y-2.5">
           <div className="flex items-baseline justify-between">
             <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Watching</h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums">{watching.length} shows</span>
+            <button
+              onClick={onSeeAllWatching}
+              className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground tabular-nums active:opacity-60"
+            >
+              {watching.length > WATCHING_GRID_LIMIT ? "See all" : `${watching.length} shows`}
+            </button>
           </div>
           <div className="grid grid-cols-3 gap-x-3 gap-y-4">
-            {watching.map((item) => (
+            {watching.slice(0, WATCHING_GRID_LIMIT).map((item) => (
               <PosterCard key={item.id} item={item} onSelect={onSelect} width="100%" />
             ))}
           </div>
@@ -167,8 +153,8 @@ export function MobileHomeView({ onSelect }: MobileHomeViewProps) {
       )}
 
       <PosterRow title="Planning" items={planning} onSelect={onSelect} />
-      <PosterRow title="Trending" items={trending} onSelect={onSelect} />
-      <PosterRow title="This season" items={seasonal} onSelect={onSelect} />
+      <BrowseRow title="Trending now" items={trending} onSelect={onSelect} />
+      <BrowseRow title="This season" items={seasonal} onSelect={onSelect} />
     </div>
   );
 }

@@ -114,10 +114,12 @@ fn default_manga_provider() -> String {
     "mangakatana".into()
 }
 fn default_fallback_provider() -> String {
-    "mkissa".into()
-}
-fn default_secondary_fallback_provider() -> String {
     "anineko".into()
+}
+// nyaa + anineko are the only selectable sources, and they're already the
+// primary/first-fallback defaults — nothing is left for a second fallback.
+fn default_secondary_fallback_provider() -> String {
+    "none".into()
 }
 fn default_shader_profile() -> String {
     "balanced".into()
@@ -355,16 +357,27 @@ impl AppState {
                 AppConfig::default()
             }
         };
-        // allanime was renamed to mkissa (same allanime.day backend, new
-        // anti-scrape crypto). Old dead providers collapse onto it too.
-        if matches!(
-            config.general.provider.as_str(),
-            "gogoanime" | "anizone" | "animepahe" | "allanime"
-        ) {
-            config.general.provider = "mkissa".into();
+        // Providers that no longer exist as a selectable option collapse onto
+        // anineko. mkissa (formerly allanime) is retired from the UI but its
+        // scraper is kept in-tree, so a config left pointing at it would
+        // otherwise select a source the user can no longer see or change.
+        const RETIRED_PROVIDERS: &[&str] =
+            &["gogoanime", "anizone", "animepahe", "allanime", "mkissa"];
+        if RETIRED_PROVIDERS.contains(&config.general.provider.as_str()) {
+            config.general.provider = "anineko".into();
         }
-        if config.general.fallback_provider == "allanime" {
-            config.general.fallback_provider = "mkissa".into();
+        if RETIRED_PROVIDERS.contains(&config.general.fallback_provider.as_str()) {
+            // Someone whose primary *and* fallback were both the retired
+            // provider would otherwise end up with anineko twice — deduped
+            // down to a single source, leaving them no fallback at all.
+            config.general.fallback_provider = if config.general.provider == "anineko" {
+                "nyaa".into()
+            } else {
+                "anineko".into()
+            };
+        }
+        if RETIRED_PROVIDERS.contains(&config.general.secondary_fallback_provider.as_str()) {
+            config.general.secondary_fallback_provider = "none".into();
         }
         config
     }
@@ -596,7 +609,7 @@ mod tests {
         assert!(!Arc::ptr_eq(&alice.inner.current_playback, &global.inner.current_playback));
 
         *alice.inner.current_playback.lock().await = Some(CurrentPlayback {
-            media_id: 111, episode_number: 1, provider: "mkissa".into(), title: "Alice's show".into(),
+            media_id: 111, episode_number: 1, provider: "anineko".into(), title: "Alice's show".into(),
             episode_title: String::new(), cover_image: String::new(), total_episodes: 12,
             last_position: 42, last_duration: 1200, paused: false,
         });
@@ -613,7 +626,7 @@ mod tests {
         let global = bare_app_state();
         let first = global.scoped_for_user(7, None, None).await;
         *first.inner.current_playback.lock().await = Some(CurrentPlayback {
-            media_id: 5, episode_number: 3, provider: "mkissa".into(), title: "x".into(),
+            media_id: 5, episode_number: 3, provider: "anineko".into(), title: "x".into(),
             episode_title: String::new(), cover_image: String::new(), total_episodes: 0,
             last_position: 99, last_duration: 100, paused: false,
         });

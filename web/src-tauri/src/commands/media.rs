@@ -1024,9 +1024,7 @@ async fn download_episode(
             return;
         }
     };
-    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "mkissa") {
-        (s, "mkissa")
-    } else if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "anineko") {
+    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "anineko") {
         (s, "anineko")
     } else {
         let err = format!("No provider mapping for media {}", media_id);

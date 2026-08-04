@@ -471,40 +471,6 @@ pub fn upsert_library_entry(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn get_library_entry(
-    conn: &rusqlite::Connection,
-    user_id: i64,
-    media_id: i64,
-) -> Result<Option<LibraryEntry>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT media_id, media_type, status, score, progress, notes, updated_at
-             FROM local_library WHERE user_id = ?1 AND media_id = ?2",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let mut rows = stmt
-        .query_map(params![user_id, media_id], |row| {
-            Ok(LibraryEntry {
-                media_id: row.get(0)?,
-                media_type: row.get(1)?,
-                status: row.get(2)?,
-                score: row.get(3)?,
-                progress: row.get(4)?,
-                notes: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    match rows.next() {
-        Some(Ok(entry)) => Ok(Some(entry)),
-        Some(Err(e)) => Err(e.to_string()),
-        None => Ok(None),
-    }
-}
-
 pub fn get_all_library(
     conn: &rusqlite::Connection,
     user_id: i64,
@@ -574,24 +540,6 @@ pub fn add_to_queue(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn get_queue_status(
-    conn: &rusqlite::Connection,
-    media_id: i64,
-    episode_number: i64,
-) -> Result<Option<String>, String> {
-    let result: Result<String, rusqlite::Error> = conn.query_row(
-        "SELECT status FROM download_queue WHERE media_id = ?1 AND episode_number = ?2",
-        params![media_id, episode_number],
-        |row| row.get(0),
-    );
-    match result {
-        Ok(status) => Ok(Some(status)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
 pub fn update_queue_status(
     conn: &rusqlite::Connection,
     media_id: i64,
@@ -619,21 +567,6 @@ pub fn update_queue_progress(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[allow(dead_code)]
-pub fn get_queue_pending(_conn: &rusqlite::Connection) -> Result<Vec<(i64, i64)>, String> {
-    let mut stmt = _conn
-        .prepare("SELECT media_id, episode_number FROM download_queue WHERE status = 'queued' ORDER BY id ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-        .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
 }
 
 pub fn get_all_queue(conn: &rusqlite::Connection) -> Result<Vec<QueueItem>, String> {

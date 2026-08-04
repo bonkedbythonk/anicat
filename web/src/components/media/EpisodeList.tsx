@@ -256,13 +256,29 @@ export function EpisodeList({
     }
 
     setPlayingEp(epNum);
+    const ep = episodes.find((e) => String(e.number) === epNum);
+    const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+
+    useAppStore.getState().setPlaybackLoading({
+      isLoading: true,
+      mediaId: mediaId,
+      episodeNumber: parseInt(epNum, 10),
+      title: mediaTitle,
+      coverImage: coverImage,
+      statusText: selectedProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+      step: selectedProvider === "nyaa" ? 2 : 1,
+    });
+
     try {
-      const ep = episodes.find((e) => String(e.number) === epNum);
-      const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
       await mediaApi.play(mediaId, parseInt(epNum, 10), selectedProvider, undefined, mediaTitle, epTitle, coverImage, episodes.length);
       dispatchRefresh();
     } catch (error) {
       console.error("Failed to play:", error);
+      useAppStore.getState().setPlaybackLoading({
+        isLoading: true,
+        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        step: 0,
+      });
     } finally {
       setPlayingEp(null);
     }

@@ -26,7 +26,7 @@ scraper spawned on demand.
  ┌──────▼───────┐         CDN ◀───┘ (segments)      ┌────────▼─────────┐
  │ SQLite        │                                  │ curl_cffi +      │
  │ registry +    │                                  │ selectolax       │
- │ watch history │                                  │ 60s idle timeout │
+ │ watch history │                                  │ 120s idle timeout│
  └──────────────┘                                   └──────────────────┘
 ```
 
@@ -80,8 +80,11 @@ scraper spawned on demand.
 ### Python scraper sidecar — provider scraping only
 - A FastAPI app in `scraper/` (`main.py`) exposing search / get / streams, with
   one provider class per file: `anineko.py`, `mkissa.py`, `mangakatana.py`.
+  `mkissa` is retained here but is no longer a selectable provider — it was
+  removed from the UI and configs migrate off it, while the scraper stays
+  in-tree in case it's brought back.
 - Uses `curl_cffi` (Chrome TLS impersonation, for Cloudflare) and `selectolax`.
-- Spawned on demand by the Rust `ScraperManager`, self-terminates after ~60s
+- Spawned on demand by the Rust `ScraperManager`, self-terminates after 120s
   idle, and is restarted when scraping is next needed. It has its own
   `scraper/pyproject.toml` and is unrelated to any root-level Python.
 

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { MediaItem, Episode, ViewType } from "@/lib/types";
+import type { MediaItem, ViewType } from "@/lib/types";
 
 interface AppConfig {
   general?: {
@@ -19,13 +19,6 @@ interface AppConfig {
   api?: {
     anilist_token?: string | null;
   };
-}
-
-interface PlaybackState {
-  item: MediaItem | null;
-  episode: Episode | null;
-  provider: string;
-  server: string | null;
 }
 
 interface AppState {
@@ -261,32 +254,6 @@ export const useAppStore = create<AppState>((set) => ({
   setPlayerActive: (playerActive) => set({ playerActive }),
 }));
 
-// Separate store for playback to avoid re-rendering non-playback components
-export const usePlaybackStore = create<PlaybackState>(() => ({
-  item: null,
-  episode: null,
-  provider: "mkissa",
-  server: null,
-}));
-
-export function setPlayback(
-  item: MediaItem,
-  episode: Episode,
-  provider: string,
-  server: string | null,
-) {
-  usePlaybackStore.setState({ item, episode, provider, server });
-}
-
-export function clearPlayback() {
-  usePlaybackStore.setState({
-    item: null,
-    episode: null,
-    provider: "mkissa",
-    server: null,
-  });
-}
-
 interface SettingsState {
   defaultProvider: string;
   autoplay: boolean;
@@ -313,7 +280,7 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  defaultProvider: "mkissa",
+  defaultProvider: "anineko",
   autoplay: true,
   autoskip: false,
   animePreview: true,
@@ -337,7 +304,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
   loadFromConfig: (config) =>
     set({
-      defaultProvider: config?.general?.provider || "mkissa",
+      defaultProvider: config?.general?.provider || "anineko",
       autoplay: config?.general?.autoplay ?? true,
       autoskip: config?.general?.autoskip ?? false,
       animePreview: config?.general?.anime_preview ?? true,

@@ -75,6 +75,10 @@ const SCORE_FORMAT_MAX: Record<string, number> = {
   POINT_3: 3,
 };
 
+// Sources that are no longer selectable, so a stale saved per-show override
+// pointing at one gets ignored rather than silently pinning the show to it.
+const RETIRED_PROVIDERS = ["mkissa", "allanime", "gogoanime", "anizone", "animepahe"];
+
 interface MediaDetailProps {
   item: MediaItem;
   onClose: () => void;
@@ -131,28 +135,39 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     },
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("mkissa");
+  const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
 
   // Per-show overrides (registry media_prefs): a saved provider or audio
   // choice for this show wins over the global config defaults.
-  const { data: mediaPrefs } = useQuery({
+  const { data: mediaPrefs, isPending: mediaPrefsPending } = useQuery({
     queryKey: ["media-prefs", item.id],
     queryFn: () => mediaApi.getMediaPrefs(item.id),
   });
 
-  useEffect(() => {
-    if (mediaPrefs?.provider) {
-      setSelectedProvider(mediaPrefs.provider);
-    } else if (config?.general?.provider) {
-      setSelectedProvider(config.general.provider as string);
+  // Which provider the saved data implies, as a derived value rather than
+  // only as state. The initial auto-play effect needs this in the very commit
+  // the queries land — reading `selectedProvider` there would still see the
+  // pre-update value, since the effect below hasn't re-rendered yet.
+  // A per-show override saved before a source was retired is ignored: the
+  // picker no longer lists it, so the user could neither see nor change it
+  // while episode queries kept hitting the dead provider.
+  const effectiveProvider = useMemo(() => {
+    if (mediaPrefs?.provider && !RETIRED_PROVIDERS.includes(mediaPrefs.provider)) {
+      return mediaPrefs.provider;
     }
+    if (config?.general?.provider) return config.general.provider as string;
+    return null;
   }, [config, mediaPrefs]);
+
+  useEffect(() => {
+    if (effectiveProvider) setSelectedProvider(effectiveProvider);
+  }, [effectiveProvider]);
 
   const handleSelectProvider = async (provider: string) => {
     setSelectedProvider(provider);
     // Remember the choice for this show: picking the global default clears
     // the override, anything else saves it.
-    const globalProvider = (config?.general?.provider as string) || "mkissa";
+    const globalProvider = (config?.general?.provider as string) || "anineko";
     try {
       await mediaApi.setMediaPrefs(item.id, {
         provider: provider === globalProvider ? null : provider,
@@ -350,11 +365,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   // applies to this one automatic trigger, never to later manual clicks of
   // the Continue button (see handlePlayNext).
   useEffect(() => {
-    if (initialAction === "play" && !loading && config && !hasTriggeredInitial) {
+    // Wait for media_prefs too, not just config: it carries this show's
+    // provider override, and it only gets one shot at firing
+    // (hasTriggeredInitial). Gating on config alone let a quick-play card
+    // start on the global provider whenever config resolved first, silently
+    // ignoring the per-show choice.
+    if (initialAction === "play" && !loading && config && !mediaPrefsPending && !hasTriggeredInitial) {
       setHasTriggeredInitial(true);
-      handlePlayNext(initialPlayEpisode ? Number(initialPlayEpisode) : undefined, selectedProvider);
+      handlePlayNext(
+        initialPlayEpisode ? Number(initialPlayEpisode) : undefined,
+        effectiveProvider ?? selectedProvider,
+      );
     }
-  }, [initialAction, loading, config, hasTriggeredInitial, selectedProvider]);
+  }, [initialAction, loading, config, mediaPrefsPending, hasTriggeredInitial, effectiveProvider, selectedProvider]);
 
   // Measure whether synopsis actually overflows the collapsed height
   useEffect(() => {
@@ -1115,7 +1138,6 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                             <option value="dub">Audio: Dub</option>
                           </FocusableSelect>
                           <FocusableSelect value={selectedProvider} onChange={(e) => handleSelectProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
-                            <option value="mkissa">Mkissa</option>
                             <option value="anineko">AniNeko</option>
                             <option value="nyaa">Torrents</option>
                           </FocusableSelect>

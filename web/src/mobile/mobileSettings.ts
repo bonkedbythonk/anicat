@@ -12,9 +12,18 @@ export interface MobileSettings {
   autoskip?: boolean;
 }
 
+// Sources that are no longer selectable. A device that saved one before it
+// was retired would otherwise keep playing from it forever — the picker no
+// longer lists it, so there'd be no way to change it from the phone.
+const RETIRED_PROVIDERS = ["mkissa", "allanime", "gogoanime", "anizone", "animepahe"];
+
 export function loadMobileSettings(): MobileSettings {
   try {
-    return JSON.parse(window.localStorage.getItem(KEY) || "{}") as MobileSettings;
+    const settings = JSON.parse(window.localStorage.getItem(KEY) || "{}") as MobileSettings;
+    if (settings.defaultProvider && RETIRED_PROVIDERS.includes(settings.defaultProvider)) {
+      delete settings.defaultProvider;
+    }
+    return settings;
   } catch {
     return {};
   }

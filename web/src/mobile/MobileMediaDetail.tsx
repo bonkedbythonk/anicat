@@ -70,7 +70,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
 
   // Device-local Source setting (You tab) wins over the server's global
   // provider — config.toml is shared by every user in multi-user mode.
-  const [selectedProvider, setSelectedProvider] = useState<string>("mkissa");
+  const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
   useEffect(() => {
     const deviceProvider = loadMobileSettings().defaultProvider;
     const provider = deviceProvider || (config?.general?.provider as string | undefined);
@@ -669,8 +669,8 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       <BottomSheet open={episodeSettingsOpen} onClose={() => setEpisodeSettingsOpen(false)} title="Playback Settings">
         <SheetRow active={autoskip} onClick={handleToggleAutoskip}><SkipForward size={18} /> Auto-Skip Intro {autoskip ? "(On)" : "(Off)"}</SheetRow>
         <SheetRow active={autoplay} onClick={handleToggleAutoNext}><PlayCircle size={18} /> Auto Next Episode {autoplay ? "(On)" : "(Off)"}</SheetRow>
-        <SheetRow onClick={() => setSelectedProvider((p) => (p === "mkissa" ? "anineko" : "mkissa"))}>
-          <RotateCcw size={18} /> Source: {selectedProvider === "mkissa" ? "Mkissa" : "AniNeko"} (tap to switch)
+        <SheetRow onClick={() => setSelectedProvider((p) => (p === "anineko" ? "nyaa" : "anineko"))}>
+          <RotateCcw size={18} /> Source: {selectedProvider === "anineko" ? "AniNeko" : "Torrents"} (tap to switch)
         </SheetRow>
       </BottomSheet>
 

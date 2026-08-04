@@ -13,11 +13,6 @@ export function dispatchRefresh() {
   invalidateProgressQueries(queryClient);
 }
 
-export function invalidateEpisodes(mediaId: number) {
-  if (!queryClient) return;
-  queryClient.invalidateQueries({ queryKey: ["media-episodes", mediaId] });
-}
-
 // Invalidate every cache that can display a media item's progress/status, so the
 // UI reconciles with AniList after a watch or an inline edit. Pass a mediaId to
 // also refresh that title's detail drawer and episode list.

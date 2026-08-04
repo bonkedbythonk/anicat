@@ -11,8 +11,8 @@ interface YouViewProps {
   onLogout: () => void;
 }
 
-const PROVIDERS = ["anineko", "mkissa", "nyaa"] as const;
-const PROVIDER_LABELS: Record<string, string> = { anineko: "AniNeko", mkissa: "Mkissa", nyaa: "Torrents" };
+const PROVIDERS = ["anineko", "nyaa"] as const;
+const PROVIDER_LABELS: Record<string, string> = { anineko: "AniNeko", nyaa: "Torrents" };
 
 function Row({
   label,

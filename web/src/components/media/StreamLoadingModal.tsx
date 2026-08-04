@@ -33,10 +33,14 @@ export const StreamLoadingModal: React.FC = () => {
     }
   }, [playerActive, isLoading, setPlaybackLoading]);
 
-  // Listen to Tauri IPC events: playback_loading_status and anicat_playback_state
+  // Listen to Tauri IPC events: playback_loading_status and anicat_playback_state.
+  // Mounted once, independent of `isLoading` — a launch can fail a few
+  // seconds *after* the modal already dismissed itself on an optimistic
+  // `active:true` (mpv survives the initial grace check, then dies moments
+  // later). If these listeners tore down whenever the modal closed, that
+  // late `status: "error"` event — the one thing that reopens the modal to
+  // tell the user mpv never actually opened — would just be dropped.
   useEffect(() => {
-    if (!isLoading) return;
-
     let unlistenStatus: (() => void) | null = null;
     let unlistenPlayback: (() => void) | null = null;
 
@@ -72,8 +76,14 @@ export const StreamLoadingModal: React.FC = () => {
         unlistenStatus = u1;
 
         const u2 = await listen<{ active: boolean }>("anicat_playback_state", (event) => {
-          // Whether MPV spawned (true) or exited/closed (false), dismiss loading overlay
-          setPlaybackLoading({ isLoading: false });
+          // Success: dismiss the loading overlay. A `false` here just means
+          // mpv exited/closed (including a normal, later user-initiated
+          // close) — real launch failures are reported separately via
+          // playback_loading_status above, so a bare `false` shouldn't
+          // reopen or otherwise touch the modal.
+          if (event.payload.active) {
+            setPlaybackLoading({ isLoading: false });
+          }
         });
         unlistenPlayback = u2;
       } catch (err) {
@@ -83,22 +93,25 @@ export const StreamLoadingModal: React.FC = () => {
 
     setupListeners();
 
-    // Safety timeout: if stream resolution hangs for over 30s, show timeout error
-    const timeoutTimer = setTimeout(() => {
-      if (isLoading && step !== 0) {
-        setPlaybackLoading({
-          isLoading: true,
-          statusText: "Stream request timed out. Please try another provider or server.",
-          step: 0,
-        });
-      }
-    }, 30000);
-
     return () => {
       if (unlistenStatus) unlistenStatus();
       if (unlistenPlayback) unlistenPlayback();
-      clearTimeout(timeoutTimer);
     };
+  }, [setPlaybackLoading]);
+
+  // Safety timeout: if stream resolution hangs for over 30s, show timeout error
+  useEffect(() => {
+    if (!isLoading || step === 0) return;
+
+    const timeoutTimer = setTimeout(() => {
+      setPlaybackLoading({
+        isLoading: true,
+        statusText: "Stream request timed out. Please try another provider or server.",
+        step: 0,
+      });
+    }, 30000);
+
+    return () => clearTimeout(timeoutTimer);
   }, [isLoading, step, setPlaybackLoading]);
 
   // Keyboard Escape listener to dismiss modal

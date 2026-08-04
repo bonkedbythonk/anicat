@@ -90,6 +90,24 @@ pub fn run() {
                 commands::media::start_download_worker(app_handle_clone, app_state_clone2).await;
             });
 
+            // Warm the torrent session in the background. It's lazily created
+            // on first play otherwise, which means the first torrent of a
+            // session is racing a DHT routing table that is still empty and a
+            // tracker list nothing has contacted yet — peer discovery is far
+            // slower cold than warm. Since a candidate that connects no peers
+            // within a few seconds is treated as dead and the next one is
+            // tried, a cold session can burn through every candidate and fall
+            // through to the fallback provider for a torrent that would have
+            // worked fine a minute later. Bootstrapping while the user is
+            // still browsing removes that race from the play path.
+            let torrent_warm = app_state.torrent.clone();
+            tauri::async_runtime::spawn(async move {
+                match torrent_warm.session().await {
+                    Ok(_) => log::info!("torrent session warmed at startup"),
+                    Err(e) => log::warn!("torrent session warm-up failed: {}", e),
+                }
+            });
+
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = handle1.await {
                     log::error!("HLS proxy task panicked: {:?}", e);

@@ -58,7 +58,7 @@ export function SettingsView({ health }: SettingsViewProps) {
   const runProviderTest = useCallback(async () => {
     const name = debugNameRef.current?.value?.trim();
     const ep = parseInt(debugEpisodeRef.current?.value || "1", 10) || 1;
-    const provider = debugProviderRef.current?.value || "mkissa";
+    const provider = debugProviderRef.current?.value || "anineko";
     if (!name) return;
     setDebugBusy(true);
     setDebugResult(null);
@@ -540,20 +540,18 @@ export function SettingsView({ health }: SettingsViewProps) {
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="nyaa">Torrents</option>
-                    <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
 
                 <SettingField label="Fallback Provider 1" description="First fallback when primary provider fails.">
                   <select
-                    value={String(config.general?.fallback_provider || "mkissa")}
+                    value={String(config.general?.fallback_provider || "anineko")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="none">None</option>
                     <option value="nyaa">Torrents</option>
-                    <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
@@ -566,7 +564,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                   >
                     <option value="none">None</option>
                     <option value="nyaa">Torrents</option>
-                    <option value="mkissa">Mkissa</option>
                     <option value="anineko">AniNeko</option>
                   </select>
                 </SettingField>
@@ -969,8 +966,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                       className="flex-1 bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground placeholder:text-muted-foreground"
                     />
                     <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground" />
-                    <select ref={debugProviderRef} defaultValue="mkissa" aria-label="Provider" className="bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground">
-                      <option value="mkissa" className="bg-surface">Mkissa</option>
+                    <select ref={debugProviderRef} defaultValue="anineko" aria-label="Provider" className="bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground">
                       <option value="anineko" className="bg-surface">AniNeko</option>
                     </select>
                     <button

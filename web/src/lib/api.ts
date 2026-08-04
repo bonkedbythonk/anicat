@@ -206,7 +206,7 @@ export async function getEpisodes(
   title?: string,
   episodeCount?: number,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider: provider || "mkissa", title: title || null, episodeCount: episodeCount ?? null });
+  return invoke("get_episodes", { mediaId, provider: provider || "anineko", title: title || null, episodeCount: episodeCount ?? null });
 }
 
 export async function getChapterPages(
@@ -322,17 +322,6 @@ export async function getUserLists(
   mediaType?: string,
 ): Promise<MediaListCollection> {
   return invoke("get_user_list", { userName, status, mediaType });
-}
-
-export async function updateProgress(
-  mediaId: number,
-  progress: number,
-  status?: string,
-): Promise<{ SaveMediaListEntry: { id: number; status: string; score: number; progress: number } | null }> {
-  return invoke("save_media_list_entry", {
-    mediaId,
-    updates: { progress, ...(status ? { status } : {}) },
-  });
 }
 
 export async function updateMediaEntry(
@@ -786,13 +775,6 @@ export interface HealthStatus {
   viewer_name?: string | null;
   auth_error?: string | null;
   current_version?: string;
-}
-
-export interface PlaybackStatus {
-  item: MediaItem | null;
-  episode: number;
-  provider: string;
-  server: string | null;
 }
 
 export interface QueueItem {

@@ -190,8 +190,7 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     // Prefer bundled mpv if present (ensures self-contained reliability in release builds)
     if mpv_bin.exists() {
         log::info!("Using bundled mpv at: {}", mpv_bin.display());
-        strip_quarantine(&mpv_bin);
-        strip_quarantine(&lib_dir);
+        strip_quarantine_once(&mpv_bin, &lib_dir);
         return Ok((
             mpv_bin.to_string_lossy().to_string(),
             config_dir,
@@ -226,8 +225,7 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         let dev_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("lib");
-        strip_quarantine(&dev_path);
-        strip_quarantine(&dev_lib_dir);
+        strip_quarantine_once(&dev_path, &dev_lib_dir);
         return Ok((
             dev_path.to_string_lossy().to_string(),
             config_dir,
@@ -257,6 +255,27 @@ fn strip_quarantine(path: &std::path::Path) {
         .arg(path)
         .output();
 }
+
+// Recursive `xattr -r -d` over the whole mpv lib dir is a blocking,
+// filesystem-walking shell-out; re-running it on every single play (as this
+// used to, once per launch for both mpv_bin and lib_dir) adds real latency
+// to every launch for a self-heal that, once it has actually run, doesn't
+// need repeating within the same process lifetime — the copy on disk
+// doesn't get re-quarantined mid-session.
+#[cfg(target_os = "macos")]
+static QUARANTINE_STRIPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+fn strip_quarantine_once(mpv_bin: &std::path::Path, lib_dir: &std::path::Path) {
+    if QUARANTINE_STRIPPED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    strip_quarantine(mpv_bin);
+    strip_quarantine(lib_dir);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn strip_quarantine_once(_mpv_bin: &std::path::Path, _lib_dir: &std::path::Path) {}
 
 #[cfg(not(target_os = "macos"))]
 fn strip_quarantine(_path: &std::path::Path) {}
@@ -870,12 +889,13 @@ pub async fn start_playback(
                 match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone()).await {
                     Ok(res) => {
                         if prov != provider_name {
-                            {
-                                let mut guard = state.current_playback.lock().await;
-                                if let Some(ref mut pb) = *guard {
-                                    pb.provider = prov.clone();
-                                }
-                            }
+                            // Note: don't write the working provider into
+                            // current_playback here — at this point it still
+                            // holds the *previous* episode's record, and this
+                            // launch overwrites it wholesale further down.
+                            // Reassigning provider_name below is what actually
+                            // makes the fallback stick (and what auto-next and
+                            // the near-end preload later read back).
                             use tauri::Emitter;
                             let _ = app.emit("show_notification", serde_json::json!({
                                 "message": format!(
@@ -1341,6 +1361,7 @@ pub async fn start_playback(
 
     let pid = child.id().unwrap_or(0);
     log::info!("Launched mpv pid={} with stream: {}", pid, stream_url);
+    let spawn_instant = std::time::Instant::now();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     match child.try_wait() {
@@ -1384,7 +1405,9 @@ pub async fn start_playback(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let exited = {
+            // `None` status means "exited, but we never saw how" (monitor lost
+            // the handle, or try_wait itself failed) — not treated as a crash.
+            let (exited, exit_status) = {
                 let mut guard = match CURRENT_MPV.lock() {
                     Ok(g) => g,
                     Err(e) => {
@@ -1397,21 +1420,21 @@ pub async fn start_playback(
                 };
                 match guard.as_mut() {
                     Some(child) => match child.try_wait() {
-                        Ok(Some(_)) => {
+                        Ok(Some(status)) => {
                             let _ = guard.take();
-                            true
+                            (true, Some(status))
                         }
-                        Ok(None) => false,
+                        Ok(None) => (false, None),
                         Err(e) => {
                             log::warn!(
                                 "mpv exit monitor: try_wait failed for media {} ep {}, treating as exited: {}",
                                 monitor_media_id, monitor_episode, e
                             );
                             let _ = guard.take();
-                            true
+                            (true, None)
                         }
                     },
-                    None => true,
+                    None => (true, None),
                 }
             };
             if exited {
@@ -1423,6 +1446,33 @@ pub async fn start_playback(
                         (monitor_media_id, monitor_episode)
                     }
                 };
+
+                // mpv surviving the initial 500ms grace check only proves the
+                // process didn't crash instantly — it can still die a few
+                // seconds later (bad/expired stream URL, dylib load failure,
+                // Cloudflare hiccup) after the loading modal has already
+                // dismissed itself on the earlier `active:true`. Without this,
+                // that later failure was silent: the modal was long gone and
+                // nothing told the user mpv never actually opened.
+                //
+                // Gate on a non-zero exit code, not just the time window:
+                // quitting mpv within a few seconds (wrong episode, changed
+                // one's mind) is completely normal and exits 0, and reporting
+                // that as a failure would fire constantly.
+                let crashed = exit_status.is_some_and(|s| !s.success());
+                if crashed && spawn_instant.elapsed() < std::time::Duration::from_secs(8) {
+                    log::warn!(
+                        "mpv exited with {:?} only {:?} after launch (media {} ep {}) — surfacing as a failed launch",
+                        exit_status, spawn_instant.elapsed(), monitor_media_id, monitor_episode
+                    );
+                    let _ = app_handle.emit("playback_loading_status", serde_json::json!({
+                        "status": "error",
+                        "step": 0,
+                        "message": "Player closed unexpectedly. Try another server or provider.",
+                        "media_id": monitor_media_id,
+                        "episode_number": monitor_episode,
+                    }));
+                }
 
                 // Give the Lua script time to send position via player/stop
                 tokio::time::sleep(std::time::Duration::from_millis(2000)).await;

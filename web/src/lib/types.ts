@@ -194,20 +194,6 @@ export interface Review {
   };
 }
 
-export interface SmartPlaylistItem {
-  media: MediaItem;
-  reason: string;
-}
-
-export interface SearchFilter {
-  genre?: string[];
-  year?: number;
-  season?: string;
-  format?: string;
-  status?: string;
-  sort?: string;
-}
-
 export interface AiringSchedule {
   id: number;
   episode: number;

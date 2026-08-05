@@ -22,12 +22,12 @@ function SuggestionButton({ item, onSelect }: { item: MediaItem; onSelect: (item
       ref={ref}
       tabIndex={tabIndex}
       onClick={() => onSelect(item)}
-      className="flex items-center gap-3 rounded-md border border-border p-2 text-left transition-colors hover:border-foreground/25 hover:bg-surface/70 cursor-pointer"
+      className="flex w-full items-center gap-3 rounded-md border border-border p-2 text-left transition-colors hover:border-foreground/25 hover:bg-surface/70 cursor-pointer"
     >
       <img
         src={item.cover_image?.large}
         alt={title}
-        className="h-14 w-10 rounded-lg object-cover"
+        className="h-14 w-10 shrink-0 rounded-lg object-cover"
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium text-foreground">{title}</p>
@@ -44,7 +44,12 @@ function SuggestionItems({ suggestions, onSelect }: { suggestions: MediaItem[]; 
   return (
     <>
       {suggestions.map((item) => (
-        <div key={item.id} role="listitem">
+        // min-w-0: a grid item defaults to min-width:auto, so it refuses to
+        // shrink below its content's intrinsic width. Without this a long
+        // title pushes the card past its column and over its neighbour, and
+        // the inner `truncate` never engages because no ancestor is allowed
+        // to shrink.
+        <div key={item.id} role="listitem" className="min-w-0">
           <SuggestionButton item={item} onSelect={onSelect} />
         </div>
       ))}

@@ -158,23 +158,36 @@ fn strip_verbatim_prefix(p: String) -> String {
 }
 
 fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-
-    let base_dir = if resource_dir.join("resources").exists() {
-        resource_dir.join("resources")
-    } else {
-        resource_dir.clone()
+    // A failure here is recoverable, so don't propagate it: every remaining
+    // lookup below (system install, PATH, dev resources) works without a
+    // resource dir. Bailing out on `?` turned a resolvable "where did Tauri
+    // put the bundle" question into "playback is dead", surfacing to the user
+    // as a bare "unknown path" after the stream had already been resolved.
+    let base_dir = match app.path().resource_dir() {
+        Ok(resource_dir) => {
+            if resource_dir.join("resources").exists() {
+                Some(resource_dir.join("resources"))
+            } else {
+                Some(resource_dir)
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Could not resolve the resource dir ({}); falling back to a system or dev-tree mpv",
+                e
+            );
+            None
+        }
     };
 
-    let prod_config = base_dir.join("mpv_config");
-    let config_dir = if prod_config.exists() {
-        prod_config.to_string_lossy().to_string()
-    } else {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let prod_config = base_dir.as_ref().map(|d| d.join("mpv_config"));
+    let config_dir = match prod_config {
+        Some(p) if p.exists() => p.to_string_lossy().to_string(),
+        _ => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("mpv_config")
             .to_string_lossy()
-            .to_string()
+            .to_string(),
     };
     // mpv can't use a `\\?\`-prefixed config-dir (see strip_verbatim_prefix).
     let config_dir = strip_verbatim_prefix(config_dir);
@@ -184,18 +197,19 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     } else {
         "mpv"
     };
-    let mpv_bin = base_dir.join(mpv_name);
-    let lib_dir = base_dir.join("lib");
-
     // Prefer bundled mpv if present (ensures self-contained reliability in release builds)
-    if mpv_bin.exists() {
-        log::info!("Using bundled mpv at: {}", mpv_bin.display());
-        strip_quarantine_once(&mpv_bin, &lib_dir);
-        return Ok((
-            mpv_bin.to_string_lossy().to_string(),
-            config_dir,
-            strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
-        ));
+    if let Some(ref base) = base_dir {
+        let mpv_bin = base.join(mpv_name);
+        let lib_dir = base.join("lib");
+        if mpv_bin.exists() {
+            log::info!("Using bundled mpv at: {}", mpv_bin.display());
+            strip_quarantine_once(&mpv_bin, &lib_dir);
+            return Ok((
+                mpv_bin.to_string_lossy().to_string(),
+                config_dir,
+                strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
+            ));
+        }
     }
 
     // Fall back to a system-installed mpv if present. Production macOS apps launched
@@ -233,10 +247,14 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
         ));
     }
 
-    Err(format!(
-        "mpv binary not found at {} or in system/dev resources",
-        mpv_bin.display()
-    ))
+    Err(match base_dir {
+        Some(base) => format!(
+            "mpv binary not found at {} or in system/dev resources",
+            base.join(mpv_name).display()
+        ),
+        None => "mpv binary not found: no bundled resource dir, and no system or dev-tree mpv"
+            .to_string(),
+    })
 }
 
 /// `cp -R` carries `com.apple.quarantine` forward from wherever a bundled

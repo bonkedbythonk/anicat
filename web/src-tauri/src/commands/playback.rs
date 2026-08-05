@@ -292,11 +292,12 @@ fn strip_quarantine_once(mpv_bin: &std::path::Path, lib_dir: &std::path::Path) {
     strip_quarantine(lib_dir);
 }
 
+// Quarantine is a macOS concept, so off-macOS this is the whole story: one
+// no-op entry point. There is deliberately no `strip_quarantine` stub here --
+// nothing would call it, and CI builds Linux with `-D warnings`, where an
+// uncalled function is a hard error.
 #[cfg(not(target_os = "macos"))]
 fn strip_quarantine_once(_mpv_bin: &std::path::Path, _lib_dir: &std::path::Path) {}
-
-#[cfg(not(target_os = "macos"))]
-fn strip_quarantine(_path: &std::path::Path) {}
 
 /// Path to a per-launch mpv log, written next to the app logs. Captures which
 /// scripts (anicat_ui, ModernZ) and shaders actually loaded — the only way to

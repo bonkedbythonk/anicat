@@ -9,6 +9,13 @@ export type ViewType =
   | "settings"
   | "downloads";
 
+/** What a media-type control can be set to. "ALL" is search-only: AniList
+ *  returns both types from one request when the query's `type` variable is
+ *  null, so a combined search costs no more than a scoped one. Surfaces that
+ *  are inherently per-type (library lists, the discovery rows) use the
+ *  narrower "ANIME" | "MANGA" instead. */
+export type MediaSearchType = "ALL" | "ANIME" | "MANGA";
+
 export interface MediaTitle {
   romaji?: string;
   english?: string;

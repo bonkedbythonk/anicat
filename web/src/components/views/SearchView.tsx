@@ -7,6 +7,7 @@ import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem, type SearchFilters } from "@/lib/api";
+import type { MediaSearchType } from "@/lib/types";
 import { FocusScope, useFocusable, useSpatialNavigation } from "@/focus";
 
 interface SearchViewProps {
@@ -79,6 +80,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
     setActiveFocusScope("search-default");
   }, [setActiveFocusScope]);
 
+  // Discovery rows, random picks and the shuffle pool are inherently
+  // per-type -- "Seasonal" has no manga meaning, and AniList's trending
+  // endpoints take a concrete type. "ALL" only ever applies to an actual
+  // query, so those surfaces fall back to anime.
+  const discoveryType: "ANIME" | "MANGA" = type === "MANGA" ? "MANGA" : "ANIME";
+  const combined = type === "ALL";
+
   const [debouncedQuery, setDebouncedQuery] = useState(() => query.trim().length >= 2 ? query.trim() : "");
   const [showFilters, setShowFilters] = useState(() => Object.keys(filters).length > 0);
   const queryClient = useQueryClient();
@@ -89,12 +97,12 @@ export function SearchView({ onSelect }: SearchViewProps) {
     isLoading: loadingDiscovery,
     isError: discoveryError,
   } = useQuery({
-    queryKey: ["search-discovery", type],
+    queryKey: ["search-discovery", discoveryType],
     queryFn: async () => {
       const [trending, seasonal, recent] = await Promise.all([
-        mediaApi.getTrending(type),
-        mediaApi.getSeasonal(type),
-        mediaApi.getRecent(type),
+        mediaApi.getTrending(discoveryType),
+        mediaApi.getSeasonal(discoveryType),
+        mediaApi.getRecent(discoveryType),
       ]);
       return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
     },
@@ -106,10 +114,10 @@ export function SearchView({ onSelect }: SearchViewProps) {
     isFetching: fetchingRandom,
     refetch: refetchRandom,
   } = useQuery({
-    queryKey: ["search-random", type],
+    queryKey: ["search-random", discoveryType],
     queryFn: async () => {
       const randomPage = Math.floor(Math.random() * 100) + 1;
-      const data = await mediaApi.search("", type, randomPage);
+      const data = await mediaApi.search("", discoveryType, randomPage);
       return data.media || [];
     },
   });
@@ -124,17 +132,28 @@ export function SearchView({ onSelect }: SearchViewProps) {
   useEffect(() => {
     if (!discoveryRaw) return;
     setShuffledPools(prev => {
-      if (prev[type].length > 0) return prev;
+      if (prev[discoveryType].length > 0) return prev;
       
       const pool = [...discoveryRaw.trending, ...discoveryRaw.seasonal, ...discoveryRaw.recent];
       const unique = pool.filter((item, index, array) => array.findIndex(other => other.id === item.id) === index);
       const shuffled = unique.sort(() => Math.random() - 0.5).slice(0, 18);
       return {
         ...prev,
-        [type]: shuffled,
+        [discoveryType]: shuffled,
       };
     });
-  }, [discoveryRaw, type]);
+  }, [discoveryRaw, discoveryType]);
+
+  // Year maps to AniList's seasonYear, which manga essentially never carry --
+  // leaving it set while switching to "All" would silently filter every manga
+  // result back out, making the combined search look broken.
+  const handleTypeChange = (next: MediaSearchType) => {
+    setType(next);
+    if (next === "ALL" && filters.year) {
+      const { year: _year, ...rest } = filters;
+      setFilters(rest);
+    }
+  };
 
   const handleShuffle = () => {
     if (!discoveryRaw) return;
@@ -143,7 +162,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
     const shuffled = unique.sort(() => Math.random() - 0.5).slice(0, 18);
     setShuffledPools(prev => ({
       ...prev,
-      [type]: shuffled,
+      [discoveryType]: shuffled,
     }));
   };
 
@@ -196,7 +215,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Search</h1>
-          <MediaTypeToggle value={type} onChange={setType} />
+          <MediaTypeToggle value={type} onChange={handleTypeChange} options={["ALL", "ANIME", "MANGA"] as const} />
         </div>
 
         <div className="relative group">
@@ -206,7 +225,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search for ${type.toLowerCase()}...`}
+            placeholder={combined ? "Search anime and manga..." : `Search for ${type.toLowerCase()}...`}
             className="w-full bg-transparent border border-border rounded-lg py-3 pl-12 pr-6 text-[15px] focus:outline-none transition-colors placeholder:text-muted-foreground/60"
           />
           {loading && (
@@ -255,6 +274,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                 ))}
               </select>
             </div>
+            {!combined && (
             <div className="space-y-1.5">
               <label className="meta-mono text-muted-foreground">Year</label>
               <select
@@ -268,6 +288,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                 ))}
               </select>
             </div>
+            )}
             <div className="space-y-1.5">
               <label className="meta-mono text-muted-foreground">Min Score</label>
               <select
@@ -303,7 +324,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
         const hasFilters = Object.values(filters).some(Boolean);
         
         if (query.trim().length === 0 && !hasFilters) {
-          const discovery = shuffledPools[type];
+          const discovery = shuffledPools[discoveryType];
           const hasDiscovery = discovery.length > 0;
           const showSkeleton = loadingDiscovery && !hasDiscovery;
 
@@ -313,7 +334,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                 <div className="absolute top-1/2 left-0 right-0 z-10 flex justify-center -translate-y-1/2 animate-fade-in">
                   <div className="bg-surface px-5 py-2.5 rounded-lg border border-border flex items-center space-x-3 shadow-xl">
                     <Loader2 className="animate-spin text-accent" size={16} />
-                    <span className="meta-mono text-foreground">Loading {type.toLowerCase()}</span>
+                    <span className="meta-mono text-foreground">Loading {discoveryType.toLowerCase()}</span>
                   </div>
                 </div>
               )}
@@ -340,7 +361,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     <div className={`space-y-4 transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Discover {type === "ANIME" ? "Anime" : "Manga"}</h2>
+                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{combined ? "Discover" : discoveryType === "ANIME" ? "Discover Anime" : "Discover Manga"}</h2>
                           <p className="meta-mono mt-1 text-muted-foreground">Trending · seasonal · recent</p>
                         </div>
                         <button
@@ -400,6 +421,32 @@ export function SearchView({ onSelect }: SearchViewProps) {
         }
 
         if (results.length > 0) {
+          // Flat-merging the two types lets the more popular medium dominate
+          // the ordering, burying a title's manga entry under its anime. Split
+          // sections keep both findable; a section is omitted when empty, so a
+          // query that only matches one type still reads as a plain list.
+          if (combined) {
+            const anime = results.filter(r => r.type !== "MANGA");
+            const manga = results.filter(r => r.type === "MANGA");
+            return (
+              <div className="space-y-10">
+                {[
+                  { key: "ANIME", label: "Anime", items: anime },
+                  { key: "MANGA", label: "Manga", items: manga },
+                ].filter(g => g.items.length > 0).map(group => (
+                  <div key={group.key} className="space-y-4">
+                    <div className="flex items-baseline gap-3">
+                      <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{group.label}</h2>
+                      <span className="meta-mono text-muted-foreground">{group.items.length}</span>
+                    </div>
+                    <FocusScope name={`search-results-${group.key.toLowerCase()}`} orientation="grid" columns={6} role="list" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                      <MediaGrid items={group.items} onSelect={onSelect} />
+                    </FocusScope>
+                  </div>
+                ))}
+              </div>
+            );
+          }
           return (
             <FocusScope name="search-results" orientation="grid" columns={6} role="list" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
               <MediaGrid items={results} onSelect={onSelect} />
@@ -411,7 +458,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
           return (
             <div className="text-center py-24">
               <Search size={40} className="mx-auto text-gray-800 mb-4" />
-              <p className="text-gray-600 font-semibold">No {type.toLowerCase()} found for &quot;{query}&quot;</p>
+              <p className="text-gray-600 font-semibold">No {combined ? "results" : type.toLowerCase()} found for &quot;{query}&quot;</p>
             </div>
           );
         }
@@ -420,7 +467,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
           return (
             <div className="text-center py-24">
               <SlidersHorizontal size={40} className="mx-auto text-gray-800 mb-4" />
-              <p className="text-gray-600 font-semibold">No {type.toLowerCase()} found matching these filters.</p>
+              <p className="text-gray-600 font-semibold">No {combined ? "results" : type.toLowerCase()} found matching these filters.</p>
             </div>
           );
         }

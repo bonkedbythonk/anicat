@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { MediaItem, ViewType } from "@/lib/types";
+import type { MediaItem, MediaSearchType, ViewType } from "@/lib/types";
 
 interface AppConfig {
   general?: {
@@ -119,8 +119,8 @@ interface AppState {
   // the detail page opens, which resets the search query and filters.
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  searchType: "ANIME" | "MANGA";
-  setSearchType: (type: "ANIME" | "MANGA") => void;
+  searchType: MediaSearchType;
+  setSearchType: (type: MediaSearchType) => void;
   searchFilters: Record<string, any>;
   setSearchFilters: (filters: Record<string, any>) => void;
 
@@ -206,7 +206,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   searchQuery: "",
   setSearchQuery: (searchQuery) => set({ searchQuery }),
-  searchType: "ANIME",
+  searchType: "ALL",
   setSearchType: (searchType) => set({ searchType }),
   searchFilters: {},
   setSearchFilters: (searchFilters) => set({ searchFilters }),

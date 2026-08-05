@@ -27,6 +27,20 @@ pub async fn search_media(
     search_media_impl(state.inner(), query, page, media_type, status, genre, year, min_score).await
 }
 
+/// Set MEDIA_SEARCH_QUERY's `$type` variable, or deliberately leave it unset.
+///
+/// "ALL" is the combined anime+manga search. It must **omit** the variable
+/// rather than send `type: null`: AniList treats an explicit null as a filter
+/// that matches nothing (it returns zero results), while an unsupplied
+/// variable makes the argument absent and returns both types from the one
+/// request. The difference is invisible in the query text -- `media(type:
+/// $type)` is identical either way -- so it is covered by a test.
+fn insert_search_media_type(vars: &mut HashMap<String, Value>, media_type: &str) {
+    if media_type != "ALL" {
+        vars.insert("type".to_string(), serde_json::json!(media_type));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn search_media_impl(
     state: &AppState,
@@ -40,6 +54,11 @@ pub async fn search_media_impl(
 ) -> Result<Value, String> {
     log::info!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
     let _has_token = state.anilist_client.has_token();
+    // "ALL" is the combined anime+manga search the search view uses once there
+    // is a query to run. AniList's `media(type:)` returns both types when the
+    // variable is null, so this stays one request rather than two. Omitting
+    // the argument entirely still means ANIME, which is what every other
+    // caller (discovery rows, mobile, random picks) expects.
     let media_type = media_type.unwrap_or_else(|| "ANIME".to_string());
 
     // Key on every parameter so different filters/pages don't collide. Spares
@@ -60,7 +79,7 @@ pub async fn search_media_impl(
     vars.insert("page".to_string(), serde_json::json!(page.unwrap_or(1)));
     vars.insert("perPage".to_string(), serde_json::json!(20));
     vars.insert("search".to_string(), if query.is_empty() { serde_json::json!(null) } else { serde_json::json!(query) });
-    vars.insert("type".to_string(), serde_json::json!(media_type));
+    insert_search_media_type(&mut vars, &media_type);
     vars.insert("isAdult".to_string(), serde_json::json!(false));
     if let Some(s) = status {
         vars.insert("status".to_string(), serde_json::json!(s));
@@ -2004,6 +2023,28 @@ fn is_progress_line(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A combined search must leave `$type` unset. Sending `type: null`
+    /// instead looks equivalent but makes AniList match nothing, which
+    /// silently empties every combined search rather than failing loudly.
+    #[test]
+    fn combined_search_omits_the_type_variable() {
+        let mut vars = HashMap::new();
+        insert_search_media_type(&mut vars, "ALL");
+        assert!(
+            !vars.contains_key("type"),
+            "combined search must omit `type` entirely, not send an explicit null"
+        );
+    }
+
+    #[test]
+    fn scoped_search_sends_its_type_variable() {
+        for t in ["ANIME", "MANGA"] {
+            let mut vars = HashMap::new();
+            insert_search_media_type(&mut vars, t);
+            assert_eq!(vars.get("type"), Some(&serde_json::json!(t)));
+        }
+    }
 
     #[derive(Debug, Clone)]
     struct DummyAnime {

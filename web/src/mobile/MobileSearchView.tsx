@@ -5,6 +5,7 @@ import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
 import { usePaginatedList } from "@/lib/usePaginatedList";
 import { mediaApi, type MediaItem, type SearchFilters } from "@/lib/api";
+import type { MediaSearchType } from "@/lib/types";
 import { PosterCard } from "./PosterCard";
 
 interface MobileSearchViewProps {
@@ -30,17 +31,21 @@ function PosterGrid({ items, onSelect }: { items: MediaItem[]; onSelect: (item: 
 export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [type, setType] = useState<"ANIME" | "MANGA">("ANIME");
+  const [type, setType] = useState<MediaSearchType>("ALL");
+  // Discovery is inherently per-type (AniList's trending/seasonal endpoints
+  // take a concrete one); "ALL" only applies to an actual query.
+  const discoveryType: "ANIME" | "MANGA" = type === "MANGA" ? "MANGA" : "ANIME";
+  const combined = type === "ALL";
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({});
 
   const { data: discoveryRaw, isLoading: loadingDiscovery } = useQuery({
-    queryKey: ["search-discovery", type],
+    queryKey: ["search-discovery", discoveryType],
     queryFn: async () => {
       const [trending, seasonal, recent] = await Promise.all([
-        mediaApi.getTrending(type),
-        mediaApi.getSeasonal(type),
-        mediaApi.getRecent(type),
+        mediaApi.getTrending(discoveryType),
+        mediaApi.getSeasonal(discoveryType),
+        mediaApi.getRecent(discoveryType),
       ]);
       return { trending: trending.media || [], seasonal: seasonal.media || [], recent: recent.media || [] };
     },
@@ -81,7 +86,7 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${type.toLowerCase()}`}
+            placeholder={combined ? "Search anime and manga" : `Search ${type.toLowerCase()}`}
             className="w-full rounded-md border border-border bg-surface py-2.5 pl-10 pr-4 text-[15px] outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -93,7 +98,7 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
         </button>
       </div>
 
-      <MediaTypeToggle value={type} onChange={setType} />
+      <MediaTypeToggle value={type} onChange={setType} options={["ALL", "ANIME", "MANGA"] as const} />
 
       {showFilters && (
         <div className="grid grid-cols-2 gap-2.5 rounded-md border border-border bg-surface p-3">
@@ -124,14 +129,32 @@ export function MobileSearchView({ onSelect }: MobileSearchViewProps) {
 
       {isSearching && results.length > 0 && (
         <>
-          <PosterGrid items={results} onSelect={onSelect} />
+          {combined ? (
+            // Split sections so a popular anime doesn't bury the same title's
+            // manga entry in a flat merged ordering. Empty groups drop out.
+            <div className="space-y-6">
+              {[
+                { key: "ANIME", label: "Anime", items: results.filter((r) => r.type !== "MANGA") },
+                { key: "MANGA", label: "Manga", items: results.filter((r) => r.type === "MANGA") },
+              ].filter((g) => g.items.length > 0).map((group) => (
+                <div key={group.key} className="space-y-2.5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+                    {group.label} · {group.items.length}
+                  </p>
+                  <PosterGrid items={group.items} onSelect={onSelect} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <PosterGrid items={results} onSelect={onSelect} />
+          )}
           <InfiniteScroll hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
         </>
       )}
 
       {isSearching && !loading && results.length === 0 && (
         <div className="py-20 text-center">
-          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">No {type.toLowerCase()} found</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">No {combined ? "results" : type.toLowerCase()} found</p>
         </div>
       )}
     </div>

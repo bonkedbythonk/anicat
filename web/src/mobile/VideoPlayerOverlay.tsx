@@ -518,7 +518,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
               <p className="mt-1 max-w-xs break-all text-[10px] text-white/40">{errorDetail}</p>
             </details>
           )}
-          <button onClick={close} className="absolute right-4 top-4 p-2" style={{ marginTop: "env(safe-area-inset-top)" }}>
+          <button onClick={close} aria-label="Close player" className="absolute right-4 top-4 p-3" style={{ marginTop: "env(safe-area-inset-top)" }}>
             <X size={22} />
           </button>
         </div>
@@ -561,7 +561,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
                 {props.episodeTitle ? ` — ${props.episodeTitle}` : ""}
               </p>
             </div>
-            <button onClick={close} className="-mr-2 p-2">
+            <button onClick={close} aria-label="Close player" className="-mr-2 p-3">
               <X size={22} />
             </button>
           </div>
@@ -635,7 +635,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
             </div>
             <div className="mt-3 flex items-center justify-between">
               <div className="flex items-center gap-5">
-                <button onClick={cycleSpeed} className="text-[13px] font-bold tabular-nums text-white/80 active:scale-95 transition-transform">
+                <button onClick={cycleSpeed} aria-label={`Playback speed ${speed}x, tap to change`} className="text-[13px] font-bold tabular-nums text-white/80 active:scale-95 transition-transform">
                   {speed}x
                 </button>
               </div>

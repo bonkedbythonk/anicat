@@ -41,7 +41,8 @@ export function EpisodeCard({ item, onSelect }: EpisodeCardProps) {
           </div>
         )}
       </button>
-      <button onClick={() => onSelect(item)} className="mt-1.5 block w-full text-left">
+      {/* min-h keeps the caption a 44px tap target — it was 33px. */}
+      <button onClick={() => onSelect(item)} className="mt-1.5 block min-h-11 w-full text-left">
         <p className="line-clamp-1 text-[12px] font-medium leading-[1.3] text-foreground">{title}</p>
         <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.07em] text-muted-foreground tabular-nums">
           EP {nextEp}{total > 0 ? ` / ${total}` : ""}

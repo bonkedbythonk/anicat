@@ -219,11 +219,11 @@ export default function MobileApp() {
       }
     }
     switch (activeTab) {
-      case "home": return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} />;
+      case "home": return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} onOpenSchedule={() => goToYouSub("schedule")} />;
       case "search": return <MobileSearchView onSelect={onSelect} />;
       case "library": return <MobileListsView onSelect={onSelect} />;
       case "manga": return <MobileMangaView onSelect={onSelect} />;
-      default: return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} />;
+      default: return <MobileHomeView onSelect={onSelect} onSeeAllWatching={() => goToTab("library")} onOpenSchedule={() => goToYouSub("schedule")} />;
     }
   };
 
@@ -239,10 +239,15 @@ export default function MobileApp() {
       )}
       <main
         className="flex-1 overflow-y-auto scroll-container px-6 pt-4"
-        style={{ paddingBottom: "calc(64px + env(safe-area-inset-bottom))" }}
+        /* The bar is fixed, so this padding is what keeps content clear of it.
+           64px was 2px under the bar's real height, clipping the last row. */
+        style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
+        {/* Stays "popLayout" — see App.tsx: with mode="wait" a backgrounded
+            tab (screen locked, app switched away) freezes the exit animation
+            and the next tab never mounts. */}
         <AnimatePresence mode="popLayout">
           {selectedItem ? (
             <motion.div

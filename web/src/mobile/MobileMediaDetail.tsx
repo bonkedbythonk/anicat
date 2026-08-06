@@ -355,13 +355,14 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
         <div className="relative w-full overflow-hidden" style={{ height: "32vh" }}>
           <img src={proxyImage(banner)} alt={title} className="h-full w-full object-cover" />
           <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.3) 45%, var(--background) 100%)" }} />
-          <button onClick={onClose} className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white active:scale-90" style={{ marginTop: "env(safe-area-inset-top)" }}>
+          <button onClick={onClose} aria-label="Back" className="absolute left-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white active:scale-90" style={{ marginTop: "env(safe-area-inset-top)" }}>
             <ChevronLeft size={20} />
           </button>
           <button
             onClick={handleToggleFavourite}
             disabled={isTogglingFavourite}
-            className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full active:scale-90 ${fullItem?.is_favourite ? "bg-accent text-background" : "bg-black/50 text-white"}`}
+            aria-label={fullItem?.is_favourite ? "Remove from favourites" : "Add to favourites"}
+            className={`absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full active:scale-90 ${fullItem?.is_favourite ? "bg-accent text-background" : "bg-black/50 text-white"}`}
             style={{ marginTop: "env(safe-area-inset-top)" }}
           >
             <Heart size={17} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
@@ -423,7 +424,10 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
                       disabled={unaired}
                       onClick={() => handlePlayNext(n)}
                       style={{ touchAction: "pan-y" }}
-                      className={`grid h-[24px] w-[24px] place-items-center rounded-[4px] border font-mono text-[9px] tabular-nums ${
+                      /* 24px is the WCAG 2.2 floor and this is a dense 25-square grid, but
+                         it read as fiddly under a thumb — 30px still fits the
+                         same row count on a 375px screen. */
+                      className={`grid h-[30px] w-[30px] place-items-center rounded-[4px] border font-mono text-[10px] tabular-nums ${
                         watched
                           ? "border-transparent bg-foreground/10 text-foreground"
                           : current

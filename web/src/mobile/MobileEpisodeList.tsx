@@ -119,9 +119,23 @@ export function MobileEpisodeList({
           : episodeTitleMap?.[Number(ep.number)] || (isManga ? `Chapter ${epNum}` : `Episode ${epNum}`);
 
         return (
+          // Row carries its own "more" button, so it can't be a <button>
+          // itself — role + key handling gives it the same semantics without
+          // nesting interactive elements.
           <div
             key={`${epNum}-${idx}`}
+            role="button"
+            tabIndex={isUnaired ? -1 : 0}
+            aria-disabled={isUnaired || undefined}
+            aria-label={`${displayTitle}${isWatched ? ", watched" : ""}`}
             onClick={() => !isUnaired && handlePlay(epNum)}
+            onKeyDown={(e) => {
+              if (isUnaired) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handlePlay(epNum);
+              }
+            }}
             className={`flex items-center gap-3 rounded-md px-3 py-2.5 active:bg-foreground/[0.05] ${isWatched ? "opacity-50" : ""}`}
           >
             <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border font-mono text-[11px] tabular-nums ${
@@ -140,7 +154,8 @@ export function MobileEpisodeList({
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); setSheetEp(epNum); }}
-                className="shrink-0 p-2 text-muted-foreground active:opacity-50"
+                aria-label={`More options for ${isManga ? "chapter" : "episode"} ${epNum}`}
+                className="shrink-0 p-3 text-muted-foreground active:opacity-50"
               >
                 <MoreVertical size={18} />
               </button>

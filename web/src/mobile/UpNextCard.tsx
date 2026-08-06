@@ -43,7 +43,7 @@ export function UpNextCard({ item, onSelect }: UpNextCardProps) {
         </div>
         <button
           onClick={() => onSelect(item, "play", String(nextEp))}
-          className="shrink-0 rounded-sm bg-accent px-4 py-2 text-[12.5px] font-semibold text-background active:scale-[0.97] transition-transform"
+          className="shrink-0 rounded-sm bg-accent px-5 py-3 text-[12.5px] font-semibold text-background active:scale-[0.97] transition-transform"
         >
           {isManga ? "Read" : progress > 0 ? "Resume" : "Play"}
         </button>

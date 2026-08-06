@@ -387,7 +387,9 @@ export function EpisodeList({
           )}
         </div>
       ) : (
-        <div className="space-y-1 max-h-[50vh] overflow-y-auto scrollbar-hide pr-1">
+        /* No inner max-height: a scrolling box inside a scrolling page traps
+           the wheel. The page scrolls, the list just grows. */
+        <div className="space-y-1 pr-1">
           {episodes.map((ep, idx) => {
             const epNum = String(ep.number);
             const isWatched = Number(ep.number) <= progress;
@@ -420,7 +422,7 @@ export function EpisodeList({
                   className={`flex items-center space-x-4 min-w-0 flex-1 text-left ${!isUnaired ? 'cursor-pointer' : ''}`}
                 >
                   {/* Clean Episode Badge */}
-                  <div className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-[14px] font-bold text-sm transition-all episode-badge-box ${
+                  <div className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-xl font-bold text-sm transition-all episode-badge-box ${
                     isWatched ? "bg-foreground/5 text-gray-500" :
                     isUnaired ? "bg-foreground/5 text-gray-700" :
                     isNext ? "bg-accent text-white shadow-md shadow-accent/20" :
@@ -525,7 +527,7 @@ export function EpisodeList({
                     </div>
                   </div>
                 ) : (
-                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-foreground/[0.04] border border-border rounded-[10px] shrink-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-foreground/[0.04] border border-border rounded-md shrink-0">
                     Airing Soon
                   </span>
                 )}

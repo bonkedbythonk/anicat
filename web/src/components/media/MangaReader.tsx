@@ -542,7 +542,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           {/* Left Vertical Bar */}
           <div className={`fixed left-6 top-1/2 -translate-y-1/2 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
             <div className="flex flex-col items-center space-y-4 bg-surface p-2 rounded-2xl border border-border">
-              <button onClick={onClose} className="p-3 rounded-xl bg-foreground/[0.03] hover:bg-foreground/[0.06] text-foreground transition-all" title="Close Reader">
+              <button onClick={onClose} className="p-3 rounded-xl bg-foreground/[0.03] hover:bg-foreground/[0.06] text-foreground transition-all" aria-label="Close reader" title="Close Reader">
                 <X size={20} />
               </button>
               
@@ -558,7 +558,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     onClick={(e) => { e.stopPropagation(); onNavigateChapter("prev"); }}
                     disabled={!hasPrevChapter}
                     className="p-2 rounded-lg hover:bg-foreground/[0.06] text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-all"
-                    title="Previous Chapter"
+                    aria-label="Previous chapter" title="Previous Chapter"
                   >
                     <ChevronLeft size={16} className="rotate-90" />
                   </button>
@@ -568,7 +568,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     onClick={(e) => { e.stopPropagation(); onNavigateChapter("next"); }}
                     disabled={!hasNextChapter}
                     className="p-2 rounded-lg hover:bg-foreground/[0.06] text-foreground disabled:opacity-20 disabled:cursor-not-allowed transition-all"
-                    title="Next Chapter"
+                    aria-label="Next chapter" title="Next Chapter"
                   >
                     <ChevronRight size={16} className="rotate-90" />
                   </button>
@@ -578,7 +578,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
               <div className="w-6 h-px bg-border" />
 
               {hasNextChapter ? (
-                <button onClick={handleNextChapter} className="p-3 bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors" title="Next Chapter">
+                <button onClick={handleNextChapter} className="p-3 bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors" aria-label="Next chapter" title="Next Chapter">
                   <ChevronRight size={20} />
                 </button>
               ) : (
@@ -609,22 +609,22 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
                     localStorage.setItem("anicat_manga_reading_direction", newDir);
                   }}
                   className="p-2 rounded-xl text-[10px] font-bold tracking-wider text-accent hover:bg-foreground/[0.03] transition-all"
-                  title="Toggle Reading Direction (RTL/LTR)"
+                  aria-label="Toggle reading direction, right-to-left or left-to-right" title="Toggle Reading Direction (RTL/LTR)"
                 >
                   {readingDirection === "rtl" ? "RTL" : "LTR"}
                 </button>
               )}
               {readingMode !== "vertical" && <div className="w-6 h-px bg-border" />}
 
-              <button onClick={() => changeMode("single")} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Single Page"><FileText size={18} /></button>
-              <button onClick={() => changeMode("double")} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Double Page"><Book size={18} /></button>
-              <button onClick={() => changeMode("vertical")} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} title="Vertical Scroll"><ScrollText size={18} /></button>
+              <button onClick={() => changeMode("single")} className={`p-2.5 rounded-xl transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={readingMode === "single"} aria-label="Single page view" title="Single Page"><FileText size={18} /></button>
+              <button onClick={() => changeMode("double")} className={`p-2.5 rounded-xl transition-all ${readingMode === "double" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={readingMode === "double"} aria-label="Double page view" title="Double Page"><Book size={18} /></button>
+              <button onClick={() => changeMode("vertical")} className={`p-2.5 rounded-xl transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={readingMode === "vertical"} aria-label="Vertical scroll view" title="Vertical Scroll"><ScrollText size={18} /></button>
               
               <div className="w-6 h-px bg-border" />
               <button
                 onClick={() => toggleFullscreen()}
                 className="p-2.5 rounded-xl text-muted-foreground hover:text-foreground transition-all cursor-pointer z-[60]"
-                title="Toggle Fullscreen"
+                aria-label="Toggle fullscreen" title="Toggle Fullscreen"
               >
                 {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>

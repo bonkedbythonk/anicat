@@ -36,6 +36,12 @@ function PaletteRowButton({ row }: { row: PaletteRow }) {
     <button
       ref={ref}
       tabIndex={tabIndex}
+      // The wrapper declares role="listbox", so its children have to be
+      // options — a listbox full of plain buttons is invalid ARIA and
+      // announces inconsistently. Focus still moves to the row itself, which
+      // is what drives the reading order.
+      role="option"
+      aria-selected={isFocused}
       onClick={row.run}
       onMouseMove={() => ref.current?.focus()}
       className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-pointer ${
@@ -290,6 +296,7 @@ export function CommandPalette() {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search shows, actions, pages"
             placeholder="Search shows, actions, pages"
             className="flex-1 bg-transparent px-2 py-1 text-[14px] text-foreground placeholder:text-muted-foreground outline-none border-none shadow-none focus:ring-0 focus-visible:shadow-none"
           />

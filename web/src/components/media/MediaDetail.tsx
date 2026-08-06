@@ -983,17 +983,24 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                   </div>
                 </div>
 
-                <FocusableButton
-                  onClick={handleRemoveFromList}
-                  title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
-                  className={`p-3 rounded-md transition-all border active:scale-95 ${
-                    deleteConfirmPending
-                      ? 'bg-red-500/80 text-background border-red-500 scale-105 animate-pulse'
-                      : 'bg-red-500/10 hover:bg-red-500/20 text-red-500/70 hover:text-red-500 border-red-500/20'
-                  }`}
-                >
-                  <Trash2 size={20} />
-                </FocusableButton>
+                {/* Destructive, so it sits apart from the primary actions
+                    behind a divider and stays quiet until hovered or armed.
+                    aria-label, not just title: an icon-only button with only a
+                    title attribute reads as an unnamed button. */}
+                <div className="ml-1 pl-3 border-l border-border">
+                  <FocusableButton
+                    onClick={handleRemoveFromList}
+                    aria-label={deleteConfirmPending ? 'Confirm removal from your list' : 'Remove from your list'}
+                    title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
+                    className={`p-3 rounded-md transition-all border active:scale-95 ${
+                      deleteConfirmPending
+                        ? 'bg-red-500/80 text-background border-red-500 scale-105 animate-pulse'
+                        : 'bg-transparent border-border text-muted-foreground hover:bg-red-500/15 hover:text-red-500 hover:border-red-500/25'
+                    }`}
+                  >
+                    <Trash2 size={20} />
+                  </FocusableButton>
+                </div>
               </FocusScope>
 
               {/* Synopsis */}
@@ -1006,7 +1013,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     initial={false}
                     transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                   >
-                    <p ref={synopsisRef} className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
+                    {/* Body copy, not metadata — it reads at foreground/80
+                        rather than the muted token the labels use. */}
+                    <p ref={synopsisRef} className="text-sm text-foreground/80 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(fullItem.description) }} />
                   </motion.div>
                   {synopsisOverflows && (
                     <FocusScope name="detail-synopsis">

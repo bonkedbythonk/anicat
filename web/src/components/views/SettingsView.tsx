@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import React, { useState, useEffect, useRef, useCallback, useId } from "react";
+import { invoke } from "@/lib/transport";
 import { listen } from "@tauri-apps/api/event";
 import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
 import { mediaApi, type HealthStatus, apiOrigin, dispatchRefresh } from "@/lib/api";
@@ -526,6 +526,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     <HardDrive size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="text"
+                      aria-label="Download location"
                       value={String(config.general?.downloads_path || "")}
                       onChange={(e) => updateField("general", "downloads_path", e.target.value)}
                       className="w-full bg-transparent border border-border rounded-md py-3.5 pl-11 pr-4 text-sm font-medium focus:border-accent outline-none transition-all"
@@ -962,6 +963,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                       ref={debugNameRef}
                       type="text"
                       placeholder="Anime name"
+                      aria-label="Anime name"
                       onKeyDown={(e) => { if (e.key === "Enter") runProviderTest(); }}
                       className="flex-1 bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground placeholder:text-muted-foreground"
                     />
@@ -1069,13 +1071,22 @@ function CardSection({ title, description, children }: { title: string; descript
 }
 
 function SettingField({ label, description, children, stack }: { label: string; description?: string; children: React.ReactNode; stack?: boolean }) {
+  // The <label> below can't carry htmlFor — the control is an arbitrary child —
+  // so it used to label nothing at all, and every select/input in Settings
+  // announced as an unnamed control. Point the child at the label instead.
+  // Children that already set their own aria-label keep it.
+  const labelId = useId();
+  const child = React.isValidElement(children) &&
+    !(children.props as Record<string, unknown>)["aria-label"]
+    ? React.cloneElement(children as React.ReactElement<Record<string, unknown>>, { "aria-labelledby": labelId })
+    : children;
   return (
     <div className={`py-2.5 ${stack ? "space-y-3" : "flex flex-col sm:flex-row sm:items-center gap-3"}`}>
       <div className="flex-1 min-w-0">
-        <label className="text-[13px] font-medium text-foreground">{label}</label>
+        <label id={labelId} className="text-[13px] font-medium text-foreground">{label}</label>
         {description && <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>}
       </div>
-      <div className={stack ? "" : "w-full sm:w-56 shrink-0 sm:text-right"}>{children}</div>
+      <div className={stack ? "" : "w-full sm:w-56 shrink-0 sm:text-right"}>{child}</div>
     </div>
   );
 }

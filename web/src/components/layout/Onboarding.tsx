@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@/lib/transport";
 import {
   Loader2,
   CheckCircle2,
@@ -21,6 +21,12 @@ interface OnboardingProps {
 
 export function Onboarding({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState(1);
+  // Move focus into the panel on mount so keyboard users start inside the
+  // dialog rather than on the app behind it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
   const [tokenInput, setTokenInput] = useState("");
   const [validating, setValidating] = useState(false);
   const [connectedUser, setConnectedUser] = useState<string | null>(null);
@@ -175,10 +181,20 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background/95 animate-fade-in p-4">
-      <div className="relative w-full max-w-lg bg-card border border-border rounded-lg p-8 shadow-xl shadow-black/20 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide">
-        
+      {/* This blocks the whole app on first run, so it has to say so: without
+          dialog semantics the sidebar behind it stayed in the tab order and
+          focus never entered the panel. */}
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Welcome to Anicat, setup"
+        tabIndex={-1}
+        className="relative w-full max-w-lg bg-card border border-border rounded-lg p-8 shadow-xl shadow-black/20 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide outline-none"
+      >
+
         {/* Step Indicators */}
-        <div className="flex justify-center space-x-2.5">
+        <div className="flex justify-center space-x-2.5" role="progressbar" aria-valuemin={1} aria-valuemax={4} aria-valuenow={step} aria-label={`Step ${step} of 4`}>
           <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 1 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
           <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 2 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
           <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 3 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
@@ -269,6 +285,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                   type="password"
                   value={tokenInput}
                   onChange={(e) => handleTokenChange(e.target.value)}
+                  aria-label="AniList authorization URL or token"
                   placeholder="Paste here to link account..."
                   className="w-full bg-foreground/[0.02] border border-border rounded-lg p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-muted-foreground/40 text-foreground"
                 />
@@ -298,10 +315,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <button onClick={() => setStep(1)} className="text-xs font-bold text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer">
+              <button onClick={() => setStep(1)} className="-m-2 p-2 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 Back
               </button>
-              <button onClick={() => setStep(3)} className="text-xs font-bold text-accent hover:text-accent-light transition-colors cursor-pointer">
+              <button onClick={() => setStep(3)} className="-m-2 p-2 text-xs font-bold text-accent hover:text-accent-light transition-colors cursor-pointer">
                 Skip for now
               </button>
             </div>
@@ -330,6 +347,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t}
                       onClick={() => handleThemeChange(t)}
+                      aria-pressed={theme === t}
                       className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                         theme === t
                           ? "bg-accent text-black "
@@ -357,6 +375,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t.key}
                       onClick={() => handleUiStyleChange(t.key)}
+                      aria-pressed={uiStyle === t.key}
                       className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                         uiStyle === t.key
                           ? "bg-accent text-black "
@@ -380,6 +399,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={f}
                       onClick={() => handleTimeFormatChange(f)}
+                      aria-pressed={timeFormat === f}
                       className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         timeFormat === f
                           ? "bg-accent text-black "
@@ -403,6 +423,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={t}
                       onClick={() => handleTranslationTypeChange(t)}
+                      aria-pressed={translationType === t}
                       className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         translationType === t
                           ? "bg-accent text-black "
@@ -426,6 +447,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     <button
                       key={g}
                       onClick={() => handleGpuUpscalingChange(g)}
+                      aria-pressed={gpuUpscaling === g}
                       className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                         gpuUpscaling === g
                           ? "bg-accent text-black "

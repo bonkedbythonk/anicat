@@ -455,12 +455,21 @@ end
 
 local next_timeout = nil
 
+-- The nyaa (torrent) provider's resolve can legitimately take up to ~85s
+-- worst case: a 45s metadata-init timeout plus a 40s pre-buffer timeout
+-- (see INIT_TIMEOUT / PREBUFFER_TIMEOUT in torrent/mod.rs). The old 12s
+-- timeout fired long before a cold torrent resolve could finish, flipping
+-- next_triggered back to false and showing a false "failed" message while
+-- the real backend request was still in flight — a second button press at
+-- that point raced the original request instead of just waiting on it.
+local NEXT_TIMEOUT_SECS = 100
+
 local function arm_next_timeout(fallback_message)
   if next_timeout then
     next_timeout:kill()
     next_timeout = nil
   end
-  next_timeout = mp.add_timeout(12, function()
+  next_timeout = mp.add_timeout(NEXT_TIMEOUT_SECS, function()
     if state.next_triggered and not state.file_loaded then
       state.next_triggered = false
       mp.osd_message(fallback_message or 'Failed to load episode.', 3.0)
@@ -510,6 +519,28 @@ end
 local function toggle_translation()
   mp.osd_message("Switching Translation (Sub/Dub)...", 3.0)
   notify_backend("toggle-translation")
+end
+
+-- eof-reached only goes true once the decoder actually runs out of data.
+-- Seeking/skipping straight to (or past) the last position lands mpv on the
+-- last frame without ever decoding through to real end-of-stream, so
+-- eof-reached stays false. Treat "settled within a hair of duration" as
+-- done too, regardless of that flag or whether playback is paused — this is
+-- what lets auto-next fire while the user is scrubbing/skipping through the
+-- end of an episode instead of only on a clean pause-at-end.
+local function check_near_end_auto_next()
+  if not state.file_loaded or state.next_triggered then
+    return
+  end
+  if get_auto_next_opt() ~= 'yes' then
+    return
+  end
+  local pos = mp.get_property_number('time-pos')
+  local dur = mp.get_property_number('duration')
+  local near_end = pos and dur and dur > 0 and (dur - pos) < 1.5
+  if mp.get_property_native('eof-reached') or near_end then
+    play_next(nil, false)
+  end
 end
 
 
@@ -601,6 +632,27 @@ mp.register_event('end-file', function(event)
   end
 end)
 
+-- Once we're most of the way through, ask the backend to resolve the next
+-- episode's stream ahead of time so auto-next is instant. One-shot per file.
+-- Checked both on the 30s progress tick (normal playback) and right after a
+-- seek settles (skipping/scrubbing straight past the 85% mark shouldn't have
+-- to wait on the next timer tick to start warming the next episode).
+local function check_preload()
+  if state.preload_sent or get_auto_next_opt() ~= 'yes' then
+    return
+  end
+  local pos = mp.get_property_number('time-pos') or 0
+  local dur = mp.get_property_number('duration') or 0
+  if dur > 0 and pos / dur >= 0.85 then
+    local cur = get_current_episode_opt()
+    local total = get_total_episodes_opt()
+    if total <= 0 or cur < total then
+      state.preload_sent = true
+      notify_backend("preload")
+    end
+  end
+end
+
 mp.register_event('playback-restart', function()
   if state.file_loaded then
     if state.first_play then
@@ -612,6 +664,8 @@ mp.register_event('playback-restart', function()
       -- (and Discord countdown) re-anchor immediately instead of drifting
       -- until the next periodic progress tick.
       notify_backend("progress")
+      check_preload()
+      check_near_end_auto_next()
     end
   end
 end)
@@ -625,21 +679,7 @@ local progress_timer = mp.add_periodic_timer(30, function()
     return
   end
   notify_backend("progress")
-
-  -- Once we're most of the way through, ask the backend to resolve the next
-  -- episode's stream ahead of time so auto-next is instant. One-shot per file.
-  if not state.preload_sent and get_auto_next_opt() == 'yes' then
-    local pos = mp.get_property_number('time-pos') or 0
-    local dur = mp.get_property_number('duration') or 0
-    if dur > 0 and pos / dur >= 0.85 then
-      local cur = get_current_episode_opt()
-      local total = get_total_episodes_opt()
-      if total <= 0 or cur < total then
-        state.preload_sent = true
-        notify_backend("preload")
-      end
-    end
-  end
+  check_preload()
 end)
 
 mp.register_event('shutdown', function()
@@ -648,8 +688,8 @@ mp.register_event('shutdown', function()
 end)
 
 mp.observe_property('eof-reached', 'bool', function(name, val)
-  if val and get_auto_next_opt() == 'yes' and not state.next_triggered then
-    play_next(nil, false)
+  if val then
+    check_near_end_auto_next()
   end
 end)
 
@@ -657,6 +697,9 @@ mp.observe_property('pause', 'bool', function(name, val)
   if state.file_loaded then
     local action = val and "pause" or "resume"
     notify_backend(action)
+  end
+  if val then
+    check_near_end_auto_next()
   end
 end)
 

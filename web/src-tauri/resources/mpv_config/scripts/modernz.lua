@@ -119,6 +119,11 @@ local user_opts = {
     shuffle_button = false,                -- show shuffle button
     speed_button = true,                   -- show speed control button
 
+    anicat_skip_button = true,             -- show AniCat skip intro/outro button
+    anicat_upscale_button = true,          -- show AniCat Anime4K upscale toggle button
+    anicat_autoskip_button = true,         -- show AniCat autoskip toggle button
+    anicat_subdub_button = true,           -- show AniCat sub/dub toggle button
+
     buttons_always_active = "none",        -- force buttons to always be active. can add: playlist_prev, playlist_next
 
     playpause_size = 28,                   -- icon size for the play/pause button
@@ -2407,6 +2412,11 @@ layouts["default"] = function ()
     right_side_button("speed", 1150, user_opts.speed_button, osc_styles.speed, 42)
     right_side_button("download", 1150, state.is_url and user_opts.download_button)
 
+    right_side_button("anicat_skip", 500, user_opts.anicat_skip_button)
+    right_side_button("anicat_upscale", 500, user_opts.anicat_upscale_button)
+    right_side_button("anicat_autoskip", 500, user_opts.anicat_autoskip_button, osc_styles.speed, 36)
+    right_side_button("anicat_subdub", 500, user_opts.anicat_subdub_button, osc_styles.speed, 58)
+
     if user_opts.cache_info then
         right_side_button("cache_info", 1250, user_opts.cache_info, osc_styles.cache, user_opts.cache_info_speed and 70 or 45)
         lo.geometry.x  = lo.geometry.x + 7
@@ -3425,6 +3435,40 @@ local function osc_init()
         mp.commandv("show-text", state.shuffled and locale.unshuffle or locale.shuffle, "-1", "1")
         state.shuffled = not state.shuffled
         mp.command("playlist-" .. (state.shuffled and "shuffle" or "unshuffle"))
+    end
+
+    --anicat_skip: reuses the existing "skip forward" glyph, same icon font
+    --and weight as the jump/track buttons either side of it.
+    ne = new_element("anicat_skip", "button")
+    ne.content = icons.next
+    ne.tooltipF = function() return "Skip intro/outro" end
+    ne.eventresponder["mbtn_left_up"] = function()
+        mp.commandv("script-message", "anicat-skip-intro")
+    end
+
+    --anicat_upscale: reuses the existing "zoom in" glyph for "enhance".
+    ne = new_element("anicat_upscale", "button")
+    ne.content = icons.zoom_in
+    ne.tooltipF = function() return "Toggle Anime4K upscaling" end
+    ne.eventresponder["mbtn_left_up"] = function()
+        mp.commandv("script-message", "anicat-toggle-shaders")
+    end
+
+    --anicat_autoskip: no matching glyph in the icon font, so this stays text
+    --— kept lowercase and unbadged so it reads as a label, not a sticker.
+    ne = new_element("anicat_autoskip", "button")
+    ne.content = "auto"
+    ne.tooltipF = function() return "Toggle intro/outro autoskip" end
+    ne.eventresponder["mbtn_left_up"] = function()
+        mp.commandv("script-message", "anicat-toggle-autoskip")
+    end
+
+    --anicat_subdub
+    ne = new_element("anicat_subdub", "button")
+    ne.content = "sub/dub"
+    ne.tooltipF = function() return "Switch subtitles/dub" end
+    ne.eventresponder["mbtn_left_up"] = function()
+        mp.commandv("script-message", "anicat-toggle-translation")
     end
 
     --speed

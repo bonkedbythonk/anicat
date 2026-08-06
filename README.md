@@ -16,6 +16,8 @@
 
 Anicat is a native desktop app for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a React/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
 
+> **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from them, similar to a browser. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
+
 ---
 
 ## Table of Contents

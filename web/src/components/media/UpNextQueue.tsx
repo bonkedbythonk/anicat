@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { MediaItem } from "@/lib/api";
 import { parseAiringTime, parseWatchedAt } from "@/lib/date";
 import { FocusScope, useFocusable, ScopeNav } from "@/focus";
@@ -43,6 +43,7 @@ function QueueItem({
   unit: "EP" | "CH";
 }) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+  const [artLoaded, setArtLoaded] = useState(false);
   const name = item.title.english || item.title.romaji || "Media";
   const art = item.banner_image || item.cover_image?.large || item.cover_image?.medium;
   const progress = item.user_status?.progress || item.media_list_entry?.progress || 0;
@@ -57,19 +58,34 @@ function QueueItem({
   const watched = relativeDay(lastWatched[item.id] || lastWatched[String(item.id)] || undefined);
   const first = index === 0;
 
+  // Row and play control are siblings, not nested: the play control used to be
+  // a <span onClick> inside the row <button>, so it was unreachable by keyboard
+  // and invalid markup.
   return (
-    <button
-      ref={ref}
-      tabIndex={tabIndex}
-      onClick={() => onSelect(item)}
-      aria-label={`${name}, ${unit} ${nextEp}${total > 0 ? ` / ${total}` : ""}`}
-      className={`flex items-center gap-4 px-4 py-3 w-full text-left cursor-pointer border-b border-border last:border-b-0 ${
+    <div
+      className={`flex items-center gap-4 px-4 py-3 w-full border-b border-border last:border-b-0 ${
         first ? "bg-surface" : "hover:bg-surface/60"
       }`}
     >
+      <button
+        ref={ref}
+        tabIndex={tabIndex}
+        onClick={() => onSelect(item)}
+        aria-label={`${name}, ${unit} ${nextEp}${total > 0 ? ` / ${total}` : ""}`}
+        className="flex items-center gap-4 flex-1 min-w-0 text-left cursor-pointer"
+      >
       <div className="relative w-[104px] h-[60px] shrink-0 rounded overflow-hidden bg-surface">
+        {/* Placeholder shimmer instead of an empty grey box while art loads. */}
+        {!artLoaded && <div className="absolute inset-0 bg-foreground/[0.06] animate-pulse" />}
         {art && (
-          <img src={art} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
+          <img
+            src={art}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onLoad={() => setArtLoaded(true)}
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${artLoaded ? "opacity-100" : "opacity-0"}`}
+          />
         )}
       </div>
       <div className="flex-1 min-w-0">
@@ -93,11 +109,10 @@ function QueueItem({
           </div>
         )}
       </div>
-      <span
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect(item, "play");
-        }}
+      </button>
+      <button
+        onClick={() => onSelect(item, "play")}
+        aria-label={`${first ? "Resume" : "Play"} ${name}, ${unit} ${nextEp}`}
         className={`shrink-0 rounded-md px-4 py-2 text-[12.5px] font-semibold cursor-pointer ${
           first
             ? "bg-accent text-black hover:bg-accent-light"
@@ -105,8 +120,8 @@ function QueueItem({
         }`}
       >
         {first ? (unit === "CH" ? "Continue" : "Resume") : (unit === "CH" ? "Read" : "Play")}
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -186,13 +201,15 @@ export function WeekStrip({ watching, onSelect }: WeekStripProps) {
             </div>
             <div className="mt-1.5 space-y-1">
               {day.shows.length === 0 ? (
-                <span className="text-[11px] text-muted-foreground/60 select-none">&mdash;</span>
+                <span className="text-[11px] text-muted-foreground select-none">&mdash;</span>
               ) : (
                 day.shows.slice(0, 3).map(({ item, episode }) => (
                   <button
                     key={item.id}
                     onClick={() => onSelect(item)}
-                    className="block w-full truncate text-left text-[11.5px] leading-snug text-foreground/70 hover:text-foreground cursor-pointer"
+                    /* Two lines instead of a hard truncate — one line cut most
+                       titles to about 18 characters. */
+                    className="block w-full text-left text-[11.5px] leading-snug line-clamp-2 text-foreground/80 hover:text-foreground cursor-pointer"
                     title={item.title.english || item.title.romaji}
                   >
                     {(item.title.english || item.title.romaji || "").split(":")[0]}{" "}

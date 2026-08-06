@@ -1,6 +1,6 @@
 
 import { Fragment, useMemo, useState, useCallback, useEffect } from "react";
-import { Loader2, User, LayoutDashboard, X, Eye, EyeOff } from "lucide-react";
+import { Loader2, User, LayoutDashboard, X, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
 import { MediaRow } from "@/components/media/MediaRow";
 import { UpNextQueue, WeekStrip } from "@/components/media/UpNextQueue";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -175,6 +175,13 @@ export function HomeView({ onSelect }: HomeViewProps) {
   const toggleRow = (id: RowId) => {
     persistRows(rowConfig.map(r => r.id === id ? { ...r, visible: !r.visible } : r));
   };
+  const moveRow = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= rowConfig.length) return;
+    const next = [...rowConfig];
+    [next[index], next[target]] = [next[target], next[index]];
+    persistRows(next);
+  };
 
   useEffect(() => {
     const handler = () => setRowConfig(loadRowConfig());
@@ -297,6 +304,7 @@ export function HomeView({ onSelect }: HomeViewProps) {
     [recentReleasesQuery.data]
   );
 
+  const [queueExpanded, setQueueExpanded] = useState(false);
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const closeLayoutEditor = useCallback(() => setShowLayoutEditor(false), []);
   const layoutModalRef = useModalDismiss<HTMLDivElement>(showLayoutEditor, closeLayoutEditor);
@@ -340,39 +348,87 @@ export function HomeView({ onSelect }: HomeViewProps) {
 
   const newCount = continueWatchingList.filter((m) => newEpisodeIds.has(m.id)).length;
 
+  // Lives in the header, not at the bottom of five shelves. Signed-out users
+  // still get configurable rows (trending / newly releasing / seasonal), so
+  // this can't live inside the authenticated block.
+  const customizeButton = (
+    <button
+      ref={customizeFocus.ref}
+      tabIndex={customizeFocus.tabIndex}
+      onClick={() => setShowLayoutEditor(true)}
+      className="flex items-center gap-1.5 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
+    >
+      <LayoutDashboard size={13} />
+      Customize
+    </button>
+  );
+
   return (
-    <div className="relative h-full space-y-10 pb-12 overflow-x-hidden max-w-[1100px]">
-      <div>
-        <div className="flex items-end justify-between mb-4 px-1">
-          <div>
-            <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Up Next</h1>
-            <p className="meta-mono mt-1 text-muted-foreground">
-              {continueWatchingList.length} in progress
-              {newCount > 0 ? ` · ${newCount} new episode${newCount === 1 ? "" : "s"}` : ""}
-            </p>
+    // overflow-x-clip, not -hidden: `hidden` on one axis forces the other to
+    // compute as `auto`, which turned this element into its own scroll
+    // container and left App.tsx's outer .scroll-container (the one carrying
+    // saveScroll/restoreScroll) permanently at scrollTop 0 — so per-view
+    // scroll position was never actually restored. `clip` hides the overflow
+    // without creating a scroll container.
+    <div className="relative h-full space-y-10 pb-12 overflow-x-clip max-w-[1100px]">
+      {/* Signed out, "Up Next / 0 in progress" is a dead heading over an empty
+          queue — the connect card is the only thing worth reading, so it takes
+          the top slot on its own. */}
+      {isAuthenticated && (
+        <div>
+          <div className="flex items-end justify-between mb-4 px-1">
+            <div>
+              <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Up Next</h1>
+              <p className="meta-mono mt-1 text-muted-foreground">
+                {continueWatchingList.length} in progress
+                {newCount > 0 ? ` · ${newCount} new episode${newCount === 1 ? "" : "s"}` : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {continueWatchingList.length > 1 && (
+                <button
+                  ref={pickMeFocus.ref}
+                  tabIndex={pickMeFocus.tabIndex}
+                  onClick={() => useAppStore.getState().setPickerOpen(true)}
+                  className="rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
+                >
+                  Pick for me
+                </button>
+              )}
+              {customizeButton}
+            </div>
           </div>
-          {isAuthenticated && continueWatchingList.length > 1 && (
-            <button
-              ref={pickMeFocus.ref}
-              tabIndex={pickMeFocus.tabIndex}
-              onClick={() => useAppStore.getState().setPickerOpen(true)}
-              className="shrink-0 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
-            >
-              Pick for me
-            </button>
+          {continueWatchingList.length > 0 ? (
+            <>
+              <UpNextQueue
+                items={continueWatchingList.slice(0, queueExpanded ? 8 : 4)}
+                newEpisodeIds={newEpisodeIds}
+                lastWatched={(lastWatchedQuery.data || {}) as Record<string, string>}
+                onSelect={onSelect}
+              />
+              {/* The queue used to run 8 rows deep and push every poster shelf
+                  below the fold. Four is enough to resume from. */}
+              {continueWatchingList.length > 4 && (
+                <button
+                  onClick={() => setQueueExpanded((v) => !v)}
+                  className="mt-2 px-1 text-[12px] font-medium text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  {queueExpanded
+                    ? "Show fewer"
+                    : `Show ${Math.min(continueWatchingList.length, 8) - 4} more`}
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="px-1">
+              <p className="text-[15px] font-semibold text-foreground">Nothing in progress</p>
+              <p className="text-[13px] text-muted-foreground mt-1">
+                Pick something from your library and it shows up here.
+              </p>
+            </div>
           )}
         </div>
-        {isAuthenticated && continueWatchingList.length > 0 ? (
-          <UpNextQueue
-            items={continueWatchingList.slice(0, 8)}
-            newEpisodeIds={newEpisodeIds}
-            lastWatched={(lastWatchedQuery.data || {}) as Record<string, string>}
-            onSelect={onSelect}
-          />
-        ) : isAuthenticated ? (
-          <p className="meta-mono px-1 text-muted-foreground">Nothing in progress. Pick something from your library.</p>
-        ) : null}
-      </div>
+      )}
 
       {!isAuthenticated && (
         <div className="flex items-center justify-between px-5 py-3.5 rounded-lg bg-surface border border-border">
@@ -397,6 +453,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
         </div>
       )}
 
+      {!isAuthenticated && <div className="flex justify-end px-1">{customizeButton}</div>}
+
       {/* Watching is a fixed section, not a configurable row — the design's
           poster shelf under the queue. Includes rewatches. */}
       {isAuthenticated && watchingMedia.length > 0 && (
@@ -416,18 +474,8 @@ export function HomeView({ onSelect }: HomeViewProps) {
         <Fragment key={r.id}>{renderRow(r.id)}</Fragment>
       ))}
 
-      {/* Layout editor */}
-      <div className="flex flex-col items-center gap-4 pt-4">
-        <button
-          ref={customizeFocus.ref}
-          tabIndex={customizeFocus.tabIndex}
-          onClick={() => setShowLayoutEditor(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.05] border border-white/[0.06] transition-all"
-        >
-          <LayoutDashboard size={13} />
-          Customize home
-        </button>
-
+      {/* Layout editor — opened from the header button above. */}
+      <div>
         {showLayoutEditor && (
           <div
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
@@ -455,16 +503,34 @@ export function HomeView({ onSelect }: HomeViewProps) {
                   <X size={16} />
                 </button>
               </div>
-              <p className="text-[11px] text-muted-foreground/70 mb-3">Tap the eye to show or hide.</p>
+              <p className="text-[11px] text-muted-foreground mb-3">Reorder with the arrows, show or hide with the eye.</p>
               <div className="space-y-1">
-                {rowConfig.map((row) => (
+                {rowConfig.map((row, i) => (
                   <div
                     key={row.id}
                     className="flex items-center gap-2 px-2 py-2 rounded-xl border border-transparent hover:bg-white/[0.05] transition-all"
                   >
-                    <span className={`flex-1 text-sm font-medium select-none transition-colors ${row.visible ? "text-foreground" : "text-muted-foreground/60"}`}>
+                    <span className={`flex-1 text-sm font-medium select-none transition-colors ${row.visible ? "text-foreground" : "text-muted-foreground"}`}>
                       {row.title}
                     </span>
+                    {/* The saved config always carried an order; until now
+                        there was no way to change it. */}
+                    <button
+                      onClick={() => moveRow(i, -1)}
+                      disabled={i === 0}
+                      aria-label={`Move ${row.title} up`}
+                      className="p-1.5 rounded-lg hover:bg-white/[0.08] transition-colors shrink-0 text-muted-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronUp size={15} />
+                    </button>
+                    <button
+                      onClick={() => moveRow(i, 1)}
+                      disabled={i === rowConfig.length - 1}
+                      aria-label={`Move ${row.title} down`}
+                      className="p-1.5 rounded-lg hover:bg-white/[0.08] transition-colors shrink-0 text-muted-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronDown size={15} />
+                    </button>
                     <button
                       onClick={() => toggleRow(row.id)}
                       aria-label={row.visible ? `Hide ${row.title}` : `Show ${row.title}`}

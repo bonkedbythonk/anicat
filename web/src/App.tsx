@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/transport";
 import { listen } from "@tauri-apps/api/event";
 import { getQueryClient, invalidateProgressQueries } from "@/lib/events";
 import { getConfig, type HealthStatus } from "@/lib/api";
@@ -318,6 +318,10 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        {/* Stays "popLayout". Do not switch to mode="wait": when the page is
+            hidden or backgrounded, rAF pauses, exit animations never resolve,
+            and with "wait" the incoming view then never mounts at all —
+            navigation appears dead until the page is visible again. */}
         <AnimatePresence mode="popLayout">
           {selectedItem ? (
             <motion.div

@@ -72,6 +72,13 @@ export default defineConfig({
         target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
         changeOrigin: true,
       },
+      // MangaReader fetches pages through /api/media/manga/proxy (see
+      // proxy/server.rs) — without this, chapter images 404 into Vite's SPA
+      // fallback and the reader renders blank pages in `npm run dev`.
+      "/api": {
+        target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
+        changeOrigin: true,
+      },
     },
   },
   envPrefix: ["VITE_", "TAURI_"],

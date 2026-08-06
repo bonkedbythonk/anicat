@@ -65,7 +65,7 @@ export function MobileEpisodeList({
       const data = (await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider)) as { streams?: StreamServer[] };
       setServerPicker({ epNum, streams: data.streams || [], loading: false, error: null });
     } catch (err) {
-      setServerPicker({ epNum, streams: [], loading: false, error: err instanceof Error ? err.message : "Failed to load servers." });
+      setServerPicker({ epNum, streams: [], loading: false, error: err instanceof Error ? err.message : "Couldn't load servers." });
     }
   };
 
@@ -191,7 +191,7 @@ export function MobileEpisodeList({
             <Loader2 size={16} className="animate-spin" /> Loading servers...
           </div>
         ) : serverPicker?.error ? (
-          <p className="px-4 py-6 text-sm text-red-400">{serverPicker.error}</p>
+          <p className="px-4 py-6 text-sm text-danger-light">{serverPicker.error}</p>
         ) : serverPicker && serverPicker.streams.length === 0 ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">No servers found.</p>
         ) : (

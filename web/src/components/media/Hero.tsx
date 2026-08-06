@@ -36,7 +36,7 @@ function AiringCountdown({ airingAt }: { airingAt: string | number }) {
       const diff = target - now;
 
       if (diff <= 0) {
-        setTimeLeft("Aired!");
+        setTimeLeft("aired");
         return;
       }
 

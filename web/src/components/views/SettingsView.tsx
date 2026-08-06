@@ -281,7 +281,7 @@ export function SettingsView({ health }: SettingsViewProps) {
         setTimeout(() => setSaved(false), 2000);
       } catch (err) {
         console.error("Auto-save failed:", err);
-        setErrorMessage("Failed to save. Try again.");
+        setErrorMessage("Couldn't save. Try again.");
         setTimeout(() => setErrorMessage(null), 4000);
       } finally {
         setSaving(false);
@@ -329,10 +329,10 @@ export function SettingsView({ health }: SettingsViewProps) {
   return (
     <div className="space-y-8 animate-fade-in max-w-6xl">
       {successMessage && (
-        <div className="flex items-center space-x-3 px-5 py-3.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm animate-fade-in shadow-lg">
+        <div className="flex items-center space-x-3 px-5 py-3.5 rounded-lg bg-success/10 border border-success/20 text-success-light font-bold text-sm animate-fade-in shadow-lg">
           <CheckCircle2 size={18} />
           <span>{successMessage}</span>
-          <button onClick={() => setSuccessMessage(null)} className="ml-auto p-1 hover:bg-green-500/10 rounded-lg transition-colors">
+          <button onClick={() => setSuccessMessage(null)} className="ml-auto p-1 hover:bg-success/10 rounded-lg transition-colors">
             <XCircle size={16} />
           </button>
         </div>
@@ -351,7 +351,7 @@ export function SettingsView({ health }: SettingsViewProps) {
             </div>
           )}
           {saved && (
-            <div className="flex items-center space-x-1.5 text-xs text-green-500 font-medium animate-fade-in">
+            <div className="flex items-center space-x-1.5 text-xs text-success font-medium animate-fade-in">
               <CheckCircle2 size={12} />
               <span>Saved</span>
             </div>
@@ -640,8 +640,8 @@ export function SettingsView({ health }: SettingsViewProps) {
                     onChange={(e) => updateField("stream", "translation_type", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
-                    <option value="sub">Subtitled (Japanese)</option>
-                    <option value="dub">Dubbed (English)</option>
+                    <option value="sub">Subtitled</option>
+                    <option value="dub">Dubbed</option>
                   </select>
                 </SettingField>
 
@@ -717,13 +717,13 @@ export function SettingsView({ health }: SettingsViewProps) {
                       <div className="flex items-center gap-2">
                         {apiAuthenticated ? (
                           <>
-                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                            <span className="text-sm text-green-400 font-medium">Connected</span>
+                            <div className="w-2 h-2 rounded-full bg-success" />
+                            <span className="text-sm text-success-light font-medium">Connected</span>
                           </>
                         ) : (
                           <>
-                            <div className="w-2 h-2 rounded-full bg-yellow-500" />
-                            <span className="text-sm text-yellow-400 font-medium">Pending validation...</span>
+                            <div className="w-2 h-2 rounded-full bg-warning" />
+                            <span className="text-sm text-warning-light font-medium">Pending validation...</span>
                           </>
                         )}
                       </div>
@@ -769,10 +769,10 @@ export function SettingsView({ health }: SettingsViewProps) {
                         disabled={logoutState === "loggingOut"}
                         className={`mt-2 text-xs font-bold flex items-center space-x-1 w-full justify-center ${
                           logoutState === "loggingOut"
-                            ? "text-red-400/40"
+                            ? "text-danger-light/40"
                             : logoutState === "confirming"
-                              ? "text-red-400 hover:text-red-300"
-                              : "text-red-400/60 hover:text-red-400"
+                              ? "text-danger-light hover:text-danger-light"
+                              : "text-danger-light/60 hover:text-danger-light"
                         }`}
                       >
                         <span>
@@ -832,16 +832,16 @@ export function SettingsView({ health }: SettingsViewProps) {
                   </>
                 )}
                 <div className="mt-4 p-3 border border-border rounded-lg space-y-1.5 text-xs font-mono bg-foreground/[0.02]">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Token saved</span><span className={tokenPresent ? "text-green-400" : "text-muted-foreground/60"}>{tokenPresent ? "yes" : "no"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Backend connected</span><span className={apiConnected ? "text-green-400" : "text-red-400"}>{apiConnected ? "yes" : "no"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">AniList validated</span><span className={apiAuthenticated ? "text-green-400" : "text-red-400"}>{apiAuthenticated ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Token saved</span><span className={tokenPresent ? "text-success-light" : "text-muted-foreground/60"}>{tokenPresent ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Backend connected</span><span className={apiConnected ? "text-success-light" : "text-danger-light"}>{apiConnected ? "yes" : "no"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">AniList validated</span><span className={apiAuthenticated ? "text-success-light" : "text-danger-light"}>{apiAuthenticated ? "yes" : "no"}</span></div>
                   {authError && (
                     authError.startsWith("anilist_down:") ? (
-                      <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-[10px] leading-snug">
+                      <div className="mt-2 p-2 rounded bg-warning/10 border border-warning/20 text-warning-light text-[10px] leading-snug">
                         AniList is temporarily down: {authError.slice("anilist_down:".length)}
                       </div>
                     ) : (
-                      <div className="flex justify-between"><span className="text-muted-foreground">Error</span><span className="text-red-400 ml-2 text-[10px] leading-snug break-all">{authError}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Error</span><span className="text-danger-light ml-2 text-[10px] leading-snug break-all">{authError}</span></div>
                     )
                   )}
                   {health?.viewer_name && (
@@ -867,7 +867,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     onClick={handleUpdate}
                     disabled={checkingUpdate}
                     className={`w-full flex items-center justify-center space-x-2 py-3 rounded-md font-bold transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 ${hasUpdate
-                      ? "bg-green-600 hover:bg-green-500 text-white shadow-green-500/20"
+                      ? "bg-success hover:bg-success text-white shadow-success-light/20"
                       : "bg-accent text-white hover:bg-accent-light"
                       }`}
                   >
@@ -889,8 +889,8 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                   {updateMessage.text && (
                     <div className={`p-4 rounded-md text-xs font-semibold flex items-start space-x-3 animate-fade-in ${updateMessage.type === "success"
-                      ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                      : "bg-red-500/10 text-red-400 border border-red-500/20"
+                      ? "bg-success/10 text-success-light border border-success/20"
+                      : "bg-danger/10 text-danger-light border border-danger/20"
                       }`}>
                       {updateMessage.type === "success" ? (
                         <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
@@ -941,7 +941,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                       setErrorMessage("Debug report copied to clipboard!");
                       setTimeout(() => setErrorMessage(null), 4000);
                     } catch {
-                      setErrorMessage("Failed to generate report.");
+                      setErrorMessage("Couldn't generate report.");
                       setTimeout(() => setErrorMessage(null), 6000);
                     }
                   }}
@@ -981,7 +981,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                     </button>
                   </div>
                   {debugResult && (
-                    <div className={`flex items-start gap-2 rounded-md p-3 text-sm border ${debugResult.ok ? "bg-green-500/10 border-green-500/20 text-green-300" : "bg-red-500/10 border-red-500/20 text-red-300"}`}>
+                    <div className={`flex items-start gap-2 rounded-md p-3 text-sm border ${debugResult.ok ? "bg-success/10 border-success/20 text-success-light" : "bg-danger/10 border-danger/20 text-danger-light"}`}>
                       {debugResult.ok ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <XCircle size={16} className="shrink-0 mt-0.5" />}
                       <span className="flex-1 leading-relaxed">{debugResult.summary}</span>
                       {debugResult.raw && (
@@ -1018,15 +1018,15 @@ export function SettingsView({ health }: SettingsViewProps) {
                   disabled={registryState === "wiping" || registryState === "done"}
                   className={`w-full py-3 rounded-md text-sm font-bold transition-all ${
                     registryState === "wiping"
-                      ? "bg-red-500/10 text-red-400/40 border border-red-500/10 cursor-not-allowed"
+                      ? "bg-danger/10 text-danger-light/40 border border-danger/10 cursor-not-allowed"
                       : registryState === "done"
-                        ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                        ? "bg-success/20 text-success-light border border-success/30"
                         : registryState === "confirming"
-                          ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                          : "border border-red-500/20 text-red-400/60 hover:bg-red-500/10"
+                          ? "bg-danger/20 text-danger-light border border-danger/30"
+                          : "border border-danger/20 text-danger-light/60 hover:bg-danger/10"
                   }`}
                 >
-                  {registryState === "wiping" ? "Wiping Registry..." : registryState === "done" ? "Registry Wiped! Restarting..." : registryState === "confirming" ? "Are you sure? This will wipe your history!" : "Clear Local Registry"}
+                  {registryState === "wiping" ? "Wiping Registry..." : registryState === "done" ? "Registry Wiped. Restarting..." : registryState === "confirming" ? "Are you sure? Click again to wipe" : "Clear Local Registry"}
                 </button>
                 <button
                   onClick={() => {
@@ -1039,7 +1039,7 @@ export function SettingsView({ health }: SettingsViewProps) {
                   }}
                   className={`w-full py-3 px-4 rounded-md text-[10px] font-bold transition-all flex items-center justify-center space-x-2 ${
                     resetOnboardingState === "confirming"
-                      ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                      ? "bg-danger/20 text-danger-light border border-danger/30"
                       : "bg-foreground/[0.03] hover:bg-foreground/[0.06] text-muted-foreground border border-border"
                   }`}
                 >

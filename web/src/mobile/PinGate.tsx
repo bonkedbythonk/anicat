@@ -105,7 +105,7 @@ export function PinGate({ onSuccess }: PinGateProps) {
         className="w-40 text-center text-3xl tracking-[0.5em] bg-card border border-border rounded-md py-3 px-4 focus:outline-none focus:ring-2 focus:ring-accent"
         placeholder="----"
       />
-      {error && <p className="text-sm text-red-400 max-w-xs text-center">{error}</p>}
+      {error && <p className="text-sm text-danger-light max-w-xs text-center">{error}</p>}
       <button
         onClick={submit}
         disabled={submitting || !pin || (!!multiUser && !displayName)}

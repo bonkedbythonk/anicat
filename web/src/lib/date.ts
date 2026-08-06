@@ -45,6 +45,22 @@ export function formatRelativeTime(dateStr: string): string {
   });
 }
 
+// Compound-precision countdown ("in 2d 4h", "in 3h 12m", "in 5m") for contexts
+// that want more granularity than formatRelativeTimeFromUnix's single-unit
+// output — e.g. a hero countdown chip where "in 1d" vs "in 1d 23h" matters.
+export function formatAiringCountdown(airingAt?: string | number | null): string | null {
+  if (!airingAt) return null;
+  const t = parseAiringTime(airingAt);
+  if (!t) return null;
+  const diff = t - Date.now();
+  if (diff <= 0) return "aired";
+  const days = Math.floor(diff / 86_400_000);
+  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
+  if (days > 0) return `in ${days}d ${hours}h`;
+  const mins = Math.floor((diff % 3_600_000) / 60_000);
+  return hours > 0 ? `in ${hours}h ${mins}m` : `in ${mins}m`;
+}
+
 export function formatRelativeTimeFromUnix(unixSeconds: number | string): string {
   if (!unixSeconds) return "Unknown";
   let date: Date;

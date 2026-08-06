@@ -136,7 +136,7 @@ export function EpisodeList({
       } catch (err: unknown) {
         if (isMounted) {
           console.error("Failed to load stream servers:", err);
-          setStreamsError((err as Error)?.message || "Failed to load stream servers.");
+          setStreamsError((err as Error)?.message || "Couldn't load stream servers. Try another provider.");
         }
       } finally {
         if (isMounted) {
@@ -175,8 +175,8 @@ export function EpisodeList({
   const statusIcon = (status: string | null | undefined) => {
     if (status === "completed") return <HardDriveDownload size={16} className="text-accent shrink-0" />;
     if (status === "downloading") return <Loader2 size={16} className="animate-spin text-accent shrink-0" />;
-    if (status === "queued") return <Clock size={16} className="text-yellow-400 shrink-0" />;
-    if (status === "failed") return <AlertCircle size={16} className="text-red-400 shrink-0" />;
+    if (status === "queued") return <Clock size={16} className="text-warning-light shrink-0" />;
+    if (status === "failed") return <AlertCircle size={16} className="text-danger-light shrink-0" />;
     return null;
   };
 
@@ -276,7 +276,7 @@ export function EpisodeList({
       console.error("Failed to play:", error);
       useAppStore.getState().setPlaybackLoading({
         isLoading: true,
-        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        statusText: typeof error === "string" ? error : "Couldn't start playback.",
         step: 0,
       });
     } finally {
@@ -300,7 +300,7 @@ export function EpisodeList({
       setResolvedStreams(data.streams || []);
     } catch (err: unknown) {
       console.error("Failed to load stream servers:", err);
-      setStreamsError((err as Error)?.message || "Failed to load stream servers.");
+      setStreamsError((err as Error)?.message || "Couldn't load stream servers. Try another provider.");
     } finally {
       setLoadingStreamsEp(null);
     }
@@ -331,7 +331,7 @@ export function EpisodeList({
       console.error("Failed to play stream:", error);
       useAppStore.getState().setPlaybackLoading({
         isLoading: true,
-        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        statusText: typeof error === "string" ? error : "Couldn't start playback.",
         step: 0,
       });
     } finally {
@@ -452,7 +452,7 @@ export function EpisodeList({
                           ? fillerEpisodes.has(Number(ep.number))
                           : false
                       ))) && (
-                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">Filler</span>
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-warning/15 text-warning-light border border-warning/20">Filler</span>
                       )}
                     </span>
                   </div>
@@ -471,7 +471,7 @@ export function EpisodeList({
                           e.stopPropagation();
                           toggleStreams(epNum);
                         }}
-                        title="Choose Stream Server"
+                        title="Choose Server"
                         className={`flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90 ${
                           expandedEpStreams === epNum
                             ? "bg-accent/25 text-accent border border-accent/30"
@@ -507,8 +507,8 @@ export function EpisodeList({
                            e.stopPropagation();
                            if (onUnwatch) onUnwatch(epNum);
                          }}
-                         title={isManga ? "Backtrack to before this chapter" : "Mark as unwatched"}
-                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-red-500/20 hover:text-red-400 transition-all active:scale-90"
+                         title={isManga ? "Mark as unread" : "Mark as unwatched"}
+                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-danger/20 hover:text-danger-light transition-all active:scale-90"
                        >
                          <XCircle size={16} />
                        </FocusableButton>
@@ -519,7 +519,7 @@ export function EpisodeList({
                            if (onWatch) onWatch(epNum);
                          }}
                          title={isManga ? "Mark as read" : "Mark as watched"}
-                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-green-500/20 hover:text-green-400 transition-all active:scale-90"
+                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-success/20 hover:text-success-light transition-all active:scale-90"
                        >
                          <Check size={16} />
                        </FocusableButton>
@@ -565,7 +565,7 @@ export function EpisodeList({
                       <span>Fetching stream servers...</span>
                     </div>
                   ) : streamsError ? (
-                    <div className="text-red-400 py-1 text-[11px] font-medium">{streamsError}</div>
+                    <div className="text-danger-light py-1 text-[11px] font-medium">{streamsError}</div>
                   ) : getSortedStreams(resolvedStreams).length === 0 ? (
                     <div className="text-muted-foreground py-1 text-[11px]">
                       No {streamFilter ? streamFilter.replace("_", " ") + " " : ""}streams found.

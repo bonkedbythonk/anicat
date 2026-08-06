@@ -75,7 +75,7 @@ export function ConnectAniList({ displayName, onConnected }: ConnectAniListProps
         placeholder="Paste redirect URL or token..."
         className="w-full max-w-xs bg-card border border-border rounded-md py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
       />
-      {error && <p className="text-sm text-red-400 max-w-xs">{error}</p>}
+      {error && <p className="text-sm text-danger-light max-w-xs">{error}</p>}
       <button
         onClick={submit}
         disabled={submitting || !pasted}

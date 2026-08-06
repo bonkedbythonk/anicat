@@ -288,6 +288,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   };
 
   const handleRemoveFromList = async () => {
+    if (!window.confirm(`Remove "${title}" from your list? This can't be undone.`)) return;
     setStatusSheetOpen(false);
     onClose();
     const qc = queryClient;

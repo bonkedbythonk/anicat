@@ -728,7 +728,7 @@ export const mediaApi = {
       console.error("[checkUpdate] error:", err);
       return {
         status: "error",
-        message: "Failed to connect to the update server. Please try again later.",
+        message: "Couldn't connect to the update server. Try again later.",
       };
     }
   },
@@ -743,7 +743,7 @@ export const mediaApi = {
     } catch (err) {
       return {
         status: "error",
-        message: "Failed to install update. Try downloading from the website.",
+        message: "Couldn't install update. Try downloading from the website.",
       };
     }
   },

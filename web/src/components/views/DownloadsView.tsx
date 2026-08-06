@@ -104,7 +104,7 @@ export function DownloadsView() {
       case "queued":
         return { dot: "bg-foreground/30", label: "Queued", cls: "text-muted-foreground" };
       case "failed":
-        return { dot: "bg-red-400/80", label: "Failed", cls: "text-red-400/90" };
+        return { dot: "bg-danger-light/80", label: "Failed", cls: "text-danger-light/90" };
       default:
         return { dot: "bg-foreground/30", label: item.status, cls: "text-muted-foreground" };
     }
@@ -220,7 +220,7 @@ export function DownloadsView() {
                           handleRemove(ep.media_id, ep.episode_number);
                           if (selectedMedia.episodes.length <= 1) setSelectedMediaId(null);
                         }}
-                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-red-400/90 hover:border-red-400/30 cursor-pointer"
+                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-danger-light/90 hover:border-danger-light/30 cursor-pointer"
                         title="Delete from disk"
                       >
                         <Trash2 size={13} />
@@ -281,14 +281,14 @@ export function DownloadsView() {
                       </span>
                     </p>
                     {item.status === "failed" && item.error_message && (
-                      <p className="mt-1 text-[11.5px] text-red-400/70 truncate max-w-[520px]" title={item.error_message}>
+                      <p className="mt-1 text-[11.5px] text-danger-light/70 truncate max-w-[520px]" title={item.error_message}>
                         {item.error_message}
                       </p>
                     )}
                   </div>
                   <button
                     onClick={() => handleRemove(item.media_id, item.episode_number)}
-                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-red-400/90 hover:border-red-400/30 cursor-pointer shrink-0"
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-danger-light/90 hover:border-danger-light/30 cursor-pointer shrink-0"
                     title="Remove"
                   >
                     <X size={13} />

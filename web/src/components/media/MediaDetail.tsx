@@ -7,7 +7,7 @@ import { mediaApi, type MediaItem, type Episode, type Character, type Review } f
 import { sanitizeHtml } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
-import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, parseAiringTime } from "@/lib/date";
+import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, formatAiringCountdown } from "@/lib/date";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { FocusScope, ScopeNav, useFocusable } from "@/focus";
@@ -52,19 +52,6 @@ function DetailTab({
 }
 
 // AniList airing timestamps are ISO strings without a zone suffix (UTC).
-function airingCountdown(airingAt?: string | number): string | null {
-  if (!airingAt) return null;
-  const t = parseAiringTime(airingAt);
-  if (!t) return null;
-  const diff = t - Date.now();
-  if (diff <= 0) return "out now";
-  const days = Math.floor(diff / 86_400_000);
-  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
-  if (days > 0) return `in ${days}d ${hours}h`;
-  const mins = Math.floor((diff % 3_600_000) / 60_000);
-  return hours > 0 ? `in ${hours}h ${mins}m` : `in ${mins}m`;
-}
-
 // AniList score formats — the raw score value lives on a different scale
 // depending on which one the viewer's account uses.
 const SCORE_FORMAT_MAX: Record<string, number> = {
@@ -466,7 +453,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       console.error("Failed to play next:", error);
       useAppStore.getState().setPlaybackLoading({
         isLoading: true,
-        statusText: typeof error === "string" ? error : "Failed to start playback.",
+        statusText: typeof error === "string" ? error : "Couldn't start playback.",
         step: 0,
       });
     } finally {
@@ -880,7 +867,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 {fullItem.average_score ? <span>Score {fullItem.average_score}</span> : null}
                 {!isManga && fullItem.next_airing?.episode && (
                   <span className="text-accent">
-                    EP {fullItem.next_airing.episode} {airingCountdown(fullItem.next_airing.airing_at) || ""}
+                    EP {fullItem.next_airing.episode} {formatAiringCountdown(fullItem.next_airing.airing_at) || ""}
                   </span>
                 )}
               </div>
@@ -970,7 +957,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     disabled={isUpdatingStatus}
                     className="bg-surface border border-border text-foreground/80 hover:text-foreground rounded-md pl-4 pr-10 py-3 text-sm font-medium focus:outline-none focus:border-accent transition-all cursor-pointer appearance-none"
                   >
-                    <option value="none" className="text-muted-foreground">-- Add to List --</option>
+                    <option value="none" className="text-muted-foreground">Add to list</option>
                     <option value="planning">Planning</option>
                     <option value="watching">{isManga ? 'Reading' : 'Watching'}</option>
                     <option value="repeating">{isManga ? 'Rereading' : 'Rewatching'}</option>
@@ -994,8 +981,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
                     className={`p-3 rounded-md transition-all border active:scale-95 ${
                       deleteConfirmPending
-                        ? 'bg-red-500/80 text-background border-red-500 scale-105 animate-pulse'
-                        : 'bg-transparent border-border text-muted-foreground hover:bg-red-500/15 hover:text-red-500 hover:border-red-500/25'
+                        ? 'bg-danger/80 text-background border-danger scale-105 animate-pulse'
+                        : 'bg-transparent border-border text-muted-foreground hover:bg-danger/15 hover:text-danger hover:border-danger/25'
                     }`}
                   >
                     <Trash2 size={20} />
@@ -1142,9 +1129,9 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                             title="Audio for this show (overrides the global setting)"
                             className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none"
                           >
-                            <option value="default">Audio: Default</option>
-                            <option value="sub">Audio: Sub</option>
-                            <option value="dub">Audio: Dub</option>
+                            <option value="default">Default</option>
+                            <option value="sub">Sub</option>
+                            <option value="dub">Dub</option>
                           </FocusableSelect>
                           <FocusableSelect value={selectedProvider} onChange={(e) => handleSelectProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
                             <option value="anineko">AniNeko</option>

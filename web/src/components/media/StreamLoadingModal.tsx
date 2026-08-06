@@ -62,7 +62,7 @@ export const StreamLoadingModal: React.FC = () => {
           } else if (status === "error") {
             setPlaybackLoading({
               isLoading: true,
-              statusText: message || "Failed to load stream.",
+              statusText: message || "Couldn't load stream.",
               step: 0,
             });
           } else {
@@ -106,7 +106,7 @@ export const StreamLoadingModal: React.FC = () => {
     const timeoutTimer = setTimeout(() => {
       setPlaybackLoading({
         isLoading: true,
-        statusText: "Stream request timed out. Please try another provider or server.",
+        statusText: "Couldn't load stream in time. Try another provider or server.",
         step: 0,
       });
     }, 30000);
@@ -191,7 +191,7 @@ export const StreamLoadingModal: React.FC = () => {
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/60">
               <div
                 className={`h-full transition-all duration-300 ease-out ${
-                  isError ? "bg-red-500" : "bg-accent"
+                  isError ? "bg-danger" : "bg-accent"
                 }`}
                 style={{ width: `${progressPct}%` }}
               />
@@ -203,7 +203,7 @@ export const StreamLoadingModal: React.FC = () => {
             {!isError && progressPct < 100 && (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-accent shrink-0" />
             )}
-            <span className={isError ? "text-red-400 font-medium" : "text-foreground/80 font-normal"}>
+            <span className={isError ? "text-danger-light font-medium" : "text-foreground/80 font-normal"}>
               {statusText || "Preparing stream..."}
             </span>
           </div>

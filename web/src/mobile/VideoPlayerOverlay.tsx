@@ -116,7 +116,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
           total_episodes: props.totalEpisodes,
         }),
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => "Failed to load stream"));
+      if (!res.ok) throw new Error(await res.text().catch(() => "Couldn't load stream"));
       const data = (await res.json()) as { stream_url: string; resume_seconds: number; subtitle_url?: string | null };
       console.log("[VideoPlayerOverlay] resolved stream_url:", data.stream_url, "subtitle_url:", data.subtitle_url);
       setStreamUrl(data.stream_url);
@@ -166,7 +166,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     const mediaError = videoRef.current?.error;
     const name = mediaError ? MEDIA_ERROR_NAMES[mediaError.code] || `code ${mediaError.code}` : "unknown";
     console.error("[VideoPlayerOverlay] <video> error:", name, mediaError?.message, streamUrl);
-    setError("Playback failed.");
+    setError("Couldn't play this episode. Try again or pick another server.");
     setErrorDetail(`${name}${mediaError?.message ? `: ${mediaError.message}` : ""} — ${streamUrl}`);
   };
 
@@ -215,7 +215,8 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
               hls?.recoverMediaError();
               break;
             default:
-              setError(`HLS error: ${data.details}`);
+              setError("Playback stalled. Try another server.");
+              setErrorDetail(`HLS error: ${data.details}`);
               hls?.destroy();
               break;
           }

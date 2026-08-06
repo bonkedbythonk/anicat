@@ -5,8 +5,8 @@ import { mediaApi, type MediaItem } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
 import { isCaughtUp } from "@/lib/progress";
 import { proxyImage } from "@/lib/proxy";
-import { parseWatchedAt } from "@/lib/date";
-import { pickAiringSoon, airingLabel } from "./useAiringSoon";
+import { parseWatchedAt, formatRelativeTimeFromUnix } from "@/lib/date";
+import { pickAiringSoon } from "./useAiringSoon";
 import { UpNextCard } from "./UpNextCard";
 import { PosterRow } from "./PosterRow";
 import { BrowseRow } from "./BrowseRow";
@@ -135,7 +135,7 @@ export function MobileHomeView({ onSelect, onSeeAllWatching, onOpenSchedule }: M
                     {item.title?.english || item.title?.romaji}
                   </p>
                   <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.07em] text-accent tabular-nums">
-                    EP {item.next_airing?.episode ?? "?"} {airingLabel(at)}
+                    EP {item.next_airing?.episode ?? "?"} {formatRelativeTimeFromUnix(at)}
                   </p>
                 </button>
               );

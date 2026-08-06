@@ -14,15 +14,6 @@ function airingAtMs(item: MediaItem): number | null {
   return ms === 0 || isNaN(ms) ? null : ms;
 }
 
-export function airingLabel(ms: number): string {
-  const diff = ms - Date.now();
-  if (diff <= 0) return "aired";
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 1) return `in ${Math.max(1, Math.floor(diff / 60_000))}m`;
-  if (hours < 48) return `in ${hours}h`;
-  return `in ${Math.floor(hours / 24)}d`;
-}
-
 /** Watching-list entries with a known upcoming episode, soonest first — the
  * phone equivalent of glancing at the Schedule tab for "anything I follow
  * airing today?". Pure so Home can run it over the watching list it already

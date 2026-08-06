@@ -312,7 +312,7 @@ export default function App() {
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="z-50 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-300 text-xs text-center leading-snug shrink-0"
+              className="z-50 px-4 py-2 bg-warning/10 border-b border-warning/20 text-warning-light text-xs text-center leading-snug shrink-0"
             >
               AniList is temporarily down — tracking and library sync are paused. {anilistDownMessage}
             </motion.div>

@@ -58,7 +58,7 @@ export function SheetRow({ onClick, active, destructive, children }: { onClick: 
     <button
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-md px-4 py-3.5 text-left text-[15px] font-medium active:bg-foreground/[0.06] ${
-        destructive ? "text-red-400" : active ? "text-accent" : "text-foreground"
+        destructive ? "text-danger-light" : active ? "text-accent" : "text-foreground"
       }`}
     >
       {children}

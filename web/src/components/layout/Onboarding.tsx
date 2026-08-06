@@ -110,7 +110,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           setAuthError(healthData.auth_error || "Invalid token or authorization rejected.");
         }
       } catch (err) {
-        setAuthError("Failed to validate token. Check network settings.");
+        setAuthError("Couldn't validate token. Check network settings.");
       } finally {
         setValidating(false);
       }
@@ -300,14 +300,14 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               )}
 
               {connectedUser && (
-                <div className="flex items-center space-x-2.5 p-3 rounded-lg bg-green-500/10 border border-green-500/25 text-green-400 text-xs font-semibold animate-scale-in">
+                <div className="flex items-center space-x-2.5 p-3 rounded-lg bg-success/10 border border-success/25 text-success-light text-xs font-semibold animate-scale-in">
                   <CheckCircle2 size={16} />
                   <span>Connected successfully as <strong className="text-foreground">{connectedUser}</strong>!</span>
                 </div>
               )}
 
               {authError && (
-                <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-xs leading-relaxed animate-scale-in">
+                <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-danger/10 border border-danger/25 text-danger-light text-xs leading-relaxed animate-scale-in">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5" />
                   <span>{authError}</span>
                 </div>
@@ -430,7 +430,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                           : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      {t === "sub" ? "Subtitled (Sub)" : "English Dubbed (Dub)"}
+                      {t === "sub" ? "Subtitled" : "Dubbed"}
                     </button>
                   ))}
                 </div>

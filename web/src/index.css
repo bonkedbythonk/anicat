@@ -34,6 +34,12 @@
   --color-white: var(--dynamic-white);
   --color-black: var(--dynamic-black);
   --color-muted-foreground: var(--text-muted);
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-success: #22c55e;
+  --color-success-light: #4ade80;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
 
   /* macOS-native radius scale: small and consistent. Big friendly radii
      were the v3 look; native surfaces sit between 6 and 16px. */
@@ -151,7 +157,7 @@ html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .media
   border-left: 1px solid var(--border-color) !important;
 }
 
-html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *) { color: var(--foreground) !important; }
+html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *):not([class*="bg-danger"]):not([class*="bg-danger"] *):not([class*="bg-success"]):not([class*="bg-success"] *):not([class*="bg-warning"]):not([class*="bg-warning"] *) { color: var(--foreground) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-100 { color: rgba(38, 35, 31, 0.90) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-200 { color: rgba(38, 35, 31, 0.80) !important; }
 html.light:not([data-style="sakura-zen"]):not([data-style="retro-manga"]) .text-gray-300 { color: rgba(38, 35, 31, 0.70) !important; }
@@ -794,7 +800,7 @@ html[data-style="retro-manga"] .text-gray-500 { color: rgba(244, 239, 230, 0.45)
 html[data-style="retro-manga"] .text-gray-600 { color: rgba(244, 239, 230, 0.45) !important; }
 html[data-style="retro-manga"] .text-gray-700 { color: rgba(244, 239, 230, 0.35) !important; }
 html[data-style="retro-manga"] .text-gray-800 { color: rgba(244, 239, 230, 0.25) !important; }
-html[data-style="retro-manga"] .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *)     { color: var(--foreground) !important; }
+html[data-style="retro-manga"] .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.bg-accent):not(.bg-accent *):not(.forced-dark-container):not(.forced-dark-container *):not([class*="bg-blue"]):not([class*="bg-blue"] *):not([class*="bg-indigo"]):not([class*="bg-indigo"] *):not([class*="bg-purple"]):not([class*="bg-purple"] *):not([class*="bg-pink"]):not([class*="bg-pink"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-violet"]):not([class*="bg-violet"] *):not([class*="bg-fuchsia"]):not([class*="bg-fuchsia"] *):not([class*="bg-danger"]):not([class*="bg-danger"] *):not([class*="bg-success"]):not([class*="bg-success"] *):not([class*="bg-warning"]):not([class*="bg-warning"] *)     { color: var(--foreground) !important; }
 
 html[data-style="retro-manga"].light .text-gray-100 { color: rgba(25, 20, 16, 0.95) !important; }
 html[data-style="retro-manga"].light .text-gray-200 { color: rgba(25, 20, 16, 0.88) !important; }
@@ -834,6 +840,12 @@ button .text-white,
 [class*="bg-violet"].text-white,
 [class*="bg-fuchsia"] .text-white,
 [class*="bg-fuchsia"].text-white,
+[class*="bg-danger"] .text-white,
+[class*="bg-danger"].text-white,
+[class*="bg-success"] .text-white,
+[class*="bg-success"].text-white,
+[class*="bg-warning"] .text-white,
+[class*="bg-warning"].text-white,
 .forced-dark-container .text-white,
 .forced-dark-container .text-white\/90,
 .forced-dark-container .text-white\/80,

@@ -142,7 +142,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       })
       .catch(err => {
         console.error("Failed to load manga pages:", err);
-        setError("Failed to load chapter pages. Please try again.");
+        setError("Couldn't load this chapter. Try again.");
         setLoading(false);
       });
   }, [mediaId, chapterNumber, initialPage, reloadKey]);
@@ -433,7 +433,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   if (error) {
     return createPortal(
       <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center p-6 text-center">
-        <div className="bg-red-500/10 text-red-500 p-4 rounded-xl mb-6 max-w-md border border-red-500/20">
+        <div className="bg-danger/10 text-danger p-4 rounded-xl mb-6 max-w-md border border-danger/20">
           <p className="font-bold mb-1">Error</p>
           <p className="text-sm">{error}</p>
         </div>

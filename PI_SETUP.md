@@ -275,15 +275,44 @@ sudo tailscale serve --bg 13370
 Your PWA URL then becomes `https://<pi-hostname>.<tailnet>.ts.net/mobile.html`
 (see `tailscale serve status` for the exact name). Nothing else changes.
 
-### 9c. Note on LAN exposure
+### 9c. Firewall: close the LAN path (applied)
 
-`anicat-server` binds `0.0.0.0:13370`, so on your home network it's reachable
-over the LAN IP too, not only the Tailscale IP. The `/mobile-api/*` surface is
-still behind the PIN/per-user gate, and `/proxy` is SSRF-allowlisted to media
-CDNs only, so this is low-risk — but if you'd rather the Pi answer *only* over
-Tailscale, add a firewall rule allowing 13370 solely on the `tailscale0`
-interface (e.g. via `ufw`), or rely on `tailscale serve` (9b) and firewall the
-raw port off entirely.
+`anicat-server` binds `0.0.0.0:13370`, so without a firewall it answers over
+the Pi's LAN IP too, not only the Tailscale one. That means anything on the
+home network — a guest phone, a neighbour who has the wifi password — can
+reach `/proxy` and `/torrent-stream`, which are deliberately ungated (see the
+router comment in `proxy/server.rs`), and pull video through the Pi without
+ever meeting the PIN gate. It also puts that traffic on the household uplink.
+
+`ufw` now restricts inbound traffic to SSH plus the `tailscale0` interface:
+
+```bash
+sudo apt-get install -y ufw
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp
+sudo ufw allow in on tailscale0
+sudo ufw --force enable
+```
+
+Port 13370 is now unreachable from the LAN. It stays reachable over the
+tailnet, and `tailscale serve` (9b) keeps working because it proxies from
+loopback, which `ufw` permits by default. SSH is left open on purpose so
+`scripts/deploy-pi.sh` still works over mDNS (`pi@anicatpi.local`) without
+requiring the deploying machine to be on the tailnet.
+
+`ufw` is enabled at boot, so this survives a restart.
+
+**If you ever re-run this on a fresh Pi**, arm a dead-man switch before
+enabling, so a mistake in the rules can't lock you out of a headless box:
+
+```bash
+sudo systemd-run --unit=ufw-panic --on-active=300 /usr/sbin/ufw --force disable
+```
+
+Then enable `ufw`, open a *fresh* SSH connection to prove it still works, and
+cancel the timer with `sudo systemctl stop ufw-panic.timer`. If you get locked
+out instead, wait five minutes and the firewall disables itself.
 
 ## 10. First connection
 

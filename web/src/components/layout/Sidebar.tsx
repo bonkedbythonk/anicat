@@ -14,7 +14,7 @@ const libraryItems: NavItem[] = [
   { label: "Schedule", view: "schedule" },
   { label: "Library", view: "lists", shortcut: "L" },
   { label: "Manga", view: "manga", shortcut: "M" },
-  { label: "Search", view: "search" },
+  { label: "Search", view: "search", shortcut: "/" },
   { label: "History", view: "profile" },
 ];
 
@@ -42,14 +42,16 @@ function FocusableNavItem({
       className={`group relative w-full flex items-center justify-between py-[7px] pl-5 pr-4 text-[13px] cursor-pointer text-left ${
         isActive
           ? "text-foreground bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] font-semibold"
-          : "text-foreground/55 hover:text-foreground/85"
+          : "text-foreground/70 hover:text-foreground"
       }`}
     >
       <span>{item.label}</span>
       {item.shortcut && (
         <kbd
           aria-hidden="true"
-          className="meta-mono hidden group-hover:inline-block text-[9px] px-1.5 py-0.5 rounded bg-foreground/[0.06] text-muted-foreground border border-border/50"
+          /* Always visible: hiding these until hover kept them from the
+             keyboard users they exist for. */
+          className="meta-mono text-[10px] px-1.5 py-0.5 rounded bg-foreground/[0.06] text-muted-foreground border border-border/50"
         >
           {item.shortcut}
         </kbd>
@@ -71,7 +73,7 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
 
   return (
     <div>
-      <div className="meta-mono px-5 pb-1.5 pt-4 text-muted-foreground/70 select-none">{title}</div>
+      <div className="meta-mono px-5 pb-1.5 pt-4 text-muted-foreground select-none">{title}</div>
       {items.map((item) => (
         <FocusableNavItem
           key={item.view}
@@ -108,7 +110,9 @@ export function Sidebar() {
       />
 
       <nav className="flex-1 overflow-y-auto scrollbar-hide pb-2">
-        <NavGroup title="Library" items={libraryItems} />
+        {/* "Browse", not "Library" — the group used to share its name with the
+            Library item inside it. */}
+        <NavGroup title="Browse" items={libraryItems} />
         <NavGroup title="System" items={systemItems} />
       </nav>
 
@@ -120,7 +124,7 @@ export function Sidebar() {
           ref={ref}
           tabIndex={tabIndex}
           onClick={() => setPaletteOpen(true)}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border text-[12px] text-foreground/45 hover:text-foreground/75 hover:border-foreground/25 cursor-pointer"
+          className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border text-[12px] text-muted-foreground hover:text-foreground hover:border-foreground/25 cursor-pointer"
         >
           <span>Search anything</span>
           <kbd className="meta-mono text-[9px] text-muted-foreground">{isMacOS ? "⌘K" : "Ctrl K"}</kbd>

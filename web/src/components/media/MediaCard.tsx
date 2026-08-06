@@ -1,6 +1,6 @@
 
 import { useCallback, useRef, memo, useState } from "react";
-import { Play, BookOpen, Star } from "lucide-react";
+import { ChevronRight, BookOpen, Star } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type MediaItem, mediaApi } from "@/lib/api";
 import { useFocusable } from "@/focus";
@@ -82,7 +82,10 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
       aria-label={title}
       className="group cursor-pointer flex flex-col space-y-2.5 w-full text-left relative"
     >
-      <div className={`relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface border border-border card-glow ${tabIndex === 0 ? "focus-active" : ""}`}>
+      {/* The focus ring is driven by the parent button's real :focus-visible
+          (see index.css) — it used to be keyed off `tabIndex === 0`, which
+          made the roving-tabindex card look focused when nothing was. */}
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface border border-border card-glow">
         <img
           src={item.cover_image?.large || item.cover_image?.medium}
           alt={title}
@@ -95,13 +98,12 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
         />
 
         {/* Play overlay — visual affordance only; the card opens detail on activation */}
+        {/* Open affordance. Deliberately NOT a play glyph: activating a browse
+            card opens the detail page. The surfaces that really start playback
+            (UpNextQueue, command palette, Picker, Hero) keep the play icon. */}
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-[400ms] flex items-center justify-center z-10" aria-hidden="true">
           <span className="glass-button p-3.5 rounded-full">
-            {isManga ? (
-              <BookOpen size={20} />
-            ) : (
-              <Play size={20} fill="currentColor" />
-            )}
+            {isManga ? <BookOpen size={20} /> : <ChevronRight size={20} />}
           </span>
         </div>
 
@@ -116,13 +118,13 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
       {/* Card info — one quiet metadata line instead of badge chips; the
           art carries the card, richer metadata lives on the detail page. */}
       <div className="space-y-1 px-0.5">
-        <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2">
+        <h3 className="text-sm font-semibold text-foreground leading-tight line-clamp-2">
           {title}
         </h3>
-        <p className="meta-mono flex items-center gap-1.5 text-gray-500">
+        <p className="meta-mono flex items-center gap-1.5 text-muted-foreground">
           {item.average_score ? (
             <span className="inline-flex items-center gap-0.5">
-              <Star size={9} fill="currentColor" className="text-gray-500" />
+              <Star size={10} fill="currentColor" className="text-muted-foreground" />
               {item.average_score}%
             </span>
           ) : null}

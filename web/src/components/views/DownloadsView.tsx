@@ -256,8 +256,9 @@ export function DownloadsView() {
           </div>
         ) : (
           <div className="py-20 text-center rounded-lg border border-dashed border-border">
-            <p className="meta-mono text-muted-foreground">Nothing downloaded yet</p>
-            <p className="text-sm text-foreground/50 mt-2">Download episodes from a show's episode list and they appear here.</p>
+            {/* Headline outranks the explanation, not the other way round. */}
+            <p className="text-[15px] font-semibold text-foreground">Nothing downloaded yet</p>
+            <p className="text-[13px] text-muted-foreground mt-1.5">Download episodes from a show's episode list and they appear here.</p>
           </div>
         )
       ) : activeQueue.length > 0 ? (
@@ -307,8 +308,8 @@ export function DownloadsView() {
         </div>
       ) : (
         <div className="py-20 text-center rounded-lg border border-dashed border-border">
-          <p className="meta-mono text-muted-foreground">Queue is empty</p>
-          <p className="text-sm text-foreground/50 mt-2">No downloads running, queued, or failed right now.</p>
+          <p className="text-[15px] font-semibold text-foreground">Queue is empty</p>
+          <p className="text-[13px] text-muted-foreground mt-1.5">No downloads running, queued, or failed right now.</p>
         </div>
       )}
     </div>

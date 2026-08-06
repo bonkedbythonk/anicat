@@ -70,8 +70,13 @@
   --bg-tertiary:   color-mix(in srgb, var(--background) 70%, white 30%);
   --bg-glass:      var(--glass-bg);
   --text-primary:  var(--foreground);
-  --text-secondary: color-mix(in srgb, var(--foreground) 65%, transparent);
-  --text-muted:    color-mix(in srgb, var(--foreground) 35%, transparent);
+  --text-secondary: color-mix(in srgb, var(--foreground) 75%, transparent);
+  /* Muted has to clear 4.5:1 against the background, and the alpha that does
+     that is not the same in both themes: cream-on-ink reaches it at 55%,
+     ink-on-paper only at 65% (light's foreground is a darker ink over a
+     lighter ground, so the same alpha lands much closer to the background).
+     Hence the per-theme override below rather than one shared value. */
+  --text-muted:    color-mix(in srgb, var(--foreground) 55%, transparent);
   --accent:        var(--accent-color);
   --accent-hover:  var(--accent-light);
   --accent-dim:    color-mix(in srgb, var(--accent-color) 15%, transparent);
@@ -99,6 +104,13 @@ html.system:not(.dark) {
     --glass-bg: #faf7f0;
     --glass-border: rgba(38, 34, 27, 0.12);
   }
+}
+
+/* Light needs a heavier muted alpha to clear AA — see the note in the token
+   bridge above. Applies to every skin, since they all share this bridge. */
+html.light,
+html.system:not(.dark) {
+  --text-muted: color-mix(in srgb, var(--foreground) 65%, transparent);
 }
 
 html.light {
@@ -471,11 +483,15 @@ textarea:focus-visible {
   }
 }
 
-/* Focus-active card lift — matches hover state for spatial navigation */
+/* Focus-active card lift — the lift matches hover so spatial navigation feels
+   like pointing, but focus also carries the accent ring the rest of the app
+   uses. Hover alone never draws the ring, so the two states stay distinct. */
 .card-glow.focus-active,
-.card-glow:focus-visible {
-  border-color: var(--border-color) !important;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+.card-glow:focus-visible,
+:focus-visible > .card-glow {
+  border-color: var(--accent-color) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 70%, transparent),
+              0 10px 28px rgba(0, 0, 0, 0.45) !important;
   transform: translateY(-2px);
 }
 
@@ -497,7 +513,9 @@ video {
    buttons; those stay sentence case. */
 .meta-mono {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 10.5px;
+  /* 10.5px uppercase mono was below a comfortable reading floor for text that
+     carries state (EP 11 / 25, WATCHED 6H AGO). */
+  font-size: 11.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -512,7 +530,7 @@ video {
   display: grid;
   place-items: center;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-muted);
   cursor: pointer;
   transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
@@ -634,8 +652,11 @@ html[data-style="sakura-zen"] [role="button"]:focus-visible {
 html[data-style="retro-manga"] {
   --background: #191410;
   --foreground: #f4efe6;
-  --accent-color: #e8272c;
-  --accent-light: #f54e52;
+  /* Was #e8272c, which only reached 3.74:1 on the card surface — the one
+     accent-coloured status line ("New episode out") failed AA. This red keeps
+     the comic-print feel at 4.79:1. */
+  --accent-color: #f54e52;
+  --accent-light: #ff7a70;
   --secondary-color: #ede8e0;
   --card-color: #241e17;
   --surface-color: #241e17;

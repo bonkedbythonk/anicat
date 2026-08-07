@@ -686,19 +686,23 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         <button
           onClick={() => handoffSequel ? selectItem(handoffSequel, "play") : handlePlayNext()}
           disabled={isPlayingNext || isCaughtUp || (isFinished && !handoffSequel)}
-          className="flex items-center gap-2 px-5 py-3 bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
+          title={handoffSequel ? `Start ${sequelTitle}` : undefined}
+          className="flex items-center gap-2 px-5 py-3 max-w-[280px] bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
         >
           {isPlayingNext ? (
             <Loader2 className="animate-spin" size={18} />
           ) : (
             <>
-              {isManga ? <BookOpen size={18} /> : <Play size={18} fill="currentColor" />}
-              <span>
-                {handoffSequel ? `Start ${sequelTitle}`
-                  : isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
-                  : showResume ? `Resume Episode ${nextEpisode} · ${formatTime(resumeSeconds)}`
-                  : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
-              </span>
+              {isManga ? <BookOpen size={18} className="shrink-0" /> : <Play size={18} fill="currentColor" className="shrink-0" />}
+              {handoffSequel ? (
+                <span className="truncate">Start {sequelTitle}</span>
+              ) : (
+                <span>
+                  {isFinished ? 'Completed' : isCaughtUp ? 'Caught Up'
+                    : showResume ? `Resume Episode ${nextEpisode} · ${formatTime(resumeSeconds)}`
+                    : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
+                </span>
+              )}
             </>
           )}
         </button>

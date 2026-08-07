@@ -240,8 +240,11 @@ export default function MobileApp() {
       <main
         className="flex-1 overflow-y-auto scroll-container px-6 pt-4"
         /* The bar is fixed, so this padding is what keeps content clear of it.
-           64px was 2px under the bar's real height, clipping the last row. */
-        style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}
+           66px is BottomNav's own content height (icon + label + its
+           padding), measured without the safe-area inset — the bar already
+           adds env(safe-area-inset-bottom) on top of that via its own
+           padding, so it must only be added once here too, not twice. */
+        style={{ paddingBottom: "calc(66px + env(safe-area-inset-bottom))" }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >

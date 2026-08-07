@@ -219,6 +219,12 @@ impl TorrentManager {
     /// (and its DHT/peer traffic) goes quiet the moment mpv closes, instead of
     /// finishing the episode in the background. Files stay on disk, so pressing
     /// play again resumes instantly. No-op if the session was never started.
+    ///
+    /// Also kicks off a cache sweep: this is the natural point where an
+    /// episode just went from "actively playing" to "sitting idle", so it's
+    /// the best moment to trim anything over the cap instead of waiting for
+    /// the next resolve() (which only happens once the user picks something
+    /// new — during a long binge that could be many episodes away).
     pub async fn pause_all(&self) {
         let Some(session) = self.session.get().cloned() else { return };
         let handles = std::sync::Mutex::new(Vec::new());
@@ -232,6 +238,8 @@ impl TorrentManager {
         for h in handles {
             let _ = session.pause(&h).await;
         }
+        let dir = self.cache_dir.clone();
+        tokio::task::spawn_blocking(move || cleanup_cache(&dir));
     }
 
     /// True while any torrent in the session is still downloading (live and
@@ -529,12 +537,18 @@ fn cleanup_cache(dir: &std::path::Path) {
         return;
     }
     items.sort_by_key(|(_, mtime, _)| *mtime);
-    let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    // Only protect what was touched very recently (still buffering/playing).
+    // This used to be a 1-hour grace window, which let an hour of binge-
+    // watching (many episodes, each several GB) sit fully protected from
+    // eviction regardless of the cap — that's how the cache grew unbounded
+    // in practice. 10 minutes is enough to cover the current episode without
+    // giving a whole session immunity.
+    let grace_cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
     for (path, mtime, size) in items {
         if total <= CACHE_CAP_BYTES {
             break;
         }
-        if mtime > hour_ago {
+        if mtime > grace_cutoff {
             continue;
         }
         let ok = if path.is_dir() {

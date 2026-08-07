@@ -79,16 +79,25 @@ export default function App() {
     // inertial momentum tail pop the whole prequel/sequel chain at once.
     let accX = 0;
     let accY = 0;
-    let cooldownUntil = 0;
+    let cooling = false;
+    let lastEventAt = 0;
     let reset: ReturnType<typeof setTimeout>;
 
     const onWheel = (e: WheelEvent) => {
       const { selectedItem: cur, closeDetail: close } = useAppStore.getState();
       if (!cur) return;
       const now = Date.now();
-      // Ignore the inertial momentum tail after a swipe so one physical gesture
-      // pops exactly one level.
-      if (now < cooldownUntil) return;
+      // A fixed-duration cooldown isn't enough: trackpad inertial momentum after
+      // a swipe can keep sending wheel events well past any fixed window, and
+      // once the cooldown elapses that ongoing momentum re-accumulates deltaX
+      // and crosses the threshold again, popping a second level. Instead, stay
+      // "cooling" until the gesture actually goes idle (a real gap between
+      // events), so one physical swipe can only ever pop once.
+      if (cooling) {
+        if (now - lastEventAt > 120) cooling = false;
+        else { lastEventAt = now; return; }
+      }
+      lastEventAt = now;
       accX += e.deltaX;
       accY += Math.abs(e.deltaY);
       clearTimeout(reset);
@@ -97,7 +106,7 @@ export default function App() {
       if (accX < -60 && Math.abs(accX) > accY * 2) {
         accX = 0;
         accY = 0;
-        cooldownUntil = now + 600;
+        cooling = true;
         close();
       }
     };

@@ -73,6 +73,7 @@ local state = {
   first_play = false,
   last_pos = 0,
   preload_sent = false,
+  end_reported = false,
 }
 
 local function parse_skip_times(raw)
@@ -492,6 +493,20 @@ local function play_next(sync, manual)
     -- can flip state.file_loaded to false before the pause event fires,
     -- silently skipping that notification too. Record explicitly (sync, so
     -- it lands before the OSD/return) instead of trusting that chain.
+    --
+    -- Guard the re-entry with a flag of its own: this branch returns without
+    -- setting next_triggered, so on the last episode every pause event and
+    -- every eof-reached flip re-entered check_near_end_auto_next and landed
+    -- back here — firing a *synchronous* curl on the mpv thread (a visible
+    -- hitch) and re-showing the OSD, over and over while the finished episode
+    -- sat on its last frame. next_triggered can't be that flag: end-file reads
+    -- it to decide whether to print the "Playback finished" hint, and no
+    -- further file-loaded ever clears it here, so reusing it would silence
+    -- that hint exactly when it matters.
+    if state.end_reported then
+      return
+    end
+    state.end_reported = true
     notify_backend("stop", true)
     mp.osd_message('Already at the last episode.', 3.0)
     return
@@ -514,6 +529,22 @@ local function play_prev(sync)
   arm_next_timeout('Failed to load previous episode.')
   mp.osd_message('Loading previous episode...', 3.0)
   notify_backend("prev", sync)
+end
+
+-- Shift+R. input.conf has always bound this to `anicat-reload-episode`, but
+-- nothing ever registered that message name, so the key did nothing. Reload
+-- the same URL in place and resume where it was: enough to recover a stalled
+-- HLS segment or a torrent read that gave up, without a round-trip through
+-- the backend (which would re-resolve the stream and drop the mpv window).
+local function reload_episode()
+  local path = mp.get_property('path')
+  if not path or path == '' then
+    mp.osd_message('Nothing to reload.', 2.0)
+    return
+  end
+  local pos = math.floor(mp.get_property_number('time-pos') or state.last_pos or 0)
+  mp.osd_message('Reloading episode...', 2.0)
+  mp.commandv('loadfile', path, 'replace', '0', 'start=' .. pos)
 end
 
 local function toggle_translation()
@@ -560,6 +591,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-next-episode', play_next)
   mp.register_script_message('anicat-previous-episode', play_prev)
   mp.register_script_message('anicat-toggle-translation', toggle_translation)
+  mp.register_script_message('anicat-reload-episode', reload_episode)
   mp.register_script_message('anicat-cancel-next', function()
     state.next_triggered = false
   end)
@@ -605,6 +637,7 @@ mp.register_event('file-loaded', function()
   state.first_play = true
   state.next_triggered = false
   state.preload_sent = false
+  state.end_reported = false
   state.duration = mp.get_property_number('duration') or 0
   if next_timeout then
     next_timeout:kill()

@@ -90,6 +90,17 @@ async fn try_send_ipc(ipc_path: &str, commands: Vec<serde_json::Value>) -> Resul
     }
 }
 
+/// Puts a preloaded stream back after a start that took it out of the slot
+/// but then bailed (superseded by a newer start). Only fills an empty slot:
+/// whatever a later preload has already put there is fresher by definition.
+async fn restore_preload(state: &AppState, entry: Option<crate::state::PreloadedStream>) {
+    let Some(entry) = entry else { return };
+    let mut slot = state.preloaded_stream.lock().await;
+    if slot.is_none() {
+        *slot = Some(entry);
+    }
+}
+
 pub async fn cancel_mpv_next(message: &str) -> Result<(), String> {
     let ipc_path = get_ipc_path();
     let cmd_osd = serde_json::json!({
@@ -856,6 +867,11 @@ pub async fn start_playback(
 
     let mut stream_headers = None;
     let mut subtitle_url: Option<String> = None;
+    // Kept so the superseded-start bails further down can hand the preloaded
+    // entry back to the slot they took it out of — otherwise the racing call
+    // that actually wins finds an empty slot and re-scrapes from scratch,
+    // losing the instant transition in the one case it was built for.
+    let mut consumed_preload: Option<crate::state::PreloadedStream> = None;
 
     let stream_url = if let Some(local_path) = local_file_path {
         log::info!("Playing offline local download: {}", local_path);
@@ -892,6 +908,7 @@ pub async fn start_playback(
 
         let (raw_stream_url, headers, sub_url) = if let Some(p) = preloaded {
             log::info!("Using preloaded stream for media {} ep {}", media_id, episode_number);
+            consumed_preload = Some(p.clone());
             (p.raw_url, p.headers, p.subtitle_url)
         } else {
             let candidates = vec![provider_name.clone(), fallback_provider, secondary_fallback];
@@ -1285,6 +1302,21 @@ pub async fn start_playback(
         // (see anineko.py's _extract_subtitle_url) rather than baking them
         // into the video — loadfile's per-file options string accepts
         // sub-file the same as any other property override.
+        //
+        // `sub-file` is not a plain scalar option: mpv expands it to
+        // `sub-files-append` (visible verbatim in mpv.log: "Setting option
+        // 'sub-files-append' = ..."). So the per-file value below *adds* to
+        // whatever the global sub-files list already holds — which, after a
+        // launch that passed --sub-file, is the previous episode's VTT. That
+        // left the next episode with two external subtitle tracks (the stale
+        // one usually winning auto-selection), and when the next episode had
+        // no VTT at all (torrent, dub server, a fallback provider) the stale
+        // track survived on its own with nothing to override it. Clear the
+        // list first, exactly like the referrer/user-agent/http-header-fields
+        // resets above do, so each episode starts from an empty one.
+        commands.push(serde_json::json!({
+            "command": ["set_property", "sub-files", ""]
+        }));
         let mut load_options = format!("start={}", resume_seconds);
         if let Some(ref sub_url) = subtitle_url {
             load_options.push_str(&format!(",sub-file={}", sub_url));
@@ -1299,11 +1331,32 @@ pub async fn start_playback(
         // what made it hang right after the start instead of buffering.
         // loadfile's options string takes the same per-file option overrides
         // CLI args do, so set them the same way here.
+        //
+        // The reverse transition needs an explicit reset, but only in one
+        // case: mpv reverts per-file options when a file ends, so a torrent
+        // episode loaded *through this path* doesn't leak its settings
+        // onward. What does leak is a torrent episode that launched the mpv
+        // process — those CLI args are globals for that process's lifetime.
+        // An auto-next off such an episode onto a non-torrent stream (a
+        // fallback provider, a mixed-provider series) then inherited
+        // cache-pause-initial=yes and cache-pause-wait=30, so mpv sat
+        // buffering 30s of an ordinary HLS stream before showing a frame —
+        // the "doesn't play immediately" symptom. Restore what a fresh
+        // non-torrent launch would have had: mpv's own defaults, plus copies
+        // of the two demuxer values mpv.conf sets. Those copies are the
+        // tradeoff — editing mpv.conf no longer reaches this path, so change
+        // both together.
         if is_torrent_stream {
             load_options.push_str(
                 ",network-timeout=0,cache=yes,cache-pause=yes,cache-pause-initial=yes,\
                  cache-pause-wait=30,demuxer-max-bytes=1GiB,demuxer-max-back-bytes=256MiB,\
                  demuxer-readahead-secs=120,force-seekable=yes",
+            );
+        } else {
+            load_options.push_str(
+                ",network-timeout=60,cache=auto,cache-pause=yes,cache-pause-initial=no,\
+                 cache-pause-wait=1,demuxer-max-bytes=128MiB,demuxer-max-back-bytes=48MiB,\
+                 demuxer-readahead-secs=15,force-seekable=no",
             );
         }
         let load_cmd = vec![
@@ -1320,6 +1373,26 @@ pub async fn start_playback(
         commands.push(serde_json::json!({
             "command": ["set_property", "pause", false]
         }));
+
+        // Last request wins. Resolving a stream can take tens of seconds (a
+        // cold torrent worst-case is ~85s), and nothing upstream serialized
+        // starts: pressing Shift+N while an auto-next was still resolving, or
+        // clicking another episode in the app, left two resolvers racing to
+        // send their own `loadfile … replace` at whatever moment each
+        // finished. The later one could land first and then be stomped by the
+        // older one, so mpv ended up on an episode nobody asked for while
+        // current_playback described the other. `playback_generation` already
+        // marks which start is newest (the AniSkip pusher checks it) — check
+        // it here too, right before the IPC write that actually changes what
+        // mpv is playing.
+        if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+            log::info!(
+                "Superseded by a newer playback start; not sending loadfile for media {} ep {}",
+                media_id, episode_number
+            );
+            restore_preload(&state, consumed_preload.take()).await;
+            return Ok(PlaybackStart { stream_url });
+        }
 
         let ipc_path = get_ipc_path();
         log::info!("Connecting to running MPV at {} via IPC...", ipc_path);
@@ -1368,6 +1441,17 @@ pub async fn start_playback(
             paused: false,
         });
         emit_playback_active(&app, true);
+        return Ok(PlaybackStart { stream_url });
+    }
+
+    // Same last-request-wins check as the IPC reuse path above, before the
+    // irreversible part (killing the running mpv and spawning a new one).
+    if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+        log::info!(
+            "Superseded by a newer playback start; not launching mpv for media {} ep {}",
+            media_id, episode_number
+        );
+        restore_preload(&state, consumed_preload.take()).await;
         return Ok(PlaybackStart { stream_url });
     }
 

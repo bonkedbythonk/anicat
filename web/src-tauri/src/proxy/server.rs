@@ -1030,6 +1030,23 @@ fn host_is_allowed(url: &str) -> bool {
     ALLOWED_DOMAINS.iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
 
+/// Length of the decoy PNG prefixed to an obfuscated media segment, or `None`
+/// when `head` isn't one and must be passed through untouched.
+///
+/// What separates a real image from a wrapper is whether anything follows the
+/// IEND chunk: a genuine PNG ends there, a wrapper has the media payload. The
+/// caller must therefore keep reading past IEND until a payload byte appears
+/// or the body ends, rather than deciding the moment it sees IEND.
+fn png_decoy_len(head: &[u8]) -> Option<usize> {
+    const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !head.starts_with(PNG_MAGIC) {
+        return None;
+    }
+    // IEND's 4-byte name, then its 4-byte CRC.
+    let offset = head.windows(4).position(|w| w == b"IEND")? + 8;
+    (offset < head.len()).then_some(offset)
+}
+
 async fn proxy_handler(
     State(state): State<ProxyState>,
     Query(params): Query<ProxyQuery>,
@@ -1156,6 +1173,104 @@ async fn proxy_handler(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    // Obfuscated HLS segments. anineko serves its real media from an ad CDN
+    // (p16-ad-sg.ibyteimg.com) as `content-type: image/png`: a tiny decoy PNG
+    // followed by the actual MPEG-TS payload. Because that content-type is
+    // neither video/* nor audio/*, these fell into the fully-buffered path
+    // below — mpv got its first byte only after the whole ~800 KB segment had
+    // been downloaded and re-assembled in RAM. mpv wants ~15s of readahead
+    // before it starts, so that cost was paid serially over several segments:
+    // a long black screen at the start of every episode, and much worse
+    // whenever the CDN was slow (observed: ~130 ms per segment on a warm cache,
+    // ~4 s on a cold one).
+    //
+    // Buffer only far enough to find the end of the decoy (IEND is at byte 62
+    // in practice; the cap is pure insurance), then stream the rest straight
+    // through. Time-to-first-byte becomes the decoy's length instead of the
+    // whole segment's.
+    //
+    // Genuine images still work: a real PNG (a cover) ends *at* IEND, so the
+    // "is there payload after it" test below fails and nothing is stripped.
+    if !is_playlist_meta && content_type.starts_with("image/") {
+        use futures_util::StreamExt;
+
+        const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+        const PNG_PEEK_LIMIT: usize = 64 * 1024;
+
+        let mut body_stream = upstream.bytes_stream();
+        let mut head: Vec<u8> = Vec::new();
+        let mut upstream_ended = false;
+
+        loop {
+            let decided = if head.len() < PNG_MAGIC.len() {
+                false
+            } else if !head.starts_with(PNG_MAGIC) {
+                // Not obfuscated at all — nothing to look for.
+                true
+            } else {
+                // Finding IEND isn't enough: a genuine PNG also ends there.
+                // Keep pulling until either a payload byte shows up (wrapper)
+                // or the stream ends (real image). Deciding at IEND alone
+                // would strip a small cover image down to nothing, since the
+                // loop exits before reqwest ever yields its end-of-stream.
+                match head.windows(4).position(|w| w == b"IEND") {
+                    Some(pos) => head.len() > pos + 8,
+                    None => false,
+                }
+            };
+            if decided || upstream_ended || head.len() >= PNG_PEEK_LIMIT {
+                break;
+            }
+            match body_stream.next().await {
+                Some(Ok(chunk)) => head.extend_from_slice(&chunk),
+                Some(Err(e)) => {
+                    log::error!("Failed to read upstream body from {}: {}", url, e);
+                    return Err(StatusCode::BAD_GATEWAY);
+                }
+                None => upstream_ended = true,
+            }
+        }
+
+        let mut stripped = false;
+        if let Some(offset) = png_decoy_len(&head) {
+            head.drain(..offset);
+            stripped = true;
+        }
+
+        if stripped && status == StatusCode::PARTIAL_CONTENT {
+            status = StatusCode::OK;
+        }
+
+        let mut response = Response::builder().status(status);
+        for (key, value) in upstream_headers.iter() {
+            let key_lower = key.as_str().to_lowercase();
+            if matches!(
+                key_lower.as_str(),
+                "transfer-encoding" | "connection" | "keep-alive" | "trailer" | "upgrade" | "content-length"
+            ) {
+                continue;
+            }
+            // Stripping the decoy shifts every offset, so the upstream's byte
+            // ranges no longer describe what we're sending.
+            if stripped && matches!(key_lower.as_str(), "content-range" | "accept-ranges" | "x-length") {
+                continue;
+            }
+            if let Ok(hv) = HeaderValue::from_bytes(value.as_bytes()) {
+                response = response.header(key.as_str(), hv);
+            }
+        }
+        response = response
+            .header("access-control-allow-origin", "*")
+            .header("access-control-expose-headers", "*");
+
+        let head_chunk = futures_util::stream::once(async move {
+            Ok::<_, reqwest::Error>(bytes::Bytes::from(head))
+        });
+        return response
+            .body(Body::from_stream(head_chunk.chain(body_stream)))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
     let mut bytes = upstream
         .bytes()
         .await
@@ -1230,7 +1345,44 @@ async fn proxy_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::host_is_allowed;
+    use super::{host_is_allowed, png_decoy_len};
+
+    /// A minimal but structurally real PNG: signature, IHDR, IEND.
+    fn decoy_png() -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n".to_vec();
+        v.extend_from_slice(&[0, 0, 0, 13]);
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+        v.extend_from_slice(&[0x1f, 0x15, 0xc4, 0x89]);
+        v.extend_from_slice(&[0, 0, 0, 0]);
+        v.extend_from_slice(b"IEND");
+        v.extend_from_slice(&[0xae, 0x42, 0x60, 0x82]);
+        v
+    }
+
+    #[test]
+    fn strips_decoy_from_wrapped_segment() {
+        let decoy = decoy_png();
+        let mut body = decoy.clone();
+        // MPEG-TS payload: 0x47 sync byte, as anineko's ad-CDN segments carry.
+        body.extend_from_slice(b"\x47\x40\x11\x10payload");
+        let offset = png_decoy_len(&body).expect("wrapper should be detected");
+        assert_eq!(offset, decoy.len());
+        assert_eq!(&body[offset..offset + 1], b"\x47");
+    }
+
+    #[test]
+    fn leaves_a_genuine_png_alone() {
+        // A real cover image: the body ends at IEND, nothing follows. Stripping
+        // here would serve an empty image.
+        assert_eq!(png_decoy_len(&decoy_png()), None);
+    }
+
+    #[test]
+    fn ignores_non_png_bodies() {
+        assert_eq!(png_decoy_len(b"\x47\x40\x11\x10raw ts"), None);
+        assert_eq!(png_decoy_len(b""), None);
+    }
 
     #[test]
     fn allows_known_media_hosts() {

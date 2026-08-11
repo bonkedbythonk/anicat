@@ -162,11 +162,24 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     return () => clearTimeout(timer);
   }, [streamUrl]);
 
+  // Torrent playback is the one source whose failures are a fixed property of
+  // the browser rather than a flaky server: releases are .mkv (and often HEVC
+  // or 10-bit H.264), which no amount of retrying makes playable. Both the
+  // error path and the silent readyState=0 path below say so plainly, since
+  // "try another server" is advice that cannot work here.
+  const isTorrentStream = !!streamUrl?.startsWith("/torrent-stream");
+  const TORRENT_UNPLAYABLE =
+    "This browser can't play torrent releases — they're .mkv files. Switch Source to AniNeko in Playback Settings.";
+
   const handleVideoError = () => {
     const mediaError = videoRef.current?.error;
     const name = mediaError ? MEDIA_ERROR_NAMES[mediaError.code] || `code ${mediaError.code}` : "unknown";
     console.error("[VideoPlayerOverlay] <video> error:", name, mediaError?.message, streamUrl);
-    setError("Couldn't play this episode. Try again or pick another server.");
+    setError(
+      isTorrentStream
+        ? TORRENT_UNPLAYABLE
+        : "Couldn't play this episode. Try again or pick another server.",
+    );
     setErrorDetail(`${name}${mediaError?.message ? `: ${mediaError.message}` : ""} — ${streamUrl}`);
   };
 
@@ -507,12 +520,14 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center text-white/80">
           <AlertCircle size={28} />
           <p className="text-sm">{error}</p>
-          <button
-            onClick={() => resolve(episodeNumber)}
-            className="rounded-full bg-white/15 px-5 py-2 text-sm font-semibold active:scale-95 transition-transform"
-          >
-            Retry
-          </button>
+          {!isTorrentStream && (
+            <button
+              onClick={() => resolve(episodeNumber)}
+              className="rounded-full bg-white/15 px-5 py-2 text-sm font-semibold active:scale-95 transition-transform"
+            >
+              Retry
+            </button>
+          )}
           {errorDetail && (
             <details className="mt-1 text-left">
               <summary className="cursor-pointer text-[11px] text-white/40">Details</summary>
@@ -527,7 +542,15 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       {stalled && !error && !loading && (
         <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 flex-col items-center gap-3 px-8 text-center text-white/80">
           <AlertCircle size={28} />
-          <p className="text-sm">This is taking longer than expected — the stream may be unreachable.</p>
+          {/* Unlike the error event, a stall is ambiguous on a torrent: a
+              slow-but-alive swarm sits at readyState 0 too, so this must not
+              claim the format is at fault — name both causes and keep Retry,
+              which is the useful action for the swarm case. */}
+          <p className="text-sm">
+            {isTorrentStream
+              ? "Still buffering — the swarm may be slow, or this browser may not support the release format. Switching Source to AniNeko in Playback Settings avoids the second case."
+              : "This is taking longer than expected — the stream may be unreachable."}
+          </p>
           <button
             onClick={() => resolve(episodeNumber)}
             className="rounded-full bg-white/15 px-5 py-2 text-sm font-semibold active:scale-95 transition-transform"

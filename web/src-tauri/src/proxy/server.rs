@@ -1008,6 +1008,12 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
     "filemoon.sx", "filemoon.art", "filemoon.top",
     "repackager.wixmp.com", "vivibebe.site",
+    // anineko's jwplayer embed hosts. The scraper deliberately resolves them
+    // to their same-origin `/stream/.../master.m3u8` (the player's own `hls4`)
+    // rather than the `hls2`/`hls3` mirrors, which sit on rotating throwaway
+    // CDN domains that could never be listed here. Playlist, variants and
+    // segments therefore all stay on these three hosts.
+    "otakuhg.site", "otakuvid.online", "otakuvid.com",
     // anineko's soft-sub sidecar CDN. Only the mobile PWA's <track> element
     // ever hits this — desktop's mpv fetches --sub-file URLs directly over
     // the network, bypassing this proxy (and its allowlist) entirely, which

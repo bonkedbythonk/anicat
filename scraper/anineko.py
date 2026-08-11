@@ -5,6 +5,10 @@ Real DOM structure:
   Episode page: button.nv-server-btn with data-video=URL, data-tab=tab_N
      <span>Hard Sub</span> / <span>DUB</span> for group labels
   Embed URLs: third-party sites that require follow-up fetch for stream URLs
+     Current hosts (verified 2026-08-11): vivibebe.site (serves
+     /public/stream/{id}/master.m3u8 directly), otakuhg.site and
+     otakuvid.online (jwplayer behind packed JS), playmogo.com (Cloudflare
+     challenge, unresolvable without a browser).
 
 Cloudflare bypass: nodriver solves the JS challenge once, extracts
 cf_clearance cookie, and injects it into curl_cffi for fast subsequent requests.
@@ -673,19 +677,32 @@ class AniNekoProvider:
         }
 
     def _try_extract_direct_url(self, embed_url: str) -> Optional[str]:
-        # 1. Direct construction for known hosts
-        vibe_match = re.search(r"vibeplayer\.site/(?:embed/)?([a-zA-Z0-9]+)", embed_url)
+        """Resolve an embed page to a playable stream URL.
+
+        Page extraction runs *first* and host-shape construction is only a
+        fallback. It used to be the other way round, which is what broke
+        playback: otakuvid.online / otakuhg.site retired the
+        `/public/stream/{id}/master.m3u8` shape (it 404s now), and because the
+        construction returned early, the general extractor — which resolves
+        those hosts fine — never ran.
+        """
+        direct = self._extract_from_embed_page(embed_url)
+        if direct:
+            return direct
+
+        # Fallback: hosts that still serve the `/public/stream/` shape. Only
+        # reached when the page itself yielded nothing (JS-gated, rate-limited,
+        # or a layout we don't parse).
+        vibe_match = re.search(
+            r"(vibeplayer\.site|vivibebe\.site)/(?:embed/)?([a-zA-Z0-9]+)", embed_url
+        )
         if vibe_match:
-            vid = vibe_match.group(1)
-            return f"https://vibeplayer.site/public/stream/{vid}/master.m3u8"
+            host, vid = vibe_match.group(1), vibe_match.group(2)
+            return f"https://{host}/public/stream/{vid}/master.m3u8"
 
-        otaku_match = re.search(r"(?:otakuvid\.online|otakuvid\.com|otakuhg\.site)/(?:embed/|e/)?([a-zA-Z0-9]+)", embed_url)
-        if otaku_match:
-            vid = otaku_match.group(1)
-            domain = urlparse(embed_url).netloc
-            return f"https://{domain}/public/stream/{vid}/master.m3u8"
+        return None
 
-        # 2. General network page extraction
+    def _extract_from_embed_page(self, embed_url: str) -> Optional[str]:
         try:
             resp = self.session.get(embed_url, timeout=15)  # embed URLs are third-party, no CF
             if resp.status_code != 200:
@@ -704,7 +721,19 @@ class AniNekoProvider:
                     text += "\n" + unpacked
                 except Exception:
                     pass
-                    
+
+            # jwplayer hosts (otakuvid/otakuhg and friends) declare
+            # `var links={"hls2":...,"hls3":...,"hls4":...}` and then feed the
+            # player `links.hls4||links.hls3||links.hls2`. Honour that order
+            # rather than whichever key happens to appear first in the source:
+            # hls4 is a *same-origin* relative path, so the playlist, its
+            # variants and every segment stay on one host the proxy allowlist
+            # already covers, while hls2/hls3 point at rotating throwaway CDN
+            # domains that can never be allowlisted.
+            links = self._extract_jwplayer_links(text)
+            if links:
+                return urljoin(embed_url, links)
+
             for pattern in [
                 r'"hls\d*"\s*:\s*["\']([^"\']+(?:\.mp4|\.m3u8|master\.txt)[^"\']*)["\']',
                 r'source\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
@@ -719,6 +748,24 @@ class AniNekoProvider:
                     return urljoin(embed_url, raw_link)
         except Exception:
             pass
+        return None
+
+    @staticmethod
+    def _extract_jwplayer_links(text: str) -> Optional[str]:
+        """Pick the best entry out of a jwplayer `var links={...}` object."""
+        m = re.search(r"\blinks\s*=\s*(\{.*?\})\s*;", text, re.DOTALL)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(1))
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(obj, dict):
+            return None
+        for key in ("hls4", "hls3", "hls2", "hls"):
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
         return None
 
     def _decode_baseN(self, num: int, base: int) -> str:

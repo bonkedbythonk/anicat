@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { getConfig, getHealth, mediaApi } from "@/lib/api";
 import { getMobileToken, clearMobileToken, mobileFetch } from "@/lib/transport";
-import { applyMobileSettings } from "./mobileSettings";
+import { applyMobileSettings, canPlayTorrents } from "./mobileSettings";
 
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { ProfileView } from "@/components/views/ProfileView";
@@ -149,7 +149,12 @@ export default function MobileApp() {
       coverImage?: string,
       totalEpisodes?: number,
     ) => {
-      setPlayer({ mediaId, episodeNumber: epNum, provider, title, episodeTitle, coverImage, totalEpisodes });
+      // Last gate before the player: torrent releases are .mkv, which WebKit
+      // can't demux. The provider can still arrive as "nyaa" from the server's
+      // global config.toml even after the device-local pickers have hidden it,
+      // so the override lives at this one funnel rather than at each caller.
+      const playable = provider === "nyaa" && !canPlayTorrents() ? "anineko" : provider;
+      setPlayer({ mediaId, episodeNumber: epNum, provider: playable, title, episodeTitle, coverImage, totalEpisodes });
     },
     [],
   );

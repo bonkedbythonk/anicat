@@ -14,7 +14,7 @@ import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import MangaReader from "@/components/media/MangaReader";
 import { MobileEpisodeList } from "./MobileEpisodeList";
-import { loadMobileSettings } from "./mobileSettings";
+import { loadMobileSettings, canPlayTorrents } from "./mobileSettings";
 import { PosterCard } from "./PosterCard";
 import { BottomSheet, SheetRow } from "./BottomSheet";
 
@@ -71,11 +71,16 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   // Device-local Source setting (You tab) wins over the server's global
   // provider — config.toml is shared by every user in multi-user mode.
   const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
+  // Torrents are .mkv; WebKit can't demux that, so on iOS the source isn't
+  // offered and a server-side `provider = "nyaa"` is overridden rather than
+  // handed to a <video> element that will silently stall on it.
+  const torrentsPlayable = useMemo(() => canPlayTorrents(), []);
   useEffect(() => {
     const deviceProvider = loadMobileSettings().defaultProvider;
     const provider = deviceProvider || (config?.general?.provider as string | undefined);
-    if (provider) setSelectedProvider(provider);
-  }, [config]);
+    if (!provider) return;
+    setSelectedProvider(provider === "nyaa" && !torrentsPlayable ? "anineko" : provider);
+  }, [config, torrentsPlayable]);
 
   const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
 
@@ -173,7 +178,11 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   useEffect(() => {
     if (initialAction === "play" && !loading && config && !hasTriggeredInitial) {
       setHasTriggeredInitial(true);
-      handlePlayNext(initialPlayEpisode ? Number(initialPlayEpisode) : undefined, config?.general?.provider as string);
+      const initialProvider = config?.general?.provider as string | undefined;
+      handlePlayNext(
+        initialPlayEpisode ? Number(initialPlayEpisode) : undefined,
+        initialProvider === "nyaa" && !torrentsPlayable ? "anineko" : initialProvider,
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAction, loading, config, hasTriggeredInitial]);
@@ -674,9 +683,11 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       <BottomSheet open={episodeSettingsOpen} onClose={() => setEpisodeSettingsOpen(false)} title="Playback Settings">
         <SheetRow active={autoskip} onClick={handleToggleAutoskip}><SkipForward size={18} /> Auto-Skip Intro {autoskip ? "(On)" : "(Off)"}</SheetRow>
         <SheetRow active={autoplay} onClick={handleToggleAutoNext}><PlayCircle size={18} /> Auto Next Episode {autoplay ? "(On)" : "(Off)"}</SheetRow>
-        <SheetRow onClick={() => setSelectedProvider((p) => (p === "anineko" ? "nyaa" : "anineko"))}>
-          <RotateCcw size={18} /> Source: {selectedProvider === "anineko" ? "AniNeko" : "Torrents"} (tap to switch)
-        </SheetRow>
+        {torrentsPlayable && (
+          <SheetRow onClick={() => setSelectedProvider((p) => (p === "anineko" ? "nyaa" : "anineko"))}>
+            <RotateCcw size={18} /> Source: {selectedProvider === "anineko" ? "AniNeko" : "Torrents"} (tap to switch)
+          </SheetRow>
+        )}
       </BottomSheet>
 
       {/* Character detail sheet */}

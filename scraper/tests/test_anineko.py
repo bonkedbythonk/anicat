@@ -70,3 +70,26 @@ def test_parse_anime_no_episodes_logs_warning(caplog):
     assert info is not None
     assert info.episodes == []
     assert any("article.nv-info-episode-item" in r.message for r in caplog.records)
+
+
+JWPLAYER_JS = """
+var uas=[];var links={"hls4":"/stream/AbC-dEf/kjhh/1786495156/66838462/master.m3u8",
+"hls3":"https://54pkd.rotating-host.cfd/QVi5/hls3/01/13367/ivvhiadw4tdz_,l,n,h,.urlset/master.txt",
+"hls2":"https://54pkd.premilkyway.com/hls2/01/13367/ivvhiadw4tdz_.urlset/master.m3u8?t=abc"};
+jwplayer("vplayer").setup({sources:[{file:links.hls4||links.hls3||links.hls2,type:"hls"}]});
+"""
+
+
+def test_extract_jwplayer_links_prefers_same_origin_hls4():
+    assert AniNekoProvider._extract_jwplayer_links(JWPLAYER_JS) == (
+        "/stream/AbC-dEf/kjhh/1786495156/66838462/master.m3u8"
+    )
+
+
+def test_extract_jwplayer_links_falls_back_when_hls4_absent():
+    js = JWPLAYER_JS.replace('"hls4"', '"hls9"')
+    assert AniNekoProvider._extract_jwplayer_links(js).endswith("master.txt")
+
+
+def test_extract_jwplayer_links_ignores_non_links_assignments():
+    assert AniNekoProvider._extract_jwplayer_links("var other={\"hls4\":\"/x\"};") is None

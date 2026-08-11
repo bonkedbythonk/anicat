@@ -1,8 +1,9 @@
+import { useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { mediaApi, getUserLists } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
-import { saveMobileSetting } from "./mobileSettings";
+import { saveMobileSetting, canPlayTorrents } from "./mobileSettings";
 
 interface YouViewProps {
   displayName: string;
@@ -113,9 +114,16 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
   });
   const meanScore = profile?.mean_score ? Math.round(profile.mean_score) : null;
 
+  // "nyaa" serves .mkv, which WebKit can't demux — on iOS it isn't a choice
+  // this phone can act on, so the whole Source row drops out rather than
+  // offering a setting that guarantees a stalled player.
+  const selectableProviders = useMemo(
+    () => PROVIDERS.filter((p) => p !== "nyaa" || canPlayTorrents()),
+    [],
+  );
   const cycleProvider = () => {
-    const idx = PROVIDERS.indexOf(provider as (typeof PROVIDERS)[number]);
-    saveMobileSetting("defaultProvider", PROVIDERS[(idx + 1) % PROVIDERS.length]);
+    const idx = selectableProviders.indexOf(provider as (typeof PROVIDERS)[number]);
+    saveMobileSetting("defaultProvider", selectableProviders[(idx + 1) % selectableProviders.length]);
   };
   const groupClass = "rounded-md bg-surface border border-border overflow-hidden";
   const groupLabel = "px-1 pt-6 pb-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground";
@@ -150,11 +158,14 @@ export function YouView({ displayName, anilistUsername, onNavigate, onLogout }: 
 
       <p className={groupLabel}>Playback</p>
       <div className={groupClass}>
-        <Row first label="Source" explainer="Which provider this phone streams from." onClick={cycleProvider}>
-          <span className="font-mono text-[11px] uppercase tracking-[0.07em] text-muted-foreground">{PROVIDER_LABELS[provider] || provider}</span>
-          <ChevronRight size={15} className="text-muted-foreground shrink-0" />
-        </Row>
+        {selectableProviders.length > 1 && (
+          <Row first label="Source" explainer="Which provider this phone streams from." onClick={cycleProvider}>
+            <span className="font-mono text-[11px] uppercase tracking-[0.07em] text-muted-foreground">{PROVIDER_LABELS[provider] || provider}</span>
+            <ChevronRight size={15} className="text-muted-foreground shrink-0" />
+          </Row>
+        )}
         <Row
+          first={selectableProviders.length <= 1}
           label="Auto-play next episode"
           onClick={() => saveMobileSetting("autoplay", !autoplay)}
         >

@@ -26,7 +26,7 @@ scraper spawned on demand.
  ┌──────▼───────┐         CDN ◀───┘ (segments)      ┌────────▼─────────┐
  │ SQLite        │                                  │ curl_cffi +      │
  │ registry +    │                                  │ selectolax       │
- │ watch history │                                  │ 120s idle timeout│
+ │ watch history │                                  │ 30min idle timeout│
  └──────────────┘                                   └──────────────────┘
 ```
 
@@ -116,13 +116,15 @@ Anicat can be reached from a phone on the same Wi-Fi while the desktop app is
 running — no separate server, no Raspberry Pi, no downloads support.
 
 - **Access gate** — a PIN set in Settings → Phone Access, off by default. The
-  "token" a phone holds is just `sha256(pin)`, recomputed from the live config
-  on every request; there's no server-side session store, so changing the PIN
-  instantly invalidates old tokens. This is deliberately not hardened
-  security — the threat model is "keep a parent from stumbling in by
-  accident," not "withstand an attacker already on the LAN." Requests from
-  loopback (i.e. mpv's own Lua script) skip the check entirely so the
-  existing desktop flow is unaffected.
+  token a phone holds is derived from the PIN plus a per-install secret
+  (`proxy/secret.rs`, stored beside `registry.db` at 0600) and recomputed on
+  every request; there's no server-side session store, so changing the PIN
+  instantly invalidates old tokens. The secret is what stops the token from
+  being a reversible hash of a short numeric PIN — everything else about the
+  gate is deliberately not hardened security, since the threat model is "keep a
+  parent from stumbling in by accident," not "withstand an attacker already on
+  the LAN." Requests from loopback (i.e. mpv's own Lua script) skip the check
+  entirely so the existing desktop flow is unaffected.
 - **Backend** — `web/src-tauri/src/proxy/mobile_api.rs` and `mobile_auth.rs`,
   nested into the same axum server as the HLS proxy. Most handlers are thin
   wrappers that call the existing `#[tauri::command]` functions directly via

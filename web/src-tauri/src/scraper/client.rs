@@ -42,7 +42,22 @@ pub struct AnimeInfo {
     pub episodes: Vec<Episode>,
 }
 
-const IDLE_TIMEOUT_SECS: u64 = 120;
+/// How long the sidecar may sit idle before the watchdog kills it.
+///
+/// This has to stay **above** the provider's Cloudflare clearance TTL
+/// (`_CF_COOKIE_TTL = 1500` in `scraper/anineko.py`). The `cf_clearance`
+/// cookie, the solver holding it, and the `curl_cffi` session carrying it all
+/// live inside this process, so killing the process throws the clearance away
+/// no matter how much of its 25 minutes is left. At the old 120s, browsing for
+/// three minutes and then pressing play meant the first anineko request 403'd
+/// and had to launch headless Chrome to re-solve the challenge — several
+/// seconds of dead time on the play path, repeatedly, mid-session.
+///
+/// Cost of the larger window is an idle Python process (tens of MB) sticking
+/// around longer. Persisting the clearance to disk would let this drop back
+/// down, but needs the solving Chrome version and a wall-clock timestamp
+/// persisted alongside it or the rehydrated session fingerprint won't match.
+const IDLE_TIMEOUT_SECS: u64 = 1800;
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -63,6 +78,81 @@ impl Drop for ScraperProcess {
 
 type FailureNotifier = Box<dyn Fn(&str) + Send + Sync>;
 
+/// Consecutive transport failures before a provider is benched.
+const BREAKER_TRIP_AFTER: u32 = 3;
+/// How long a benched provider is skipped before one request is let through to
+/// see whether it recovered.
+const BREAKER_COLD_FOR: Duration = Duration::from_secs(5 * 60);
+
+/// Per-provider circuit breaker for the scraper request path.
+///
+/// A provider that is down costs the *full* timeout budget on every attempt —
+/// 90s for a search, 30s for a stream fetch, and the play path issues several
+/// of each before giving up and running the whole chain again for the fallback
+/// provider. Benching it after a few consecutive failures turns that into an
+/// instant error, so the fallback provider gets tried immediately.
+///
+/// Deliberately counts **only transport failures** (the sidecar unreachable,
+/// the request erroring or timing out). A request that completes and returns
+/// zero results is not evidence the provider is down: an episode that genuinely
+/// isn't on the site would otherwise bench a perfectly healthy provider for
+/// five minutes.
+#[derive(Clone, Default)]
+struct ProviderBreaker {
+    inner: Arc<std::sync::Mutex<std::collections::HashMap<String, BreakerEntry>>>,
+}
+
+#[derive(Default)]
+struct BreakerEntry {
+    consecutive_failures: u32,
+    tripped_at: Option<Instant>,
+}
+
+impl ProviderBreaker {
+    /// `Err` with a human-readable reason when the provider is currently
+    /// benched. Clears an expired bench on the way through, so the next request
+    /// probes the provider for real.
+    fn check(&self, provider: &str) -> Result<(), String> {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(entry) = map.get_mut(provider) else { return Ok(()) };
+        let Some(tripped_at) = entry.tripped_at else { return Ok(()) };
+        let elapsed = tripped_at.elapsed();
+        if elapsed >= BREAKER_COLD_FOR {
+            // Half-open: let this one through and judge the provider on it.
+            entry.tripped_at = None;
+            entry.consecutive_failures = 0;
+            log::info!("[breaker] '{}' cooled off, trying it again", provider);
+            return Ok(());
+        }
+        Err(format!(
+            "{} is temporarily unavailable ({} consecutive failures; retrying in {}s)",
+            provider,
+            entry.consecutive_failures,
+            (BREAKER_COLD_FOR - elapsed).as_secs()
+        ))
+    }
+
+    fn record_success(&self, provider: &str) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(provider);
+    }
+
+    fn record_failure(&self, provider: &str) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(provider.to_string()).or_default();
+        entry.consecutive_failures += 1;
+        if entry.consecutive_failures >= BREAKER_TRIP_AFTER && entry.tripped_at.is_none() {
+            entry.tripped_at = Some(Instant::now());
+            log::warn!(
+                "[breaker] benching '{}' for {}s after {} consecutive transport failures",
+                provider,
+                BREAKER_COLD_FOR.as_secs(),
+                entry.consecutive_failures
+            );
+        }
+    }
+}
+
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
     spawn_lock: tokio::sync::Mutex<()>,
@@ -74,6 +164,9 @@ pub struct ScraperManager {
     // re-armed by a successful start so a later relapse notifies again.
     failure_notifier: Arc<std::sync::Mutex<Option<FailureNotifier>>>,
     failure_notified: Arc<std::sync::atomic::AtomicBool>,
+    /// Skips requests to a provider that has been failing at transport level,
+    /// so a dead site doesn't cost the full timeout budget on every play.
+    breaker: ProviderBreaker,
 }
 
 impl Clone for ScraperManager {
@@ -86,6 +179,7 @@ impl Clone for ScraperManager {
             scraper_script: self.scraper_script.clone(),
             failure_notifier: self.failure_notifier.clone(),
             failure_notified: self.failure_notified.clone(),
+            breaker: self.breaker.clone(),
         }
     }
 }
@@ -104,6 +198,7 @@ impl ScraperManager {
             scraper_script,
             failure_notifier: Arc::new(std::sync::Mutex::new(None)),
             failure_notified: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            breaker: ProviderBreaker::default(),
         }
     }
 
@@ -161,7 +256,8 @@ impl ScraperManager {
 
     pub async fn search(&self, query: &str, provider: &str) -> Result<Vec<AnimeRef>, String> {
         log::info!("Searching scraper: query='{}', provider={}", query, provider);
-        let port = self.ensure_running().await?;
+        self.breaker.check(provider)?;
+        let port = self.ensure_running().await.inspect_err(|_| self.breaker.record_failure(provider))?;
         let url = format!(
             "http://127.0.0.1:{}/search?query={}&provider={}",
             port,
@@ -176,8 +272,12 @@ impl ScraperManager {
             .await
             .map_err(|e| {
                 log::error!("Scraper search request failed (query={}, provider={}): {}", query, provider, e);
+                self.breaker.record_failure(provider);
                 format!("Scraper search failed: {}", e)
             })?;
+        // The request completed. Whether it found anything is the provider's
+        // business, not the breaker's — see ProviderBreaker.
+        self.breaker.record_success(provider);
         let body = resp.text().await.map_err(|e| e.to_string())?;
         match serde_json::from_str::<Vec<AnimeRef>>(&body) {
             Ok(results) => {
@@ -218,7 +318,8 @@ impl ScraperManager {
         provider: &str,
     ) -> Result<Vec<StreamServer>, String> {
         log::info!("Requesting streams from scraper: provider={}, slug={}, episode={}", provider, slug, episode);
-        let port = self.ensure_running().await?;
+        self.breaker.check(provider)?;
+        let port = self.ensure_running().await.inspect_err(|_| self.breaker.record_failure(provider))?;
         let url = format!(
             "http://127.0.0.1:{}/streams?slug={}&episode={}&provider={}",
             port, slug, episode, provider
@@ -231,8 +332,12 @@ impl ScraperManager {
             .await
             .map_err(|e| {
                 log::error!("Scraper streams request failed (slug={}, episode={}, provider={}): {}", slug, episode, provider, e);
+                self.breaker.record_failure(provider);
                 format!("Scraper streams failed: {}", e)
             })?;
+        // Completed request: a provider that answers "no streams for this
+        // episode" is up, not down.
+        self.breaker.record_success(provider);
         let body = resp.text().await.map_err(|e| e.to_string())?;
         match serde_json::from_str::<Vec<StreamServer>>(&body) {
             Ok(servers) => {
@@ -495,6 +600,7 @@ async fn start_and_wait(
         });
     }
 
+    let spawn_start = Instant::now();
     let mut delay_ms = READY_RETRY_MS;
     for attempt in 0..MAX_READY_ATTEMPTS {
         sleep(Duration::from_millis(delay_ms)).await;
@@ -512,7 +618,15 @@ async fn start_and_wait(
                 let p = process.clone();
                 let c = http_client.clone();
                 tokio::spawn(async move { idle_watchdog(p, c).await; });
-                log::info!("Scraper ready on port {} (attempt {})", port, attempt + 1);
+                // Elapsed, not just the attempt count: a cold sidecar spawn is
+                // one of the stages that shows up as "pressing play was slow",
+                // and the resolve summary line can't see inside this call.
+                log::info!(
+                    "[resolve] sidecar cold-start ready on port {} in {}ms (attempt {})",
+                    port,
+                    spawn_start.elapsed().as_millis(),
+                    attempt + 1
+                );
                 return Ok(port);
             }
             _ => { delay_ms = (delay_ms * 2).min(2000); }
@@ -528,6 +642,43 @@ async fn start_and_wait(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn breaker_trips_only_after_consecutive_failures() {
+        let breaker = ProviderBreaker::default();
+        assert!(breaker.check("anineko").is_ok());
+        for _ in 0..BREAKER_TRIP_AFTER - 1 {
+            breaker.record_failure("anineko");
+            assert!(breaker.check("anineko").is_ok(), "should not bench before the threshold");
+        }
+        breaker.record_failure("anineko");
+        assert!(breaker.check("anineko").is_err(), "should be benched at the threshold");
+    }
+
+    #[test]
+    fn a_success_resets_the_failure_streak() {
+        let breaker = ProviderBreaker::default();
+        // Two failures then a success must not leave the provider one failure
+        // from being benched — the streak has to be *consecutive*, or an
+        // intermittently flaky site eventually benches itself.
+        breaker.record_failure("anineko");
+        breaker.record_failure("anineko");
+        breaker.record_success("anineko");
+        breaker.record_failure("anineko");
+        assert!(breaker.check("anineko").is_ok());
+    }
+
+    #[test]
+    fn benching_one_provider_leaves_the_others_alone() {
+        let breaker = ProviderBreaker::default();
+        for _ in 0..BREAKER_TRIP_AFTER {
+            breaker.record_failure("anineko");
+        }
+        assert!(breaker.check("anineko").is_err());
+        // The whole point of benching a provider is to reach the fallback
+        // faster, so the fallback must not be benched along with it.
+        assert!(breaker.check("nyaa").is_ok());
+    }
 
     #[tokio::test]
     #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]

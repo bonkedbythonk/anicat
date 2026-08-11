@@ -64,20 +64,6 @@ pub struct ProxyState {
     /// Per-IP failed-login counter shared by both login endpoints. Empty until
     /// something fails; see `throttle` module.
     pub login_throttle: super::throttle::LoginThrottle,
-    /// Last authenticated request seen per user_id, updated by
-    /// `require_user_session`. Powers the read-only `/mobile-api/admin/status`
-    /// activity endpoint — for monitoring active sessions — without any
-    /// per-request DB writes.
-    pub last_seen: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<i64, LastSeen>>>,
-}
-
-/// One user's most recent authenticated request. `at` is monotonic (for
-/// computing "how long ago"); `path` is the request path (a coarse hint at
-/// what they were doing — browsing vs. streaming).
-#[derive(Clone)]
-pub struct LastSeen {
-    pub at: std::time::Instant,
-    pub path: String,
 }
 
 impl ProxyState {
@@ -134,7 +120,6 @@ pub async fn start_proxy(
         app_handle: app_handle.clone(),
         app_state,
         login_throttle: super::throttle::LoginThrottle::new(),
-        last_seen: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Player callback routes (called by mpv's Lua script today, and by the
@@ -192,9 +177,6 @@ pub async fn start_proxy(
         .route("/mobile-api/session/login", post(session::login))
         .route("/mobile-api/lan-info", get(mobile_auth::lan_info))
         .route("/mobile-api/users/list-names", get(mobile_api::list_user_names))
-        // Admin activity view. Ungated here because it authenticates with its
-        // own admin_key query param, not a standard auth token — see admin_status.
-        .route("/mobile-api/admin/status", get(mobile_api::admin_status))
         .merge(gated)
         // Fallback rather than a nested prefix: mobile.html and its manifest/
         // service-worker/asset references are root-relative (a standard Vite
@@ -729,11 +711,14 @@ async fn player_preload_handler(
     if pb.total_episodes > 0 && next_ep > pb.total_episodes {
         return Ok("ok");
     }
-    // Already preloaded (or being worked on) for this target — don't repeat.
+    // Already preloaded for this target — don't repeat. Matched on provider
+    // too, like `preload_episode_impl` does: an entry resolved through a
+    // different provider is a different stream, and `start_playback` won't
+    // consume it anyway.
     {
         let slot = scoped.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
-            if p.media_id == pb.media_id && p.episode_number == next_ep {
+            if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider {
                 return Ok("ok");
             }
         }
@@ -753,8 +738,20 @@ async fn player_preload_handler(
         );
         return Ok("ok");
     }
+    // The slot check above can't see a resolve that is still running (the slot
+    // is only filled on completion), and this handler fires from several Lua
+    // triggers — the 30s progress tick and every settled seek past the 85%
+    // mark. Claim the target so only the first one scrapes.
+    let Some(guard) = scoped.claim_preload(pb.media_id, next_ep, &pb.provider) else {
+        log::info!(
+            "Preload for media {} ep {} ({}) already in flight; skipping",
+            pb.media_id, next_ep, pb.provider
+        );
+        return Ok("ok");
+    };
     let app_state = scoped.clone();
     tokio::spawn(async move {
+        let _guard = guard;
         match crate::commands::playback::resolve_stream_for_provider(
             &app_state,
             pb.media_id,
@@ -872,7 +869,13 @@ async fn player_toggle_translation_handler(
                     Some(title),
                     Some(episode_title),
                     Some(cover_image),
-                    None,
+                    // Carry the episode count through. Passing None here made
+                    // start_playback push `anicat_ui-total_episodes=0` to the
+                    // Lua script, which disables its end-of-series guard
+                    // (`total_eps > 0 and current_ep >= total_eps`) — so after
+                    // a sub/dub switch, auto-next off the finale tried to load
+                    // an episode that doesn't exist.
+                    Some(play_info.total_episodes),
                     None,
                 )
                 .await
@@ -1083,7 +1086,14 @@ async fn proxy_handler(
 
     // An explicit ?referer= (from the mobile playback path, carrying the
     // stream's own required Referer) wins over the per-host defaults below.
-    if let Some(ref referer) = params.referer {
+    //
+    // Held to the same allowlist as the target URL. This parameter is
+    // caller-controlled on an endpoint that is deliberately unauthenticated
+    // (a phone's <video>/<img> cannot attach a bearer token), so without the
+    // check anyone who can reach the port could make this server send an
+    // arbitrary Referer of their choosing to a third-party CDN. Every real
+    // caller sends a provider origin, so this rejects nothing legitimate.
+    if let Some(referer) = params.referer.as_deref().filter(|r| host_is_allowed(r)) {
         req_builder = req_builder.header("referer", referer);
     } else if url.contains("mangakatana.com") {
         req_builder = req_builder.header("referer", "https://mangakatana.com/");

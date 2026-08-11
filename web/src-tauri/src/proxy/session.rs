@@ -22,14 +22,15 @@ use axum::{
 };
 use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
+use super::secret::{derive_token, tokens_match};
 use super::server::ProxyState;
 
-pub(crate) fn user_token(user_id: i64, pin: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}", user_id, pin).as_bytes());
-    format!("{:x}", hasher.finalize())
+/// Keyed on the install secret for the same reason as `mobile_auth::pin_token`:
+/// without it, the token was a plain hash of `user_id:pin` over a numeric PIN,
+/// so a leaked token gave up that friend's PIN to an offline search.
+pub(crate) fn user_token(secret: &str, user_id: i64, pin: &str) -> String {
+    derive_token(secret, "user", &format!("{}:{}", user_id, pin))
 }
 
 #[derive(Deserialize)]
@@ -69,8 +70,9 @@ pub async fn login(
         }
     };
     state.login_throttle.record_success(ip).await;
+    let secret = super::secret::server_secret(&state.app_state.db_path);
     Ok(Json(LoginResponse {
-        token: user_token(user.id, &user.pin),
+        token: user_token(secret, user.id, &user.pin),
         user_id: user.id,
         display_name: user.display_name,
     }))
@@ -113,17 +115,13 @@ pub async fn require_user_session(
 
     let db = state.app_state.open_db().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let users = crate::registry::service::list_users(&db).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let matched = users.into_iter().find(|u| user_token(u.id, &u.pin) == token);
+    let secret = super::secret::server_secret(&state.app_state.db_path);
+    let matched = users
+        .into_iter()
+        .find(|u| tokens_match(&user_token(secret, u.id, &u.pin), &token));
 
     match matched {
         Some(user) => {
-            // Record activity for /mobile-api/admin/status before running the
-            // handler — one in-memory map write, no DB touch on the hot path.
-            {
-                let path = req.uri().path().to_string();
-                let mut seen = state.last_seen.lock().await;
-                seen.insert(user.id, super::server::LastSeen { at: std::time::Instant::now(), path });
-            }
             req.extensions_mut().insert(AuthedUser(user.id));
             Ok(next.run(req).await)
         }
@@ -135,12 +133,21 @@ pub async fn require_user_session(
 mod tests {
     use super::*;
 
+    const S: &str = "test-secret";
+
     #[test]
     fn user_token_is_deterministic_and_scoped_by_id() {
-        assert_eq!(user_token(1, "1234"), user_token(1, "1234"));
+        assert_eq!(user_token(S, 1, "1234"), user_token(S, 1, "1234"));
         // Same PIN, different user id: must not collide.
-        assert_ne!(user_token(1, "1234"), user_token(2, "1234"));
+        assert_ne!(user_token(S, 1, "1234"), user_token(S, 2, "1234"));
         // Same user id, different PIN: must not collide.
-        assert_ne!(user_token(1, "1234"), user_token(1, "4321"));
+        assert_ne!(user_token(S, 1, "1234"), user_token(S, 1, "4321"));
+    }
+
+    #[test]
+    fn a_token_cannot_be_derived_without_the_install_secret() {
+        // A friend's leaked token must not be invertible to their PIN, which
+        // a bare hash of "user_id:pin" over a numeric PIN plainly was.
+        assert_ne!(user_token(S, 1, "1234"), user_token("another-secret", 1, "1234"));
     }
 }

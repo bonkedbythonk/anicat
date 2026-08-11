@@ -3,11 +3,16 @@
 //! This is intentionally not hardened security: the app runs on a trusted
 //! home network, and the goal is only to stop someone (a parent, a sibling)
 //! from stumbling into it, not to withstand an attacker already on the LAN.
-//! The PIN is stored and compared in plaintext, and the "token" a client
-//! holds is nothing more than sha256(pin) — recomputed from the live config
-//! on every request. There is no server-side session store or expiry:
-//! changing the PIN in Settings instantly invalidates every previously
-//! issued token, for free, since they simply stop matching the new hash.
+//! The PIN is stored and compared in plaintext, and the token a client holds is
+//! recomputed from live config on every request. There is no server-side
+//! session store or expiry: changing the PIN in Settings instantly invalidates
+//! every previously issued token, for free, since they simply stop matching.
+//!
+//! The token is keyed on a per-install secret (see `secret.rs`) rather than
+//! being a bare `sha256(pin)`. That keeps all of the above and drops the one
+//! property that was genuinely bad: a bare hash of a 4-8 digit numeric PIN is
+//! reversible offline in under a second, so any leaked token handed over the
+//! PIN itself.
 
 use axum::{
     extract::{ConnectInfo, Request, State},
@@ -17,15 +22,13 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
+use super::secret::{derive_token, tokens_match};
 use super::server::ProxyState;
 
-pub(crate) fn pin_token(pin: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(pin.as_bytes());
-    format!("{:x}", hasher.finalize())
+pub(crate) fn pin_token(secret: &str, pin: &str) -> String {
+    derive_token(secret, "pin", pin)
 }
 
 #[derive(Deserialize)]
@@ -52,9 +55,10 @@ pub async fn authenticate(
     if !cfg.mobile.lan_access_enabled {
         return Err(StatusCode::FORBIDDEN);
     }
+    let secret = super::secret::server_secret(&state.app_state.db_path);
     let token = match &cfg.mobile.pin {
         Some(configured) if !configured.is_empty() && configured == &body.pin => {
-            Some(pin_token(configured))
+            Some(pin_token(secret, configured))
         }
         _ => None,
     };
@@ -112,9 +116,15 @@ fn local_lan_ip() -> Option<String> {
     socket.local_addr().ok().map(|a| a.ip().to_string())
 }
 
-pub(crate) fn is_authorized(configured_pin: Option<&str>, provided_token: Option<&str>) -> bool {
+pub(crate) fn is_authorized(
+    secret: &str,
+    configured_pin: Option<&str>,
+    provided_token: Option<&str>,
+) -> bool {
     match (configured_pin, provided_token) {
-        (Some(pin), Some(token)) if !pin.is_empty() => pin_token(pin) == token,
+        (Some(pin), Some(token)) if !pin.is_empty() => {
+            tokens_match(&pin_token(secret, pin), token)
+        }
         _ => false,
     }
 }
@@ -162,7 +172,8 @@ pub async fn require_mobile_auth(
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
 
-    if is_authorized(configured_pin.as_deref(), token) {
+    let secret = super::secret::server_secret(&state.app_state.db_path);
+    if is_authorized(secret, configured_pin.as_deref(), token) {
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)
@@ -173,34 +184,45 @@ pub async fn require_mobile_auth(
 mod tests {
     use super::*;
 
+    const S: &str = "test-secret";
+
     #[test]
     fn pin_token_is_deterministic_and_pin_specific() {
-        assert_eq!(pin_token("1234"), pin_token("1234"));
-        assert_ne!(pin_token("1234"), pin_token("4321"));
+        assert_eq!(pin_token(S, "1234"), pin_token(S, "1234"));
+        assert_ne!(pin_token(S, "1234"), pin_token(S, "4321"));
+    }
+
+    #[test]
+    fn a_token_cannot_be_derived_from_the_pin_alone() {
+        // The bug this replaced: token == sha256(pin), so anyone holding a
+        // token could brute-force a 4-8 digit PIN offline in under a second.
+        // Without the install's secret the token is now uncomputable.
+        assert_ne!(pin_token(S, "1234"), pin_token("another-secret", "1234"));
     }
 
     #[test]
     fn rejects_when_no_pin_configured() {
-        assert!(!is_authorized(None, Some(&pin_token("1234"))));
-        assert!(!is_authorized(Some(""), Some(&pin_token("1234"))));
+        assert!(!is_authorized(S, None, Some(&pin_token(S, "1234"))));
+        assert!(!is_authorized(S, Some(""), Some(&pin_token(S, "1234"))));
     }
 
     #[test]
     fn rejects_missing_or_wrong_token() {
-        assert!(!is_authorized(Some("1234"), None));
-        assert!(!is_authorized(Some("1234"), Some("not-a-real-token")));
-        assert!(!is_authorized(Some("1234"), Some(&pin_token("4321"))));
+        assert!(!is_authorized(S, Some("1234"), None));
+        assert!(!is_authorized(S, Some("1234"), Some("not-a-real-token")));
+        assert!(!is_authorized(S, Some("1234"), Some(&pin_token(S, "4321"))));
     }
 
     #[test]
     fn accepts_matching_token() {
-        assert!(is_authorized(Some("1234"), Some(&pin_token("1234"))));
+        assert!(is_authorized(S, Some("1234"), Some(&pin_token(S, "1234"))));
     }
 
     #[test]
     fn changing_pin_invalidates_old_token() {
-        let old_token = pin_token("1234");
-        // PIN changed in Settings — the old token no longer matches.
-        assert!(!is_authorized(Some("5678"), Some(&old_token)));
+        let old_token = pin_token(S, "1234");
+        // PIN changed in Settings — the old token no longer matches. Free
+        // invalidation, and keying on the secret doesn't cost us it.
+        assert!(!is_authorized(S, Some("5678"), Some(&old_token)));
     }
 }

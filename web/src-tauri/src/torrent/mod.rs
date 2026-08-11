@@ -1,5 +1,6 @@
-//! Torrent streaming provider ("nyaa"): searches SubsPlease/Nyaa for a 1080p
-//! release of the requested episode, downloads it with an embedded librqbit
+//! Torrent streaming provider ("nyaa"): searches SubsPlease/Nyaa for an HD
+//! release of the requested episode (1080p preferred, 720p as a fallback tier
+//! — see `search::SD_PENALTY`), downloads it with an embedded librqbit
 //! session, and serves it to mpv over the local proxy with HTTP ranges. No
 //! external client, no scraping of player pages — torrents don't rot the way
 //! streaming-site extractors do.
@@ -39,6 +40,10 @@ pub struct ResolveTarget<'a> {
     /// Movies/OVAs legitimately have no episode number in their release
     /// names; allow an episodeless match for those.
     pub allow_episodeless: bool,
+    /// How many episodes this AniList entry has, when known. Used to recognise
+    /// a release that numbers a split cour absolutely — see
+    /// `search::absolute_episode`.
+    pub episode_count: Option<i64>,
     pub prefer_dub: bool,
     /// When the user picked a specific release from the server list, its
     /// name. That candidate is tried first; the rest stay as fallbacks so a
@@ -125,7 +130,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media_id, episode, titles, allow_episodeless, prefer_dub, chosen_name } = target;
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, chosen_name } = target;
         let session = self.session().await?;
 
         // Reuse a previous resolution if the torrent is still in the session.
@@ -160,7 +165,7 @@ impl TorrentManager {
         );
         if candidates.is_empty() {
             return Err(format!(
-                "No 1080p torrent found for '{}' episode {}",
+                "No HD torrent found for '{}' episode {}",
                 titles[0], episode
             ));
         }
@@ -168,7 +173,7 @@ impl TorrentManager {
         let mut last_err = String::new();
         for cand in candidates.iter().take(4) {
             match self
-                .try_candidate(client, &session, cand, episode)
+                .try_candidate(client, &session, cand, episode, episode_count)
                 .await
             {
                 Ok(r) => {
@@ -337,6 +342,7 @@ impl TorrentManager {
         session: &Arc<Session>,
         cand: &search::Candidate,
         episode: i64,
+        episode_count: Option<i64>,
     ) -> Result<Resolved, String> {
         // Prefer the .torrent file (instant metadata) over the magnet.
         let add = if let Some(ref url) = cand.torrent_url {
@@ -402,12 +408,45 @@ impl TorrentManager {
             })
             .collect();
 
-        let file_id = if videos.len() == 1 {
+        // A lone video file is normally the episode by definition — the search
+        // already matched the release name to this episode, so there is nothing
+        // to disambiguate.
+        //
+        // Not so for a candidate accepted on the *assumption* that it is a
+        // complete-series batch (see `Candidate::assume_batch`): its name said
+        // nothing about episodes, so "one video file" is evidence the
+        // assumption was wrong — a real 25-episode batch has 25 files. Fall
+        // through to the filename check, which rejects it and moves on to the
+        // next candidate rather than playing episode 1 when episode 13 was
+        // asked for.
+        let file_id = if videos.len() == 1 && !cand.assume_batch {
             Some(videos[0].0)
         } else {
+            // Which episode number the *files* use for the one being asked
+            // for. Decided before any literal match, not after it: when a
+            // release numbers a split cour absolutely (files 12-23 for an
+            // AniList entry of 1-12), a file literally named "12" exists and is
+            // the wrong episode — it is that entry's episode 1. Taking the
+            // literal match first would quietly play the wrong thing, which is
+            // worse than the "episode not found" this started as.
+            let numbered: Vec<i64> = videos
+                .iter()
+                .filter_map(|(_, name, _)| search::filename_episode(name))
+                .collect();
+            let wanted = match search::absolute_episode(&numbered, episode, episode_count) {
+                Some(absolute) => {
+                    log::info!(
+                        "torrent: '{}' numbers episodes absolutely; episode {} is file {}",
+                        cand.name, episode, absolute
+                    );
+                    absolute
+                }
+                None => episode,
+            };
+
             let mut best: Option<(usize, u64)> = None;
             for (i, name, len) in &videos {
-                if search::filename_matches_episode(name, episode)
+                if search::filename_matches_episode(name, wanted)
                     && best.map(|(_, l)| *len > l).unwrap_or(true)
                 {
                     best = Some((*i, *len));
@@ -636,6 +675,7 @@ mod tests {
                     episode: 1,
                     titles: &titles,
                     allow_episodeless: false,
+                    episode_count: Some(28),
                     prefer_dub: false,
                     chosen_name: None,
                 },

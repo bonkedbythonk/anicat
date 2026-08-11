@@ -79,13 +79,6 @@ pub struct MobileConfig {
     pub pin: Option<String>,
     #[serde(default = "default_false")]
     pub lan_access_enabled: bool,
-    /// Optional secret that unlocks the read-only `/mobile-api/admin/status`
-    /// activity endpoint (active sessions, current playback). When unset the
-    /// endpoint 404s, so the feature is off unless an admin deliberately sets
-    /// a key. Deliberately separate from standard auth tokens so no regular user can
-    /// read the activity list.
-    #[serde(default)]
-    pub admin_key: Option<String>,
 }
 
 fn default_translation_type() -> String {
@@ -165,6 +158,20 @@ pub struct AppStateInner {
     /// Next episode's stream resolved ahead of time (near the end of the
     /// current episode) so auto-next is instant instead of waiting on a scrape.
     pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
+    /// Preload targets with a resolve currently in flight. `preloaded_stream`
+    /// is only filled once a resolve *finishes*, so on its own it can't stop
+    /// two callers for the same episode — the detail page warming the Continue
+    /// episode and the player's near-end `/player/preload` — from both passing
+    /// the "already preloaded?" check and both scraping. For scraper providers
+    /// that's duplicated work; on nyaa it's worse, since a second
+    /// `add_torrent` + `update_only_files` against the same swarm churns the
+    /// piece selection out from under the episode currently streaming (see the
+    /// `update_only_files` comment in `torrent/mod.rs`).
+    ///
+    /// A `std::sync` mutex on purpose: the set is tiny, never held across an
+    /// await, and `PreloadGuard`'s `Drop` has to release the claim
+    /// synchronously.
+    pub preloading: Arc<std::sync::Mutex<std::collections::HashSet<PreloadKey>>>,
     /// Incremented on every start_playback. Background tasks (notably the
     /// AniSkip resolver, which keeps retrying IPC for a few seconds) capture
     /// the value at spawn and bail if it no longer matches — otherwise a task
@@ -201,6 +208,7 @@ pub struct UserAniList {
 pub struct UserPlaybackState {
     pub current_playback: Arc<tokio::sync::Mutex<Option<CurrentPlayback>>>,
     pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
+    pub preloading: Arc<std::sync::Mutex<std::collections::HashSet<PreloadKey>>>,
     pub playback_generation: Arc<std::sync::atomic::AtomicU64>,
     pub last_progress_record: Arc<tokio::sync::Mutex<Option<(i64, i64, std::time::Instant)>>>,
 }
@@ -210,9 +218,31 @@ impl UserPlaybackState {
         Self {
             current_playback: Arc::new(tokio::sync::Mutex::new(None)),
             preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+            preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+}
+
+/// What identifies one preload target: the episode *and* the provider, since
+/// the same episode resolved through two providers is two different streams.
+pub type PreloadKey = (i64, i64, String);
+
+/// Releases a preload claim taken by [`AppState::claim_preload`] when the
+/// resolve that took it finishes, however it finishes — completion, an error
+/// return, or the task being dropped.
+pub struct PreloadGuard {
+    set: Arc<std::sync::Mutex<std::collections::HashSet<PreloadKey>>>,
+    key: PreloadKey,
+}
+
+impl Drop for PreloadGuard {
+    fn drop(&mut self) {
+        self.set
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
     }
 }
 
@@ -329,6 +359,7 @@ impl AppState {
                 user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
                 last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+                preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 torrent: Arc::new(crate::torrent::TorrentManager::new()),
                 user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -390,6 +421,47 @@ impl AppState {
         }
         std::fs::write(&self.inner.config_path, toml_str)?;
         Ok(())
+    }
+
+    /// Claims `(media_id, episode_number, provider)` as a preload target,
+    /// returning a guard that releases the claim on drop. `None` means another
+    /// resolve for the exact same target is already in flight and this caller
+    /// should do nothing — see `AppStateInner::preloading` for why the
+    /// `preloaded_stream` slot alone can't catch that.
+    pub fn claim_preload(
+        &self,
+        media_id: i64,
+        episode_number: i64,
+        provider: &str,
+    ) -> Option<PreloadGuard> {
+        let key: PreloadKey = (media_id, episode_number, provider.to_string());
+        let mut set = self
+            .inner
+            .preloading
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !set.insert(key.clone()) {
+            return None;
+        }
+        Some(PreloadGuard {
+            set: self.inner.preloading.clone(),
+            key,
+        })
+    }
+
+    /// Is a preload for this exact target still resolving?
+    ///
+    /// Lets `start_playback` wait for work already in progress instead of
+    /// racing it. The two used to duplicate each other whenever auto-next
+    /// arrived before the near-end preload had finished — same episode
+    /// resolved twice, and on nyaa that means two `add_torrent` +
+    /// `update_only_files` rounds against one live torrent.
+    pub fn preload_in_flight(&self, media_id: i64, episode_number: i64, provider: &str) -> bool {
+        self.inner
+            .preloading
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(media_id, episode_number, provider.to_string()))
     }
 
     pub fn open_db(&self) -> Result<rusqlite::Connection, String> {
@@ -456,6 +528,7 @@ impl AppState {
                 cache: user_anilist.cache.clone(),
                 current_playback: user_playback.current_playback.clone(),
                 preloaded_stream: user_playback.preloaded_stream.clone(),
+                preloading: user_playback.preloading.clone(),
                 playback_generation: user_playback.playback_generation.clone(),
                 last_progress_record: user_playback.last_progress_record.clone(),
                 discord: crate::discord::DiscordClient::new(),
@@ -581,6 +654,7 @@ mod tests {
                 user_list_lock: Arc::new(tokio::sync::Mutex::new(())),
                 last_progress_record: Arc::new(tokio::sync::Mutex::new(None)),
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
+                preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 torrent: Arc::new(crate::torrent::TorrentManager::new()),
                 user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -636,6 +710,49 @@ mod tests {
         // request in the same login is still there for a later one.
         let pb = second.inner.current_playback.lock().await;
         assert_eq!(pb.as_ref().map(|p| p.last_position), Some(99));
+    }
+
+    #[test]
+    fn a_second_claim_on_the_same_target_is_refused_until_the_first_is_dropped() {
+        let state = bare_app_state();
+        let first = state.claim_preload(42, 7, "anineko");
+        assert!(first.is_some());
+        // This is the case the whole mechanism exists for: the detail page and
+        // the player's near-end /player/preload both firing for one episode.
+        // preloaded_stream can't catch it, because it stays empty until the
+        // first resolve *finishes*.
+        assert!(state.claim_preload(42, 7, "anineko").is_none());
+
+        drop(first);
+        assert!(
+            state.claim_preload(42, 7, "anineko").is_some(),
+            "dropping the guard must release the claim, or one failed resolve blocks the target forever"
+        );
+    }
+
+    #[test]
+    fn claims_are_scoped_to_episode_and_provider() {
+        let state = bare_app_state();
+        let _held = state.claim_preload(42, 7, "anineko");
+        // Same show, next episode: a different stream to resolve.
+        assert!(state.claim_preload(42, 8, "anineko").is_some());
+        // Same episode via another provider: also a different stream, and
+        // start_playback only consumes a preload whose provider matches.
+        assert!(state.claim_preload(42, 7, "nyaa").is_some());
+    }
+
+    #[tokio::test]
+    async fn distinct_users_get_isolated_preload_claims() {
+        let global = bare_app_state();
+        let alice = global.scoped_for_user(1, None, None).await;
+        let bob = global.scoped_for_user(2, None, None).await;
+
+        let _alice_claim = alice.claim_preload(42, 7, "anineko");
+        // Two friends starting the same episode are resolving into two
+        // separate preloaded_stream slots, so one must not suppress the
+        // other's resolve and leave their slot empty.
+        assert!(bob.claim_preload(42, 7, "anineko").is_some());
+        assert!(alice.claim_preload(42, 7, "anineko").is_none());
     }
 
     #[tokio::test]

@@ -585,6 +585,7 @@ pub async fn resolve_stream_impl(
                     episode: episode_number as i64,
                     titles: &titles,
                     allow_episodeless,
+                    episode_count,
                     prefer_dub,
                     chosen_name: None,
                 },
@@ -614,14 +615,9 @@ pub async fn resolve_stream_impl(
 
     let db = state.open_db()?;
 
-    // 1. Try saved slug first, or auto-search if missing
-    let mut slug_opt = registry::service::get_provider_slug(&db, media_id, &provider_name);
-    if slug_opt.is_none() {
-        slug_opt = resolve_and_save_provider_slug_for_episode(state, media_id, &provider_name, false, title.clone(), Some(episode_number)).await.ok().flatten();
-    }
-
+    // 1. Try the saved slug first.
     let mut servers = Vec::new();
-    if let Some(ref slug) = slug_opt {
+    if let Some(ref slug) = registry::service::get_provider_slug(&db, media_id, &provider_name) {
         if let Ok(res) = state
             .scraper_manager
             .get_streams(slug, episode_number, &provider_name)
@@ -631,15 +627,22 @@ pub async fn resolve_stream_impl(
         }
     }
 
+    // No saved slug, or the saved one is stale (the provider renamed or dropped
+    // the show): resolve it fresh. The resolver validates each candidate by
+    // fetching its streams, so it hands those back — calling get_streams on the
+    // slug it returns would repeat the request it just made.
     if servers.is_empty() {
-        if let Ok(Some(fresh_slug)) = resolve_and_save_provider_slug_for_episode(state, media_id, &provider_name, false, title.clone(), Some(episode_number)).await {
-            if let Ok(res) = state
-                .scraper_manager
-                .get_streams(&fresh_slug, episode_number, &provider_name)
-                .await
-            {
-                servers = res;
-            }
+        if let Ok(Some((_, validated))) = resolve_and_save_provider_slug_for_episode(
+            state,
+            media_id,
+            &provider_name,
+            false,
+            title.clone(),
+            Some(episode_number),
+        )
+        .await
+        {
+            servers = validated;
         }
     }
 
@@ -650,21 +653,35 @@ pub async fn resolve_stream_impl(
     // 2. Fallback provider if primary returned 0 streams
     if fallback != provider_name {
         log::info!("resolve_stream: primary provider '{}' failed, trying fallback '{}'", provider_name, fallback);
-        let fb_slug = match registry::service::get_provider_slug(&db, media_id, &fallback) {
-            Some(s) => Some(s),
-            None => resolve_and_save_provider_slug_for_episode(state, media_id, &fallback, false, title.clone(), Some(episode_number)).await.ok().flatten(),
-        };
-
-        if let Some(ref slug) = fb_slug {
-            if let Ok(servers) = state
+        // Same shape as the primary above: probe a saved slug, and only fall
+        // through to a fresh resolve (which returns its own validated streams)
+        // when that produces nothing.
+        let mut fb_servers = Vec::new();
+        if let Some(ref slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
+            if let Ok(res) = state
                 .scraper_manager
                 .get_streams(slug, episode_number, &fallback)
                 .await
             {
-                if !servers.is_empty() {
-                    return Ok(serde_json::json!({ "streams": servers }));
-                }
+                fb_servers = res;
             }
+        }
+        if fb_servers.is_empty() {
+            if let Ok(Some((_, validated))) = resolve_and_save_provider_slug_for_episode(
+                state,
+                media_id,
+                &fallback,
+                false,
+                title.clone(),
+                Some(episode_number),
+            )
+            .await
+            {
+                fb_servers = validated;
+            }
+        }
+        if !fb_servers.is_empty() {
+            return Ok(serde_json::json!({ "streams": fb_servers }));
         }
     }
 
@@ -1772,6 +1789,18 @@ async fn media_is_finished(state: &AppState, media_id: i64) -> bool {
     }
 }
 
+/// Find (and cache) the provider slug for a media, validating each candidate by
+/// actually fetching its streams for `episode_number`.
+///
+/// Returns the slug **together with the streams that validated it**. Those two
+/// used to be separated: callers got a bare slug back and immediately called
+/// `get_streams` on it again, repeating a request this function had just made —
+/// and since the play path also probes a cached slug first, one play could pay
+/// for the same episode's `get_streams` three times over. Handing the validated
+/// list back removes the redundant round-trip without changing what gets picked.
+///
+/// The stream list is empty when there was nothing to validate against: manga,
+/// the `nyaa` provider (no scraper catalog), or `episode_number: None`.
 pub async fn resolve_and_save_provider_slug_for_episode(
     state: &AppState,
     media_id: i64,
@@ -1779,7 +1808,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
     is_manga: bool,
     frontend_title: Option<String>,
     episode_number: Option<i32>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, Vec<crate::scraper::client::StreamServer>)>, String> {
     // The torrent provider has no scraper catalog to search against; its
     // "slug" is only ever a user-entered search-title override.
     if provider_name == "nyaa" {
@@ -1872,8 +1901,14 @@ pub async fn resolve_and_save_provider_slug_for_episode(
     // and every synonym were never searched at all. Keep going until a query
     // produces results that actually match.
     let mut matches = Vec::new();
-    for (idx, query) in search_candidates.iter().enumerate() {
-        if idx > 0 {
+    // Space out consecutive *successful* queries so the provider doesn't rate-
+    // limit us. This used to sleep before every query after the first, which
+    // also penalized the case it can't help: a query that errored or timed out
+    // already put far more than 1.5s between itself and the next one, so the
+    // sleep only added latency to a play that was already going badly.
+    let mut previous_query_completed = false;
+    for query in search_candidates.iter() {
+        if previous_query_completed {
             log::info!("resolve_and_save_provider_slug: sleeping 1.5s before next query to prevent rate limiting");
             tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
@@ -1886,6 +1921,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
 
         match search_res {
             Ok(res) => {
+                previous_query_completed = true;
                 if !res.is_empty() {
                     log::info!("resolve_and_save_provider_slug: found {} results for query '{}'", res.len(), query);
                     let found = find_all_matches(&target_titles, res, |r| &r.title, &translation_type);
@@ -1900,6 +1936,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
                 }
             }
             Err(e) => {
+                previous_query_completed = false;
                 log::error!("resolve_and_save_provider_slug: search failed for '{}' on '{}': {}", query, provider_name, e);
             }
         }
@@ -1911,10 +1948,14 @@ pub async fn resolve_and_save_provider_slug_for_episode(
     }
 
     for cand in matches {
+        // Kept and returned rather than discarded: this is the fetch the
+        // caller would otherwise immediately repeat. See the doc comment.
+        let mut validated_streams = Vec::new();
         if let Some(ep) = episode_number {
             if !is_manga && provider_name != "nyaa" {
-                if let Ok(servers) = state.scraper_manager.get_streams(&cand.id, ep, provider_name).await {
-                    if servers.is_empty() {
+                match state.scraper_manager.get_streams(&cand.id, ep, provider_name).await {
+                    Ok(servers) if !servers.is_empty() => validated_streams = servers,
+                    Ok(_) => {
                         log::info!(
                             "resolve_and_save_provider_slug: candidate '{}' (slug '{}') returned 0 streams for ep {}, trying next candidate",
                             cand.title,
@@ -1923,8 +1964,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
                         );
                         continue;
                     }
-                } else {
-                    continue;
+                    Err(_) => continue,
                 }
             }
         }
@@ -1932,7 +1972,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
         log::info!("resolve_and_save_provider_slug: matched '{}' to slug '{}'", cand.title, cand.id);
         let db = state.open_db()?;
         let _ = registry::service::set_provider_slug(&db, media_id, provider_name, &cand.id);
-        return Ok(Some(cand.id));
+        return Ok(Some((cand.id, validated_streams)));
     }
 
     log::warn!("resolve_and_save_provider_slug: all matching candidates yielded 0 streams for media_id={}", media_id);
@@ -1946,6 +1986,7 @@ pub async fn resolve_and_save_provider_slug(
     is_manga: bool,
     frontend_title: Option<String>,
 ) -> Result<Option<String>, String> {
+    // No episode to validate against, so the stream list is always empty here.
     resolve_and_save_provider_slug_for_episode(
         state,
         media_id,
@@ -1955,6 +1996,7 @@ pub async fn resolve_and_save_provider_slug(
         None,
     )
     .await
+    .map(|found| found.map(|(slug, _)| slug))
 }
 
 pub fn find_all_matches<T, F>(target_titles: &[&str], candidates: Vec<T>, get_title: F, preferred_translation: &str) -> Vec<T>

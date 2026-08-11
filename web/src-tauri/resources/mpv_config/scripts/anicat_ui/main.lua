@@ -74,6 +74,7 @@ local state = {
   last_pos = 0,
   preload_sent = false,
   end_reported = false,
+  early_eof_reported = false,
 }
 
 local function parse_skip_times(raw)
@@ -559,6 +560,16 @@ end
 -- done too, regardless of that flag or whether playback is paused — this is
 -- what lets auto-next fire while the user is scrubbing/skipping through the
 -- end of an episode instead of only on a clean pause-at-end.
+-- An episode has to have actually played before "it ended" is believable.
+-- eof-reached goes true whenever the demuxer runs out of data, including when
+-- a stream dies the moment it opens — and at that point position is ~0 while
+-- duration is already known from the container header. Auto-next honoured that
+-- as a finished episode and advanced, so a broken stream silently *skipped*
+-- the episode rather than reporting a failure. Half the runtime is far below
+-- the 85% watched threshold, so this never blocks a genuine ending, including
+-- one reached by seeking.
+local MIN_PLAYED_FRACTION = 0.5
+
 local function check_near_end_auto_next()
   if not state.file_loaded or state.next_triggered then
     return
@@ -568,8 +579,22 @@ local function check_near_end_auto_next()
   end
   local pos = mp.get_property_number('time-pos')
   local dur = mp.get_property_number('duration')
-  local near_end = pos and dur and dur > 0 and (dur - pos) < 1.5
-  if mp.get_property_native('eof-reached') or near_end then
+  -- Unknown duration means there is no way to tell a finished episode from a
+  -- dead stream, so don't advance on guesswork.
+  if not pos or not dur or dur <= 0 then
+    return
+  end
+  local eof = mp.get_property_native('eof-reached')
+  if pos < dur * MIN_PLAYED_FRACTION then
+    if eof and not state.early_eof_reported then
+      state.early_eof_reported = true
+      msg.warn(string.format(
+        'end-of-file at %.1fs of %.1fs — treating as a failed stream, not a finished episode', pos, dur))
+      mp.osd_message('Stream ended early. Shift+R to reload, or pick another source.', 5.0)
+    end
+    return
+  end
+  if eof or (dur - pos) < 1.5 then
     play_next(nil, false)
   end
 end
@@ -638,6 +663,7 @@ mp.register_event('file-loaded', function()
   state.next_triggered = false
   state.preload_sent = false
   state.end_reported = false
+  state.early_eof_reported = false
   state.duration = mp.get_property_number('duration') or 0
   if next_timeout then
     next_timeout:kill()

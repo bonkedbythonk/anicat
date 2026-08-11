@@ -35,12 +35,41 @@ pub(crate) fn resume_position(stop_time: i64, duration: i64) -> i64 {
     }
 }
 
+/// Path to mpv's JSON IPC socket.
+///
+/// Not in `/tmp`. That socket is a command channel — everything this file sends
+/// over it (`loadfile` at any URL, `set_property` for referrer/user-agent/
+/// http-header-fields, `script-message` into anicat_ui) is equally available to
+/// anyone else who can connect. `/tmp` is world-writable and the default umask
+/// leaves the socket world-connectable, so on a shared machine any other local
+/// user could drive the player. Putting it inside a 0700 directory the OS
+/// already gives us per-user closes that at the directory level, which is the
+/// part we control — mpv creates the socket itself, so its own mode is not ours
+/// to set.
+///
+/// Windows is unaffected: a named pipe, not a filesystem path.
 fn get_ipc_path() -> String {
-    if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    {
         r"\\.\pipe\anicat-mpv".to_string()
-    } else {
-        let uid = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
-        format!("/tmp/anicat-mpv-{}.sock", uid)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Falls back to the old /tmp path only if there is no per-user config
+        // dir at all, which would also mean the app has nowhere to store its
+        // config or registry — i.e. it is already badly broken.
+        let Some(dir) = dirs::config_dir().map(|d| d.join("anicat")) else {
+            let uid = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+            return format!("/tmp/anicat-mpv-{}.sock", uid);
+        };
+        if std::fs::create_dir_all(&dir).is_ok() {
+            use std::os::unix::fs::PermissionsExt;
+            // Best-effort: an existing dir created before this change may be
+            // 0755, so tighten it rather than assuming create_dir_all's mode.
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        dir.join("mpv.sock").to_string_lossy().to_string()
     }
 }
 
@@ -393,6 +422,121 @@ fn get_stream_group(server: &crate::scraper::client::StreamServer) -> &str {
     }
 }
 
+/// Playback candidates in the order they should be tried: the server the
+/// preference logic above actually chose, then every other server best-first as
+/// retry material. Deduped by URL, since the scraper's several extraction
+/// passes routinely surface the same URL under different names.
+///
+/// The primary stays first no matter how it ranks — sub/dub preference and an
+/// explicit user pick both outrank raw speed, and this must not quietly
+/// override either.
+fn candidate_order<'a>(
+    servers: &'a [crate::scraper::client::StreamServer],
+    primary: Option<&'a crate::scraper::client::StreamServer>,
+) -> Vec<&'a crate::scraper::client::StreamServer> {
+    let mut rest: Vec<&crate::scraper::client::StreamServer> = servers.iter().collect();
+    rest.sort_by_key(|s| quality_sort_key(s));
+
+    let mut out = Vec::with_capacity(servers.len());
+    let mut seen = std::collections::HashSet::new();
+    for s in primary.into_iter().chain(rest) {
+        if !s.url.is_empty() && seen.insert(s.url.as_str()) {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// Outcome of a stream liveness probe.
+///
+/// Deliberately biased toward `Alive`: a false negative skips a server that
+/// would have played fine, which is strictly worse than the status quo, so only
+/// an unambiguous rejection counts as dead. See `probe_stream`.
+enum StreamProbe {
+    Alive,
+    Dead(String),
+}
+
+/// Ask an upstream for the first two bytes of a stream to find out whether it
+/// is actually serving. Resolution can hand back a URL that 404s or whose
+/// signed token has expired — that isn't a resolve *error*, so nothing used to
+/// catch it, and mpv opened onto a stream that never flowed.
+///
+/// Sends the same headers mpv will (referer/user-agent matter to several of
+/// these CDNs), and treats only "this URL will not serve media" answers as
+/// dead. A timeout is explicitly *not* one of them: a slow CDN is still a
+/// playable CDN, and mpv waits far longer than this probe does.
+async fn probe_stream(
+    client: &reqwest::Client,
+    url: &str,
+    headers: Option<&HashMap<String, String>>,
+) -> StreamProbe {
+    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
+
+    let mut req = client.get(url).header("range", "bytes=0-1");
+    if let Some(headers) = headers {
+        for (key, val) in headers {
+            req = req.header(key, val);
+        }
+    }
+
+    match req.timeout(PROBE_TIMEOUT).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if probe_status_is_dead(status.as_u16()) {
+                StreamProbe::Dead(format!("HTTP {}", status))
+            } else {
+                StreamProbe::Alive
+            }
+        }
+        Err(e) if e.is_timeout() => StreamProbe::Alive,
+        Err(e) => StreamProbe::Dead(e.to_string()),
+    }
+}
+
+/// Elapsed time of each stage of a stream resolve, logged as one line when the
+/// resolve finishes.
+///
+/// Exists because "why did pressing play take 30 seconds" was previously
+/// unanswerable: the work spans a Python sidecar that may need respawning, a
+/// Cloudflare challenge, a title search loop with its own sleeps, a stream
+/// fetch, and now a liveness probe — and nothing recorded which of those the
+/// time went to. Every tuning constant around this path (the sidecar idle
+/// timeout, the inter-query sleep, the probe timeout, the breaker thresholds)
+/// is a guess until this says otherwise.
+#[derive(Default)]
+struct ResolveTimings {
+    /// Fetching streams for an already-cached slug.
+    cached_slug_ms: u128,
+    /// Searching the provider for a slug and validating candidates.
+    slug_resolve_ms: u128,
+    /// Probing candidate servers for liveness.
+    probe_ms: u128,
+    /// How many servers were probed before one answered.
+    probes: usize,
+}
+
+impl ResolveTimings {
+    fn log(&self, provider: &str, media_id: i64, episode: i64, outcome: &str, total_ms: u128) {
+        log::info!(
+            "[resolve] provider={} media={} ep={} outcome={} total={}ms \
+             cached_slug={}ms slug_resolve={}ms probe={}ms probes={}",
+            provider, media_id, episode, outcome, total_ms,
+            self.cached_slug_ms, self.slug_resolve_ms, self.probe_ms, self.probes
+        );
+    }
+}
+
+/// Whether an HTTP status means "this URL will not serve media".
+///
+/// Everything not listed is treated as alive on purpose: 405 (host dislikes
+/// Range), 429, an unfollowed redirect and every 2xx all mean "keep going",
+/// because mpv may succeed where this probe didn't and skipping a working
+/// server is worse than probing one that turns out to be dead.
+fn probe_status_is_dead(status: u16) -> bool {
+    matches!(status, 403 | 404 | 410 | 451) || (500..600).contains(&status)
+}
+
 /// Human-facing provider name for notifications.
 pub(crate) fn provider_label(provider: &str) -> &str {
     match provider {
@@ -434,6 +578,9 @@ pub(crate) async fn resolve_stream_for_provider(
     server: &Option<String>,
     title: Option<String>,
 ) -> Result<(String, Option<std::collections::HashMap<String, String>>, Option<String>), String> {
+    let started = std::time::Instant::now();
+    let mut timings = ResolveTimings::default();
+
     // Torrents don't go through the scraper: search Nyaa/SubsPlease, start
     // the embedded torrent session, and hand mpv the local range-stream URL.
     if provider_name == "nyaa" {
@@ -453,6 +600,7 @@ pub(crate) async fn resolve_stream_for_provider(
                     episode: episode_number,
                     titles: &titles,
                     allow_episodeless,
+                    episode_count,
                     prefer_dub,
                     // The stream picker passes the chosen release name back as
                     // `server`; honor it. Auto-play (Continue button) sends
@@ -461,8 +609,18 @@ pub(crate) async fn resolve_stream_for_provider(
                 },
                 proxy_port,
             )
-            .await?;
-        return Ok((url, None, None));
+            .await;
+        // Torrents skip every stage below (no slug, no scraper, and prebuffer
+        // is a far stronger liveness check than the probe), so this line is
+        // just the total — but it keeps one grep-able marker for every play.
+        timings.log(
+            provider_name,
+            media_id,
+            episode_number,
+            if url.is_ok() { "ok" } else { "failed" },
+            started.elapsed().as_millis(),
+        );
+        return url.map(|u| (u, None, None));
     }
 
     // Read any cached slug in a scoped block so the (non-Sync) DB connection is
@@ -471,34 +629,31 @@ pub(crate) async fn resolve_stream_for_provider(
         let db = state.open_db()?;
         crate::registry::service::get_provider_slug(&db, media_id, provider_name)
     };
-    let slug_opt = match cached_slug {
-        Some(s) => Some(s),
-        None => super::media::resolve_and_save_provider_slug_for_episode(
-            state,
-            media_id,
-            provider_name,
-            false,
-            title.clone(),
-            Some(episode_number as i32),
-        )
-        .await
-        .ok()
-        .flatten(),
+
+    let mut servers = match cached_slug {
+        Some(ref s) => {
+            let t = std::time::Instant::now();
+            let res = state
+                .scraper_manager
+                .get_streams(s, episode_number as i32, provider_name)
+                .await
+                .unwrap_or_default();
+            timings.cached_slug_ms = t.elapsed().as_millis();
+            res
+        }
+        None => Vec::new(),
     };
 
-    let mut servers = if let Some(ref s) = slug_opt {
-        state
-            .scraper_manager
-            .get_streams(s, episode_number as i32, provider_name)
-            .await
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
-
-    // If cached slug yielded 0 streams, force a fresh slug resolution with stream validation!
+    // No cached slug, or the cached one yielded nothing (the provider renamed
+    // or dropped the show): resolve it fresh, with stream validation. The
+    // resolver validates every candidate by fetching its streams and returns
+    // them, so calling get_streams on the slug it hands back would repeat the
+    // request it just made — this path used to do exactly that, on top of the
+    // probe above, which is how one play could pay for the same episode's
+    // get_streams three times over.
     if servers.is_empty() {
-        if let Ok(Some(fresh_slug)) = super::media::resolve_and_save_provider_slug_for_episode(
+        let t = std::time::Instant::now();
+        if let Ok(Some((_, validated))) = super::media::resolve_and_save_provider_slug_for_episode(
             state,
             media_id,
             provider_name,
@@ -508,17 +663,13 @@ pub(crate) async fn resolve_stream_for_provider(
         )
         .await
         {
-            if let Ok(fresh_servers) = state
-                .scraper_manager
-                .get_streams(&fresh_slug, episode_number as i32, provider_name)
-                .await
-            {
-                servers = fresh_servers;
-            }
+            servers = validated;
         }
+        timings.slug_resolve_ms = t.elapsed().as_millis();
     }
 
     if servers.is_empty() {
+        timings.log(provider_name, media_id, episode_number, "no-servers", started.elapsed().as_millis());
         return Err(format!("No stream URL found on {}", provider_name));
     }
 
@@ -546,13 +697,58 @@ pub(crate) async fn resolve_stream_for_provider(
             .or_else(|| pick_best_server(&servers, target_quality))
     };
 
-    let raw_stream_url = selected_server.map(|s| s.url.clone()).unwrap_or_default();
-    let headers = selected_server.and_then(|s| s.headers.clone());
-    let subtitle_url = selected_server.and_then(|s| s.subtitle_url.clone());
-    if raw_stream_url.is_empty() {
+    // Picking a server used to be the end of it: one URL went to mpv, and if
+    // it was dead (404, expired token, CDN refusing us) nothing noticed —
+    // that's not a resolve *error*, so the fallback-provider chain in
+    // start_playback never fired either, and the user got an mpv window onto a
+    // stream that never flowed. Probe down the ranked list instead, so a dead
+    // server costs a couple of hundred milliseconds rather than the play.
+    const MAX_PROBES: usize = 4;
+    let ordered = candidate_order(&servers, selected_server);
+    if ordered.is_empty() {
+        timings.log(provider_name, media_id, episode_number, "no-servers", started.elapsed().as_millis());
         return Err(format!("No stream URL found on {}", provider_name));
     }
-    Ok((raw_stream_url, headers, subtitle_url))
+
+    let probe_start = std::time::Instant::now();
+    let mut last_dead = String::new();
+    for (idx, cand) in ordered.iter().take(MAX_PROBES).enumerate() {
+        timings.probes = idx + 1;
+        match probe_stream(&state.http_client, &cand.url, cand.headers.as_ref()).await {
+            StreamProbe::Alive => {
+                if idx > 0 {
+                    log::info!(
+                        "Stream probe: {} preferred server(s) on {} were dead, playing '{}' instead",
+                        idx, provider_name, cand.name
+                    );
+                }
+                timings.probe_ms = probe_start.elapsed().as_millis();
+                timings.log(provider_name, media_id, episode_number, "ok", started.elapsed().as_millis());
+                return Ok((cand.url.clone(), cand.headers.clone(), cand.subtitle_url.clone()));
+            }
+            StreamProbe::Dead(reason) => {
+                log::warn!(
+                    "Stream probe: server '{}' on {} is dead ({})",
+                    cand.name, provider_name, reason
+                );
+                last_dead = reason;
+            }
+        }
+    }
+    timings.probe_ms = probe_start.elapsed().as_millis();
+    timings.log(provider_name, media_id, episode_number, "all-dead", started.elapsed().as_millis());
+
+    // Every server we probed answered with an unambiguous rejection. Report it
+    // as a resolve failure so the caller moves on to the fallback provider —
+    // returning the best-ranked dead URL anyway would just reproduce the bug
+    // this probe exists to catch.
+    Err(format!(
+        "No playable stream on {} ({} of {} servers probed, last error: {})",
+        provider_name,
+        ordered.len().min(MAX_PROBES),
+        ordered.len(),
+        last_dead
+    ))
 }
 
 /// Resolve and cache a stream ahead of time so the eventual `start_playback`
@@ -596,7 +792,7 @@ pub async fn preload_episode_impl(
         return Ok(());
     }
 
-    // Already preloaded (or being worked on) for this exact target — skip.
+    // Already preloaded for this exact target — skip.
     {
         let slot = state.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
@@ -606,8 +802,23 @@ pub async fn preload_episode_impl(
         }
     }
 
+    // Nothing in the slot yet doesn't mean nothing is coming: the slot is only
+    // filled when a resolve *finishes*, so the check above can't see a resolve
+    // that is still running. Claim the target instead — see
+    // AppStateInner::preloading.
+    let Some(guard) = state.claim_preload(media_id, episode_number, &provider_name) else {
+        log::info!(
+            "Preload for media {} ep {} ({}) already in flight; skipping",
+            media_id, episode_number, provider_name
+        );
+        return Ok(());
+    };
+
     let state_inner = state.clone();
     tokio::spawn(async move {
+        // Held for the whole resolve; dropping it releases the claim however
+        // this task ends.
+        let _guard = guard;
         match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title).await {
             Ok((raw_url, headers, subtitle_url)) => {
                 let mut slot = state_inner.preloaded_stream.lock().await;
@@ -783,22 +994,23 @@ pub async fn start_playback(
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
 
-    {
-        let mut guard = state.current_playback.lock().await;
-        *guard = Some(crate::state::CurrentPlayback {
-            media_id,
-            episode_number,
-            provider: provider_name.clone(),
-            title: title_str.clone(),
-            episode_title: episode_title_str.clone(),
-            cover_image: cover_image_str.clone(),
-            total_episodes: total_eps,
-            last_position: 0,
-            last_duration: 0,
-            paused: false,
-        });
-    }
-
+    // `current_playback` is deliberately NOT written here. It used to be, and
+    // that made the slot describe an episode that had not started and might
+    // never start:
+    //
+    //  - A resolve that fails returns Err below with the slot already moved on.
+    //    `player_next_handler` computes the next episode from that slot, so the
+    //    following Shift+N jumped past the episode that just failed.
+    //  - Resolving can take tens of seconds. Progress/pause callbacks arriving
+    //    from the still-playing previous episode during that window were
+    //    attributed to this one.
+    //  - The IPC-failure recovery path further down reads the slot to save the
+    //    outgoing episode's position before respawning mpv — but the write here
+    //    had already reset `last_position` to 0, so that save never fired.
+    //
+    // Every path that actually commits mpv to this episode (IPC reuse, fresh
+    // spawn) writes the slot itself. The superseded-start bails deliberately
+    // leave the previous episode's record alone, since the newer start owns it.
     let db = state.open_db()?;
 
     let resume_seconds = if start_over.unwrap_or(false) {
@@ -833,8 +1045,6 @@ pub async fn start_playback(
         }
         sec
     };
-
-    state.discord.set_presence(&title_str, episode_number, &episode_title_str, total_eps, resume_seconds, 0, false);
 
     let local_file_path = {
         let mut path_found = None;
@@ -888,6 +1098,47 @@ pub async fn start_playback(
         // Instant transition: if the previous episode preloaded this one's
         // stream, use it and skip the scrape entirely. Stale or mismatched
         // entries fall through to a normal resolve.
+        //
+        // The age limit was 15 minutes, which is generous for the signed CDN
+        // URLs several of these providers hand out — an auto-next landing on an
+        // expired one produced exactly the "next episode doesn't start" symptom,
+        // and worse, taking the preload skips the resolve *and* its
+        // fallback-provider chain, so nothing recovered. Three minutes covers
+        // the case this exists for (the near-end preload, which fires at 85% of
+        // an episode), and the probe below covers the rest.
+        const PRELOAD_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
+        // Auto-next routinely arrives while the near-end preload for the same
+        // episode is still resolving. The slot is only filled on completion, so
+        // checking it here would find nothing and this call would start a
+        // second, competing resolve of the identical episode — both were
+        // observed finishing within a second of each other, and on nyaa that
+        // is two `add_torrent` + `update_only_files` rounds against one live
+        // torrent, churning the piece selection out from under whatever mpv is
+        // reading. Wait for the work already in progress instead.
+        //
+        // Bounded, and a timeout just falls through to resolving normally, so
+        // a preload that never finishes cannot wedge playback.
+        if state.preload_in_flight(media_id, episode_number, &provider_name) {
+            const PRELOAD_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+            log::info!(
+                "Waiting for the in-flight preload of media {} ep {} instead of resolving it twice",
+                media_id, episode_number
+            );
+            let deadline = std::time::Instant::now() + PRELOAD_WAIT;
+            while std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                if !state.preload_in_flight(media_id, episode_number, &provider_name) {
+                    break;
+                }
+                // A newer start superseded this one; stop waiting and let the
+                // guards further down bail out.
+                if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+                    break;
+                }
+            }
+        }
+
         let preloaded = {
             let mut slot = state.preloaded_stream.lock().await;
             match slot.take() {
@@ -895,7 +1146,7 @@ pub async fn start_playback(
                     if p.media_id == media_id
                         && p.episode_number == episode_number
                         && p.provider == provider_name
-                        && p.at.elapsed() < std::time::Duration::from_secs(15 * 60) =>
+                        && p.at.elapsed() < PRELOAD_MAX_AGE =>
                 {
                     Some(p)
                 }
@@ -904,6 +1155,27 @@ pub async fn start_playback(
                     None
                 }
             }
+        };
+
+        // Fresh enough is not the same as still working, so confirm the
+        // preloaded URL is actually serving before committing mpv to it. A
+        // dead one falls through to the full resolve (and therefore to the
+        // fallback-provider chain) instead of being handed over blind. It is
+        // deliberately not put back in the slot — it has been proven dead.
+        let preloaded = match preloaded {
+            Some(p) => {
+                match probe_stream(&state.http_client, &p.raw_url, p.headers.as_ref()).await {
+                    StreamProbe::Alive => Some(p),
+                    StreamProbe::Dead(reason) => {
+                        log::warn!(
+                            "Preloaded stream for media {} ep {} is dead ({}); re-resolving",
+                            media_id, episode_number, reason
+                        );
+                        None
+                    }
+                }
+            }
+            None => None,
         };
 
         let (raw_stream_url, headers, sub_url) = if let Some(p) = preloaded {
@@ -970,6 +1242,12 @@ pub async fn start_playback(
         }
         stream_url
     };
+
+    // Only now that a playable stream exists. Setting presence before the
+    // resolve meant a play that failed to find any stream still advertised the
+    // episode on Discord, with a running countdown, for an episode nobody was
+    // watching.
+    state.discord.set_presence(&title_str, episode_number, &episode_title_str, total_eps, resume_seconds, 0, false);
 
     // Sync AniList watching list after confirming stream is available — but
     // only when the entry isn't already CURRENT. Previously this fired a
@@ -1960,7 +2238,78 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{is_watched, resume_position};
+    use super::{candidate_order, is_watched, probe_status_is_dead, resume_position};
+    use crate::scraper::client::StreamServer;
+
+    fn server(name: &str, url: &str, quality: &str) -> StreamServer {
+        StreamServer {
+            name: name.to_string(),
+            url: url.to_string(),
+            quality: Some(quality.to_string()),
+            is_m3u8: None,
+            headers: None,
+            group: None,
+            subtitle_url: None,
+        }
+    }
+
+    #[test]
+    fn probe_treats_only_definitive_rejections_as_dead() {
+        for dead in [403, 404, 410, 451, 500, 502, 503] {
+            assert!(probe_status_is_dead(dead), "{} should be dead", dead);
+        }
+        // A false negative skips a server that plays fine, so everything
+        // ambiguous has to stay alive: 2xx, an unfollowed redirect, a host that
+        // rejects Range with 405, and rate limiting.
+        for alive in [200, 206, 302, 405, 416, 429] {
+            assert!(!probe_status_is_dead(alive), "{} should be alive", alive);
+        }
+    }
+
+    #[test]
+    fn candidate_order_keeps_the_chosen_server_first() {
+        // wixstatic outranks mp4upload on speed, but the preference logic
+        // picked the mp4upload one (sub/dub group, or an explicit user pick).
+        // Probing must not quietly override that choice.
+        let servers = vec![
+            server("fast", "https://wixstatic.com/a.mp4", "1080p"),
+            server("chosen", "https://mp4upload.com/b.mp4", "1080p"),
+        ];
+        let ordered = candidate_order(&servers, Some(&servers[1]));
+        assert_eq!(
+            ordered.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            vec!["chosen", "fast"]
+        );
+    }
+
+    #[test]
+    fn candidate_order_dedupes_by_url_and_ranks_the_rest() {
+        // The scraper's four extraction passes routinely surface one URL under
+        // several names; retrying the same dead URL twice would waste a probe.
+        let servers = vec![
+            server("slow", "https://elsewhere.example/c.mp4", "1080p"),
+            server("dupe-of-fast", "https://wixstatic.com/a.mp4", "1080p"),
+            server("fast", "https://wixstatic.com/a.mp4", "1080p"),
+        ];
+        let ordered = candidate_order(&servers, Some(&servers[2]));
+        assert_eq!(
+            ordered.iter().map(|s| s.url.as_str()).collect::<Vec<_>>(),
+            vec!["https://wixstatic.com/a.mp4", "https://elsewhere.example/c.mp4"]
+        );
+    }
+
+    #[test]
+    fn candidate_order_drops_empty_urls() {
+        // The nyaa picker emits sentinel entries with an empty url, resolved
+        // lazily on pick — probing one would be a guaranteed wasted request.
+        let servers = vec![
+            server("sentinel", "", "1080p"),
+            server("real", "https://wixstatic.com/a.mp4", "1080p"),
+        ];
+        let ordered = candidate_order(&servers, None);
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(ordered[0].name, "real");
+    }
 
     #[test]
     fn watched_only_past_threshold() {

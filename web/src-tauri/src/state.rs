@@ -246,11 +246,39 @@ impl Drop for PreloadGuard {
     }
 }
 
+/// What will actually play the stream being resolved.
+///
+/// It decides which releases are acceptable, not just how the URL is handed
+/// back: mpv decodes anything, while a browser `<video>` element cannot touch
+/// HEVC, AV1 or 10-bit H.264 — all common in Nyaa releases. Every resolve path
+/// carries this so release scoring, the torrent resolution cache and the
+/// preload slot all agree on who the stream is for.
+///
+/// Derived from the call site rather than sent by the client: `/mobile-api/*`
+/// is only ever reachable from the PWA, and the Tauri commands only ever from
+/// the desktop window, so neither can misreport it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamClient {
+    Mpv,
+    Browser,
+}
+
+impl StreamClient {
+    pub fn is_browser(self) -> bool {
+        self == StreamClient::Browser
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PreloadedStream {
     pub media_id: i64,
     pub episode_number: i64,
     pub provider: String,
+    /// A stream preloaded for mpv may be a release the phone cannot decode
+    /// (and vice versa for nothing, since mpv accepts everything). The slot is
+    /// keyed by media/episode/provider only, so consumers must also match on
+    /// this or a desktop preload gets handed to the PWA.
+    pub client: StreamClient,
     pub raw_url: String,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub subtitle_url: Option<String>,

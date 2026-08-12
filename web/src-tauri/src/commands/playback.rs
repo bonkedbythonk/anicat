@@ -577,6 +577,7 @@ pub(crate) async fn resolve_stream_for_provider(
     provider_name: &str,
     server: &Option<String>,
     title: Option<String>,
+    client: crate::state::StreamClient,
 ) -> Result<(String, Option<std::collections::HashMap<String, String>>, Option<String>), String> {
     let started = std::time::Instant::now();
     let mut timings = ResolveTimings::default();
@@ -602,6 +603,7 @@ pub(crate) async fn resolve_stream_for_provider(
                     allow_episodeless,
                     episode_count,
                     prefer_dub,
+                    browser_client: client.is_browser(),
                     // The stream picker passes the chosen release name back as
                     // `server`; honor it. Auto-play (Continue button) sends
                     // None and takes the best-scored candidate.
@@ -764,7 +766,7 @@ pub async fn preload_episode(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<(), String> {
-    preload_episode_impl(state.inner(), media_id, episode_number, provider, title).await
+    preload_episode_impl(state.inner(), media_id, episode_number, provider, title, crate::state::StreamClient::Mpv).await
 }
 
 pub async fn preload_episode_impl(
@@ -773,6 +775,7 @@ pub async fn preload_episode_impl(
     episode_number: i64,
     provider: Option<String>,
     title: Option<String>,
+    client: crate::state::StreamClient,
 ) -> Result<(), String> {
     let provider_name = match provider {
         Some(p) if !p.is_empty() => p,
@@ -796,7 +799,7 @@ pub async fn preload_episode_impl(
     {
         let slot = state.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
-            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name {
+            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name && p.client == client {
                 return Ok(());
             }
         }
@@ -819,13 +822,14 @@ pub async fn preload_episode_impl(
         // Held for the whole resolve; dropping it releases the claim however
         // this task ends.
         let _guard = guard;
-        match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title).await {
+        match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title, client).await {
             Ok((raw_url, headers, subtitle_url)) => {
                 let mut slot = state_inner.preloaded_stream.lock().await;
                 *slot = Some(crate::state::PreloadedStream {
                     media_id,
                     episode_number,
                     provider: provider_name.clone(),
+                    client,
                     raw_url,
                     headers,
                     subtitle_url,
@@ -1146,6 +1150,10 @@ pub async fn start_playback(
                     if p.media_id == media_id
                         && p.episode_number == episode_number
                         && p.provider == provider_name
+                        // A browser-bound preload may be a release mpv would
+                        // never have been given, and vice versa; taking the
+                        // wrong one silently plays the wrong file.
+                        && p.client == crate::state::StreamClient::Mpv
                         && p.at.elapsed() < PRELOAD_MAX_AGE =>
                 {
                     Some(p)
@@ -1194,7 +1202,7 @@ pub async fn start_playback(
                 }
                 tried.push(prov.clone());
 
-                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone()).await {
+                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone(), crate::state::StreamClient::Mpv).await {
                     Ok(res) => {
                         if prov != provider_name {
                             // Note: don't write the working provider into

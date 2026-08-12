@@ -445,7 +445,7 @@ async fn resolve_stream(
     Query(q): Query<ResolveStreamQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Stream server list is scraper-derived, not per-viewer.
-    ok_or_500(crate::commands::media::resolve_stream_impl(&state.app_state, id, q.episode_number, q.provider, None).await)
+    ok_or_500(crate::commands::media::resolve_stream_impl(&state.app_state, id, q.episode_number, q.provider, None, crate::state::StreamClient::Browser).await)
 }
 
 #[derive(Deserialize)]
@@ -589,7 +589,7 @@ async fn preload_episode(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let scoped = state.scoped_for(auth).await;
     ok_or_500(
-        crate::commands::playback::preload_episode_impl(&scoped, body.media_id, body.episode_number, body.provider, body.title)
+        crate::commands::playback::preload_episode_impl(&scoped, body.media_id, body.episode_number, body.provider, body.title, crate::state::StreamClient::Browser)
             .await
             .map(|_| Value::Null),
     )
@@ -604,6 +604,16 @@ struct ResolvePlaybackBody {
     episode_title: Option<String>,
     cover_image: Option<String>,
     total_episodes: Option<i64>,
+    /// Whether this phone's `<video>` element can decode Matroska at all —
+    /// the client half of the codec story the server cannot infer.
+    ///
+    /// `StreamClient::Browser` tells the resolver to avoid HEVC/AV1/10-bit
+    /// *releases*, but every torrent release is a .mkv regardless of codec,
+    /// and only the client knows whether its engine demuxes that container
+    /// (Chromium does, WebKit does not). Absent — an older PWA build — is
+    /// treated as capable, which is exactly the behaviour that shipped before
+    /// this field existed.
+    can_play_matroska: Option<bool>,
 }
 
 /// Mobile has no mpv — instead of `start_playback` spawning a native player,
@@ -621,7 +631,7 @@ async fn resolve_playback(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let app_state = state.scoped_for(AuthedUser(user_id)).await;
     let app_state = &app_state;
-    let provider_name = match body.provider.clone() {
+    let mut provider_name = match body.provider.clone() {
         Some(p) if !p.is_empty() => p,
         _ => app_state.config.read().await.general.provider.clone(),
     };
@@ -630,6 +640,27 @@ async fn resolve_playback(
         cfg.general.fallback_provider.clone()
     };
 
+    // Both provider slots can arrive as "nyaa" from the server's global
+    // config.toml — `general.provider` when the client sends none, and
+    // `general.fallback_provider` whenever the primary fails. The PWA's own
+    // pickers hide nyaa on a device that can't demux Matroska, but neither of
+    // those paths passes through them, which is how a phone that had it hidden
+    // still ended up staring at a stalled <video>. Refuse it here instead:
+    // an honest error beats a stream that cannot start.
+    let can_play_matroska = body.can_play_matroska.unwrap_or(true);
+    let torrents_unusable = |p: &str| p == "nyaa" && !can_play_matroska;
+    if torrents_unusable(&provider_name) && !torrents_unusable(&fallback_provider) && !fallback_provider.is_empty() && fallback_provider != "none" {
+        provider_name = fallback_provider.clone();
+    }
+    if torrents_unusable(&provider_name) {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": "This browser can't play torrent releases (.mkv). Pick a different source in Playback Settings."
+            })),
+        ));
+    }
+
     let title_str = body.title.clone().unwrap_or_default();
     let episode_title_str = body.episode_title.clone().unwrap_or_default();
     let cover_image_str = body.cover_image.clone().unwrap_or_default();
@@ -637,17 +668,22 @@ async fn resolve_playback(
 
     let (raw_url, stream_headers, raw_subtitle_url, resolved_provider) = match crate::commands::playback::resolve_stream_for_provider(
         app_state, body.media_id, body.episode_number, &provider_name, &None, body.title.clone(),
+        crate::state::StreamClient::Browser,
     )
     .await
     {
         Ok((url, headers, subtitle_url)) => (url, headers, subtitle_url, provider_name.clone()),
         Err(primary_err) => {
-            let has_fallback = !fallback_provider.is_empty() && fallback_provider != "none" && fallback_provider != provider_name;
+            let has_fallback = !fallback_provider.is_empty()
+                && fallback_provider != "none"
+                && fallback_provider != provider_name
+                && !torrents_unusable(&fallback_provider);
             if !has_fallback {
                 return Err((StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": primary_err }))));
             }
             match crate::commands::playback::resolve_stream_for_provider(
                 app_state, body.media_id, body.episode_number, &fallback_provider, &None, body.title.clone(),
+                crate::state::StreamClient::Browser,
             )
             .await
             {

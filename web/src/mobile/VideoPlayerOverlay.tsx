@@ -3,6 +3,7 @@ import { X, Loader2, AlertCircle, Play, Pause, RotateCcw, RotateCw, Maximize, Sk
 import { mobileFetch } from "@/lib/transport";
 import { useSettingsStore } from "@/stores/app";
 import Hls from "hls.js";
+import { canPlayTorrents } from "./mobileSettings";
 
 export interface VideoPlayerOverlayProps {
   mediaId: number;
@@ -114,6 +115,10 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
           episode_title: props.episodeTitle,
           cover_image: props.coverImage,
           total_episodes: props.totalEpisodes,
+          // The server picks releases whose codecs a browser can decode, but
+          // only this side knows whether the engine demuxes Matroska at all —
+          // so it also decides whether "nyaa" is offerable as a fallback.
+          can_play_matroska: canPlayTorrents(),
         }),
       });
       if (!res.ok) throw new Error(await res.text().catch(() => "Couldn't load stream"));

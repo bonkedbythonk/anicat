@@ -25,6 +25,13 @@ const CACHE_CAP_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 struct Resolved {
     torrent_id: usize,
     file_id: usize,
+    /// Whether the release this came from is playable in a `<video>` element.
+    /// The cache is keyed by episode alone, so a resolution made for mpv can
+    /// be handed to the phone — fine when the release is browser-compatible
+    /// (no second download of the same episode), wrong when it is an AV1 or
+    /// Hi10P batch mpv was happy with. A browser caller re-resolves in that
+    /// case instead of reusing it.
+    browser_playable: bool,
 }
 
 /// What to find a torrent stream for. Grouped (rather than passed as five
@@ -45,6 +52,10 @@ pub struct ResolveTarget<'a> {
     /// `search::absolute_episode`.
     pub episode_count: Option<i64>,
     pub prefer_dub: bool,
+    /// The stream is bound for a browser `<video>` element rather than mpv,
+    /// which narrows what codecs are acceptable. See
+    /// `search::ReleaseCriteria::browser_client`.
+    pub browser_client: bool,
     /// When the user picked a specific release from the server list, its
     /// name. That candidate is tried first; the rest stay as fallbacks so a
     /// pick that turns out to be dead still plays something.
@@ -130,7 +141,8 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, chosen_name } = target;
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name } = target;
+        let criteria = search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client };
         let session = self.session().await?;
 
         // Reuse a previous resolution if the torrent is still in the session.
@@ -138,7 +150,7 @@ impl TorrentManager {
         // before handing back the URL.
         {
             let resolved = self.resolved.lock().await;
-            if let Some(r) = resolved.get(&(media_id, episode)) {
+            if let Some(r) = resolved.get(&(media_id, episode)).filter(|r| r.browser_playable || !browser_client) {
                 if let Some(handle) = session.get(r.torrent_id.into()) {
                     let _ = session.unpause(&handle).await;
                     return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
@@ -150,7 +162,7 @@ impl TorrentManager {
             return Err("No title to search torrents for".into());
         }
         let mut candidates =
-            search::find_candidates(client, titles, episode, allow_episodeless, prefer_dub).await;
+            search::find_candidates(client, titles, criteria).await;
         // Honor an explicit release pick: float the matching candidate to the
         // front (stable partition keeps the rest as ordered fallbacks).
         if let Some(ref chosen) = chosen_name {
@@ -205,11 +217,15 @@ impl TorrentManager {
         client: &reqwest::Client,
         target: ResolveTarget<'_>,
     ) -> Vec<TorrentChoice> {
-        let ResolveTarget { episode, titles, allow_episodeless, prefer_dub, .. } = target;
+        let ResolveTarget { episode, titles, allow_episodeless, prefer_dub, browser_client, .. } = target;
         if titles.is_empty() {
             return vec![];
         }
-        search::find_candidates(client, titles, episode, allow_episodeless, prefer_dub)
+        search::find_candidates(
+            client,
+            titles,
+            search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client },
+        )
             .await
             .into_iter()
             .map(|c| TorrentChoice {
@@ -492,7 +508,13 @@ impl TorrentManager {
             return Err(e);
         }
 
-        Ok(Resolved { torrent_id, file_id })
+        Ok(Resolved {
+            torrent_id,
+            file_id,
+            // Judged from the release name, the same text the scorer used, so
+            // the cache agrees with the ranking that picked this candidate.
+            browser_playable: !search::browser_incompatible_codec(&search::normalize(&cand.name)),
+        })
     }
 }
 
@@ -640,7 +662,7 @@ mod tests {
     #[ignore]
     async fn live_find_candidates() {
         let titles = vec!["Sousou no Frieren".to_string()];
-        let cands = search::find_candidates(&client(), &titles, 1, false, false).await;
+        let cands = search::find_candidates(&client(), &titles, search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false }).await;
         assert!(!cands.is_empty(), "no candidates found");
         let best = &cands[0];
         println!("best: {} (score {}, seeders {})", best.name, best.score, best.seeders);
@@ -653,7 +675,7 @@ mod tests {
         );
         // A short/ambiguous title must not match unrelated shows.
         let titles = vec!["Monster".to_string()];
-        let cands = search::find_candidates(&client(), &titles, 3, false, false).await;
+        let cands = search::find_candidates(&client(), &titles, search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false }).await;
         for c in &cands {
             let n = search::normalize(&c.name);
             assert!(!n.contains("pocket"), "false positive: {}", c.name);
@@ -676,6 +698,7 @@ mod tests {
                     titles: &titles,
                     allow_episodeless: false,
                     episode_count: Some(28),
+                    browser_client: false,
                     prefer_dub: false,
                     chosen_name: None,
                 },

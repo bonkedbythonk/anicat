@@ -559,14 +559,79 @@ const FILM_MISMATCH_PENALTY: i64 = 300;
 /// nearly dead.
 const SD_PENALTY: i64 = 400;
 
+/// How far a release whose name advertises a codec no browser can decode is
+/// pushed down when the stream is bound for a `<video>` element.
+///
+/// Sized to dominate every other term rather than merely compete with them: an
+/// incompatible release does not play *at all*, so even the best-cased one
+/// (exact episode 1000 + trusted 100 + saturated seeders 360 = 1460) must land
+/// below the worst-cased compatible alternative that still scores (a bare
+/// untagged batch at 300 with no seeder bonus). Anything smaller leaves an
+/// inversion where a heavily-seeded AV1 exact match outranks a thin but
+/// playable batch.
+///
+/// Deliberately a penalty and not a rejection. Codec detection is name-based
+/// guesswork — `[SubsPlease] Show - 05 (1080p)` states no codec at all — so a
+/// false positive must cost a release its rank, never its existence. When
+/// nothing compatible matched, a negative-scoring candidate is still the best
+/// on offer and still gets tried; scores are only ever compared, never
+/// thresholded.
+const BROWSER_INCOMPATIBLE_PENALTY: i64 = 1200;
+
+/// Whether a release name advertises a video or audio codec that browsers
+/// cannot decode in a `<video>` element.
+///
+/// Video: HEVC and AV1 have no reliable browser support in Matroska, and
+/// 10-bit H.264 (Hi10P — endemic in anime) has none anywhere at all.
+/// Audio: E-AC-3, FLAC and DTS all ride along in otherwise-fine H.264 releases
+/// and fail on their own.
+///
+/// Matched against `normalize`d text, which lowercases and turns *every*
+/// non-alphanumeric character into a space. So a marker may never contain a dot
+/// or a hyphen — `H.265` arrives as `h 265` and `E-AC-3` as `e ac 3`, which is
+/// why both spellings appear here as space-separated phrases. (The neighbouring
+/// dub check's "dual-audio" is unreachable for exactly this reason.)
+///
+/// Matched on whole tokens rather than as substrings: `dts` and `av1` are short
+/// enough to appear inside unrelated words, and a false positive here costs a
+/// release its rank.
+pub fn browser_incompatible_codec(name_norm: &str) -> bool {
+    const PHRASES: &[&str] = &[
+        // Video
+        "hevc", "x265", "h265", "h 265", "x 265", "av1",
+        "10bit", "10 bit", "hi10", "hi10p",
+        // Audio
+        "eac3", "eac 3", "e ac 3", "flac", "dts",
+    ];
+    let padded = format!(" {} ", name_norm);
+    if PHRASES.iter().any(|p| padded.contains(&format!(" {p} "))) {
+        return true;
+    }
+    // Dolby Digital Plus carries its channel layout in the same token —
+    // "DDP5.1" normalizes to "ddp5 1", so an exact-token match misses it.
+    name_norm.split(' ').any(|t| t.starts_with("ddp"))
+}
+
+/// What a release is being scored against. Bundled rather than passed as a
+/// fourth and fifth positional `bool`, which had already made call sites read
+/// as `(name, q, 13, false, false)`.
+#[derive(Debug, Clone, Copy)]
+pub struct ReleaseCriteria {
+    pub episode: i64,
+    pub allow_episodeless: bool,
+    pub prefer_dub: bool,
+    /// The stream is bound for a browser `<video>` element rather than mpv.
+    /// mpv plays everything here, so this is only ever set for the mobile PWA.
+    pub browser_client: bool,
+}
+
 /// Score a release name against the wanted episode. None = reject.
 fn score_release(
     name: &str,
     query_norm: &str,
-    episode: i64,
-    allow_episodeless: bool,
-    prefer_dub: bool,
+    criteria: ReleaseCriteria,
 ) -> Option<(i64, bool)> {
+    let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client } = criteria;
     let name_norm = normalize(name);
     if !title_matches(query_norm, name) {
         return None;
@@ -613,6 +678,9 @@ fn score_release(
     }
     if prefer_dub && (name_norm.contains("dual audio") || name_norm.contains("dual-audio") || name_norm.contains("english dub")) {
         score += 250;
+    }
+    if browser_client && browser_incompatible_codec(&name_norm) {
+        score -= BROWSER_INCOMPATIBLE_PENALTY;
     }
     Some((score, assume_batch))
 }
@@ -694,9 +762,7 @@ async fn search_nyaa(
     client: &reqwest::Client,
     query: &str,
     query_title_norm: &str,
-    episode: i64,
-    allow_episodeless: bool,
-    prefer_dub: bool,
+    criteria: ReleaseCriteria,
 ) -> Vec<Candidate> {
     let mut out = vec![];
     let url = format!(
@@ -728,7 +794,7 @@ async fn search_nyaa(
         let trusted = field(item, "nyaa:trusted") == "Yes";
         let torrent_url = field(item, "link");
         let infohash = field(item, "nyaa:infoHash");
-        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, episode, allow_episodeless, prefer_dub) else {
+        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, criteria) else {
             continue;
         };
         if trusted {
@@ -771,10 +837,10 @@ async fn search_nyaa(
 pub async fn find_candidates(
     client: &reqwest::Client,
     titles: &[String],
-    episode: i64,
-    allow_episodeless: bool,
-    prefer_dub: bool,
+    criteria: ReleaseCriteria,
 ) -> Vec<Candidate> {
+    let episode = criteria.episode;
+    let prefer_dub = criteria.prefer_dub;
     let mut all: Vec<Candidate> = vec![];
 
     // Expand season-naming variants, keep order, dedupe, cap the fan-out.
@@ -802,9 +868,13 @@ pub async fn find_candidates(
         // as a hit, and normalize() already discards punctuation.
         let q_title = search_query_form(title);
         let single_q = format!("{} - {:02}", q_title, episode);
-        all.extend(search_nyaa(client, &single_q, &norm, episode, false, prefer_dub).await);
+        // The per-episode query can never legitimately match an untagged
+        // release, so it always scores with allow_episodeless off regardless of
+        // what the caller asked for; only the batch query honours it.
+        let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
+        all.extend(search_nyaa(client, &single_q, &norm, single).await);
         let batch_q = format!("{} 1080p", q_title);
-        all.extend(search_nyaa(client, &batch_q, &norm, episode, allow_episodeless, prefer_dub).await);
+        all.extend(search_nyaa(client, &batch_q, &norm, criteria).await);
     }
 
     // Dedupe by name, best score wins.
@@ -829,6 +899,105 @@ fn urlencoding_encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Criteria for an mpv-bound resolve, which is what every pre-existing
+    /// ordering assertion below was written against — mpv decodes everything,
+    /// so no codec penalty applies and the tiers behave as they always did.
+    fn crit(episode: i64, allow_episodeless: bool, prefer_dub: bool) -> ReleaseCriteria {
+        ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client: false }
+    }
+
+    /// The same, bound for a browser `<video>` element.
+    fn crit_browser(episode: i64, allow_episodeless: bool, prefer_dub: bool) -> ReleaseCriteria {
+        ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client: true }
+    }
+
+    #[test]
+    fn browser_codec_markers_are_detected() {
+        for name in [
+            "[Judas] Show [BD 1080p][HEVC x265 10bit][Dual-Audio]",
+            "[Sokudo] Toradora! [1080p BD AV1][dual audio]",
+            "[NH] Show - Season 2 (WEB 1080p x265 10-bit)",
+            "Show S02 1080p CR WEB-DL MULTi EAC3 H 264",
+            "[Group] Show [BD 1080p FLAC]",
+            "[Group] Show [1080p Hi10P]",
+        ] {
+            assert!(
+                browser_incompatible_codec(&normalize(name)),
+                "should be flagged as browser-incompatible: {}",
+                name
+            );
+        }
+        for name in [
+            "[SubsPlease] Sousou no Frieren - 05 (1080p) [ABCD1234]",
+            "[Erai-raws] Toradora - 01 ~ 25 [1080p]",
+            "Show S02E10 1080p CR WEB-DL AAC2.0 H 264-VARYG",
+        ] {
+            assert!(
+                !browser_incompatible_codec(&normalize(name)),
+                "should be treated as playable: {}",
+                name
+            );
+        }
+        // normalize() maps every non-alphanumeric character to a space, so a
+        // marker containing a dot or a hyphen can never match. These two are
+        // the forms that only appear punctuated in the wild.
+        for name in [
+            "[Grp] Show - 05 [1080p H.265]",
+            "Show S02E10 1080p WEB-DL E-AC-3 H 264-VARYG",
+            "[Grp] Show - 05 [1080p x264 DDP5.1]",
+            "[Grp] Show (BD 1080p DTS-HD MA)",
+        ] {
+            assert!(
+                browser_incompatible_codec(&normalize(name)),
+                "punctuated marker must survive normalize(): {}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn browser_client_sinks_incompatible_release_below_compatible_batch() {
+        let q = normalize("Toradora");
+        // Best case for the incompatible release (exact episode) against the
+        // worst case for the compatible one (an untagged batch, lowest tier),
+        // plus the largest bonuses the incompatible one could pick up. Even
+        // then it must lose, or a phone gets handed a stream it cannot decode.
+        let (av1_exact, _) =
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, crit_browser(13, false, false)).unwrap();
+        let (h264_batch, _) =
+            score_release("[Grp] Toradora [1080p BD]", &q, crit_browser(13, false, false)).unwrap();
+        assert!(
+            av1_exact + TRUSTED_BONUS + seeder_score(SEEDER_SATURATION) < h264_batch,
+            "AV1 exact ({}) must sink below H.264 batch ({}) even fully bonused",
+            av1_exact,
+            h264_batch
+        );
+    }
+
+    #[test]
+    fn mpv_client_is_unaffected_by_codec() {
+        // mpv decodes all of these, so the penalty must not apply and the
+        // exact-episode tier must still win.
+        let q = normalize("Toradora");
+        let (av1_exact, _) =
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, crit(13, false, false)).unwrap();
+        let (h264_exact, _) =
+            score_release("[Grp] Toradora - 13 [1080p]", &q, crit(13, false, false)).unwrap();
+        assert_eq!(av1_exact, h264_exact);
+    }
+
+    #[test]
+    fn browser_penalty_never_rejects_outright() {
+        // When nothing compatible exists, the incompatible release is still
+        // the best on offer and must remain selectable — scores are compared,
+        // never thresholded.
+        let q = normalize("Toradora");
+        assert!(
+            score_release("[Grp] Toradora - 13 [1080p HEVC 10bit]", &q, crit_browser(13, false, false))
+                .is_some()
+        );
+    }
 
     #[test]
     fn season1_query_rejects_r2_release() {
@@ -980,12 +1149,12 @@ mod tests {
         // contain episode 5 — it should not consume a candidate slot ahead of
         // releases that can.
         let q = normalize("K-On!");
-        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, 5, false, false).unwrap();
-        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, 5, false, false).unwrap();
+        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, crit(5, false, false)).unwrap();
+        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, crit(5, false, false)).unwrap();
         assert!(series > film);
         // For an actual film lookup (allow_episodeless), no penalty applies.
         let kk = normalize("Koe no Katachi");
-        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, 1, true, false).unwrap();
+        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, crit(1, true, false)).unwrap();
         assert!(movie_ok > 0);
     }
 
@@ -1014,15 +1183,13 @@ mod tests {
             assert!(
                 score_release(
                     "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH][Multiple Subtitle]",
-                    &q, ep, false, false
-                ).is_some(),
+                    &q, crit(ep, false, false)).is_some(),
                 "episode {} must match the batch containing it", ep
             );
         }
         // Outside the stated range it must still be rejected.
         assert!(score_release(
-            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, 13, false, false
-        ).is_none());
+            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1072,10 +1239,10 @@ mod tests {
         // Rejecting these is what left a finished show with three candidates
         // when the site had a dozen.
         let (untagged, assume_batch) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, 13, false, false).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, crit(13, false, false)).unwrap();
         assert!(assume_batch);
         let (explicit, explicit_batch) =
-            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, 13, false, false).unwrap();
+            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, crit(13, false, false)).unwrap();
         assert!(!explicit_batch);
         assert!(explicit > untagged, "a release that states its range must outrank an assumed one");
     }
@@ -1083,8 +1250,8 @@ mod tests {
     #[test]
     fn seven_twenty_is_accepted_but_never_outranks_ten_eighty() {
         let q = normalize("Toradora");
-        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, 13, false, false).unwrap();
-        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, 13, false, false).unwrap();
+        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, crit(13, false, false)).unwrap();
+        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, crit(13, false, false)).unwrap();
         assert!(sd < hd);
         // The seeder bonus saturates below SD_PENALTY, so it can never promote
         // a 720p release over the same release in 1080p.
@@ -1094,7 +1261,7 @@ mod tests {
         );
         assert!(sd + seeder_score(SEEDER_SATURATION) < hd);
         // Anything below 720p is still rejected outright.
-        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, 13, false, false).is_none());
+        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1118,11 +1285,11 @@ mod tests {
         // whether either would actually download.
         let q = normalize("Toradora");
         let (dead_base, _) =
-            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, 13, false, false).unwrap();
+            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, crit(13, false, false)).unwrap();
         let dead = dead_base + TRUSTED_BONUS + seeder_score(2) - DEAD_SWARM_PENALTY;
 
         let (live_base, assumed) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, 13, false, false).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, crit(13, false, false)).unwrap();
         let live = live_base + seeder_score(52);
 
         assert!(assumed);
@@ -1135,8 +1302,8 @@ mod tests {
         // release that names the exact episode — that ordering is correctness,
         // not preference.
         let q = normalize("Show");
-        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, 13, false, false).unwrap();
-        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, 13, false, false).unwrap();
+        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, crit(13, false, false)).unwrap();
+        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, crit(13, false, false)).unwrap();
         assert!(exact + seeder_score(20) > batch + seeder_score(SEEDER_SATURATION));
     }
 

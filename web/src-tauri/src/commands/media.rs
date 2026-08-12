@@ -546,7 +546,7 @@ pub async fn resolve_stream(
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<Value, String> {
-    resolve_stream_impl(state.inner(), media_id, episode_number, provider, title).await
+    resolve_stream_impl(state.inner(), media_id, episode_number, provider, title, crate::state::StreamClient::Mpv).await
 }
 
 pub async fn resolve_stream_impl(
@@ -555,6 +555,7 @@ pub async fn resolve_stream_impl(
     episode_number: i32,
     provider: Option<String>,
     title: Option<String>,
+    client: crate::state::StreamClient,
 ) -> Result<Value, String> {
     let provider_name = match provider {
         Some(p) if !p.is_empty() => p,
@@ -587,6 +588,7 @@ pub async fn resolve_stream_impl(
                     allow_episodeless,
                     episode_count,
                     prefer_dub,
+                    browser_client: client.is_browser(),
                     chosen_name: None,
                 },
             )

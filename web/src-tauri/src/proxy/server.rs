@@ -718,7 +718,7 @@ async fn player_preload_handler(
     {
         let slot = scoped.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
-            if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider {
+            if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider && p.client == crate::state::StreamClient::Mpv {
                 return Ok("ok");
             }
         }
@@ -759,6 +759,9 @@ async fn player_preload_handler(
             &pb.provider,
             &None,
             Some(pb.title.clone()),
+            // /player/preload is only ever called by mpv's Lua script; the
+            // PWA has no equivalent trigger.
+            crate::state::StreamClient::Mpv,
         )
         .await
         {
@@ -768,6 +771,7 @@ async fn player_preload_handler(
                     media_id: pb.media_id,
                     episode_number: next_ep,
                     provider: pb.provider.clone(),
+                    client: crate::state::StreamClient::Mpv,
                     raw_url,
                     headers,
                     subtitle_url,

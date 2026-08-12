@@ -1012,6 +1012,13 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
     "filemoon.sx", "filemoon.art", "filemoon.top",
     "repackager.wixmp.com", "vivibebe.site",
+    // anineko's HD-2, reached via bibiemb.xyz. One fixed Cloudflare Workers
+    // subdomain hosts the playlist, its variants and its segments, so the full
+    // `vibevibe.workers.dev` covers it. Deliberately NOT bare `workers.dev` --
+    // that is a shared public platform and would let the proxy fetch anyone's
+    // Worker. HD-2 is what keeps mobile playable on the episodes where HD-1's
+    // ad-CDN segments have been revoked.
+    "vibevibe.workers.dev",
     // anineko's jwplayer embed hosts. The scraper deliberately resolves them
     // to their same-origin `/stream/.../master.m3u8` (the player's own `hls4`)
     // rather than the `hls2`/`hls3` mirrors, which sit on rotating throwaway
@@ -1378,6 +1385,22 @@ mod tests {
         v.extend_from_slice(b"IEND");
         v.extend_from_slice(&[0xae, 0x42, 0x60, 0x82]);
         v
+    }
+
+    #[test]
+    fn hd2_worker_subdomain_is_allowed_but_not_all_workers() {
+        // HD-2's playlist, variants and segments all sit on one fixed Workers
+        // subdomain, and it is what keeps mobile playable when HD-1's ad-CDN
+        // segments have been revoked.
+        assert!(host_is_allowed(
+            "https://morning-credit-3bcc.vibevibe.workers.dev/abc/master.m3u8"
+        ));
+        // workers.dev is a shared public platform. Allowing the whole thing
+        // would turn the proxy into an open relay for anyone's Worker.
+        assert!(!host_is_allowed("https://someone-else.workers.dev/x.m3u8"));
+        assert!(!host_is_allowed("https://workers.dev/x.m3u8"));
+        // And the usual suffix-confusion guard.
+        assert!(!host_is_allowed("https://vibevibe.workers.dev.evil.com/x.m3u8"));
     }
 
     #[test]

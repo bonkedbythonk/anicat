@@ -119,7 +119,24 @@ class StreamServer:
 #: here is a promise that the same host also appears in `ALLOWED_DOMAINS` in
 #: `web/src-tauri/src/proxy/server.rs`. Adding one without the other produces a
 #: server the phone offers and then fails to play.
-_BROWSER_REACHABLE_HOSTS = ("vivibebe.site", "vibeplayer.site", "anizara.store")
+_BROWSER_REACHABLE_HOSTS = (
+    "vivibebe.site",
+    "vibeplayer.site",
+    "anizara.store",
+    # HD-2. Resolves off bibiemb.xyz onto one fixed Cloudflare Workers
+    # subdomain -- `morning-credit-3bcc.vibevibe.workers.dev` was identical
+    # across every episode and both audio groups when this was measured, and
+    # playlist, variants and segments all stay on it. Listing the full
+    # `vibevibe.workers.dev` is as narrow as any other entry here (it is one
+    # account's namespace); listing bare `workers.dev` would open the proxy to
+    # anyone's Worker and must not be done.
+    #
+    # This matters because HD-2 is the one server that covers the episodes
+    # HD-1 loses: HD-1's segments sit on an ad CDN that revokes them per
+    # asset, and on a ten-episode sample four were dead -- HD-2 served 200 on
+    # all four.
+    "vibevibe.workers.dev",
+)
 
 
 def _host_is_browser_reachable(url: str) -> bool:

@@ -115,9 +115,14 @@ def test_browser_reachability_tracks_the_proxy_allowlist():
     assert not _host_is_browser_reachable(
         "https://OkqtSs1gBbNcA8e.rivercrestlearningstudio.store/x/hls3/01/master.txt"
     )
-    assert not _host_is_browser_reachable("https://morning-credit-3bcc.vibevibe.workers.dev/x/master.m3u8")
+    # HD-2 sits on one fixed Workers subdomain and is reachable -- it is what
+    # covers the episodes whose HD-1 segments have been revoked.
+    assert _host_is_browser_reachable("https://morning-credit-3bcc.vibevibe.workers.dev/x/master.m3u8")
+    # But only that namespace: workers.dev at large is a shared public platform.
+    assert not _host_is_browser_reachable("https://someone-else.workers.dev/x/master.m3u8")
     # Suffix matching must not be fooled by a lookalike parent domain.
     assert not _host_is_browser_reachable("https://vivibebe.site.evil.com/x/master.m3u8")
+    assert not _host_is_browser_reachable("https://vibevibe.workers.dev.evil.com/x/master.m3u8")
 
 
 def test_parse_anime_extracts_episodes():

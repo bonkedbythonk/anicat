@@ -104,7 +104,10 @@ impl TorrentManager {
         self.session
             .get_or_try_init(|| async {
                 std::fs::create_dir_all(&self.cache_dir).map_err(|e| e.to_string())?;
-                let opts = SessionOptions {
+                // Built twice: once normally, once without DHT persistence if
+                // the stored state turns out to be unusable. See below.
+                let opts = |disable_dht_persistence: bool| SessionOptions {
+                    disable_dht_persistence,
                     // Never seed — see the Cargo.toml note on the feature.
                     disable_upload: true,
                     // A dead/unreachable peer under the library's 10s default
@@ -124,9 +127,40 @@ impl TorrentManager {
                     }),
                     ..Default::default()
                 };
-                Session::new_with_opts(self.cache_dir.clone(), opts)
-                    .await
-                    .map_err(|e| format!("torrent session init failed: {}", e))
+                match Session::new_with_opts(self.cache_dir.clone(), opts(false)).await {
+                    Ok(session) => Ok(session),
+                    Err(persistent_err) => {
+                        // librqbit persists the DHT routing table *and the UDP
+                        // port it was listening on* to a file of its own
+                        // (~/Library/Caches/com.rqbit.dht/dht.json on macOS).
+                        // If that file is corrupt, or the port it names is
+                        // taken by something else, `PersistentDht::create`
+                        // fails and takes the whole session with it — so every
+                        // torrent play died with "error initializing
+                        // persistent DHT" until someone found and deleted a
+                        // cache file they had no reason to know about.
+                        //
+                        // The stored table is a startup optimisation, not a
+                        // requirement: without it the DHT just bootstraps from
+                        // the well-known nodes again. So fall back rather than
+                        // fail. Deliberately not deleting the file — this is a
+                        // play path, and a stale cache file is not ours to
+                        // remove behind the user's back; the fallback costs one
+                        // bootstrap per launch and nothing else.
+                        log::warn!(
+                            "torrent: stored DHT state is unusable ({}); starting without DHT persistence",
+                            persistent_err
+                        );
+                        Session::new_with_opts(self.cache_dir.clone(), opts(true))
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "torrent session init failed: {} (also failed with stored DHT state: {})",
+                                    e, persistent_err
+                                )
+                            })
+                    }
+                }
             })
             .await
             .cloned()
@@ -683,6 +717,12 @@ mod tests {
     }
 
     // Live network + torrent test: resolve an episode and stream real bytes.
+    //
+    // If this fails instantly with "torrent session init failed: error
+    // initializing persistent DHT", the stored DHT state is unusable rather
+    // than anything here being wrong — `session()` now falls back to a
+    // non-persistent DHT for exactly that case, so seeing it fail here means
+    // the fallback regressed.
     #[tokio::test]
     #[ignore]
     async fn live_resolve_and_stream() {

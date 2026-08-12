@@ -153,6 +153,37 @@ impl ProviderBreaker {
     }
 }
 
+/// Read a sidecar response as either its body text or the failure the sidecar
+/// reported.
+///
+/// The sidecar signals failure two different ways: `/search` and `/streams`
+/// answer with an HTTP 500 whose body is `{"error": "..."}`, while `/get` and
+/// `/manga/get` answer **200** with that same `error` key alongside empty data.
+/// Nothing used to look at either. The body went straight into
+/// `serde_json::from_str::<Vec<StreamServer>>`, which choked on the map and
+/// produced `Parse streams: invalid type: map, expected a sequence` — so the
+/// reason a provider failed reached the user as a serde complaint, and survived
+/// only in the log. Checking the status alone would not be enough because of
+/// the 200-with-error shape, and checking the key alone would not be enough for
+/// a 500 whose body isn't JSON at all, so this does both.
+async fn sidecar_body(resp: reqwest::Response) -> Result<String, String> {
+    let status = resp.status();
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let reported = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .filter(|s| !s.trim().is_empty());
+    match reported {
+        Some(err) => Err(err),
+        None if !status.is_success() => Err(format!(
+            "scraper returned HTTP {} ({})",
+            status,
+            body.chars().take(200).collect::<String>()
+        )),
+        None => Ok(body),
+    }
+}
+
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
     spawn_lock: tokio::sync::Mutex<()>,
@@ -275,10 +306,23 @@ impl ScraperManager {
                 self.breaker.record_failure(provider);
                 format!("Scraper search failed: {}", e)
             })?;
-        // The request completed. Whether it found anything is the provider's
-        // business, not the breaker's — see ProviderBreaker.
-        self.breaker.record_success(provider);
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        // The request completed. Whether it *found* anything is the provider's
+        // business, not the breaker's — see ProviderBreaker. But a sidecar that
+        // answered with an error is not a completed request in that sense, and
+        // recording success here unconditionally meant a sidecar erroring on
+        // every single call registered as healthy forever, so the breaker could
+        // never trip on the one failure mode it exists for.
+        let body = match sidecar_body(resp).await {
+            Ok(body) => {
+                self.breaker.record_success(provider);
+                body
+            }
+            Err(e) => {
+                log::error!("Scraper search errored (query={}, provider={}): {}", query, provider, e);
+                self.breaker.record_failure(provider);
+                return Err(format!("Scraper search failed: {}", e));
+            }
+        };
         match serde_json::from_str::<Vec<AnimeRef>>(&body) {
             Ok(results) => {
                 log::info!("Scraper search returned {} results", results.len());
@@ -304,7 +348,13 @@ impl ScraperManager {
                 log::error!("Scraper get_anime request failed (slug={}, provider={}): {}", slug, provider, e);
                 format!("Scraper get_anime failed: {}", e)
             })?;
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        // `/get` reports failure as HTTP 200 with an `error` key next to an
+        // empty episode list, so without this an outright failure is
+        // indistinguishable from a show that genuinely has no episodes.
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_anime errored (slug={}, provider={}): {}", slug, provider, e);
+            format!("Scraper get_anime failed: {}", e)
+        })?;
         serde_json::from_str(&body).map_err(|e| {
             log::error!("Failed to parse scraper get_anime response: {}, error: {}", body, e);
             format!("Parse anime: {}", e)
@@ -336,9 +386,30 @@ impl ScraperManager {
                 format!("Scraper streams failed: {}", e)
             })?;
         // Completed request: a provider that answers "no streams for this
-        // episode" is up, not down.
-        self.breaker.record_success(provider);
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        // episode" is up, not down — that stays a success. A sidecar that
+        // answered with an error does not; see the note in `search`.
+        //
+        // The tradeoff is deliberate: `/streams` reports "this episode isn't
+        // here" as an exception too, so three such lookups in a row bench a
+        // healthy provider for five minutes. Acceptable because the streak must
+        // be consecutive and any success clears it, and because reaching the
+        // fallback provider sooner is exactly what the user wants in that case
+        // anyway. Distinguishing the two properly needs an error-kind field
+        // from the sidecar, which it does not yet send.
+        let body = match sidecar_body(resp).await {
+            Ok(body) => {
+                self.breaker.record_success(provider);
+                body
+            }
+            Err(e) => {
+                log::error!(
+                    "Scraper streams errored (slug={}, episode={}, provider={}): {}",
+                    slug, episode, provider, e
+                );
+                self.breaker.record_failure(provider);
+                return Err(format!("Scraper streams failed: {}", e));
+            }
+        };
         match serde_json::from_str::<Vec<StreamServer>>(&body) {
             Ok(servers) => {
                 log::info!("Scraper found {} stream servers for episode {}", servers.len(), episode);
@@ -368,7 +439,10 @@ impl ScraperManager {
                 log::error!("Scraper manga search request failed (query={}): {}", query, e);
                 format!("Scraper search failed: {}", e)
             })?;
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper manga search errored (query={}): {}", query, e);
+            format!("Scraper search failed: {}", e)
+        })?;
         serde_json::from_str(&body).map_err(|e| {
             log::error!("Failed to parse scraper manga search response: {}, error: {}", body, e);
             format!("Parse search: {}", e)
@@ -392,7 +466,11 @@ impl ScraperManager {
                 log::error!("Scraper get_manga request failed (slug={}): {}", slug, e);
                 format!("Scraper get_manga failed: {}", e)
             })?;
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        // Same 200-with-`error` shape as `/get` above.
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_manga errored (slug={}): {}", slug, e);
+            format!("Scraper get_manga failed: {}", e)
+        })?;
         serde_json::from_str(&body).map_err(|e| {
             log::error!("Failed to parse scraper get_manga response: {}, error: {}", body, e);
             format!("Parse manga: {}", e)
@@ -421,7 +499,10 @@ impl ScraperManager {
                 log::error!("Scraper get_chapter_pages request failed (slug={}, chapter={}): {}", slug, chapter, e);
                 format!("Scraper get_chapter_pages failed: {}", e)
             })?;
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_chapter_pages errored (slug={}, chapter={}): {}", slug, chapter, e);
+            format!("Scraper get_chapter_pages failed: {}", e)
+        })?;
         serde_json::from_str(&body).map_err(|e| {
             log::error!("Failed to parse scraper chapter pages response: {}, error: {}", body, e);
             format!("Parse chapter pages: {}", e)
@@ -666,6 +747,48 @@ mod tests {
         breaker.record_success("anineko");
         breaker.record_failure("anineko");
         assert!(breaker.check("anineko").is_ok());
+    }
+
+    /// `sidecar_body` is the whole reason a failing provider now reaches the
+    /// breaker and the user with its real message, so pin the four shapes the
+    /// sidecar actually produces.
+    async fn body_of(status: u16, body: &str) -> Result<String, String> {
+        let resp = http::Response::builder().status(status).body(body.to_string()).unwrap();
+        sidecar_body(reqwest::Response::from(resp)).await
+    }
+
+    #[tokio::test]
+    async fn sidecar_body_passes_through_success_payloads() {
+        // A stream list is a JSON array — `.get("error")` must not trip on it.
+        assert_eq!(body_of(200, r#"[{"name":"HD-1"}]"#).await.unwrap(), r#"[{"name":"HD-1"}]"#);
+        // An object with no `error` key is equally fine.
+        assert_eq!(
+            body_of(200, r#"{"title":"X","episodes":[]}"#).await.unwrap(),
+            r#"{"title":"X","episodes":[]}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn sidecar_body_surfaces_a_reported_error() {
+        // The 500 shape (/search, /streams).
+        let e = body_of(500, r#"{"error":"Stream resolution failed after 3 attempts: timeout"}"#)
+            .await
+            .unwrap_err();
+        assert!(e.contains("Stream resolution failed after 3 attempts"), "got: {}", e);
+        // The 200-with-error shape (/get, /manga/get) — the status alone would
+        // call this a success.
+        let e = body_of(200, r#"{"title":"","episodes":[],"error":"Get failed after 3 attempts: 403"}"#)
+            .await
+            .unwrap_err();
+        assert!(e.contains("Get failed after 3 attempts"), "got: {}", e);
+    }
+
+    #[tokio::test]
+    async fn sidecar_body_still_fails_on_a_non_json_error_status() {
+        // A 502 from something that isn't the sidecar at all has no `error`
+        // key to read, and must not be handed onward as a valid body.
+        let e = body_of(502, "<html>Bad Gateway</html>").await.unwrap_err();
+        assert!(e.contains("502"), "got: {}", e);
     }
 
     #[test]

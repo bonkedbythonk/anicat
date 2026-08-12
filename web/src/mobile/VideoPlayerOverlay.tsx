@@ -72,7 +72,11 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [stalled, setStalled] = useState(false);
+  // Two different stalls with two different messages. "startup" is the stream
+  // never producing a first frame; "midplay" is it dying partway through,
+  // which previously had no detection at all — the only stall check was a
+  // one-shot readyState===0 timer that could not fire once playback began.
+  const [stall, setStall] = useState<null | "startup" | "midplay">(null);
   const [skipSegments, setSkipSegments] = useState<SkipSegment[]>([]);
   const [activeSkip, setActiveSkip] = useState<SkipSegment | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -95,7 +99,7 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     setLoading(true);
     setError(null);
     setErrorDetail(null);
-    setStalled(false);
+    setStall(null);
     setStreamUrl(null);
     setSubtitleUrl(null);
     setSkipSegments([]);
@@ -103,6 +107,14 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     setCurrentTime(0);
     setDuration(0);
     setBuffered(0);
+    // Position-keyed, so it has to reset with the position. This is a ref and
+    // the overlay is not remounted between episodes (only <video> is, via
+    // key={streamUrl}), so a leftover value from the previous episode sits far
+    // ahead of the new one's clock and the `pos - last >= 10` gate below never
+    // opens: every episode after the first in a session stopped reporting
+    // progress at all, and an unclean exit (tab closed, PWA evicted, crash)
+    // lost the position entirely.
+    lastProgressReport.current = 0;
     try {
       const res = await mobileFetch("/mobile-api/playback/resolve", {
         method: "POST",
@@ -156,16 +168,44 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
   // an infinite spinner with nothing to report back.
   useEffect(() => {
     if (!streamUrl) return;
-    setStalled(false);
+    setStall(null);
     const timer = setTimeout(() => {
       const v = videoRef.current;
       if (v && v.readyState === 0) {
         console.warn("[VideoPlayerOverlay] still readyState=0 after 12s:", streamUrl);
-        setStalled(true);
+        setStall("startup");
       }
     }, 12_000);
     return () => clearTimeout(timer);
   }, [streamUrl]);
+
+  // Mid-playback stall detection. The timer above is one-shot and gated on
+  // readyState === 0, so it only ever catches a stream that never started; a
+  // stream that dies at minute 12 went completely unreported. `waiting` fires
+  // on every ordinary rebuffer too, so this waits out a grace period and only
+  // speaks up if the element is still starved — and any of `playing`,
+  // `canplay` or a timeupdate cancels it.
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearStallWatch = useCallback(() => {
+    if (stallTimer.current) {
+      clearTimeout(stallTimer.current);
+      stallTimer.current = null;
+    }
+    setStall((s) => (s === "midplay" ? null : s));
+  }, []);
+  const beginStallWatch = useCallback(() => {
+    if (stallTimer.current) return;
+    stallTimer.current = setTimeout(() => {
+      stallTimer.current = null;
+      const v = videoRef.current;
+      // HAVE_CURRENT_DATA or less means it still cannot advance a frame.
+      if (v && !v.paused && !v.ended && v.readyState < 3) {
+        console.warn("[VideoPlayerOverlay] stalled mid-playback at", v.currentTime);
+        setStall("midplay");
+      }
+    }, 15_000);
+  }, []);
+  useEffect(() => () => clearStallWatch(), [clearStallWatch]);
 
   // Torrent playback is the one source whose failures are a fixed property of
   // the browser rather than a flaky server: releases are .mkv (and often HEVC
@@ -223,21 +263,62 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       });
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
+
+      // Recovery has to be counted, not just attempted. Both handlers below
+      // used to be bare calls with no ceiling, so a stream that died mid-play
+      // (expired CDN token, segment 404) retried forever without ever setting
+      // an error: the picture froze, the controls stayed live, and nothing
+      // said anything. Give each failure kind a small budget, then fall
+      // through to the same visible error the default branch already shows.
+      //
+      // Separate counters: a media error recovered by a swap-audio-codec pass
+      // says nothing about the network, and one shouldn't spend the other's
+      // budget. Both reset in RECOVERY_RESET_MS of uninterrupted playback, so
+      // a long session that hiccups once an hour never exhausts them.
+      const MAX_NETWORK_RECOVERIES = 3;
+      const MAX_MEDIA_RECOVERIES = 2;
+      const RECOVERY_RESET_MS = 60_000;
+      let networkRecoveries = 0;
+      let mediaRecoveries = 0;
+      let lastRecoveryAt = 0;
+
+      const giveUp = (data: { details: unknown }, what: string) => {
+        setError("Playback stalled. Try another server.");
+        setErrorDetail(`HLS error: ${data.details} (${what})`);
+        hls?.destroy();
+      };
+
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls?.startLoad();
+        if (!data.fatal) return;
+        const now = Date.now();
+        if (now - lastRecoveryAt > RECOVERY_RESET_MS) {
+          networkRecoveries = 0;
+          mediaRecoveries = 0;
+        }
+        lastRecoveryAt = now;
+
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            if (networkRecoveries >= MAX_NETWORK_RECOVERIES) {
+              giveUp(data, `gave up after ${networkRecoveries} network retries`);
               break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls?.recoverMediaError();
+            }
+            networkRecoveries++;
+            console.warn(`[VideoPlayerOverlay] HLS network error, retry ${networkRecoveries}:`, data.details);
+            hls?.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            if (mediaRecoveries >= MAX_MEDIA_RECOVERIES) {
+              giveUp(data, `gave up after ${mediaRecoveries} media recoveries`);
               break;
-            default:
-              setError("Playback stalled. Try another server.");
-              setErrorDetail(`HLS error: ${data.details}`);
-              hls?.destroy();
-              break;
-          }
+            }
+            mediaRecoveries++;
+            console.warn(`[VideoPlayerOverlay] HLS media error, recovery ${mediaRecoveries}:`, data.details);
+            hls?.recoverMediaError();
+            break;
+          default:
+            giveUp(data, "unrecoverable");
+            break;
         }
       });
     } else {
@@ -438,6 +519,8 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
     if (!scrubbing) setCurrentTime(v.currentTime);
     if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
     const [pos, dur] = currentPosDuration();
+    // Frames are advancing, so whatever the `waiting` handler armed is moot.
+    clearStallWatch();
     if (pos - lastProgressReport.current >= 10) {
       lastProgressReport.current = pos;
       callPlayer("progress", pos, dur);
@@ -509,8 +592,11 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
             onPlay={handlePlay}
             onEnded={handleEnded}
             onError={handleVideoError}
-            onCanPlay={() => setStalled(false)}
-            onLoadedData={() => setStalled(false)}
+            onWaiting={beginStallWatch}
+            onStalled={beginStallWatch}
+            onPlaying={clearStallWatch}
+            onCanPlay={() => { clearStallWatch(); setStall(null); }}
+            onLoadedData={() => setStall(null)}
           >
             {subtitleUrl && (
               <track kind="subtitles" srcLang="en" label="English" default src={subtitleUrl} />
@@ -544,17 +630,25 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
           </button>
         </div>
       )}
-      {stalled && !error && !loading && (
+      {stall && !error && !loading && (
         <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 flex-col items-center gap-3 px-8 text-center text-white/80">
           <AlertCircle size={28} />
           {/* Unlike the error event, a stall is ambiguous on a torrent: a
               slow-but-alive swarm sits at readyState 0 too, so this must not
               claim the format is at fault — name both causes and keep Retry,
-              which is the useful action for the swarm case. */}
+              which is the useful action for the swarm case.
+
+              A mid-playback stall is a different situation and gets different
+              copy: the format is already proven playable (it played), so the
+              only live causes are the swarm drying up or the stream dying. */}
           <p className="text-sm">
-            {isTorrentStream
-              ? "Still buffering — the swarm may be slow, or this browser may not support the release format. Switching Source to AniNeko in Playback Settings avoids the second case."
-              : "This is taking longer than expected — the stream may be unreachable."}
+            {stall === "midplay"
+              ? isTorrentStream
+                ? "Playback stalled — the swarm may have dried up. Retrying re-resolves the episode."
+                : "Playback stalled — the stream stopped responding. Retry, or pick another server."
+              : isTorrentStream
+                ? "Still buffering — the swarm may be slow, or this browser may not support the release format. Switching Source to AniNeko in Playback Settings avoids the second case."
+                : "This is taking longer than expected — the stream may be unreachable."}
           </p>
           <button
             onClick={() => resolve(episodeNumber)}

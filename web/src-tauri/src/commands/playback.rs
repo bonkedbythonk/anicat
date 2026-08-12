@@ -457,30 +457,105 @@ enum StreamProbe {
     Dead(String),
 }
 
-/// Ask an upstream for the first two bytes of a stream to find out whether it
-/// is actually serving. Resolution can hand back a URL that 404s or whose
-/// signed token has expired — that isn't a resolve *error*, so nothing used to
-/// catch it, and mpv opened onto a stream that never flowed.
+/// Whether a URL is an HLS playlist rather than media bytes.
 ///
-/// Sends the same headers mpv will (referer/user-agent matter to several of
-/// these CDNs), and treats only "this URL will not serve media" answers as
+/// anineko's jwplayer hosts serve playlists as `master.txt`, so extension
+/// alone is not enough.
+fn looks_like_playlist(url: &str) -> bool {
+    let path = url.split('?').next().unwrap_or(url);
+    path.ends_with(".m3u8") || path.ends_with("master.txt")
+}
+
+/// First media URI in a playlist, resolved against the playlist's own URL.
+/// `None` when the body isn't a playlist we understand.
+fn first_playlist_entry(base_url: &str, body: &str) -> Option<String> {
+    let entry = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
+    reqwest::Url::parse(base_url)
+        .ok()?
+        .join(entry)
+        .ok()
+        .map(|u| u.to_string())
+}
+
+/// Ask an upstream whether it is actually serving media. Resolution can hand
+/// back a URL that 404s or whose signed token has expired — that isn't a
+/// resolve *error*, so nothing used to catch it, and mpv opened onto a stream
+/// that never flowed.
+///
+/// For HLS this walks down to a real segment before judging, which is the
+/// whole point. A playlist is a small static file and answers 200 long after
+/// the media behind it is gone: anineko's HD-1 serves its segments from an
+/// abused ad CDN that revokes them per-asset, so `master.m3u8` returned 200
+/// while every segment returned `403 {"code":1004,"error":"domain forbidden"}`.
+/// Probing only the playlist called that alive, the resolve "succeeded", the
+/// fallback-provider chain never fired, and hls.js fed 40-byte JSON error
+/// bodies into MSE — which the user sees as "Media failed to decode", pointing
+/// at codecs instead of at a dead upstream. Measured across ten episodes, four
+/// were dead this way.
+///
+/// Sends the same headers the player will (referer/user-agent matter to several
+/// of these CDNs), and treats only "this URL will not serve media" answers as
 /// dead. A timeout is explicitly *not* one of them: a slow CDN is still a
-/// playable CDN, and mpv waits far longer than this probe does.
+/// playable CDN, and mpv waits far longer than this probe does. Likewise a
+/// playlist that can't be parsed is left Alive rather than punished — the bias
+/// toward Alive is deliberate, since a false negative skips a server that would
+/// have played.
 async fn probe_stream(
     client: &reqwest::Client,
     url: &str,
     headers: Option<&HashMap<String, String>>,
 ) -> StreamProbe {
     const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
+    /// master -> variant -> segment. Two hops is the deepest real HLS goes;
+    /// the cap also stops a self-referential playlist from looping.
+    const MAX_PLAYLIST_HOPS: usize = 2;
 
-    let mut req = client.get(url).header("range", "bytes=0-1");
-    if let Some(headers) = headers {
-        for (key, val) in headers {
-            req = req.header(key, val);
+    let with_headers = |mut req: reqwest::RequestBuilder| {
+        if let Some(headers) = headers {
+            for (key, val) in headers {
+                req = req.header(key, val);
+            }
+        }
+        req
+    };
+
+    // Walk playlists down to whatever they ultimately point at.
+    let mut target = url.to_string();
+    for _ in 0..MAX_PLAYLIST_HOPS {
+        if !looks_like_playlist(&target) {
+            break;
+        }
+        let req = with_headers(client.get(&target)).timeout(PROBE_TIMEOUT);
+        match req.send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if probe_status_is_dead(status.as_u16()) {
+                    return StreamProbe::Dead(format!("playlist HTTP {}", status));
+                }
+                let body = match resp.text().await {
+                    Ok(b) => b,
+                    // Fetched fine but unreadable: not evidence of death.
+                    Err(_) => return StreamProbe::Alive,
+                };
+                match first_playlist_entry(&target, &body) {
+                    Some(next) => target = next,
+                    // An empty or unrecognised playlist. Don't guess.
+                    None => return StreamProbe::Alive,
+                }
+            }
+            Err(e) if e.is_timeout() => return StreamProbe::Alive,
+            Err(e) => return StreamProbe::Dead(e.to_string()),
         }
     }
 
-    match req.timeout(PROBE_TIMEOUT).send().await {
+    // Range-probe the media itself.
+    let req = with_headers(client.get(&target))
+        .header("range", "bytes=0-1")
+        .timeout(PROBE_TIMEOUT);
+    match req.send().await {
         Ok(resp) => {
             let status = resp.status();
             if probe_status_is_dead(status.as_u16()) {
@@ -2275,7 +2350,10 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_order, is_watched, probe_status_is_dead, resume_position};
+    use super::{
+        candidate_order, first_playlist_entry, is_watched, looks_like_playlist,
+        probe_status_is_dead, resume_position,
+    };
     use crate::scraper::client::StreamServer;
 
     fn server(name: &str, url: &str, quality: &str) -> StreamServer {
@@ -2312,6 +2390,40 @@ mod tests {
             servers.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             ["HD-1", "Legacy"],
         );
+    }
+
+    #[test]
+    fn playlist_detection_covers_the_hosts_in_use() {
+        assert!(looks_like_playlist("https://vivibebe.site/public/stream/a/master.m3u8"));
+        // anineko's jwplayer hosts serve playlists named master.txt.
+        assert!(looks_like_playlist("https://x.example.com/a/hls3/01/master.txt"));
+        // A query string must not hide the extension.
+        assert!(looks_like_playlist("https://x.example.com/a/master.m3u8?t=abc"));
+        // Media, and the local torrent endpoint, are not playlists.
+        assert!(!looks_like_playlist("https://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/abc"));
+        assert!(!looks_like_playlist("http://127.0.0.1:13370/torrent-stream?t=0&f=0"));
+    }
+
+    #[test]
+    fn playlist_entries_resolve_against_the_playlist_url() {
+        let master = "https://vivibebe.site/public/stream/a5be/master.m3u8";
+        // Relative variant, as vivibebe writes them.
+        let body = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n2676461080.m3u8\n";
+        assert_eq!(
+            first_playlist_entry(master, body).unwrap(),
+            "https://vivibebe.site/public/stream/a5be/2676461080.m3u8"
+        );
+        // Absolute segment on a different host — the case that matters, since
+        // the segments live on an ad CDN, not on the playlist's host.
+        let body = "#EXTM3U\n#EXTINF:18.2,\nhttps://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/abc\n";
+        assert_eq!(
+            first_playlist_entry(master, body).unwrap(),
+            "https://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/abc"
+        );
+        // Comments/tags only, or empty: nothing to probe, so the caller must
+        // fall back to Alive rather than invent a verdict.
+        assert!(first_playlist_entry(master, "#EXTM3U\n#EXT-X-ENDLIST\n").is_none());
+        assert!(first_playlist_entry(master, "").is_none());
     }
 
     #[test]
@@ -2396,3 +2508,4 @@ mod tests {
         assert_eq!(resume_position(500, 0), 0);
     }
 }
+

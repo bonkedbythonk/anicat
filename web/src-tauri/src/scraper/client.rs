@@ -34,6 +34,18 @@ pub struct StreamServer {
     /// a query param instead of baking captions into the video).
     #[serde(default)]
     pub subtitle_url: Option<String>,
+    /// Whether the mobile PWA can actually play this server.
+    ///
+    /// Reachability, not codecs: the PWA pulls every byte through the local
+    /// proxy, which only talks to `ALLOWED_DOMAINS`. Most anineko embeds
+    /// resolve onto throwaway CDN hosts that rotate per request and can never
+    /// be listed, so the phone is refused before a frame decodes. mpv fetches
+    /// upstream directly and is unaffected — hence per-server, not global.
+    ///
+    /// `None` means the provider predates the field; treated as playable,
+    /// which is the behaviour that shipped before it existed.
+    #[serde(default)]
+    pub browser_ok: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

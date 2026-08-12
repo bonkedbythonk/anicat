@@ -675,6 +675,35 @@ pub(crate) async fn resolve_stream_for_provider(
         return Err(format!("No stream URL found on {}", provider_name));
     }
 
+    // A browser can only play what the proxy is willing to fetch, and most of
+    // anineko's servers resolve onto rotating throwaway CDN hosts that
+    // `ALLOWED_DOMAINS` can never cover. Those are refused before a frame
+    // decodes, so drop them here rather than ranking, probing and handing one
+    // over — a clean "nothing playable on X" lets the fallback-provider chain
+    // fire, which is the recoverable outcome.
+    //
+    // Hard filter rather than a penalty, unlike the codec scoring in
+    // torrent::search: an unreachable host is a certainty, not a guess from a
+    // release name. Providers that don't report the field send None and are
+    // kept, so this can only ever narrow a provider that opted in.
+    if client.is_browser() {
+        let before = servers.len();
+        servers.retain(|s| s.browser_ok.unwrap_or(true));
+        if servers.len() != before {
+            log::info!(
+                "Dropped {} of {} {} server(s) the proxy can't reach for a browser client",
+                before - servers.len(), before, provider_name
+            );
+        }
+        if servers.is_empty() {
+            timings.log(provider_name, media_id, episode_number, "none-browser-playable", started.elapsed().as_millis());
+            return Err(format!(
+                "No mobile-playable stream on {} (all servers resolve to hosts the proxy can't reach)",
+                provider_name
+            ));
+        }
+    }
+
     let translation_type = effective_translation_type(state, media_id).await;
     let data_saver = state.config.read().await.stream.data_saver;
     let target_quality: u32 = if data_saver { 720 } else { 1080 };
@@ -2258,7 +2287,31 @@ mod tests {
             headers: None,
             group: None,
             subtitle_url: None,
+            browser_ok: None,
         }
+    }
+
+    /// The browser filter is `retain(|s| s.browser_ok.unwrap_or(true))`, and
+    /// the `unwrap_or(true)` is the load-bearing half: providers that don't
+    /// report the field (mkissa, and any older frozen sidecar still in the
+    /// wild) must keep working exactly as before rather than silently
+    /// resolving to nothing on mobile.
+    #[test]
+    fn browser_filter_keeps_servers_that_dont_report_the_field() {
+        let mut servers = vec![
+            server("HD-1", "https://vivibebe.site/public/stream/a/master.m3u8", "1080p"),
+            server("StreamHG", "https://x.rivercrestlearningstudio.store/a/master.txt", "1080p"),
+            server("Legacy", "https://mp4upload.com/a.mp4", "1080p"),
+        ];
+        servers[0].browser_ok = Some(true);
+        servers[1].browser_ok = Some(false);
+        // servers[2] leaves it None — a provider predating the field.
+
+        servers.retain(|s| s.browser_ok.unwrap_or(true));
+        assert_eq!(
+            servers.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["HD-1", "Legacy"],
+        );
     }
 
     #[test]

@@ -1,17 +1,43 @@
-"""AniNeko provider — verified against live site DOM (2026-06-11).
+"""AniNeko provider — verified against the live site 2026-08-12.
 
-Real DOM structure:
-  Search: article.nv-anime-card > a.nv-anime-thumb (slug), img alt (title)
-  Episode page: button.nv-server-btn with data-video=URL, data-tab=tab_N
-     <span>Hard Sub</span> / <span>DUB</span> for group labels
-  Embed URLs: third-party sites that require follow-up fetch for stream URLs
-     Current hosts (verified 2026-08-11): vivibebe.site (serves
-     /public/stream/{id}/master.m3u8 directly), otakuhg.site and
-     otakuvid.online (jwplayer behind packed JS), playmogo.com (Cloudflare
-     challenge, unresolvable without a browser).
+anineko is server-rendered PHP + jQuery: no SPA, no hydration, and every piece
+of data this provider needs is either in the HTML or behind a plain JSON
+endpoint. There is exactly one place to look for each thing.
 
-Cloudflare bypass: nodriver solves the JS challenge once, extracts
-cf_clearance cookie, and injects it into curl_cffi for fast subsequent requests.
+  Search        GET /ajax/search?q=<query>
+                -> {"success": true, "results": [{title, url, image, meta}]}
+                `url` is /watch/<slug>; `meta` reads "TV - 28 Episodes".
+                The multi-attempt fan-out in `search()` is still needed: the
+                site indexes by its own English titles, so an AniList romaji
+                title can miss entirely while a truncation of it hits.
+
+  Episodes      GET /watch/<slug>
+                article.nv-info-episode-item > a.nv-info-episode-main,
+                with an /ep-(\\d+) href fallback for the number.
+
+  Servers       GET /watch/<slug>/ep-<n>
+                <div class="... server-items lang-group" data-id="sub|dub">
+                  <button class="nv-server-btn server-video"
+                          data-video="<embed url>?sub=<vtt>">
+                    HD-1 <span>Sort Sub</span>
+                The name is a bare text node, not a <strong>; the group comes
+                from the panel's data-id; the VTT rides in the query string.
+
+Embed hosts, and which of them the mobile PWA can play (see `browser_ok`):
+  vivibebe.site   /<token> -> /public/stream/<token>/master.m3u8, derivable
+                  with no fetch at all. Proxy-allowlisted, so this is the one
+                  server that works on mobile.
+  otakuhg.site,   jwplayer behind packed JS. Their `links` object now offers
+  otakuvid.online only hls3/hls2, both on throwaway domains that rotate per
+                  request -- unallowlistable, therefore desktop-only.
+  bibiemb.xyz     resolves onto *.workers.dev; desktop-only.
+  playmogo.com    Cloudflare-challenged, unresolvable without a browser.
+
+Cloudflare: anineko challenges only intermittently (it was serving plain
+requests throughout the 2026-08-12 verification). `_cf_get` therefore tries
+curl_cffi first and only opens Chrome on an actual 403. `_CF_COOKIE_TTL` must
+stay under the sidecar's `IDLE_TIMEOUT_SECS` in scraper/client.rs, since the
+clearance dies with this process.
 """
 
 import re
@@ -77,6 +103,32 @@ class StreamServer:
     group: str = "unknown"
     source_type: str = "unknown"
     subtitle_url: Optional[str] = None
+    #: Whether a browser `<video>` element can actually play this server.
+    #:
+    #: Not a codec judgement — a proxy-reachability one. The mobile PWA fetches
+    #: every byte through anicat's proxy, which only talks to an allowlisted set
+    #: of hosts. Most of anineko's embeds resolve to throwaway CDN domains that
+    #: rotate per request and can never be listed, so those servers are dead on
+    #: the phone no matter how healthy they are. mpv fetches directly and is
+    #: unaffected, which is why this has to be per-server rather than global.
+    browser_ok: bool = False
+
+
+#: Host suffixes whose streams the anicat proxy can actually reach, and which
+#: are therefore playable in the mobile PWA. Kept deliberately narrow: an entry
+#: here is a promise that the same host also appears in `ALLOWED_DOMAINS` in
+#: `web/src-tauri/src/proxy/server.rs`. Adding one without the other produces a
+#: server the phone offers and then fails to play.
+_BROWSER_REACHABLE_HOSTS = ("vivibebe.site", "vibeplayer.site", "anizara.store")
+
+
+def _host_is_browser_reachable(url: str) -> bool:
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return False
+    host = host.lower()
+    return any(host == h or host.endswith("." + h) for h in _BROWSER_REACHABLE_HOSTS)
 
 
 _CF_COOKIE_TTL = 1500  # 25 minutes (Cloudflare typically gives 30 min)
@@ -276,15 +328,26 @@ class AniNekoProvider:
     async def search(self, query: str) -> list[AnimeRef]:
         attempts = self._build_search_attempts(query)
 
+        # `/ajax/search` is the site's own autocomplete endpoint and answers
+        # with JSON, so this no longer parses search-result HTML at all — one
+        # whole class of selector breakage gone.
+        #
+        # The multi-attempt fan-out stays, because it is doing real work: the
+        # site indexes by its own English titles, so an AniList romaji title
+        # like "Kaguya-sama wa Kokurasetai: Ultra Romantic" returns *zero*
+        # results while the truncated "Kaguya-sama wa Kokurasetai" returns the
+        # right show. Verified against both endpoints — this is a property of
+        # the index, not of the old HTML scrape.
         async def run_attempt(attempt: str) -> list[AnimeRef]:
             try:
                 resp = await self._cf_get(
-                    f"{BASE_URL}/browser",
-                    params={"keyword": attempt},
+                    f"{BASE_URL}/ajax/search",
+                    params={"q": attempt},
                     timeout=15,
+                    headers={"X-Requested-With": "XMLHttpRequest"},
                 )
                 resp.raise_for_status()
-                return self._parse_search(resp.text)
+                return self._parse_ajax_search(resp.text)
             except Exception as e:
                 log.warning("Search attempt for '%s' failed: %s", attempt, e)
                 return []
@@ -355,41 +418,22 @@ class AniNekoProvider:
                         "page_title": page_title,
                     })
 
-                sources: List[StreamServer] = []
-
-                # Pass A — DOM data-video elements
-                sources_a, debug_a = self._pass_dom(html)
-                sources.extend(sources_a)
+                servers, debug_panels = self._parse_servers(html)
                 if debug:
-                    debug_log.append(debug_a)
+                    debug_log.append(debug_panels)
 
-                # Pass B — Regex over raw HTML
-                sources_b, debug_b = self._pass_regex(html)
-                sources.extend(sources_b)
-                if debug:
-                    debug_log.append(debug_b)
-
-                # Pass C — Script JSON blobs
-                sources_c, debug_c = self._pass_script_json(html)
-                sources.extend(sources_c)
-                if debug:
-                    debug_log.append(debug_c)
-
-                # Pass D — Server groups (Hard Sub / Soft Sub / DUB)
-                sources_d, debug_d = self._pass_server_groups(html)
-                sources.extend(sources_d)
-                if debug:
-                    debug_log.append(debug_d)
-
+                # Dedupe on the embed URL. The panel markup is already clean,
+                # so this is cheap insurance rather than the load-bearing
+                # filter it had to be when four passes fed into it.
                 seen = set()
                 unique = []
-                for s in sources:
+                for s in servers:
                     if s.url and s.url not in seen:
                         seen.add(s.url)
                         unique.append(s)
 
                 loop = asyncio.get_running_loop()
-                
+
                 def resolve_server(s: StreamServer) -> StreamServer:
                     direct = self._try_extract_direct_url(s.url)
                     if direct:
@@ -399,10 +443,24 @@ class AniNekoProvider:
                             or "master.txt" in direct
                             or "master.m3u8" in direct
                         )
+                    # Judged on the *resolved* URL: the embed host tells you
+                    # nothing, since otakuhg.site resolves onto a different,
+                    # rotating domain every time.
+                    s.browser_ok = _host_is_browser_reachable(s.url)
                     return s
 
                 tasks = [loop.run_in_executor(None, resolve_server, s) for s in unique]
                 resolved_servers = await asyncio.gather(*tasks)
+
+                if not any(s.browser_ok for s in resolved_servers):
+                    # Not fatal on desktop (mpv bypasses the proxy entirely),
+                    # but it means the phone has nothing to play for this
+                    # episode, which is worth a line in the log.
+                    log.warning(
+                        "anineko %s ep %s: none of the %d servers are proxy-reachable "
+                        "(mobile will have no playable source)",
+                        slug, episode, len(resolved_servers),
+                    )
 
                 if debug:
                     return resolved_servers, debug_log
@@ -420,29 +478,37 @@ class AniNekoProvider:
         return [], []
 
     @staticmethod
-    def _parse_search(html: str) -> list[AnimeRef]:
-        tree = HTMLParser(html)
-        cards = tree.css("article.nv-anime-card")
-        if not cards:
-            warn_empty("anineko", "article.nv-anime-card", "search results")
+    def _parse_ajax_search(body: str) -> list[AnimeRef]:
+        """Parse `/ajax/search?q=` — the site's own autocomplete JSON.
+
+        Shape: {"success": true, "results": [{title, url, image, meta}]},
+        where `url` is `/watch/<slug>` and `meta` reads like "TV - 28 Episodes".
+        Replaces the old `article.nv-anime-card` scrape; a JSON contract is far
+        less likely to move than a class name, and this endpoint matched the
+        HTML one on every title tested (and beat it on short/ambiguous ones).
+        """
+        try:
+            data = json.loads(body)
+        except (ValueError, TypeError):
+            warn_empty("anineko", "/ajax/search", "search results (not JSON)")
+            return []
+        items = data.get("results") if isinstance(data, dict) else None
+        if not items:
+            return []
         results = []
-        for card in cards:
-            thumb = card.css_first("a.nv-anime-thumb")
-            href = thumb.attributes.get("href", "") if thumb else ""
-            if not href or not href.startswith("/watch/"):
+        for item in items:
+            if not isinstance(item, dict):
                 continue
-            slug = href.replace("/watch/", "")
-            img = thumb.css_first("img") if thumb else None
-            title = img.attributes.get("alt", "") if img else ""
-            if not title:
-                title_div = card.css_first(".nv-anime-title")
-                if title_div:
-                    title_a = title_div.css_first("a")
-                    if title_a:
-                        title = title_a.text(strip=True)
-            if not title:
+            url = (item.get("url") or "").strip()
+            title = (item.get("title") or "").strip()
+            if not url or not title:
+                continue
+            slug = url.rsplit("/watch/", 1)[-1].strip("/")
+            if not slug or "/" in slug:
                 continue
             results.append(AnimeRef(id=slug, title=title))
+        if not results:
+            warn_empty("anineko", "/ajax/search", "search results (empty)")
         return results
 
     @staticmethod
@@ -496,211 +562,142 @@ class AniNekoProvider:
 
     @staticmethod
     def _extract_subtitle_url(data_video_url: str) -> Optional[str]:
-        """Soft-sub/dub servers attach an external VTT as a query param on the
-        data-video URL instead of the video itself carrying subtitles — the
-        site's own three per-host variants: `sub=`, `caption_1=` (paired with
-        a `sub_N=` label), and `c1_file=` (paired with `c1_label=`)."""
-        qs = parse_qs(urlparse(data_video_url).query)
-        for key in ("sub", "caption_1", "c1_file"):
-            if qs.get(key):
-                return qs[key][0]
+        """Pull the soft-sub VTT out of a `data-video` URL's query string.
+
+        HD-1/HD-2 attach captions as a query param rather than burning them in
+        (`...?sub=https://cdn.anizara.store/...vtt`). This used to guess at a
+        fixed list of param names; now it takes any param whose value looks
+        like a subtitle URL, so a rename doesn't silently drop captions.
+        """
+        try:
+            params = parse_qs(urlparse(data_video_url).query)
+        except Exception:
+            return None
+        for values in params.values():
+            for value in values:
+                if value.startswith("http") and (".vtt" in value or ".srt" in value or "/subtitle" in value):
+                    return value
         return None
 
-    # ── Pass A: DOM data-video elements ─────────────────
+    def _parse_servers(self, html: str) -> Tuple[List[StreamServer], dict]:
+        """Read the server list straight out of the watch page's own markup.
 
-    def _pass_dom(self, html: str) -> Tuple[List[StreamServer], dict]:
-        found, notes = [], []
-        # data-video attributes on server buttons. Button markup now spans
-        # multiple lines (attrs and the group <span> each on their own
-        # line), so this needs DOTALL — without it the pattern never matches
-        # and every server falls back to Pass B/D's group="unknown", which
-        # made get_stream_group() treat all of them as hard_sub regardless
-        # of what they actually were.
-        matches = re.findall(
-            r'<button[^>]*\bdata-video\s*=\s*"([^"]+)"([^>]*)>(.*?)</button>',
-            html,
-            re.DOTALL,
-        )
-        for url, rest_attrs, inner in matches:
-            name = re.sub(r"<[^>]+>", "", inner).strip()[:40]
-            group = "unknown"
-            span_m = re.search(r"<span[^>]*>([^<]+)</span>", inner)
-            if span_m:
-                group = span_m.group(1).strip().lower().replace(" ", "_")
-                if "hard" in group:
-                    group = "hard_sub"
-                elif "dub" in group:
-                    group = "dub"
-                else:
-                    # Covers "Soft Sub" and the site's current "Sort Sub"
-                    # label (typo on their end, not ours) — anything that's
-                    # neither hard-baked nor dub is a soft-sub server.
-                    group = "soft_sub"
+        anineko server-renders every server it has, so there is exactly one
+        place to look and no guesswork:
 
-            found.append(
-                StreamServer(
-                    name=name or f"server_{len(found)}",
-                    url=url,
+            <div class="... server-items lang-group" data-id="sub|dub">
+              <button class="nv-server-btn server-video" data-video="<embed url>">
+                <strong>HD-1</strong> ...
+
+        This replaces four overlapping extraction passes (DOM, a raw-HTML regex
+        sweep, a script-JSON scan, and a second server-group pass). They existed
+        to cover each other's gaps but mostly manufactured work: the regex pass
+        matched *any* quoted .m3u8/.mp4//embed/ string on the page, which is how
+        `https://anineko.to/img/logo.png` ended up in a live server list as
+        `script_url` — and every invented URL then cost its own 15s embed fetch.
+        One structural read produces the same 12 real servers with none of that.
+
+        Group is taken from the panel (`sub`/`dub`) rather than sniffed from a
+        label, so an unrecognised label can no longer silently become soft_sub.
+        """
+        tree = HTMLParser(html)
+        panels = tree.css("div.server-items.lang-group")
+        if not panels:
+            warn_empty("anineko", "div.server-items.lang-group", "server panels")
+        servers: List[StreamServer] = []
+        for panel in panels:
+            # data-id is "sub" or "dub"; anicat's own vocabulary is
+            # soft_sub/hard_sub/dub, and anineko's sub tier carries an external
+            # VTT, which is soft_sub by definition.
+            panel_id = (panel.attributes.get("data-id") or "").strip().lower()
+            group = "dub" if panel_id == "dub" else "soft_sub"
+            for btn in panel.css("button[data-video]"):
+                raw = (btn.attributes.get("data-video") or "").strip()
+                if not raw.startswith("http"):
+                    continue
+                # The name is a bare text node sitting directly in the button,
+                # ahead of a <span> holding the tier label:
+                #     <button ...>  HD-1  <span>Sort Sub</span></button>
+                # so `text()` would return "HD-1Sort Sub" and `<strong>` (which
+                # the panel *heading* uses) doesn't exist here at all. Take only
+                # the button's own text, and collapse the generous indentation
+                # around it — the previous parser passed that through, which is
+                # why server names reached the UI padded to 40 characters.
+                label = " ".join(btn.text(deep=False).split())
+                if not label:
+                    strong = btn.css_first("strong")
+                    if strong:
+                        label = " ".join(strong.text().split())
+                if not label:
+                    label = " ".join(btn.text().split())
+                servers.append(StreamServer(
+                    name=(label or "Server").strip(),
+                    url=raw,
                     group=group,
-                    source_type="dom_data_video",
-                    subtitle_url=self._extract_subtitle_url(url),
-                )
-            )
-        iframes = re.findall(r'<iframe[^>]+src\s*=\s*"([^"]+)"', html)
-        for url in iframes:
-            found.append(
-                StreamServer(
-                    name="iframe",
-                    url=url,
-                    group="unknown",
-                    source_type="dom_iframe",
-                )
-            )
-        return found, {"pass": "dom_iframe", "found": len(found), "notes": notes}
-
-    # ── Pass B: Regex over raw HTML ─────────────────────
-
-    def _pass_regex(self, html: str) -> Tuple[List[StreamServer], dict]:
-        found = []
-        patterns = [
-            r'data-video\s*=\s*"([^"]+)"',
-            r'src\s*=\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"',
-            r'"((?:https?:)?//[^"]+\.(?:m3u8|mp4)[^"]*)"',
-            r'"((?:https?:)?//[^"]+/embed/[^"]*)"',
-        ]
-        for pat in patterns:
-            for url in re.findall(pat, html):
-                # Label the server by its host (e.g. "Vivibebe") instead of the
-                # internal extractor name, which was leaking "regex" into the UI.
-                m = re.search(r"https?://([^/]+)", url if url.startswith("http") else "https:" + url)
-                host = m.group(1).split(":")[0] if m else ""
-                label = host.replace("www.", "").split(".")[0] if host else "source"
-                found.append(
-                    StreamServer(
-                        name=label.capitalize() or "Source",
-                        url=url,
-                        group="unknown",
-                        source_type="regex",
-                        is_m3u8=(".m3u8" in url) or None,
-                    )
-                )
-        return found, {
-            "pass": "regex",
-            "found": len(found),
-            "notes": [],
+                    source_type="dom_panel",
+                    subtitle_url=self._extract_subtitle_url(raw),
+                ))
+        return servers, {
+            "pass": "panels",
+            "panels": len(panels),
+            "found": len(servers),
+            "names": [s.name for s in servers],
         }
 
-    # ── Pass C: Script JSON blobs ───────────────────────
+    #: Hosts that serve a playable stream at a URL derivable from the embed
+    #: URL alone, so no fetch is needed. Maps host suffix -> path template
+    #: taking the embed's token.
+    #:
+    #: This is the *fast* path and, not coincidentally, the only proxy-reachable
+    #: one: vivibebe is the sole anineko server the mobile PWA can play. Kept as
+    #: an explicit table rather than the previous inline two-host regex, whose
+    #: own docstring admitted the list had gone stale.
+    _DIRECT_SHAPE_HOSTS = {
+        "vivibebe.site": "https://{host}/public/stream/{token}/master.m3u8",
+        "vibeplayer.site": "https://{host}/public/stream/{token}/master.m3u8",
+    }
 
-    def _pass_script_json(self, html: str) -> Tuple[List[StreamServer], dict]:
-        found, notes = [], []
-        scripts = re.findall(
-            r"<script[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE
-        )
-        for i, s in enumerate(scripts):
-            s = s.strip()
-            if not s:
-                continue
-            json_objects = re.findall(r"\{[^{}]*\}", s)
-            for obj_str in json_objects:
-                try:
-                    obj = json.loads(obj_str)
-                except (json.JSONDecodeError, ValueError):
-                    start = obj_str.find("{")
-                    if start < 0:
-                        start = s.find(obj_str)
-                        if start < 0:
-                            continue
-                        obj_str = s[start : start + 500]
-                    try:
-                        obj = json.loads(obj_str)
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-                for key in ["sources", "file", "src", "url", "stream", "hls", "video"]:
-                    if isinstance(obj, dict) and key in obj:
-                        val = obj[key]
-                        if isinstance(val, str):
-                            found.append(
-                                StreamServer(
-                                    name=f"script_{key}",
-                                    url=val,
-                                    group="unknown",
-                                    source_type="script_json",
-                                    is_m3u8=(".m3u8" in val) or None,
-                                )
-                            )
-                        elif isinstance(val, list):
-                            for item in val:
-                                if isinstance(item, str):
-                                    found.append(
-                                        StreamServer(
-                                            name=f"script_{key}",
-                                            url=item,
-                                            group="unknown",
-                                            source_type="script_json",
-                                            is_m3u8=(".m3u8" in item) or None,
-                                        )
-                                    )
-            if found:
-                notes.append(f"Script #{i} produced {len(found)} URLs")
+    def _direct_shape_url(self, embed_url: str) -> Optional[str]:
+        """Derive a stream URL from the embed URL without fetching anything."""
+        try:
+            parsed = urlparse(embed_url)
+        except Exception:
+            return None
+        host = (parsed.hostname or "").lower()
+        template = None
+        for candidate, tmpl in self._DIRECT_SHAPE_HOSTS.items():
+            if host == candidate or host.endswith("." + candidate):
+                template = tmpl
+                host = candidate
                 break
-        return found, {
-            "pass": "script_json",
-            "found": len(found),
-            "notes": notes,
-        }
-
-    # ── Pass D: Server groups ───────────────────────────
-
-    def _pass_server_groups(self, html: str) -> Tuple[List[StreamServer], dict]:
-        found = []
-        matches = re.findall(
-            r'data-video\s*=\s*"([^"]+)"',
-            html,
-        )
-        for url in matches:
-            # Already captured in Pass A as dom_data_video, but add as
-            # embedding-friendly version for multi-server display
-            if url not in {s.url for s in found}:
-                found.append(
-                    StreamServer(
-                        name="server",
-                        url=url,
-                        group="unknown",
-                        source_type="server_group",
-                    )
-                )
-        return found, {
-            "pass": "server_groups",
-            "found": len(found),
-            "notes": [],
-        }
+        if not template:
+            return None
+        # Path is `/<token>` or `/embed/<token>`; the query string carries the
+        # subtitle sidecar and must not leak into the token.
+        token = parsed.path.strip("/").rsplit("/", 1)[-1]
+        if not token or not re.fullmatch(r"[A-Za-z0-9]+", token):
+            return None
+        return template.format(host=host, token=token)
 
     def _try_extract_direct_url(self, embed_url: str) -> Optional[str]:
         """Resolve an embed page to a playable stream URL.
 
-        Page extraction runs *first* and host-shape construction is only a
-        fallback. It used to be the other way round, which is what broke
-        playback: otakuvid.online / otakuhg.site retired the
-        `/public/stream/{id}/master.m3u8` shape (it 404s now), and because the
-        construction returned early, the general extractor — which resolves
-        those hosts fine — never ran.
+        Hosts with a derivable URL shape are handled first and cost **zero**
+        HTTP requests — that is most of the wall-clock time of a play on the one
+        server that actually works on mobile. Everything else falls back to
+        fetching and unpacking the embed page.
+
+        Note the ordering is the reverse of what it was. Page-extraction-first
+        was introduced because otakuvid/otakuhg retired the `/public/stream/`
+        shape, but that reasoning never applied to vivibebe, which still serves
+        it (verified on both sub and dub tokens). Those hosts are now selected
+        by an explicit table instead of being tried blindly, so putting the
+        cheap path first can't resurrect the old bug.
         """
-        direct = self._extract_from_embed_page(embed_url)
-        if direct:
-            return direct
-
-        # Fallback: hosts that still serve the `/public/stream/` shape. Only
-        # reached when the page itself yielded nothing (JS-gated, rate-limited,
-        # or a layout we don't parse).
-        vibe_match = re.search(
-            r"(vibeplayer\.site|vivibebe\.site)/(?:embed/)?([a-zA-Z0-9]+)", embed_url
-        )
-        if vibe_match:
-            host, vid = vibe_match.group(1), vibe_match.group(2)
-            return f"https://{host}/public/stream/{vid}/master.m3u8"
-
-        return None
+        shaped = self._direct_shape_url(embed_url)
+        if shaped:
+            return shaped
+        return self._extract_from_embed_page(embed_url)
 
     def _extract_from_embed_page(self, embed_url: str) -> Optional[str]:
         try:

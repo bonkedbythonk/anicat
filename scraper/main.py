@@ -103,6 +103,11 @@ async def get_streams(slug: str = Query(...), episode: int = Query(...), provide
                 "group": s.group,
                 "source_type": s.source_type,
                 "subtitle_url": s.subtitle_url,
+                # Whether the mobile PWA can play this one. mkissa/mangakatana
+                # predate the field, hence getattr rather than s.browser_ok:
+                # a provider that doesn't set it is reported as browser-capable,
+                # which is the behaviour that shipped before it existed.
+                "browser_ok": getattr(s, "browser_ok", True),
             }
             for s in servers
         ]

@@ -648,6 +648,15 @@ pub async fn resolve_stream_impl(
         }
     }
 
+    // The picker must not offer what the caller can't play. On mobile every
+    // byte goes through the proxy's host allowlist, and most anineko servers
+    // resolve onto rotating CDN domains it can never cover — listing those
+    // gives the phone a menu of entries that fail the moment they're picked.
+    // Desktop (mpv, direct fetch) sees the full list, unchanged.
+    if client.is_browser() {
+        servers.retain(|s| s.browser_ok.unwrap_or(true));
+    }
+
     if !servers.is_empty() {
         return Ok(serde_json::json!({ "streams": servers }));
     }
@@ -681,6 +690,9 @@ pub async fn resolve_stream_impl(
             {
                 fb_servers = validated;
             }
+        }
+        if client.is_browser() {
+            fb_servers.retain(|s| s.browser_ok.unwrap_or(true));
         }
         if !fb_servers.is_empty() {
             return Ok(serde_json::json!({ "streams": fb_servers }));

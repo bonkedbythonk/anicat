@@ -139,6 +139,26 @@ _BROWSER_REACHABLE_HOSTS = (
 )
 
 
+#: anineko's server-panel `data-id` values mapped onto anicat's group
+#: vocabulary. "sub" is Sort Sub (external VTT sidecar), "hsub" is Hard Sub
+#: (captions burned into the video, so no sidecar and none expected).
+_PANEL_GROUPS = {"sub": "soft_sub", "hsub": "hard_sub", "dub": "dub"}
+
+#: Paths that appear in the server list but are not episodes. anineko lists a
+#: "PRE" button on unaired episodes pointing at its release-calendar page --
+#: same host as a real HD-1 stream, so host-based reachability happily marks it
+#: playable and the player is handed a web page instead of a video.
+_NON_STREAM_PATH_MARKERS = ("/calendar/", "index.php")
+
+
+def _is_stream_url(url: str) -> bool:
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        return False
+    return not any(marker in path for marker in _NON_STREAM_PATH_MARKERS)
+
+
 def _host_is_browser_reachable(url: str) -> bool:
     try:
         host = urlparse(url).hostname or ""
@@ -623,14 +643,32 @@ class AniNekoProvider:
             warn_empty("anineko", "div.server-items.lang-group", "server panels")
         servers: List[StreamServer] = []
         for panel in panels:
-            # data-id is "sub" or "dub"; anicat's own vocabulary is
-            # soft_sub/hard_sub/dub, and anineko's sub tier carries an external
-            # VTT, which is soft_sub by definition.
+            # The site ships three panels -- "sub" (Sort Sub, external VTT),
+            # "hsub" (Hard Sub, captions burned in) and "dub" -- which map onto
+            # anicat's soft_sub/hard_sub/dub vocabulary.
+            #
+            # Anything unrecognised is left "unknown" rather than folded into
+            # soft_sub. Guessing here is what the old label-sniffing pass did,
+            # and it is worse than admitting ignorance: a mislabelled hard-sub
+            # server has no VTT sidecar, so the sub/dub preference logic in
+            # resolve_stream_for_provider ranks it as though it did.
             panel_id = (panel.attributes.get("data-id") or "").strip().lower()
-            group = "dub" if panel_id == "dub" else "soft_sub"
+            group = _PANEL_GROUPS.get(panel_id, "unknown")
+            if group == "unknown":
+                warn_empty(
+                    "anineko",
+                    f'lang-group data-id="{panel_id}"',
+                    "unmapped server panel (new audio tier?)",
+                )
             for btn in panel.css("button[data-video]"):
                 raw = (btn.attributes.get("data-video") or "").strip()
                 if not raw.startswith("http"):
+                    continue
+                # Unaired episodes carry a "PRE" button pointing at the release
+                # calendar. It is on the same host as a real stream, so nothing
+                # downstream would catch it.
+                if not _is_stream_url(raw):
+                    log.info("anineko: skipping non-stream entry %s", raw[:80])
                     continue
                 # The name is a bare text node sitting directly in the button,
                 # ahead of a <span> holding the tier label:

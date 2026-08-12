@@ -162,3 +162,68 @@ def test_extract_jwplayer_links_falls_back_when_hls4_absent():
 
 def test_extract_jwplayer_links_ignores_non_links_assignments():
     assert AniNekoProvider._extract_jwplayer_links("var other={\"hls4\":\"/x\"};") is None
+
+
+# Panel markup as the live site emits it for a show that has both a hard-sub
+# and a soft-sub tier (captured 2026-08-12). The tier name is a bare text node
+# ahead of a <span>, and only the soft-sub tier carries a ?sub= sidecar.
+THREE_TIER_HTML = """
+<div class="nv-server-grid server-items lang-group" data-id="hsub">
+  <button class="nv-server-btn server-video" data-video="https://vivibebe.site/aaa111">
+    HD-1 <span>Hard Sub</span>
+  </button>
+</div>
+<div class="nv-server-grid server-items lang-group" data-id="sub">
+  <button class="nv-server-btn server-video" data-video="https://vivibebe.site/bbb222?sub=https://cdn.anizara.store/x.vtt">
+    HD-1 <span>Sort Sub</span>
+  </button>
+</div>
+<div class="nv-server-grid server-items lang-group" data-id="dub">
+  <button class="nv-server-btn server-video" data-video="https://vivibebe.site/ccc333">
+    HD-1 <span>DUB</span>
+  </button>
+</div>
+"""
+
+# An unaired episode: the panel is data-id="preview" and its button points at
+# the release calendar, on the same host a real stream would use.
+PREVIEW_HTML = """
+<div class="nv-server-grid server-items lang-group" data-id="preview">
+  <button class="nv-server-btn server-video" data-video="https://vivibebe.site/calendar/index.php?title=Some%20Show&ep=7">
+    PRE <span>Preview</span>
+  </button>
+</div>
+"""
+
+
+def test_all_three_audio_tiers_map_to_distinct_groups():
+    servers, _ = AniNekoProvider()._parse_servers(THREE_TIER_HTML)
+    assert [s.group for s in servers] == ["hard_sub", "soft_sub", "dub"]
+    # Hard-sub burns captions in, so it must not claim a sidecar; soft-sub must.
+    by_group = {s.group: s for s in servers}
+    assert by_group["hard_sub"].subtitle_url is None
+    assert by_group["soft_sub"].subtitle_url == "https://cdn.anizara.store/x.vtt"
+    assert by_group["dub"].subtitle_url is None
+
+
+def test_unknown_panel_is_not_silently_called_soft_sub(caplog):
+    html = THREE_TIER_HTML.replace('data-id="hsub"', 'data-id="somethingnew"')
+    with caplog.at_level(logging.WARNING):
+        servers, _ = AniNekoProvider()._parse_servers(html)
+    # Folding an unrecognised tier into soft_sub is what made hard-sub servers
+    # look like they carried a VTT sidecar they do not have.
+    assert servers[0].group == "unknown"
+    assert any("somethingnew" in r.message for r in caplog.records)
+
+
+def test_preview_placeholder_is_not_offered_as_a_stream():
+    """An unaired episode must resolve to nothing, not to a web page.
+
+    The PRE button sits on vivibebe.site, the same host as a real HD-1 stream,
+    so host-based reachability marks it playable and the player is handed a few
+    KB of HTML. That surfaces as a decode error, or as an episode that "plays"
+    for a moment and stops.
+    """
+    servers, debug = AniNekoProvider()._parse_servers(PREVIEW_HTML)
+    assert servers == []
+    assert debug["found"] == 0

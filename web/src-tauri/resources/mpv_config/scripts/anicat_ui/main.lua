@@ -99,17 +99,12 @@ local function parse_skip_times(raw)
   return parsed
 end
 
-local function match_skip_type(title)
+-- Chapter titled literally "OP"/"ED" (optionally with a number or extra
+-- word around it, e.g. "OP2", "OP 2", "Part OP") -- the scene-release
+-- convention, and unambiguous: nothing else gets called that.
+local function match_strict_skip_type(title)
   title = (title or ''):lower()
-  
-  if title:find('intro') or title:find('opening') then
-    return 'op'
-  end
-  
-  if title:find('ending') or title:find('outro') or title:find('credits') then
-    return 'ed'
-  end
-  
+
   if title == 'op' or title:find('^op%s') or title:find('^op%d') or title:find('%sop%s') or title:find('%sop%d') or title:find('%sop$') then
     return 'op'
   end
@@ -117,8 +112,34 @@ local function match_skip_type(title)
   if title == 'ed' or title:find('^ed%s') or title:find('^ed%d') or title:find('%sed%s') or title:find('%sed%d') or title:find('%sed$') then
     return 'ed'
   end
-  
+
   return nil
+end
+
+-- Looser wording ("Intro", "Opening", "Ending", "Outro", "Credits") that
+-- USUALLY also means the OP/ED, but not always: some BD releases chapter a
+-- cold-open/recap segment as "Intro" *and* the real opening song as a
+-- separate "OP" chapter right after it -- two different segments, only the
+-- second of which is the opening. Kept separate from the strict matcher
+-- above so parse_chapters_for_skips can tell "the only candidate in this
+-- file" from "a same-named rival to a more specific chapter" and prefer the
+-- specific one -- see the comment there.
+local function match_loose_skip_type(title)
+  title = (title or ''):lower()
+
+  if title:find('intro') or title:find('opening') then
+    return 'op'
+  end
+
+  if title:find('ending') or title:find('outro') or title:find('credits') then
+    return 'ed'
+  end
+
+  return nil
+end
+
+local function match_skip_type(title)
+  return match_strict_skip_type(title) or match_loose_skip_type(title)
 end
 
 -- Merge chapter-derived skips into AniSkip times.
@@ -149,9 +170,37 @@ local function parse_chapters_for_skips()
 
   local duration = mp.get_property_number('duration') or 0
 
+  -- Whether this file has an unambiguous "OP"/"ED" chapter for each type.
+  -- Checked across the whole list before classifying anything: a "Intro"
+  -- chapter three entries before an "OP" chapter is a cold open, not the
+  -- opening, and must lose to the chapter that is unambiguously the real
+  -- one. Without this, both got typed 'op' -- observed live on a real BD
+  -- release, chapters "Intro" (0:00-1:51) and "OP" (1:51-3:21) -- and the
+  -- skip prompt fired at 0:00 on the cold open instead of 1:51 on the
+  -- actual song, which is what "it skips the wrong thing, too early"
+  -- reported as.
+  local has_strict = {}
+  for _, chapter in ipairs(chapters) do
+    local strict_type = match_strict_skip_type(chapter.title or '')
+    if strict_type then
+      has_strict[strict_type] = true
+    end
+  end
+
   for i, chapter in ipairs(chapters) do
     local title = chapter.title or ''
-    local skip_type = match_skip_type(title)
+    local strict_type = match_strict_skip_type(title)
+    local skip_type = strict_type
+    if not skip_type then
+      local loose_type = match_loose_skip_type(title)
+      -- Only fall back to the loose match when nothing more specific claims
+      -- this same type anywhere in the file. When something does, this
+      -- chapter is whatever the loose wording actually says it is (a cold
+      -- open, a recap) rather than the segment that name usually means.
+      if loose_type and not has_strict[loose_type] then
+        skip_type = loose_type
+      end
+    end
     if skip_type then
       local start_time = chapter.time or 0
       local end_time = duration

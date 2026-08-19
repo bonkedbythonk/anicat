@@ -1684,6 +1684,14 @@ enum TitleKind {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct TitleVariant {
     season: u32,
+    /// Whether `season` came from an actual marker in the title text, as
+    /// opposed to the "no marker found" default of 1. AniList's English
+    /// title for a second season is often just a subtitle with no "Season 2"
+    /// anywhere in it (e.g. "Heart Throb" for Chuunibyou's Ren), while the
+    /// provider's own catalog entry correctly says "2nd Season". Vetoing
+    /// that candidate as "wrong season" throws away the only right answer —
+    /// see `variant_penalty`.
+    season_explicit: bool,
     part: u32,
     kind: TitleKind,
     /// Tilde/asterisk-style specials markers ("Quintuplets~" vs "Quintuplets*"
@@ -1788,6 +1796,7 @@ fn title_variant(title: &str) -> TitleVariant {
 
     TitleVariant {
         season: season.unwrap_or(1),
+        season_explicit: season.is_some(),
         part,
         kind,
         marker,
@@ -1800,10 +1809,14 @@ fn title_variant(title: &str) -> TitleVariant {
 /// specials-marker difference ("~" vs "*") is only demoted so the right
 /// marker wins ties but a lone candidate can still match.
 fn variant_penalty(target: &TitleVariant, candidate: &TitleVariant) -> f64 {
-    if target.season != candidate.season
-        || target.part != candidate.part
-        || target.kind != candidate.kind
-    {
+    // Only veto on season when the target itself names one explicitly. A
+    // target with no season marker (the common case for a franchise's
+    // subtitle-only English title) says nothing about which season it is,
+    // so it cannot rule a candidate's explicit season out — string
+    // similarity is left to decide instead. A target that *does* name a
+    // season still vetoes any candidate that disagrees, explicit or not.
+    let season_conflict = target.season_explicit && target.season != candidate.season;
+    if season_conflict || target.part != candidate.part || target.kind != candidate.kind {
         return 0.3;
     }
     if target.marker != candidate.marker {
@@ -2374,6 +2387,32 @@ mod tests {
         let targets = vec!["Go-toubun no Hanayome Movie", "The Quintessential Quintuplets Movie"];
         let m = find_best_match(&targets, quintuplets_candidates(), |r| &r.title, "").unwrap();
         assert_eq!(m.id, "movie");
+    }
+
+    #[test]
+    fn season_two_wins_when_its_english_title_has_no_season_marker() {
+        // Real anineko /ajax/search results for "chuunibyou". AniList's
+        // English title for season 2 is just "Love, Chunibyo & Other
+        // Delusions - Heart Throb -" -- no "2", "II", or "Season" anywhere
+        // -- so it used to default to season 1 and get vetoed against the
+        // correctly-labeled "2nd Season" entry, leaving the untitled movie
+        // ("...: Take On Me", no "Movie" in its own title so it isn't
+        // caught by the kind veto either) as the closest string match.
+        let targets = vec!["Love, Chunibyo & Other Delusions - Heart Throb -"];
+        let candidates: Vec<DummyAnime> = [
+            ("Chuunibyou demo Koi ga Shitai! Movie: Take On Me", "movie_romaji"),
+            ("Love, Chunibyo & Other Delusions!", "s1"),
+            ("Love, Chunibyo & Other Delusions! 2nd Season: Heart Throb", "s2"),
+            ("Love, Chunibyo & Other Delusions!: Heart Throb - The Rikka Wars", "special"),
+            ("Love, Chunibyo & Other Delusions!: Heart Throb Lite Shorts", "ona"),
+            ("Love, Chunibyo & Other Delusions!: Sparkling... Slapstick Noel", "noel"),
+            ("Love, Chunibyo & Other Delusions!: Take On Me", "movie_untitled"),
+        ]
+        .iter()
+        .map(|(t, id)| DummyAnime { title: t.to_string(), id: id.to_string() })
+        .collect();
+        let m = find_best_match(&targets, candidates, |r| &r.title, "").unwrap();
+        assert_eq!(m.id, "s2");
     }
 
     #[tokio::test]

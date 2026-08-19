@@ -1037,6 +1037,14 @@ const ALLOWED_DOMAINS: &[&str] = &[
     // missing either one means playback dies within seconds whenever mkissa
     // happens to hand back a stream server on the missing host.
     "ok.ru", "okcdn.ru", "vkuser.net",
+    // anineko's StreamHG server (rotated in as HD-1's replacement when HD-1's
+    // own ad-CDN segments are revoked). Real media, PNG-obfuscated the same
+    // way as the ibyteimg.com case above, served from a TikTok-owned CDN
+    // subdomain under signed URLs (`p16-`/`p19-ad-site-sign-sg.tiktokcdn.com`).
+    // Deliberately the narrow `ad-site-sign-sg.tiktokcdn.com` suffix rather
+    // than bare `tiktokcdn.com` -- the bare domain is TikTok's general CDN and
+    // would let the proxy fetch arbitrary TikTok-hosted content.
+    "ad-site-sign-sg.tiktokcdn.com",
 ];
 
 fn host_is_allowed(url: &str) -> bool {

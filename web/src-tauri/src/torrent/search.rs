@@ -217,7 +217,7 @@ fn is_ignorable_suffix_token(t: &str) -> bool {
         "s", "season", "seasons", "cour", "part", "pt", "final",
         "ova", "ovas", "oad", "oads", "ona", "onas", "sp", "special", "specials",
         "extra", "extras", "movie", "movies", "film", "gekijouban", "the",
-        "complete", "series", "collection", "batch", "tv", "bd", "bdrip", "bluray",
+        "short", "shorts", "complete", "series", "collection", "batch", "tv", "bd", "bdrip", "bluray",
         "remastered", "uncensored", "dual", "audio", "multi", "subs", "subbed", "dubbed",
     ];
     // Bare numbers and "s01"-style markers: part of how a season is written,
@@ -352,6 +352,18 @@ fn strip_season_marker(norm: &str) -> String {
     let mut tokens: Vec<&str> = norm.split(' ').filter(|t| !t.is_empty()).collect();
     // Never strip down to nothing: a show really can be named "86".
     while tokens.len() > 1 && is_season_marker(tokens[tokens.len() - 1]) {
+        // A bare trailing number preceded by another bare number is an episode
+        // range or list ("Chunibyo Lite 1 6", from "1-6"), not a season marker
+        // — a real trailing season number stands alone. Popping it left a lone
+        // "1" behind, which the caller's "a lone trailing number is part of the
+        // title" rule then rejects, so an alias segment naming an OVA/shorts
+        // entry by its relative episode range never matched its own title.
+        let last = tokens[tokens.len() - 1];
+        let prev_is_digit = last.chars().all(|c| c.is_ascii_digit())
+            && tokens[tokens.len() - 2].chars().all(|c| c.is_ascii_digit());
+        if prev_is_digit {
+            break;
+        }
         tokens.pop();
     }
     tokens.join(" ")
@@ -373,7 +385,7 @@ fn title_matches(query_norm: &str, name: &str) -> bool {
 
 /// As `title_matches`, told which other titles belong to the same AniList
 /// entry (normalized) so `segments` can recognise an alias.
-fn title_matches_with_alts(query_norm: &str, name: &str, alts: &[String]) -> bool {
+pub(crate) fn title_matches_with_alts(query_norm: &str, name: &str, alts: &[String]) -> bool {
     let query_season = season_of(query_norm);
     let segs = segments(name, alts);
     let Some(matched) = segs.iter().find(|seg| segment_matches(query_norm, seg)) else {
@@ -468,11 +480,18 @@ fn season_of(norm: &str) -> u32 {
     // makes this safe: an episode number ("Toradora - 05") is a segment of its
     // own by the time this sees it, so it can never be read as a season. The
     // two-digit cap keeps "Mob Psycho 100" from claiming season 100.
-    if let Some(last) = norm.split(' ').next_back() {
+    let tokens: Vec<&str> = norm.split(' ').filter(|t| !t.is_empty()).collect();
+    if let Some(&last) = tokens.last() {
         if let Some(n) = roman_numeral(last) {
             return n;
         }
-        if last.len() <= 2 {
+        // A bare number preceded by another bare number is an episode range or
+        // list ("Chunibyo Lite 1 6", from "1-6"), not a season marker — a real
+        // trailing season number stands alone. Without this guard, an alias
+        // segment naming an OVA/shorts entry by its relative episode range got
+        // read as "season 6" and rejected against the query's season 1.
+        let prev_is_digit = tokens.len() >= 2 && tokens[tokens.len() - 2].chars().all(|c| c.is_ascii_digit());
+        if !prev_is_digit && last.len() <= 2 {
             if let Ok(n) = last.parse::<u32>() {
                 // A leading-zero form ("Show 02") is a season the same as "2";
                 // a bare 0 is neither.
@@ -1132,6 +1151,22 @@ mod tests {
     /// The same, bound for a browser `<video>` element.
     fn crit_browser(episode: i64, allow_episodeless: bool, prefer_dub: bool) -> ReleaseCriteria {
         ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client: true }
+    }
+
+    #[test]
+    fn ova_and_shorts_aliases_match_their_own_relative_episode_range() {
+        // A batch release naming an OVA/shorts entry by an absolute S00E11-E16
+        // range, with the recognisable alias buried in a pipe-separated title
+        // and trailed by its own relative episode range "1-6" (from "1-6").
+        // Regression coverage for two bugs found together: `season_of` read a
+        // trailing "1 6" pair as "season 6" (only the second of two adjacent
+        // bare numbers is ever a season), and `strip_season_marker` popped
+        // that same trailing "6" off an alias segment, leaving a lone "1"
+        // that the title/episode-range heuristic then rejected on its own.
+        let name = "[uba] Love, Chunibyo & Other Delusions! - S00E11-E16 - Heart Throb Lite Shorts (BD Remux 1080p AVC FLAC 2.0) | Chuunibyou demo Koi ga Shitai! Ren Lite | Chunibyo Lite! 1-6";
+        assert!(title_matches(&normalize("Chunibyo Lite"), name));
+        assert!(title_matches(&normalize("Heart Throb Lite"), name));
+        assert!(title_matches(&normalize("Chuunibyou demo Koi ga Shitai! Ren Lite"), name));
     }
 
     #[test]

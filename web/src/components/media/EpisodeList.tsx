@@ -288,26 +288,12 @@ export function EpisodeList({
     }
   };
 
-  const toggleStreams = async (epNum: string) => {
-    if (expandedEpStreams === epNum) {
-      setExpandedEpStreams(null);
-      return;
-    }
-
-    setExpandedEpStreams(epNum);
-    setLoadingStreamsEp(epNum);
-    setStreamsError(null);
-    setResolvedStreams([]);
-
-    try {
-      const data = await mediaApi.getStreams(mediaId, parseInt(epNum, 10), selectedProvider) as { streams?: StreamServer[] };
-      setResolvedStreams(data.streams || []);
-    } catch (err: unknown) {
-      console.error("Failed to load stream servers:", err);
-      setStreamsError((err as Error)?.message || "Couldn't load stream servers. Try another provider.");
-    } finally {
-      setLoadingStreamsEp(null);
-    }
+  const toggleStreams = (epNum: string) => {
+    // Fetching is handled by the effect above, which reacts to
+    // expandedEpStreams changing. Fetching here too used to fire a second,
+    // concurrent request on every open — the two responses could land in
+    // either order and briefly render duplicated/flickering server rows.
+    setExpandedEpStreams(expandedEpStreams === epNum ? null : epNum);
   };
 
   const handlePlaySpecificStream = async (epNum: string, serverName: string) => {

@@ -99,17 +99,32 @@ export const StreamLoadingModal: React.FC = () => {
     };
   }, [setPlaybackLoading]);
 
-  // Safety timeout: if stream resolution hangs for over 30s, show timeout error
+  // Safety timeout: warn once resolution is taking unusually long.
+  //
+  // 30s used to fire well inside normal torrent resolve time -- observed
+  // live, a resolve that had to wait out nyaa's own rate limiting took 22s,
+  // and the backend's own preload-dedup guard now waits up to 60s before it
+  // considers a resolve stuck (see PRELOAD_WAIT in commands/playback.rs,
+  // bumped for the identical reason). At 30s this fired a hard "couldn't
+  // load" message on plenty of resolves that were simply slow and went on to
+  // succeed a few seconds later -- the auto-dismiss effect above would swap
+  // it out for the real player once mpv opened, but not before telling the
+  // user their stream had failed when it had not.
+  //
+  // This does not cancel anything on the backend either way; the Rust future
+  // behind start_playback keeps running regardless of what this modal shows.
+  // So the wording below says "still trying", not "failed" -- true at 45s
+  // far more often than it's false, unlike the old text.
   useEffect(() => {
     if (!isLoading || step === 0) return;
 
     const timeoutTimer = setTimeout(() => {
       setPlaybackLoading({
         isLoading: true,
-        statusText: "Couldn't load stream in time. Try another provider or server.",
+        statusText: "Still trying to reach a server — this can take a while on a slow torrent swarm.",
         step: 0,
       });
-    }, 30000);
+    }, 45000);
 
     return () => clearTimeout(timeoutTimer);
   }, [isLoading, step, setPlaybackLoading]);

@@ -79,6 +79,7 @@ pub async fn torrent_stream_handler(
     let Some(handle) = session.get(q.t.into()) else {
         return error_response(StatusCode::NOT_FOUND, "torrent not found");
     };
+    state.app_state.torrent.spawn_stall_logger(&session, q.t);
     let file_info = handle.with_metadata(|m| {
         m.file_infos
             .get(q.f)

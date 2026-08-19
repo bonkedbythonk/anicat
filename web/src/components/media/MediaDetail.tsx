@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile, Search } from "lucide-react";
 import { mediaApi, flattenCharacterEdges, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import { sanitizeHtml, stripSpoilers } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -104,6 +104,16 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     !!selectedCharacter,
     closeCharacterModal
   );
+  const [showMatchModal, setShowMatchModal] = useState(false);
+  const [matchQuery, setMatchQuery] = useState("");
+  const [matchResults, setMatchResults] = useState<{ id: string; title: string; year?: number }[]>([]);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchSaving, setMatchSaving] = useState(false);
+  const closeMatchModal = () => {
+    setShowMatchModal(false);
+    setMatchResults([]);
+  };
+  const matchModalRef = useModalDismiss<HTMLDivElement>(showMatchModal, closeMatchModal);
   const [isResolvingTrailer, setIsResolvingTrailer] = useState(false);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
   const setNotification = useAppStore((s) => s.setNotification);
@@ -1213,6 +1223,18 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                           >
                             <RotateCcw size={14} />
                           </FocusableButton>
+                          <FocusableButton
+                            onClick={() => {
+                              const defaultQuery = fullItem.title?.english || fullItem.title?.romaji || title || "";
+                              setMatchQuery(defaultQuery);
+                              setMatchResults([]);
+                              setShowMatchModal(true);
+                            }}
+                            className="p-1.5 rounded-lg glass-button transition-all active:scale-95"
+                            title="Fix source match"
+                          >
+                            <Search size={14} />
+                          </FocusableButton>
                         </div>
                       </FocusScope>
                     )}
@@ -1458,6 +1480,90 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
               </div>
             )}
             </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Source match override modal */}
+      {showMatchModal && (
+        <div
+          ref={matchModalRef}
+          className="fixed inset-0 z-[200] flex items-center justify-center"
+          onClick={closeMatchModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fix source match"
+          tabIndex={-1}
+        >
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative max-w-md w-[90%] max-h-[80vh] overflow-y-auto bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeMatchModal} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors z-10"><X size={16} /></button>
+            <div className="text-sm font-bold text-foreground mb-1">Fix source match</div>
+            <div className="text-[11px] text-muted-foreground mb-4">
+              {selectedProvider === "nyaa"
+                ? "Type the exact search title to use for torrent matching (useful for OVAs, specials, and seasons that share a title with other entries)."
+                : "Search AniNeko and pick the correct entry for this show."}
+            </div>
+            <form
+              className="flex gap-2 mb-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!matchQuery.trim()) return;
+                setMatchLoading(true);
+                try {
+                  const results = await mediaApi.searchProvider(matchQuery.trim(), selectedProvider);
+                  setMatchResults(results);
+                } catch {
+                  notifyError("Search failed.");
+                } finally {
+                  setMatchLoading(false);
+                }
+              }}
+            >
+              <input
+                type="text"
+                value={matchQuery}
+                onChange={(e) => setMatchQuery(e.target.value)}
+                placeholder="Search title"
+                className="flex-1 text-xs bg-surface border border-border rounded-lg px-3 py-2 text-foreground outline-none"
+                autoFocus
+              />
+              <button
+                type="submit"
+                disabled={matchLoading || !matchQuery.trim()}
+                className="px-3 py-2 rounded-lg bg-accent/15 text-accent border border-accent/30 text-xs font-semibold disabled:opacity-50"
+              >
+                {matchLoading ? <Loader2 size={14} className="animate-spin" /> : "Search"}
+              </button>
+            </form>
+            {matchResults.length > 0 && (
+              <div className="space-y-1.5">
+                {matchResults.map((r) => (
+                  <button
+                    key={r.id}
+                    disabled={matchSaving}
+                    onClick={async () => {
+                      setMatchSaving(true);
+                      try {
+                        await mediaApi.mapProviderSlug(item.id, selectedProvider, r.id);
+                        await mediaApi.clearProviderCache(item.id).catch(() => {});
+                        queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id], refetchType: 'all' });
+                        queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
+                        closeMatchModal();
+                      } catch {
+                        notifyError("Could not save the match.");
+                      } finally {
+                        setMatchSaving(false);
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg bg-foreground/[0.03] border border-border hover:border-accent/40 transition-all disabled:opacity-50"
+                  >
+                    <div className="text-xs font-semibold text-foreground">{r.title}</div>
+                    {r.year && <div className="text-[10px] text-muted-foreground">{r.year}</div>}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>

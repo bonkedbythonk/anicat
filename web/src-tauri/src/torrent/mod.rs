@@ -6,6 +6,7 @@
 //! streaming-site extractors do.
 
 pub mod cinema;
+pub mod seadex;
 pub mod series;
 pub mod search;
 pub mod stream;
@@ -83,6 +84,12 @@ pub struct TorrentManager {
     session: tokio::sync::OnceCell<Arc<Session>>,
     cache_dir: PathBuf,
     resolved: tokio::sync::Mutex<HashMap<(i64, i64), Resolved>>,
+    /// Torrent ids with a `spawn_stall_logger` task currently running —
+    /// dedupes against the burst of range requests mpv fires per seek.
+    stall_logging: std::sync::Mutex<std::collections::HashSet<usize>>,
+    /// SeaDex's parsed release list per AniList `media_id` — see
+    /// `seadex::find_candidates`'s doc comment for why this is cached at all.
+    seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
 }
 
 impl Default for TorrentManager {
@@ -107,6 +114,8 @@ impl TorrentManager {
             session: tokio::sync::OnceCell::new(),
             cache_dir,
             resolved: tokio::sync::Mutex::new(HashMap::new()),
+            stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
+            seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -212,6 +221,23 @@ impl TorrentManager {
             }
             _ => search::find_candidates(client, titles, criteria).await,
         };
+        // Which number the *files* inside a torrent use. For a series that is
+        // the within-season episode, since a season pack names its files
+        // SxxEyy — while `episode` stays absolute, because it is the identity
+        // the resolved-stream cache and the whole app are keyed by, and
+        // within-season numbers collide across seasons.
+        let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
+        // A human already picked the release for this exact AniList entry, so
+        // when SeaDex has one it goes in ahead of every regex-matched result —
+        // and, unlike the regex search, it can be the *only* candidate for the
+        // scattered OVA/special/"Lite" entries a franchise splits into, so this
+        // has to run before the "no candidates" check below, not after it.
+        let mut seadex_candidates =
+            seadex::find_candidates(client, &self.seadex_cache, media_id, titles, file_episode, allow_episodeless, episode_count).await;
+        if !seadex_candidates.is_empty() {
+            candidates.append(&mut seadex_candidates);
+            candidates.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
+        }
         // Honor an explicit release pick: float the matching candidate to the
         // front (stable partition keeps the rest as ordered fallbacks).
         if let Some(ref chosen) = chosen_name {
@@ -231,13 +257,6 @@ impl TorrentManager {
                 format!("No HD torrent found for '{}' episode {}", titles[0], episode)
             });
         }
-
-        // Which number the *files* inside a torrent use. For a series that is
-        // the within-season episode, since a season pack names its files
-        // SxxEyy — while `episode` stays absolute, because it is the identity
-        // the resolved-stream cache and the whole app are keyed by, and
-        // within-season numbers collide across seasons.
-        let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
 
         let mut last_err = String::new();
         for cand in candidates.iter().take(4) {
@@ -275,7 +294,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
     ) -> Vec<TorrentChoice> {
         let ResolveTarget {
-            episode, titles, allow_episodeless, prefer_dub, browser_client,
+            media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client,
             movie, series: series_criteria, ..
         } = target;
         if titles.is_empty() {
@@ -285,7 +304,7 @@ impl TorrentManager {
         // is in `resolve`. Destructuring these away and always running the
         // anime search meant the picker offered nothing at all for a film or
         // an episode: it searched nyaa for a title nyaa has never carried.
-        match (movie, series_criteria) {
+        let mut candidates = match (movie, series_criteria) {
             (Some(movie_criteria), _) => cinema::find_movie_candidates(client, titles, movie_criteria).await,
             (_, Some(episode_criteria)) => {
                 series::find_episode_candidates(client, titles, episode_criteria).await
@@ -298,7 +317,15 @@ impl TorrentManager {
                 )
                 .await
             }
+        };
+        let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
+        let mut seadex_candidates =
+            seadex::find_candidates(client, &self.seadex_cache, media_id, titles, file_episode, allow_episodeless, episode_count).await;
+        if !seadex_candidates.is_empty() {
+            candidates.append(&mut seadex_candidates);
+            candidates.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
         }
+        candidates
             .into_iter()
             .map(|c| TorrentChoice {
                 name: c.name,
@@ -354,6 +381,67 @@ impl TorrentManager {
         active.into_inner().unwrap()
     }
 
+    /// Whether a torrent id is still tracked by the session — i.e. whether
+    /// `/torrent-stream?t=<id>` would actually serve something rather than
+    /// 404. Cheap, local, no network round trip: the right liveness check
+    /// for a torrent-backed preload, where `probe_stream`'s HTTP range probe
+    /// (built for CDN URLs that can 403/expire) just adds latency without
+    /// checking anything more meaningful than this does.
+    pub async fn is_live(&self, torrent_id: usize) -> bool {
+        match self.session().await {
+            Ok(session) => session.get(torrent_id.into()).is_some(),
+            Err(_) => false,
+        }
+    }
+
+    /// Samples peer counts and download speed every 5s into the app log for
+    /// as long as the torrent is downloading, so "why isn't this buffering"
+    /// can be answered from Anicat.log after the fact instead of needing
+    /// tracing turned on to reproduce it live.
+    ///
+    /// Deduped per torrent id: mpv fires a burst of range requests per seek,
+    /// and `torrent_stream_handler` calls this on every one of them — only
+    /// the first actually starts a logger. Stops once the torrent finishes,
+    /// disappears from the session (evicted, deleted), or after a generous
+    /// cap so a paused/idle torrent doesn't log forever.
+    pub fn spawn_stall_logger(self: &Arc<Self>, session: &Arc<Session>, torrent_id: usize) {
+        {
+            let mut active = self.stall_logging.lock().unwrap_or_else(|e| e.into_inner());
+            if !active.insert(torrent_id) {
+                return;
+            }
+        }
+        let mgr = self.clone();
+        let session = session.clone();
+        tokio::spawn(async move {
+            const INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+            const MAX_SAMPLES: u32 = 240; // 20 minutes
+            for _ in 0..MAX_SAMPLES {
+                tokio::time::sleep(INTERVAL).await;
+                let Some(handle) = session.get(torrent_id.into()) else { break };
+                let stats = handle.stats();
+                let finished = stats.finished;
+                let peers = stats.live.as_ref().map(|l| &l.snapshot.peer_stats);
+                log::info!(
+                    "torrent: stall-check id {} — {} [peers live={} connecting={} seen={} dead={}]",
+                    torrent_id,
+                    stats,
+                    peers.map(|p| p.live).unwrap_or(0),
+                    peers.map(|p| p.connecting).unwrap_or(0),
+                    peers.map(|p| p.seen).unwrap_or(0),
+                    peers.map(|p| p.dead).unwrap_or(0),
+                );
+                if finished {
+                    break;
+                }
+            }
+            mgr.stall_logging
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&torrent_id);
+        });
+    }
+
     /// Read the first bit of the chosen file so playback starts on warm data
     /// and dead torrents fail fast. Bounded by time, not just bytes, so a
     /// slow-but-alive swarm still passes.
@@ -401,7 +489,8 @@ impl TorrentManager {
             .clone()
             .stream(file_id)
             .map_err(|e| format!("prebuffer stream open failed: {}", e))?;
-        let want = PREBUFFER_BYTES.min(stream.len() as usize);
+        let file_len = stream.len();
+        let want = PREBUFFER_BYTES.min(file_len as usize);
         let mut got = 0usize;
         let mut buf = vec![0u8; 256 * 1024];
         let started = std::time::Instant::now();
@@ -421,6 +510,59 @@ impl TorrentManager {
             got / 1024,
             started.elapsed()
         );
+
+        // The read above proves nothing on its own: `cache_dir` (see `new()`)
+        // survives across app launches, so a file already partly downloaded
+        // from an earlier attempt satisfies it entirely from disk — in
+        // 516 microseconds, observed live — with zero bytes actually coming
+        // from today's swarm. That let a candidate whose live peers can't
+        // sustain real-time playback right now sail through this check
+        // instead of falling through to one of the other candidates that
+        // might be healthier: SubsPlease Horimiya ep3 measured 21 peers seen,
+        // never more than 4 live, 0.3-0.5MiB/s sustained against a 1.2GiB
+        // file (needs ~0.7MiB/s to even plausibly finish in 30 minutes) —
+        // "pre-buffered instantly" and "buffers too slowly to actually play"
+        // at once.
+        //
+        // `fetched_bytes` only increments on bytes actually received from a
+        // peer this session (librqbit's `on_received_piece`), never on
+        // pieces the disk cache already had, so sampling its delta over a
+        // few seconds measures the swarm, not the disk. The threshold is
+        // deliberately generous — "would finish within 30 minutes", not
+        // "keeps up in real time" — since the real episode duration isn't
+        // known this early; a swarm that fails even that bar is failing hard
+        // enough that another candidate is worth trying.
+        const THROUGHPUT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(3);
+        const NEEDS_TO_FINISH_WITHIN_SECS: f64 = 30.0 * 60.0;
+        let fetched_before = handle
+            .stats()
+            .live
+            .as_ref()
+            .map(|l| l.snapshot.fetched_bytes)
+            .unwrap_or(0);
+        tokio::time::sleep(THROUGHPUT_SAMPLE).await;
+        let fetched_after = handle
+            .stats()
+            .live
+            .as_ref()
+            .map(|l| l.snapshot.fetched_bytes)
+            .unwrap_or(0);
+        let bytes_per_sec =
+            fetched_after.saturating_sub(fetched_before) as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
+        let required_bps = file_len as f64 / NEEDS_TO_FINISH_WITHIN_SECS;
+        if bytes_per_sec < required_bps {
+            return Err(format!(
+                "swarm too slow: {:.0} KB/s, needs {:.0} KB/s to plausibly keep up",
+                bytes_per_sec / 1024.0,
+                required_bps / 1024.0
+            ));
+        }
+        log::info!(
+            "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s)",
+            bytes_per_sec / 1024.0,
+            required_bps / 1024.0
+        );
+
         Ok(())
     }
 
@@ -792,6 +934,50 @@ mod tests {
             "best candidate is a different show: {}",
             best.name
         );
+    }
+
+    // Live network test: SeaDex has a Nyaa-tracked, single-file "best" pick
+    // for a Chuunibyou OVA (AniList id 16934) — exactly the class of entry
+    // (a franchise special split off into its own AniList id) the lookup
+    // exists for, and the simple case: one file, nothing to disambiguate.
+    #[tokio::test]
+    #[ignore]
+    async fn live_seadex_finds_a_single_file_ova() {
+        let titles = vec!["Chuunibyou demo Koi ga Shitai!: Kirameki no... Slapstick Noel".to_string()];
+        let cache = tokio::sync::Mutex::new(HashMap::new());
+        let cands = seadex::find_candidates(&client(), &cache, 16934, &titles, 1, true, Some(1)).await;
+        assert!(!cands.is_empty(), "no SeaDex candidates found for alID 16934");
+        let best = &cands[0];
+        println!("best: {} (score {})", best.name, best.score);
+        assert!(best.name.starts_with("[SeaDex"), "not a SeaDex candidate: {}", best.name);
+        assert!(best.magnet.as_ref().is_some_and(|m| m.starts_with("magnet:?xt=urn:btih:")));
+        assert!(!best.assume_batch, "a single-file OVA is not a batch");
+    }
+
+    // Live network test, regression coverage for the bug this module's
+    // box-set guard exists to prevent: SeaDex's record for Chuunibyou's "Ren
+    // Lite" shorts (AniList id 20582) is a 22-file YURI release that also
+    // contains all of season 2 ("S02E01".."S02E12") and a handful of other
+    // specials — the *only* Nyaa-tracked entries for this alID are that box
+    // set and a single combined-range file the title check can't place. Both
+    // must be rejected rather than hand back a wrong-season file.
+    #[tokio::test]
+    #[ignore]
+    async fn live_seadex_rejects_a_franchise_box_set() {
+        let titles = vec![
+            "Chuunibyou demo Koi ga Shitai! Ren Lite".to_string(),
+            "Love, Chunibyo & Other Delusions Ren Lite".to_string(),
+        ];
+        let cache = tokio::sync::Mutex::new(HashMap::new());
+        for episode in 1..=6 {
+            let cands = seadex::find_candidates(&client(), &cache, 20582, &titles, episode, false, Some(6)).await;
+            assert!(
+                cands.is_empty(),
+                "episode {}: expected no safe SeaDex candidate, got {:?}",
+                episode,
+                cands.iter().map(|c| &c.name).collect::<Vec<_>>()
+            );
+        }
     }
 
     // Live network test: a colon in an AniList title separates a sequel or arc

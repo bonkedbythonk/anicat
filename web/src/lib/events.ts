@@ -46,6 +46,14 @@ export function invalidateProgressQueries(qc: QueryClient, mediaId?: number) {
 
 const OPTIMISTIC_UPDATE_PREFIXES = [
   "home-", "lists", "library", "profile", "manga-data", "search",
+  // The detail page itself. Missing this was the whole point of an
+  // optimistic update turned backwards: every *other* cached view patched
+  // instantly on a manual progress edit, while the one query backing the
+  // screen actually being edited waited on the real AniList round trip
+  // (then an invalidate, then a refetch) before the number on screen moved
+  // -- which is what made a manual edit feel slow. It never was slow
+  // elsewhere; nothing elsewhere was being watched.
+  "media-detail",
 ];
 
 export function updateProgressInQueries(qc: QueryClient, mediaId: number, progress: number, status?: string) {

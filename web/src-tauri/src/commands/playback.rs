@@ -154,6 +154,107 @@ async fn try_send_ipc(ipc_path: &str, commands: Vec<serde_json::Value>) -> Resul
     }
 }
 
+/// Waits on mpv's IPC socket for the `file-loaded` event — the point where
+/// the demuxer has actually opened the stream and mpv knows there is a video
+/// track, which is also when `--force-window` paints something on screen.
+///
+/// This is a real readiness signal, unlike "the process is still alive 500ms
+/// after spawn": for a torrent-backed stream, opening the file can mean
+/// seeking to read an MKV's Cues element near the end of the file (see
+/// torrent/stream.rs's doc comment on seek-reprioritization), which on a slow
+/// swarm can block for minutes. Connecting immediately after spawn — well
+/// before mpv could plausibly have finished that probe — avoids the race
+/// where `file-loaded` fires before this function starts listening.
+///
+/// Returns `Ok(true)` once loaded, `Ok(false)` if mpv reported `shutdown` /
+/// `end-file` (closed or failed before loading), and `Err` if the socket
+/// couldn't be reached at all (e.g. not created yet).
+async fn wait_for_mpv_file_loaded(ipc_path: &str) -> Result<bool, String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    async fn query_then_listen<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+        mut stream: S,
+    ) -> bool {
+        // `file-loaded` is a one-shot broadcast: a connection that joins
+        // after it already fired never sees it and would otherwise wait out
+        // the full timeout despite mpv already playing fine. That race is
+        // real, not theoretical — an episode that's fully cached on disk
+        // from an earlier attempt (this file's own connect-retry loop can
+        // lose to it) loads in well under the time a connect + 150ms retry
+        // takes. So ask directly whether a file is already loaded before
+        // falling back to listening for the event.
+        let query = serde_json::json!({"command": ["get_property", "path"], "request_id": 1});
+        if stream
+            .write_all(format!("{}\n", query).as_bytes())
+            .await
+            .is_ok()
+        {
+            let _ = stream.flush().await;
+        }
+
+        let mut lines = tokio::io::BufReader::new(stream).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                    match v.get("event").and_then(|e| e.as_str()) {
+                        Some("file-loaded") => return true,
+                        Some("shutdown") | Some("end-file") => return false,
+                        _ => {}
+                    }
+                    // Response to the get_property above: request_id 1
+                    // succeeding means a file is already loaded right now.
+                    if v.get("request_id").and_then(|r| r.as_i64()) == Some(1)
+                        && v.get("error").and_then(|e| e.as_str()) == Some("success")
+                    {
+                        return true;
+                    }
+                }
+                _ => return false, // EOF or read error: mpv's end of the socket is gone
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let stream = tokio::net::UnixStream::connect(ipc_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(query_then_listen(stream).await)
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let client = ClientOptions::new().open(ipc_path).map_err(|e| e.to_string())?;
+        Ok(query_then_listen(client).await)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = ipc_path;
+        Err("Unsupported platform".to_string())
+    }
+}
+
+/// Polls for the socket to exist and then waits for `file-loaded`, giving up
+/// after `timeout`. The connect retry loop covers the brief window right
+/// after spawn where mpv hasn't created its IPC socket yet.
+async fn wait_for_mpv_window(ipc_path: &str, timeout: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        match tokio::time::timeout(deadline - now, wait_for_mpv_file_loaded(ipc_path)).await {
+            Ok(Ok(loaded)) => return loaded,
+            Ok(Err(_)) => tokio::time::sleep(std::time::Duration::from_millis(150)).await,
+            Err(_) => return false, // overall timeout
+        }
+    }
+}
+
 /// Puts a preloaded stream back after a start that took it out of the slot
 /// but then bailed (superseded by a newer start). Only fills an empty slot:
 /// whatever a later preload has already put there is fresher by definition.
@@ -1114,6 +1215,27 @@ pub(crate) async fn resolve_stream_for_provider(
         return Err(format!("No stream URL found on {}", provider_name));
     }
 
+    // Doodstream (currently fronted by playmogo.com; the underlying platform
+    // rotates its domain regularly) is not a direct stream at all -- checked
+    // live, anineko's own player embeds it the same way: a raw <iframe> onto
+    // the embed page, which loads the real file itself via an obfuscated,
+    // short-lived token exchange the embed's own JS runs client-side. The
+    // "url" the scraper hands back for it is that embed page, not media, and
+    // mpv given a webpage exits immediately -- a hard crash, not a dead-server
+    // probe failure, so nothing here previously caught it before it reached
+    // mpv. Dropped for the same reason as the browser_ok filter below: a
+    // clean "nothing playable" here lets the fallback-provider chain fire,
+    // which is the recoverable outcome.
+    let before = servers.len();
+    servers.retain(|s| !s.name.eq_ignore_ascii_case("doodstream"));
+    if servers.len() != before {
+        log::info!("Dropped Doodstream from {} candidates: embed-only, not a direct stream", provider_name);
+    }
+    if servers.is_empty() {
+        timings.log(provider_name, media_id, episode_number, "no-servers", started.elapsed().as_millis());
+        return Err(format!("No stream URL found on {}", provider_name));
+    }
+
     // A browser can only play what the proxy is willing to fetch, and most of
     // anineko's servers resolve onto rotating throwaway CDN hosts that
     // `ALLOWED_DOMAINS` can never cover. Those are refused before a frame
@@ -1592,7 +1714,19 @@ pub async fn start_playback(
         // Bounded, and a timeout just falls through to resolving normally, so
         // a preload that never finishes cannot wedge playback.
         if state.preload_in_flight(media_id, episode_number, &provider_name) {
-            const PRELOAD_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+            // Was 20s. Observed live: a torrent resolve that had to wait out
+            // nyaa's own rate limiting took 22s end to end, and a second one
+            // -- competing with a duplicate resolve this exact guard exists
+            // to prevent -- took 44s. At 20s the wait gives up before either
+            // would have finished, falls through to "resolve normally", and
+            // creates the identical race the comment above describes: two
+            // add_torrent rounds against the same swarm, each also doubling
+            // the nyaa search volume, which is a real contributor to the rate
+            // limiting slowing both down in the first place. 60s comfortably
+            // covers what was actually observed, with the fallback below
+            // still standing as the ceiling for a preload that is genuinely
+            // stuck rather than just slow.
+            const PRELOAD_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
             log::info!(
                 "Waiting for the in-flight preload of media {} ep {} instead of resolving it twice",
                 media_id, episode_number
@@ -1638,7 +1772,33 @@ pub async fn start_playback(
         // dead one falls through to the full resolve (and therefore to the
         // fallback-provider chain) instead of being handed over blind. It is
         // deliberately not put back in the slot — it has been proven dead.
+        //
+        // A torrent-backed preload's failure mode isn't "CDN URL expired" —
+        // it's "evicted from the session" (see torrent/mod.rs's cache cap) —
+        // so it gets a direct, local, no-network-round-trip check instead of
+        // probe_stream's HTTP range probe (built for, and only meaningful
+        // against, an external CDN).
         let preloaded = match preloaded {
+            Some(p) if p.raw_url.contains("/torrent-stream") => {
+                let torrent_id = p.raw_url
+                    .split("t=")
+                    .nth(1)
+                    .and_then(|s| s.split('&').next())
+                    .and_then(|s| s.parse::<usize>().ok());
+                let live = match torrent_id {
+                    Some(id) => state.torrent.is_live(id).await,
+                    None => false,
+                };
+                if live {
+                    Some(p)
+                } else {
+                    log::warn!(
+                        "Preloaded torrent stream for media {} ep {} is no longer in the session; re-resolving",
+                        media_id, episode_number
+                    );
+                    None
+                }
+            }
             Some(p) => {
                 match probe_stream(&state.http_client, &p.raw_url, p.headers.as_ref()).await {
                     StreamProbe::Alive => Some(p),
@@ -2393,7 +2553,54 @@ pub async fn start_playback(
         }
     });
 
-    emit_playback_active(&app, true);
+    // A torrent-backed stream's `file-loaded` can be minutes away (see
+    // wait_for_mpv_window's doc comment) — firing `active:true` right here,
+    // as soon as the process merely survived its first 500ms, is the "fake"
+    // dismissal: the loading modal closes while mpv still shows no window at
+    // all. Gate it on the real readiness signal instead, in the background so
+    // this command still returns immediately. Non-torrent providers keep the
+    // old instant behavior; their streams don't have this failure mode.
+    if is_torrent_stream {
+        let ready_app = app.clone();
+        let ready_state = (*state).clone();
+        let ready_ipc_path = get_ipc_path();
+        tokio::spawn(async move {
+            let wait_started = std::time::Instant::now();
+            // 10 minutes: generous enough for a genuinely slow swarm to
+            // deliver whatever the demuxer's probe seeked to, without leaving
+            // the modal open forever if `file-loaded` is somehow never seen.
+            let loaded = wait_for_mpv_window(&ready_ipc_path, std::time::Duration::from_secs(600)).await;
+            log::info!(
+                "torrent: mpv readiness wait for media {} ep {} finished in {:?}, loaded={}",
+                media_id, episode_number, wait_started.elapsed(), loaded
+            );
+
+            if ready_state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+                // A newer start_playback already took over `active`; let it
+                // own the signal instead of stomping on it from here.
+                log::info!("torrent: readiness wait superseded for media {} ep {}; not emitting", media_id, episode_number);
+                return;
+            }
+
+            if !loaded {
+                // Either mpv exited before loading -- the exit monitor above
+                // already emitted `active:false` and any failure message --
+                // or the wait timed out. Only the timeout-while-still-alive
+                // case needs an emit here, so the UI isn't stuck behind the
+                // modal forever despite mpv actually running.
+                let still_running = matches!(CURRENT_MPV.lock(), Ok(guard) if guard.is_some());
+                if !still_running {
+                    log::info!("torrent: mpv no longer running for media {} ep {}; exit monitor owns active:false", media_id, episode_number);
+                    return;
+                }
+                log::warn!("torrent: readiness wait timed out but mpv is still running for media {} ep {}; emitting active:true anyway", media_id, episode_number);
+            }
+            emit_playback_active(&ready_app, true);
+        });
+    } else {
+        emit_playback_active(&app, true);
+    }
+
     Ok(PlaybackStart { stream_url })
 }
 
@@ -2799,6 +3006,40 @@ mod tests {
             servers.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             ["HD-1", "Legacy"],
         );
+    }
+
+    /// Doodstream's resolved "url" is an embed page, confirmed by inspecting
+    /// anineko's own player (it iframes the identical URL rather than
+    /// resolving it further) -- mpv given that url exits immediately, a hard
+    /// crash rather than the dead-server case the probe below already
+    /// recovers from. Name match, case-insensitive: the scraper's own label
+    /// for it, seen as both "Doodstream" and "DoodStream" across responses.
+    #[test]
+    fn doodstream_is_dropped_before_it_can_reach_mpv() {
+        let servers = vec![
+            server("HD-2", "https://vivibebe.site/public/stream/b/master.m3u8", "1080p"),
+            server("DoodStream", "https://playmogo.com/e/lw8bsfx2aj15", "1080p"),
+            server("Earnvids", "https://earnvids.example/a.mp4", "1080p"),
+        ];
+        let mut filtered = servers;
+        filtered.retain(|s| !s.name.eq_ignore_ascii_case("doodstream"));
+        assert_eq!(
+            filtered.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["HD-2", "Earnvids"],
+        );
+    }
+
+    #[test]
+    fn dropping_doodstream_from_an_all_doodstream_list_fails_cleanly() {
+        // The scenario that actually crashed: every preferred server was
+        // dead, and Doodstream -- the only one left -- was not really a
+        // candidate either. The right outcome is an empty list (which the
+        // caller turns into "No stream URL found"), not a fallback onto the
+        // one entry that was never playable.
+        let servers = vec![server("Doodstream", "https://playmogo.com/e/x", "1080p")];
+        let mut filtered = servers;
+        filtered.retain(|s| !s.name.eq_ignore_ascii_case("doodstream"));
+        assert!(filtered.is_empty());
     }
 
     #[test]

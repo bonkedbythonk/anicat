@@ -558,6 +558,37 @@ fn get_stream_group(server: &crate::scraper::client::StreamServer) -> &str {
     }
 }
 
+/// The sub/dub/explicit-pick preference logic, factored out so a post-restart
+/// retry (see the 403-triggered scraper restart in `resolve_stream_for_provider`)
+/// can re-run it against a freshly-fetched server list instead of falling
+/// back to a cruder pick that would ignore the user's translation preference.
+fn select_server<'a>(
+    servers: &'a [crate::scraper::client::StreamServer],
+    server: &Option<String>,
+    translation_type: &str,
+    target_quality: u32,
+) -> Option<&'a crate::scraper::client::StreamServer> {
+    if let Some(ref s_name) = server {
+        servers.iter().find(|s| s.name == *s_name)
+            .or_else(|| pick_best_server(servers, target_quality))
+    } else if translation_type == "dub" {
+        pick_best_server_in_group(servers, &["dub"], target_quality)
+            .or_else(|| pick_best_server_in_group(servers, &["hard_sub"], target_quality))
+            .or_else(|| pick_best_server_in_group(servers, &["soft_sub"], target_quality))
+            .or_else(|| pick_best_server(servers, target_quality))
+    } else {
+        pick_best_server_in_group(servers, &["hard_sub"], target_quality)
+            .or_else(|| {
+                servers.iter()
+                    .filter(|s| get_stream_group(s) == "soft_sub" && s.subtitle_url.is_some())
+                    .find(|s| resolution_rank(s) == target_quality)
+                    .or_else(|| pick_best_server_in_group(servers, &["soft_sub"], target_quality))
+            })
+            .or_else(|| pick_best_server_in_group(servers, &["dub"], target_quality))
+            .or_else(|| pick_best_server(servers, target_quality))
+    }
+}
+
 /// Playback candidates in the order they should be tried: the server the
 /// preference logic above actually chose, then every other server best-first as
 /// retry material. Deduped by URL, since the scraper's several extraction
@@ -1172,6 +1203,7 @@ pub(crate) async fn resolve_stream_for_provider(
         crate::registry::service::get_provider_slug(&db, media_id, provider_name)
     };
 
+    let mut resolved_slug = cached_slug.clone();
     let mut servers = match cached_slug {
         Some(ref s) => {
             let t = std::time::Instant::now();
@@ -1195,7 +1227,7 @@ pub(crate) async fn resolve_stream_for_provider(
     // get_streams three times over.
     if servers.is_empty() {
         let t = std::time::Instant::now();
-        if let Ok(Some((_, validated))) = super::media::resolve_and_save_provider_slug_for_episode(
+        if let Ok(Some((slug, validated))) = super::media::resolve_and_save_provider_slug_for_episode(
             state,
             media_id,
             provider_name,
@@ -1205,6 +1237,7 @@ pub(crate) async fn resolve_stream_for_provider(
         )
         .await
         {
+            resolved_slug = Some(slug);
             servers = validated;
         }
         timings.slug_resolve_ms = t.elapsed().as_millis();
@@ -1269,25 +1302,7 @@ pub(crate) async fn resolve_stream_for_provider(
     let data_saver = state.config.read().await.stream.data_saver;
     let target_quality: u32 = if data_saver { 720 } else { 1080 };
 
-    let selected_server = if let Some(ref s_name) = server {
-        servers.iter().find(|s| s.name == *s_name)
-            .or_else(|| pick_best_server(&servers, target_quality))
-    } else if translation_type == "dub" {
-        pick_best_server_in_group(&servers, &["dub"], target_quality)
-            .or_else(|| pick_best_server_in_group(&servers, &["hard_sub"], target_quality))
-            .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
-            .or_else(|| pick_best_server(&servers, target_quality))
-    } else {
-        pick_best_server_in_group(&servers, &["hard_sub"], target_quality)
-            .or_else(|| {
-                servers.iter()
-                    .filter(|s| get_stream_group(s) == "soft_sub" && s.subtitle_url.is_some())
-                    .find(|s| resolution_rank(s) == target_quality)
-                    .or_else(|| pick_best_server_in_group(&servers, &["soft_sub"], target_quality))
-            })
-            .or_else(|| pick_best_server_in_group(&servers, &["dub"], target_quality))
-            .or_else(|| pick_best_server(&servers, target_quality))
-    };
+    let selected_server = select_server(&servers, server, &translation_type, target_quality);
 
     // Picking a server used to be the end of it: one URL went to mpv, and if
     // it was dead (404, expired token, CDN refusing us) nothing noticed —
@@ -1304,6 +1319,7 @@ pub(crate) async fn resolve_stream_for_provider(
 
     let probe_start = std::time::Instant::now();
     let mut last_dead = String::new();
+    let mut saw_forbidden = false;
     for (idx, cand) in ordered.iter().take(MAX_PROBES).enumerate() {
         timings.probes = idx + 1;
         match probe_stream(&state.http_client, &cand.url, cand.headers.as_ref()).await {
@@ -1323,11 +1339,49 @@ pub(crate) async fn resolve_stream_for_provider(
                     "Stream probe: server '{}' on {} is dead ({})",
                     cand.name, provider_name, reason
                 );
+                if reason.contains("403") {
+                    saw_forbidden = true;
+                }
                 last_dead = reason;
             }
         }
     }
     timings.probe_ms = probe_start.elapsed().as_millis();
+
+    // A 403 among an otherwise-dead sweep looks like a stale session (an
+    // expired Cloudflare clearance, or signed CDN URLs handed back from an
+    // old scrape) rather than the provider actually being gone -- see
+    // `force_restart`'s doc comment. Worth one retry with a fresh sidecar
+    // before giving up and falling to the next provider, since the whole
+    // point is that a fresh scrape produces different (live) URLs.
+    if saw_forbidden {
+        if let Some(ref slug) = resolved_slug {
+            log::warn!(
+                "{}: every probed server was dead including a 403 -- forcing a scraper restart and retrying once",
+                provider_name
+            );
+            state.scraper_manager.force_restart().await;
+            if let Ok(fresh_servers) = state
+                .scraper_manager
+                .get_streams(slug, episode_number as i32, provider_name)
+                .await
+            {
+                if !fresh_servers.is_empty() {
+                    let retry_selected = select_server(&fresh_servers, server, &translation_type, target_quality);
+                    let retry_ordered = candidate_order(&fresh_servers, retry_selected);
+                    for cand in retry_ordered.iter().take(MAX_PROBES) {
+                        if let StreamProbe::Alive = probe_stream(&state.http_client, &cand.url, cand.headers.as_ref()).await {
+                            log::info!("{}: session restart recovered a playable stream ('{}')", provider_name, cand.name);
+                            timings.log(provider_name, media_id, episode_number, "ok-after-restart", started.elapsed().as_millis());
+                            return Ok((cand.url.clone(), cand.headers.clone(), cand.subtitle_url.clone()));
+                        }
+                        last_dead = "still dead after session restart".to_string();
+                    }
+                }
+            }
+        }
+    }
+
     timings.log(provider_name, media_id, episode_number, "all-dead", started.elapsed().as_millis());
 
     // Every server we probed answered with an unambiguous rejection. Report it

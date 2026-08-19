@@ -534,36 +534,56 @@ impl TorrentManager {
         // enough that another candidate is worth trying.
         const THROUGHPUT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(3);
         const NEEDS_TO_FINISH_WITHIN_SECS: f64 = 30.0 * 60.0;
-        let fetched_before = handle
-            .stats()
-            .live
-            .as_ref()
-            .map(|l| l.snapshot.fetched_bytes)
-            .unwrap_or(0);
-        tokio::time::sleep(THROUGHPUT_SAMPLE).await;
-        let fetched_after = handle
-            .stats()
-            .live
-            .as_ref()
-            .map(|l| l.snapshot.fetched_bytes)
-            .unwrap_or(0);
-        let bytes_per_sec =
-            fetched_after.saturating_sub(fetched_before) as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
         let required_bps = file_len as f64 / NEEDS_TO_FINISH_WITHIN_SECS;
-        if bytes_per_sec < required_bps {
-            return Err(format!(
-                "swarm too slow: {:.0} KB/s, needs {:.0} KB/s to plausibly keep up",
-                bytes_per_sec / 1024.0,
-                required_bps / 1024.0
-            ));
-        }
-        log::info!(
-            "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s)",
-            bytes_per_sec / 1024.0,
-            required_bps / 1024.0
-        );
 
-        Ok(())
+        // Two samples, not one: right after a network hiccup (the machine
+        // waking from sleep, Wi-Fi reassociating, a VPN reconnect) a swarm's
+        // *actual* peers are still reconnecting, and the first few seconds
+        // read exactly like a genuinely dead swarm — observed live, 507 KB/s
+        // then 0 KB/s on two candidates moments after wake, before a third
+        // candidate came back at 13 MB/s once connectivity had caught up.
+        // One retry window gives a recovering swarm a second chance without
+        // meaningfully softening the check for one that's actually just slow
+        // (still two strikes, not an escalating grace period).
+        let mut last_bps = 0.0f64;
+        for attempt in 0..2 {
+            let fetched_before = handle
+                .stats()
+                .live
+                .as_ref()
+                .map(|l| l.snapshot.fetched_bytes)
+                .unwrap_or(0);
+            tokio::time::sleep(THROUGHPUT_SAMPLE).await;
+            let fetched_after = handle
+                .stats()
+                .live
+                .as_ref()
+                .map(|l| l.snapshot.fetched_bytes)
+                .unwrap_or(0);
+            last_bps =
+                fetched_after.saturating_sub(fetched_before) as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
+            if last_bps >= required_bps {
+                log::info!(
+                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s){}",
+                    last_bps / 1024.0,
+                    required_bps / 1024.0,
+                    if attempt > 0 { " on retry" } else { "" }
+                );
+                return Ok(());
+            }
+            if attempt == 0 {
+                log::info!(
+                    "torrent: throughput low on first sample ({:.0} KB/s, needs {:.0} KB/s); resampling once before giving up",
+                    last_bps / 1024.0,
+                    required_bps / 1024.0
+                );
+            }
+        }
+        Err(format!(
+            "swarm too slow: {:.0} KB/s, needs {:.0} KB/s to plausibly keep up",
+            last_bps / 1024.0,
+            required_bps / 1024.0
+        ))
     }
 
     async fn try_candidate(

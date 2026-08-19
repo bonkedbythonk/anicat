@@ -297,6 +297,26 @@ impl ScraperManager {
         }
     }
 
+    /// Kills the current sidecar, if any, so the next request spawns a fresh
+    /// one with a fresh `curl_cffi` session and Cloudflare solve.
+    ///
+    /// The idle-timeout watchdog (see `IDLE_TIMEOUT_SECS`) is tuned to
+    /// outlive the provider's Cloudflare clearance under normal use, but that
+    /// assumes the *app* sitting idle -- a laptop sleeping for hours blows
+    /// past the clearance's own absolute expiry regardless of idle-timer
+    /// tuning, and the same staleness can also show up as expired signed CDN
+    /// URLs handed back from an old scrape rather than a 403 from anineko.to
+    /// itself. Either way the fix is the same: a fresh sidecar means a fresh
+    /// scrape with freshly-signed URLs. Called by the playback resolve path
+    /// when every probed server on a provider dies including at least one
+    /// 403 -- the shape of "the session is stale," not "the show is gone."
+    pub async fn force_restart(&self) {
+        let mut proc = self.process.lock().await;
+        if proc.take().is_some() {
+            log::warn!("[scraper] Forcing a sidecar restart to refresh its session");
+        }
+    }
+
     pub async fn search(&self, query: &str, provider: &str) -> Result<Vec<AnimeRef>, String> {
         log::info!("Searching scraper: query='{}', provider={}", query, provider);
         self.breaker.check(provider)?;

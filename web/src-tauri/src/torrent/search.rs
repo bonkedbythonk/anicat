@@ -53,6 +53,47 @@ fn search_query_form(title: &str) -> String {
         .join(" ")
 }
 
+/// The part of a title before its subtitle, when there is one.
+///
+/// AniList carries the full official title — "Rich Girl Caretaker: I'm Secretly
+/// the Caregiver of the Most Popular Girl in This Rich Kid School", 95
+/// characters — while release groups name the file after the short form.
+/// Nyaa's search ANDs its terms, so querying the full title returns literally
+/// nothing: 0 results against 34 for "Rich Girl Caretaker". Splitting on the
+/// colon is conservative on purpose; it is where AniList puts the boundary, and
+/// it leaves titles that merely contain punctuation ("Fate/stay night") alone.
+///
+/// `None` when there is no subtitle, when the short form would be a single
+/// token (too weak a query to be worth a round-trip), or when the subtitle is
+/// short enough to be a sequel or arc identifier rather than a descriptive
+/// tail. That last one is the load-bearing condition: a colon separates two
+/// very different things, and dropping the wrong one hands back the wrong
+/// season.
+///
+///   "Kaguya-sama wa Kokurasetai: Ultra Romantic"  -> season 3, kept by groups
+///   "Kimetsu no Yaiba: Yuukaku-hen"               -> an arc, kept by groups
+///   "Sword Art Online: Alicization"               -> a cour, kept by groups
+///
+/// Truncating those produces a query that matches the *first* season, which
+/// has an episode 6 as well, so nothing downstream catches it -- measured live,
+/// `Kaguya-sama wa Kokurasetai - 06` (season 1) outranked the Ultra Romantic
+/// release the query was actually for. Every one of those identifiers is one to
+/// three words, while the descriptive light-novel tails groups do drop run to a
+/// dozen and up, so the length of the subtitle separates them cleanly.
+const MIN_DROPPABLE_SUBTITLE_WORDS: usize = 6;
+
+fn short_title(title: &str) -> Option<String> {
+    let (head, subtitle) = title.split_once(':')?;
+    let head = head.trim();
+    if head.split_whitespace().count() < 2 {
+        return None;
+    }
+    if subtitle.split_whitespace().count() < MIN_DROPPABLE_SUBTITLE_WORDS {
+        return None;
+    }
+    Some(head.to_string())
+}
+
 pub fn normalize(s: &str) -> String {
     s.to_lowercase()
         .chars()
@@ -96,12 +137,73 @@ fn title_variants(title: &str) -> Vec<String> {
 /// "Monster" matched "Re Monster", "Pocket Monsters", "S-Rank Monster no
 /// Behemoth" and "Monogatari Series - Off & Monster Season": the word is
 /// present in each, just not as the show's name.
-fn segments(name: &str) -> Vec<String> {
-    name.split(['[', ']', '(', ')', '|', '+', '~'])
-        .flat_map(|part| part.split(" - "))
-        .map(normalize)
-        .filter(|s| !s.is_empty())
-        .collect()
+fn segments(name: &str, alts: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in name.split(['[', ']', '(', ')', '|', '+', '~']) {
+        let chunks: Vec<String> = part.split(" - ").map(normalize).filter(|s| !s.is_empty()).collect();
+        // " - " separates a title from its episode number, but release groups
+        // also use it *inside* a title: "Sword Art Online - Alicization - War
+        // of Underworld - 06". Splitting blindly on it produced both halves of
+        // one bug. The correct release for a query was missed, because the
+        // title it was looking for ("Sword Art Online Alicization") existed
+        // only as two adjacent chunks and never as a segment. And a *longer*
+        // titled entry was accepted, because "Sword Art Online Alicization" was
+        // a whole segment of the War of Underworld release — a different
+        // AniList entry, a different cour, with an episode 6 of its own. Same
+        // shape for "Kimetsu no Yaiba", which matched both the Yuukaku-hen and
+        // the Hashira Geiko-hen arcs.
+        //
+        // So rejoin the leading chunks that are title material into the one
+        // segment the title actually is, and keep the rest as they were. The
+        // query then has to account for the whole title, not a prefix of it
+        // that happens to land on a dash.
+        //
+        // Except when the chunk is one of *this media's own* other titles.
+        // "[35mm] Koe no Katachi - A Silent Voice" uses the same separator for
+        // an alias rather than a continuation, and no property of the text
+        // tells the two apart — "A Silent Voice" and "War of Underworld" are
+        // both plain title-shaped phrases after a dash. What tells them apart
+        // is AniList: the first is this entry's English title, the second
+        // belongs to a different entry. So the alias stays its own segment and
+        // keeps matching, while an unrecognised continuation is joined.
+        let title_len = chunks
+            .iter()
+            .enumerate()
+            .take_while(|(i, c)| is_title_material(c) && (*i == 0 || !alts.iter().any(|a| a == *c)))
+            .count();
+        if title_len > 1 {
+            out.push(chunks[..title_len].join(" "));
+            out.extend(chunks[title_len..].iter().cloned());
+        } else {
+            out.extend(chunks);
+        }
+    }
+    out
+}
+
+/// Could this dash-separated chunk be part of the show's name, rather than the
+/// episode number, season or format tags that follow it?
+///
+/// Resolution and codec tags live inside brackets in every naming convention in
+/// circulation, so by the time a chunk reaches here the realistic alternatives
+/// to "more title" are an episode number, a season, or nothing but noise words.
+fn is_title_material(chunk: &str) -> bool {
+    let tokens: Vec<&str> = chunk.split(' ').filter(|t| !t.is_empty()).collect();
+    if tokens.is_empty() {
+        return false;
+    }
+    if is_pure_season_segment(chunk) {
+        return false;
+    }
+    let first = tokens[0];
+    if is_episode_marker(first) || first.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    // Resolution reaches here on the rare unbracketed name.
+    if first.len() >= 4 && first.ends_with('p') && first[..first.len() - 1].chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    tokens.iter().any(|t| !is_ignorable_suffix_token(t))
 }
 
 /// Tokens that may trail a title without changing which show it is: season and
@@ -142,7 +244,27 @@ fn segment_matches(query_norm: &str, segment_norm: &str) -> bool {
     let query_base = strip_season_marker(query_norm);
     let segment_base = strip_season_marker(segment_norm);
     let q: Vec<&str> = query_base.split(' ').filter(|t| !t.is_empty()).collect();
-    let s: Vec<&str> = segment_base.split(' ').filter(|t| !t.is_empty()).collect();
+    let mut s: Vec<&str> = segment_base.split(' ').filter(|t| !t.is_empty()).collect();
+    // A title never resumes after its episode number, so everything from the
+    // first episode marker on is release metadata by definition.
+    //
+    // This is what makes the `Title S01E06 1080p CR WEB-DL AAC2.0 H.264` naming
+    // convention matchable at all. Groups using it write no separator between
+    // the title and the tags, so the whole thing arrives as one segment and the
+    // suffix rule below sees "s01e06", "cr", "web", "dl" — none of them
+    // ignorable, so the release was rejected outright. The " - " convention was
+    // unaffected because `segments` had already split the tags off, which is
+    // why this only ever failed for some shows.
+    //
+    // It cannot loosen the prefix guard: a wrong show fails on the title tokens
+    // sitting *before* the episode marker ("Monster" against "Monster Hunter
+    // S01E06" still rejects on "hunter").
+    if let Some(cut) = s.iter().position(|t| is_episode_marker(t)) {
+        if cut < q.len() {
+            return false;
+        }
+        s.truncate(cut);
+    }
     if q.is_empty() || s.len() < q.len() || s[..q.len()] != q[..] {
         return false;
     }
@@ -161,6 +283,38 @@ fn segment_matches(query_norm: &str, segment_norm: &str) -> bool {
             is_ignorable_suffix_token(t)
         }
     })
+}
+
+/// Is this token an episode number in one of the glued forms — "s01e06",
+/// "e06", "ep06"? A bare number is deliberately excluded: it is ambiguous with
+/// a title's own number ("Steins;Gate 0") and `segment_matches` already has a
+/// rule for those.
+fn is_episode_marker(t: &str) -> bool {
+    let digits_after = |rest: &str| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    if let Some(rest) = t.strip_prefix("ep") {
+        if digits_after(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = t.strip_prefix('e') {
+        if digits_after(rest) {
+            return true;
+        }
+    }
+    season_episode(t).is_some()
+}
+
+/// The (season, episode) pair in an "s01e06" token, if that is what this is.
+fn season_episode(t: &str) -> Option<(u32, u32)> {
+    let rest = t.strip_prefix('s')?;
+    let (season, episode) = rest.split_once('e')?;
+    if season.is_empty() || episode.is_empty() {
+        return None;
+    }
+    if !season.chars().all(|c| c.is_ascii_digit()) || !episode.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some((season.parse().ok()?, episode.parse().ok()?))
 }
 
 /// Is this token a season marker in any of the forms in circulation?
@@ -212,9 +366,16 @@ fn strip_season_marker(norm: &str) -> String {
 /// | K-ON!!" answer a season-1 query, because its alternate title normalizes
 /// to the season-1 name once punctuation is stripped. That is a wrong-content
 /// bug the episode-file check cannot catch: season 2 has an episode 5 too.
+#[cfg(test)]
 fn title_matches(query_norm: &str, name: &str) -> bool {
+    title_matches_with_alts(query_norm, name, &[])
+}
+
+/// As `title_matches`, told which other titles belong to the same AniList
+/// entry (normalized) so `segments` can recognise an alias.
+fn title_matches_with_alts(query_norm: &str, name: &str, alts: &[String]) -> bool {
     let query_season = season_of(query_norm);
-    let segs = segments(name);
+    let segs = segments(name, alts);
     let Some(matched) = segs.iter().find(|seg| segment_matches(query_norm, seg)) else {
         return false;
     };
@@ -239,6 +400,14 @@ fn title_matches(query_norm: &str, name: &str) -> bool {
 /// Distinct from `season_of`, which answers 1 for "no marker" — a default that
 /// is right for comparing two titles but hides whether anything was said.
 fn explicit_season(norm: &str) -> Option<u32> {
+    // "s02e06" states its season as plainly as "S2" does, but no word boundary
+    // follows the number so none of the patterns below can see it. Reading it
+    // is not optional: `segment_matches` now matches this naming, and without
+    // this a season-2 release would default to season 1 and satisfy a season-1
+    // query — the wrong-content bug the whole season check exists to stop.
+    if let Some((season, _)) = norm.split(' ').find_map(season_episode) {
+        return Some(season);
+    }
     let stated = season_of(norm);
     if stated != 1 {
         return Some(stated);
@@ -629,11 +798,12 @@ pub struct ReleaseCriteria {
 fn score_release(
     name: &str,
     query_norm: &str,
+    alts: &[String],
     criteria: ReleaseCriteria,
 ) -> Option<(i64, bool)> {
     let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client } = criteria;
     let name_norm = normalize(name);
-    if !title_matches(query_norm, name) {
+    if !title_matches_with_alts(query_norm, name, alts) {
         return None;
     }
     let hd = name_norm.contains("1080");
@@ -688,6 +858,7 @@ fn score_release(
 async fn search_subsplease(
     client: &reqwest::Client,
     title: &str,
+    alts: &[String],
     episode: i64,
     prefer_dub: bool,
 ) -> Vec<Candidate> {
@@ -714,7 +885,7 @@ async fn search_subsplease(
         let ep_str = item.get("episode").and_then(|v| v.as_str()).unwrap_or("");
         let show_norm = normalize(show);
         // SubsPlease search is fuzzy; require the whole query in the show name.
-        if !title_matches(&query_norm, &show_norm) {
+        if !title_matches_with_alts(&query_norm, &show_norm, alts) {
             continue;
         }
         // Batch entries look like "01-28", singles like "10" or "10.5".
@@ -762,6 +933,7 @@ async fn search_nyaa(
     client: &reqwest::Client,
     query: &str,
     query_title_norm: &str,
+    alts: &[String],
     criteria: ReleaseCriteria,
 ) -> Vec<Candidate> {
     let mut out = vec![];
@@ -770,6 +942,14 @@ async fn search_nyaa(
         urlencoding_encode(query)
     );
     let body = match client.get(&url).send().await {
+        // A rate-limit or an outage answers with a body that simply has no
+        // <item> in it, which is indistinguishable from "this show has no
+        // releases" once it reaches the parser — and the symptom, "no streams
+        // found", is the same as a genuine miss. Say which one it was.
+        Ok(r) if !r.status().is_success() => {
+            log::warn!("torrent: nyaa search returned HTTP {} for '{}'", r.status(), query);
+            return out;
+        }
         Ok(r) => r.text().await.unwrap_or_default(),
         Err(e) => {
             log::warn!("torrent: nyaa search failed: {}", e);
@@ -794,7 +974,7 @@ async fn search_nyaa(
         let trusted = field(item, "nyaa:trusted") == "Yes";
         let torrent_url = field(item, "link");
         let infohash = field(item, "nyaa:infoHash");
-        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, criteria) else {
+        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, alts, criteria) else {
             continue;
         };
         if trusted {
@@ -843,10 +1023,17 @@ pub async fn find_candidates(
     let prefer_dub = criteria.prefer_dub;
     let mut all: Vec<Candidate> = vec![];
 
-    // Expand season-naming variants, keep order, dedupe, cap the fan-out.
+    // Expand season-naming variants and short forms, keep order, dedupe, cap
+    // the fan-out. Each title is followed immediately by its own short form so
+    // the cap can never keep a title while dropping the variant of it that
+    // works — and a manual override, which `gather_media_info` puts first
+    // precisely because the automatic titles failed, always survives.
     let mut expanded: Vec<String> = vec![];
     for t in titles {
-        for v in title_variants(t) {
+        for v in title_variants(t).into_iter().flat_map(|v| {
+            let short = short_title(&v);
+            std::iter::once(v).chain(short)
+        }) {
             if !v.trim().is_empty() && !expanded.iter().any(|e| normalize(e) == normalize(&v)) {
                 expanded.push(v);
             }
@@ -854,10 +1041,22 @@ pub async fn find_candidates(
     }
     expanded.truncate(4);
 
+    // Every title AniList has for this entry, normalized. Used only to tell an
+    // alias apart from a title continuation after a dash — see `segments`.
+    // Taken from `titles` rather than `expanded` so the cap above, which exists
+    // to bound the number of *searches*, doesn't also narrow what counts as an
+    // alias.
+    let alts: Vec<String> = titles.iter().map(|t| normalize(t)).collect();
+
     for title in &expanded {
-        all.extend(search_subsplease(client, title, episode, prefer_dub).await);
+        all.extend(search_subsplease(client, title, &alts, episode, prefer_dub).await);
     }
 
+    // The per-episode queries can never legitimately match an untagged release,
+    // so they always score with allow_episodeless off regardless of what the
+    // caller asked for; only the batch query honours it.
+    let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
+    let mut queries: Vec<(String, String, ReleaseCriteria)> = vec![];
     for title in &expanded {
         let norm = normalize(title);
         // Nyaa's own full-text search takes the query literally, so title
@@ -867,14 +1066,31 @@ pub async fn find_candidates(
         // Matching is unaffected either way: `norm` still governs what counts
         // as a hit, and normalize() already discards punctuation.
         let q_title = search_query_form(title);
-        let single_q = format!("{} - {:02}", q_title, episode);
-        // The per-episode query can never legitimately match an untagged
-        // release, so it always scores with allow_episodeless off regardless of
-        // what the caller asked for; only the batch query honours it.
-        let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
-        all.extend(search_nyaa(client, &single_q, &norm, single).await);
-        let batch_q = format!("{} 1080p", q_title);
-        all.extend(search_nyaa(client, &batch_q, &norm, criteria).await);
+        queries.push((format!("{} - {:02}", q_title, episode), norm.clone(), single));
+        // Nyaa's search is an AND over terms, so the episode has to be spelled
+        // the way the release spells it or the query returns nothing at all.
+        // "Rich Girl Caretaker - 06" returned 0 items while "Rich Girl
+        // Caretaker S01E06" returned 5: every group on that show uses the
+        // SxxEyy convention and none uses " - NN".
+        queries.push((
+            format!("{} S{:02}E{:02}", q_title, season_of(&norm), episode),
+            norm.clone(),
+            single,
+        ));
+        queries.push((format!("{} 1080p", q_title), norm, criteria));
+    }
+
+    // Concurrently: this is on the play path, and the fan-out is now three
+    // queries per title where a sequential walk would spend a round-trip on
+    // each.
+    for batch in futures_util::future::join_all(
+        queries
+            .iter()
+            .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, *crit)),
+    )
+    .await
+    {
+        all.extend(batch);
     }
 
     // Dedupe by name, best score wins.
@@ -964,9 +1180,9 @@ mod tests {
         // plus the largest bonuses the incompatible one could pick up. Even
         // then it must lose, or a phone gets handed a stream it cannot decode.
         let (av1_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, crit_browser(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], crit_browser(13, false, false)).unwrap();
         let (h264_batch, _) =
-            score_release("[Grp] Toradora [1080p BD]", &q, crit_browser(13, false, false)).unwrap();
+            score_release("[Grp] Toradora [1080p BD]", &q, &[], crit_browser(13, false, false)).unwrap();
         assert!(
             av1_exact + TRUSTED_BONUS + seeder_score(SEEDER_SATURATION) < h264_batch,
             "AV1 exact ({}) must sink below H.264 batch ({}) even fully bonused",
@@ -981,9 +1197,9 @@ mod tests {
         // exact-episode tier must still win.
         let q = normalize("Toradora");
         let (av1_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, crit(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], crit(13, false, false)).unwrap();
         let (h264_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p]", &q, crit(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p]", &q, &[], crit(13, false, false)).unwrap();
         assert_eq!(av1_exact, h264_exact);
     }
 
@@ -994,7 +1210,7 @@ mod tests {
         // never thresholded.
         let q = normalize("Toradora");
         assert!(
-            score_release("[Grp] Toradora - 13 [1080p HEVC 10bit]", &q, crit_browser(13, false, false))
+            score_release("[Grp] Toradora - 13 [1080p HEVC 10bit]", &q, &[], crit_browser(13, false, false))
                 .is_some()
         );
     }
@@ -1040,6 +1256,90 @@ mod tests {
         }
     }
 
+    /// The "Rich Girl Caretaker" case: every group on the show writes
+    /// `Title SxxEyy 1080p CR WEB-DL ...` with no separator between the title
+    /// and the tags, so the release name arrives as a single segment and used
+    /// to be rejected wholesale.
+    #[test]
+    fn glued_sxxeyy_naming_matches_and_still_respects_the_season() {
+        let q = normalize("Rich Girl Caretaker");
+        for right in [
+            "[ToonsHub] Rich Girl Caretaker S01E06 1080p CR WEB-DL AAC2.0 H.264 (Multi-Subs)",
+            "[BlackRose] Rich Girl Caretaker - S01E06 (WEB 1080p HEVC 10-bit EAC-3) | Saijo no Osewa",
+            "Rich Girl Caretaker S01E06 1080p CR WEB-DL AAC2.0 H.264-VARYG (Multi-Subs)",
+        ] {
+            assert!(title_matches(&q, right), "must match: {}", right);
+        }
+        // The season still has to line up. Nothing else in the name states it,
+        // so if `s02e06` isn't read as season 2 this release answers a
+        // season-1 query and the user watches the wrong show.
+        assert!(!title_matches(&q, "[ToonsHub] Rich Girl Caretaker S02E06 1080p WEB-DL"));
+        // And a different show is still a different show: the episode marker
+        // ends the title, it does not excuse the tokens ahead of it.
+        assert!(!title_matches(&normalize("Monster"), "[G] Monster Hunter S01E06 1080p WEB-DL"));
+    }
+
+    #[test]
+    fn a_subtitled_title_yields_the_short_form_release_groups_use() {
+        assert_eq!(
+            short_title("Rich Girl Caretaker: I'm Secretly the Caregiver of the Most Popular Girl"),
+            Some("Rich Girl Caretaker".to_string())
+        );
+        // No subtitle, nothing to shorten.
+        assert_eq!(short_title("Sousou no Frieren"), None);
+        // A one-word head is too weak a query to spend a round-trip on.
+        assert_eq!(
+            short_title("Monster: A Subtitle Long Enough To Otherwise Qualify Here"),
+            None
+        );
+        // A short subtitle names a sequel, arc or cour, and release groups keep
+        // it. Dropping it would query the first season, which has the same
+        // episode numbers and would silently win.
+        for sequel in [
+            "Kaguya-sama wa Kokurasetai: Ultra Romantic",
+            "Kimetsu no Yaiba: Yuukaku-hen",
+            "Sword Art Online: Alicization",
+            "Fate/stay night: Unlimited Blade Works",
+        ] {
+            assert_eq!(short_title(sequel), None, "must not shorten: {}", sequel);
+        }
+    }
+
+    /// A dash inside a title, which release groups use as freely as they use
+    /// one before the episode number. Splitting on it blindly broke both
+    /// directions at once: the queried entry went unfound because its title
+    /// only ever existed as two adjacent chunks, and a longer-titled entry --
+    /// a different cour, with its own episode 6 -- was accepted in its place.
+    #[test]
+    fn a_dash_inside_a_title_neither_hides_it_nor_matches_a_longer_one() {
+        let alicization = normalize("Sword Art Online: Alicization");
+        let war = normalize("Sword Art Online: Alicization - War of Underworld");
+
+        let a_release = "[HorribleSubs] Sword Art Online - Alicization - 06 [1080p].mkv";
+        let w_release = "[HorribleSubs] Sword Art Online - Alicization - War of Underworld - 06 [1080p].mkv";
+        let w_release_glued = "[Erai-raws] Sword Art Online Alicization - War of Underworld 2nd Season - 06 [1080p]";
+
+        assert!(title_matches(&alicization, a_release));
+        assert!(!title_matches(&alicization, w_release));
+        assert!(!title_matches(&alicization, w_release_glued));
+        assert!(title_matches(&war, w_release));
+        assert!(!title_matches(&war, a_release));
+
+        // Same shape one franchise over: the arcs are separate AniList entries
+        // and a query for the first season must not take one of them.
+        let s1 = normalize("Kimetsu no Yaiba");
+        for arc in [
+            "[SubsPlease] Kimetsu no Yaiba - Yuukaku-hen - 06 (1080p)",
+            "[SubsPlease] Kimetsu no Yaiba - Hashira Geiko-hen - 06 (1080p) [A994EC11].mkv",
+        ] {
+            assert!(!title_matches(&s1, arc), "must not match: {}", arc);
+        }
+        assert!(title_matches(
+            &normalize("Kimetsu no Yaiba: Yuukaku-hen"),
+            "[SubsPlease] Kimetsu no Yaiba - Yuukaku-hen - 06 (1080p)"
+        ));
+    }
+
     #[test]
     fn alternate_titles_and_suffixes_still_match() {
         // Anchoring the query at a segment start must not break the many
@@ -1048,11 +1348,18 @@ mod tests {
         let k = normalize("Koe no Katachi");
         for name in [
             "[Judas] Koe no Katachi (A Silent Voice) [BD 1080p][HEVC x265 10bit][Dual-Audio]",
-            "[35mm] Koe no Katachi - A Silent Voice [1080p] [B9471AD7].mkv",
             "[Okay-Subs] A Silent Voice (BD 1080p) | Koe no Katachi",
         ] {
             assert!(title_matches(&k, name), "must match: {}", name);
         }
+        // A dash before the English title is an alias, not a continuation, and
+        // only AniList knows which — with the entry's other titles in hand it
+        // matches; without them the release is (correctly) treated as naming a
+        // longer title than the query.
+        let aliased = "[35mm] Koe no Katachi - A Silent Voice [1080p] [B9471AD7].mkv";
+        let alts = vec![normalize("Koe no Katachi"), normalize("A Silent Voice")];
+        assert!(title_matches_with_alts(&k, aliased, &alts));
+        assert!(!title_matches(&k, aliased));
 
         let t = normalize("Toradora!");
         for name in [
@@ -1149,12 +1456,12 @@ mod tests {
         // contain episode 5 — it should not consume a candidate slot ahead of
         // releases that can.
         let q = normalize("K-On!");
-        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, crit(5, false, false)).unwrap();
-        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, crit(5, false, false)).unwrap();
+        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, &[], crit(5, false, false)).unwrap();
+        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, &[], crit(5, false, false)).unwrap();
         assert!(series > film);
         // For an actual film lookup (allow_episodeless), no penalty applies.
         let kk = normalize("Koe no Katachi");
-        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, crit(1, true, false)).unwrap();
+        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, &[], crit(1, true, false)).unwrap();
         assert!(movie_ok > 0);
     }
 
@@ -1183,13 +1490,13 @@ mod tests {
             assert!(
                 score_release(
                     "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH][Multiple Subtitle]",
-                    &q, crit(ep, false, false)).is_some(),
+                    &q, &[], crit(ep, false, false)).is_some(),
                 "episode {} must match the batch containing it", ep
             );
         }
         // Outside the stated range it must still be rejected.
         assert!(score_release(
-            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, crit(13, false, false)).is_none());
+            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, &[], crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1239,10 +1546,10 @@ mod tests {
         // Rejecting these is what left a finished show with three candidates
         // when the site had a dozen.
         let (untagged, assume_batch) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, crit(13, false, false)).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], crit(13, false, false)).unwrap();
         assert!(assume_batch);
         let (explicit, explicit_batch) =
-            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, crit(13, false, false)).unwrap();
+            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], crit(13, false, false)).unwrap();
         assert!(!explicit_batch);
         assert!(explicit > untagged, "a release that states its range must outrank an assumed one");
     }
@@ -1250,8 +1557,8 @@ mod tests {
     #[test]
     fn seven_twenty_is_accepted_but_never_outranks_ten_eighty() {
         let q = normalize("Toradora");
-        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, crit(13, false, false)).unwrap();
-        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, crit(13, false, false)).unwrap();
+        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], crit(13, false, false)).unwrap();
+        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, &[], crit(13, false, false)).unwrap();
         assert!(sd < hd);
         // The seeder bonus saturates below SD_PENALTY, so it can never promote
         // a 720p release over the same release in 1080p.
@@ -1261,7 +1568,7 @@ mod tests {
         );
         assert!(sd + seeder_score(SEEDER_SATURATION) < hd);
         // Anything below 720p is still rejected outright.
-        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, crit(13, false, false)).is_none());
+        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, &[], crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1285,11 +1592,11 @@ mod tests {
         // whether either would actually download.
         let q = normalize("Toradora");
         let (dead_base, _) =
-            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, crit(13, false, false)).unwrap();
+            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, &[], crit(13, false, false)).unwrap();
         let dead = dead_base + TRUSTED_BONUS + seeder_score(2) - DEAD_SWARM_PENALTY;
 
         let (live_base, assumed) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, crit(13, false, false)).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], crit(13, false, false)).unwrap();
         let live = live_base + seeder_score(52);
 
         assert!(assumed);
@@ -1302,8 +1609,8 @@ mod tests {
         // release that names the exact episode — that ordering is correctness,
         // not preference.
         let q = normalize("Show");
-        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, crit(13, false, false)).unwrap();
-        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, crit(13, false, false)).unwrap();
+        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, &[], crit(13, false, false)).unwrap();
+        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, &[], crit(13, false, false)).unwrap();
         assert!(exact + seeder_score(20) > batch + seeder_score(SEEDER_SATURATION));
     }
 
@@ -1325,3 +1632,5 @@ mod tests {
         assert!(!title_matches(&query, "Code Geass - 11 [Group] 1080p"));
     }
 }
+
+

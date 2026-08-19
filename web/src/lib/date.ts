@@ -7,6 +7,23 @@ export function parseWatchedAt(s: string): Date {
   return new Date(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
 }
 
+/**
+ * AniList fuzzy dates carry whatever parts are known — a character birthday
+ * is usually month + day with no year. Renders only the known parts, and
+ * returns undefined when nothing is known so callers can drop the row.
+ */
+export function formatFuzzyDate(
+  date?: { year?: number | null; month?: number | null; day?: number | null } | null,
+): string | undefined {
+  if (!date?.month && !date?.day && !date?.year) return undefined;
+  const MONTHS = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  const month = date.month ? MONTHS[date.month - 1] : undefined;
+  const parts = [month && date.day ? `${month} ${date.day}` : month ?? (date.day ? `Day ${date.day}` : undefined)];
+  if (date.year) parts.push(String(date.year));
+  return parts.filter(Boolean).join(", ") || undefined;
+}
+
 export function parseAiringTime(airingAt?: string | number | null): number {
   if (!airingAt) return 0;
   if (typeof airingAt === "number") {

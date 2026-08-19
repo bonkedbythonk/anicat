@@ -5,14 +5,17 @@ import {
   ChevronLeft, ChevronDown, ChevronUp, Play, BookOpen, Heart, Loader2, Star,
   SkipForward, PlayCircle, RotateCcw, Frown, Meh, Smile, Minus, Plus,
 } from "lucide-react";
-import { mediaApi, type MediaItem, type Episode, type Character } from "@/lib/api";
-import { sanitizeHtml } from "@/lib/sanitize";
+import { mediaApi, flattenCharacterEdges, type MediaItem, type Episode, type Character } from "@/lib/api";
+import { sanitizeHtml, stripSpoilers } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
-import { formatRelativeTimeFromUnix } from "@/lib/date";
+import { formatRelativeTimeFromUnix, formatFuzzyDate } from "@/lib/date";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import MangaReader from "@/components/media/MangaReader";
+import { MediaGallery, buildGalleryImages } from "@/components/media/MediaGallery";
+import { VoiceActorList } from "@/components/media/VoiceActorList";
+import { StaffProfile } from "@/components/media/StaffProfile";
 import { MobileEpisodeList } from "./MobileEpisodeList";
 import { loadMobileSettings, canPlayTorrents } from "./mobileSettings";
 import { PosterCard } from "./PosterCard";
@@ -49,6 +52,16 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "related" | "more">("episodes");
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  // The voice actor whose filmography is showing; swaps the sheet's content.
+  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
+  const closeCharacterSheet = () => {
+    setSelectedCharacter(null);
+    setSelectedStaffId(null);
+  };
+  // Dub viewers want the English cast, everyone else the Japanese one.
+  const preferredVaLanguage = useSettingsStore((s) => s.translationType) === "dub" ? "ENGLISH" : "JAPANESE";
+  const preferredVoiceActor = (char: Character) =>
+    char.voiceActors?.find((va) => va.language === preferredVaLanguage) ?? char.voiceActors?.[0];
   const [statusSheetOpen, setStatusSheetOpen] = useState(false);
   const [progressSheetOpen, setProgressSheetOpen] = useState(false);
   const [scoreSheetOpen, setScoreSheetOpen] = useState(false);
@@ -120,11 +133,13 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   const prequel = useMemo(() => pickRel("PREQUEL"), [relations]);
   const sequel = useMemo(() => pickRel("SEQUEL"), [relations]);
 
-  const { data: anizipTitles = {} } = useQuery({
-    queryKey: ["anizip-titles", item.id],
-    queryFn: () => mediaApi.fetchAniZipTitles(item.id),
+  // See MediaDetail for why this key is not the old "anizip-titles".
+  const { data: anizip } = useQuery({
+    queryKey: ["anizip-meta", item.id],
+    queryFn: () => mediaApi.fetchAniZipMeta(item.id),
     staleTime: 24 * 60 * 60 * 1000,
   });
+  const anizipTitles = anizip?.titles ?? {};
   const { data: scoreFormat = "POINT_100" } = useQuery({
     queryKey: ["viewer-score-format"],
     queryFn: async () => (await mediaApi.getUserProfile())?.Viewer?.mediaListOptions?.scoreFormat || "POINT_100",
@@ -151,23 +166,33 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
     }
     for (const [num, title] of Object.entries(anizipTitles)) map[Number(num)] = title;
     return map;
-  }, [fullItem, anizipTitles]);
+  }, [fullItem, anizip]);
+
+  /** Episode number -> still frame. AniZip's numeric keys win over AniList's
+   *  positional `streamingEpisodes` array. Mirrors the desktop MediaDetail. */
+  const episodeThumbMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    const eps = fullItem?.streaming_episodes;
+    if (Array.isArray(eps)) {
+      eps.forEach((ep) => {
+        if (!ep?.thumbnail || !ep?.title) return;
+        const epNumMatch = ep.title.match(/^Episode\s+(\d+)/i);
+        if (!epNumMatch) return;
+        map[parseInt(epNumMatch[1], 10)] = ep.thumbnail;
+      });
+    }
+    for (const [num, url] of Object.entries(anizip?.thumbnails ?? {})) map[Number(num)] = url;
+    return map;
+  }, [fullItem, anizip]);
+
+  const galleryImages = useMemo(
+    () => buildGalleryImages(anizip, fullItem?.banner_image, episodeThumbMap),
+    [anizip, fullItem, episodeThumbMap],
+  );
 
   const { data: characters = [], isLoading: loadingChars } = useQuery({
     queryKey: ["media-characters", item.id],
-    queryFn: async () => {
-      const res = await mediaApi.getCharacters(item.id);
-      const r = res as { Media?: { characters?: { edges?: unknown[] } }; media?: { characters?: { edges?: unknown[] } }; characters?: { edges?: unknown[] }; edges?: unknown[] };
-      const edges = r?.Media?.characters?.edges || r?.media?.characters?.edges || r?.characters?.edges || r?.edges || [];
-      type RawEdge = { role?: string; id?: number; name?: { full: string }; image?: { large?: string }; node?: { id?: number; name?: { full: string }; image?: { large?: string } }; voiceActors?: Character["voiceActors"] };
-      return (edges as RawEdge[]).map((edge): Character => ({
-        id: (edge.node?.id ?? edge.id) ?? 0,
-        name: (edge.node?.name ?? edge.name) ?? { full: "" },
-        image: edge.node?.image ?? edge.image,
-        role: edge.role ?? "",
-        voiceActors: edge.voiceActors ?? [],
-      }));
-    },
+    queryFn: async () => flattenCharacterEdges(await mediaApi.getCharacters(item.id)),
     enabled: activeTab === "characters",
   });
 
@@ -512,6 +537,11 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
             </div>
           )}
 
+          {/* Stills — art style at a glance. Same spoiler cap as desktop. */}
+          {!isManga && galleryImages.length > 0 && (
+            <MediaGallery images={galleryImages} stillsAllowed={Math.max(3, actualProgress)} />
+          )}
+
           {/* Tabs */}
           <div className="-mx-6 flex gap-2 overflow-x-auto px-6 pb-1 pt-2 scrollbar-hide">
             {(["episodes", "characters", "related", "more"] as const).map((tab) => (
@@ -547,6 +577,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
                   mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
                   coverImage={fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || ""}
                   episodeTitleMap={episodeTitleMap}
+                  episodeThumbMap={episodeThumbMap}
                   fillerEpisodes={fillerEpisodes}
                   onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)}
                   onWatch={(num) => handleUpdateProgress(Number(num))}
@@ -568,8 +599,12 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
                 ) : characters.length > 0 ? (
                   characters.map((char) => (
                     <button key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="space-y-1.5 text-left active:opacity-70">
-                      {char.image?.large && <img src={char.image.large} alt={char.name.full} className="aspect-square w-full rounded-xl object-cover" />}
+                      {/* 2:3, matching the source art — a square crop cut every face down to a chin. */}
+                      {char.image?.large && <img src={proxyImage(char.image.large)} alt={char.name.full} loading="lazy" className="aspect-[2/3] w-full rounded-md object-cover" />}
                       <p className="line-clamp-2 text-[12px] font-bold text-foreground">{char.name.full}</p>
+                      {preferredVoiceActor(char) && (
+                        <p className="truncate text-[10px] text-muted-foreground">{preferredVoiceActor(char)?.name.full}</p>
+                      )}
                     </button>
                   ))
                 ) : (
@@ -691,26 +726,63 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       </BottomSheet>
 
       {/* Character detail sheet */}
-      <BottomSheet open={!!selectedCharacter} onClose={() => setSelectedCharacter(null)} title="Character">
-        {selectedCharacter && (
-          <div className="flex items-start gap-4 px-4 pb-4">
-            {selectedCharacter.image?.large && <img src={selectedCharacter.image.large} alt={selectedCharacter.name?.full} className="h-20 w-20 shrink-0 rounded-xl object-cover" />}
-            <div className="min-w-0 space-y-1">
-              <p className="text-[15px] font-bold text-foreground">{selectedCharacter.name?.full}</p>
-              <p className="text-[11px] capitalize text-muted-foreground">{selectedCharacter.role?.replace(/_/g, " ")?.toLowerCase()}</p>
-              {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
-                <div className="space-y-1.5 pt-2">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Voice Actors</p>
-                  {selectedCharacter.voiceActors?.map((va) => (
-                    <div key={va.id} className="flex items-center gap-2">
-                      {va.image?.large && <img src={va.image.large} alt={va.name?.full} className="h-6 w-6 rounded-full object-cover" />}
-                      <span className="text-[12px] text-foreground">{va.name?.full}</span>
-                      <span className="text-[10px] text-muted-foreground">{va.language}</span>
+      <BottomSheet open={!!selectedCharacter} onClose={closeCharacterSheet} title={selectedStaffId ? "Voice Actor" : "Character"}>
+        {selectedCharacter && selectedStaffId && (
+          <div className="px-4 pb-4">
+            <StaffProfile
+              staffId={selectedStaffId}
+              compact
+              onBack={() => setSelectedStaffId(null)}
+              onSelectMedia={(media) => { closeCharacterSheet(); selectItem(media); }}
+            />
+          </div>
+        )}
+        {selectedCharacter && !selectedStaffId && (
+          <div className="space-y-4 px-4 pb-4">
+            <div className="flex items-start gap-4">
+              {selectedCharacter.image?.large && <img src={proxyImage(selectedCharacter.image.large)} alt={selectedCharacter.name?.full} className="w-24 shrink-0 aspect-[2/3] rounded-md object-cover" />}
+              <div className="min-w-0 space-y-1">
+                <p className="text-[15px] font-bold text-foreground">{selectedCharacter.name?.full}</p>
+                {selectedCharacter.name?.native && <p className="text-[11px] text-muted-foreground">{selectedCharacter.name.native}</p>}
+                <p className="text-[11px] capitalize text-muted-foreground">{selectedCharacter.role?.replace(/_/g, " ")?.toLowerCase()}</p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pt-1 text-[11px]">
+                  {[
+                    { label: "Age", value: selectedCharacter.age },
+                    { label: "Gender", value: selectedCharacter.gender },
+                    { label: "Birthday", value: formatFuzzyDate(selectedCharacter.dateOfBirth) },
+                    { label: "Favourites", value: selectedCharacter.favourites ? selectedCharacter.favourites.toLocaleString() : undefined },
+                  ].filter((f) => f.value).map((f) => (
+                    <div key={f.label} className="contents">
+                      <dt className="text-muted-foreground">{f.label}</dt>
+                      <dd className="font-medium text-foreground">{f.value}</dd>
                     </div>
                   ))}
-                </div>
-              )}
+                </dl>
+              </div>
             </div>
+
+            {selectedCharacter.description && (
+              <div className="space-y-1.5 border-t border-border pt-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">About</p>
+                {/* Spoilers cut before sanitizing — see MediaDetail. */}
+                <div
+                  className="character-bio whitespace-pre-line text-[12px] leading-relaxed text-foreground/80"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(stripSpoilers(selectedCharacter.description)) }}
+                />
+              </div>
+            )}
+
+            {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
+              <div className="space-y-2 border-t border-border pt-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Voice Actors</p>
+                <VoiceActorList
+                  voiceActors={selectedCharacter.voiceActors ?? []}
+                  preferredLanguage={preferredVaLanguage}
+                  onSelect={setSelectedStaffId}
+                  compact
+                />
+              </div>
+            )}
           </div>
         )}
       </BottomSheet>

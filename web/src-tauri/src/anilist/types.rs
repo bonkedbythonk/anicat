@@ -163,6 +163,13 @@ pub struct CharacterNode {
     pub id: i64,
     pub name: Option<StaffName>,
     pub image: Option<StaffImage>,
+    pub description: Option<String>,
+    /// A free-text range on AniList ("13-16"), not a number.
+    pub age: Option<String>,
+    pub gender: Option<String>,
+    pub favourites: Option<i64>,
+    #[serde(rename = "dateOfBirth")]
+    pub date_of_birth: Option<FuzzyDate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +183,7 @@ pub struct StaffNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StaffName {
     pub full: Option<String>,
+    pub native: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

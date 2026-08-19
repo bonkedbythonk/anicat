@@ -177,7 +177,13 @@ export interface Character {
   id: number;
   name: { full: string; native?: string };
   image?: { large?: string };
+  /** AniList markdown rendered to HTML, spoilers wrapped in a marker span */
   description?: string;
+  /** A free-text range on AniList ("13-16"), not a number */
+  age?: string;
+  gender?: string;
+  favourites?: number;
+  dateOfBirth?: { year?: number | null; month?: number | null; day?: number | null };
   role?: string;
   voiceActors?: {
     id: number;

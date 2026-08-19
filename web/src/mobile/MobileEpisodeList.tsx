@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Play, Loader2, MoreVertical, Check, XCircle, RefreshCw, Video } from "lucide-react";
 import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
 import { dispatchRefresh } from "@/lib/events";
+import { useSettingsStore } from "@/stores/app";
 import { BottomSheet, SheetRow } from "./BottomSheet";
 
 interface MobileEpisodeListProps {
@@ -20,6 +21,7 @@ interface MobileEpisodeListProps {
   mediaTitle?: string;
   coverImage?: string;
   episodeTitleMap?: Record<number, string>;
+  episodeThumbMap?: Record<number, string>;
   fillerEpisodes?: number[] | Set<number>;
 }
 
@@ -32,10 +34,13 @@ interface MobileEpisodeListProps {
 export function MobileEpisodeList({
   mediaId, episodes, loading, progress = 0, isManga = false, onRead, onUnwatch, onWatch,
   nextAiringEpisode, nextAiringTime, onRetry, selectedProvider, mediaTitle, coverImage,
-  episodeTitleMap, fillerEpisodes,
+  episodeTitleMap, episodeThumbMap, fillerEpisodes,
 }: MobileEpisodeListProps) {
+  const dataSaver = useSettingsStore((s) => s.dataSaver);
   const [playingEp, setPlayingEp] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // Stale TVDB/Crunchyroll URLs fall back to the plain number badge.
+  const [brokenThumbs, setBrokenThumbs] = useState<Set<number>>(new Set());
   const [sheetEp, setSheetEp] = useState<string | null>(null);
   const [serverPicker, setServerPicker] = useState<{ epNum: string; streams: StreamServer[]; loading: boolean; error: string | null } | null>(null);
 
@@ -138,11 +143,32 @@ export function MobileEpisodeList({
             }}
             className={`flex items-center gap-3 rounded-md px-3 py-2.5 active:bg-foreground/[0.05] ${isWatched ? "opacity-50" : ""}`}
           >
-            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border font-mono text-[11px] tabular-nums ${
-              isNext && !isUnaired ? "border-accent text-foreground" : isWatched ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
-            }`}>
-              {playingEp === epNum ? <Loader2 size={15} className="animate-spin" /> : epNum}
-            </div>
+            {!isManga && !dataSaver && episodeThumbMap?.[Number(ep.number)] && !brokenThumbs.has(Number(ep.number)) ? (
+              <div className="relative aspect-video w-[72px] shrink-0 overflow-hidden rounded-[4px] bg-foreground/5">
+                <img
+                  src={episodeThumbMap[Number(ep.number)]}
+                  alt=""
+                  loading="lazy"
+                  onError={() => setBrokenThumbs((prev) => new Set(prev).add(Number(ep.number)))}
+                  className="h-full w-full object-cover"
+                />
+                {playingEp === epNum ? (
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">
+                    <Loader2 size={15} className="animate-spin" />
+                  </span>
+                ) : (
+                  <span className="absolute bottom-0 left-1 font-mono text-[10px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                    {epNum}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border font-mono text-[11px] tabular-nums ${
+                isNext && !isUnaired ? "border-accent text-foreground" : isWatched ? "border-transparent bg-accent/15 text-accent" : "border-border text-muted-foreground"
+              }`}>
+                {playingEp === epNum ? <Loader2 size={15} className="animate-spin" /> : epNum}
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13.5px] font-medium text-foreground">{displayTitle}</p>
               {isFiller(Number(ep.number)) && (

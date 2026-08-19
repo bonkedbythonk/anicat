@@ -73,6 +73,7 @@ pub fn routes() -> Router<ProxyState> {
         .route("/smart-playlist", get(get_smart_playlist))
         .route("/media/{id}", get(get_media_detail))
         .route("/media/{id}/characters", get(get_media_characters))
+        .route("/staff/{id}", get(get_staff))
         .route("/media/{id}/episodes", get(get_episodes))
         .route("/media/{id}/streams", get(resolve_stream))
         .route("/media/{id}/skip-times", get(get_skip_times))
@@ -348,6 +349,11 @@ struct PagedTypeQuery {
     media_type: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct StaffQuery {
+    page: Option<i64>,
+}
+
 async fn get_trending(
     State(state): State<ProxyState>,
     auth: AuthedUser,
@@ -390,6 +396,15 @@ async fn get_media_characters(
     // Character bios carry no per-viewer data — safe to leave on the shared
     // global cache/client rather than scoping.
     ok_or_500(crate::commands::media::get_media_characters_impl(&state.app_state, id).await)
+}
+
+async fn get_staff(
+    State(state): State<ProxyState>,
+    Path(id): Path<i64>,
+    Query(q): Query<StaffQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Filmography carries no per-viewer data, so it stays on the shared cache.
+    ok_or_500(crate::commands::media::get_staff_impl(&state.app_state, id, q.page).await)
 }
 
 async fn get_smart_playlist(

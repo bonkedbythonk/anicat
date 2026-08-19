@@ -98,8 +98,13 @@ interface CharacterEdge {
   role: string;
   node: {
     id: number;
-    name: { full: string };
+    name: { full: string; native?: string };
     image: { large?: string };
+    description?: string;
+    age?: string;
+    gender?: string;
+    favourites?: number;
+    dateOfBirth?: { year?: number | null; month?: number | null; day?: number | null };
   };
   voiceActors: {
     id: number;
@@ -149,25 +154,60 @@ export async function fetchJikanFiller(malId: number): Promise<number[]> {
   return Array.from(fillers);
 }
 
-/** Fetch episode titles from AniZip API (all episodes, English + Japanese) */
-export async function fetchAniZipTitles(anilistId: number): Promise<Record<number, string>> {
+export interface AniZipMeta {
+  /** Episode number -> episode title (English preferred, Japanese fallback) */
+  titles: Record<number, string>;
+  /** Episode number -> TVDB still frame */
+  thumbnails: Record<number, string>;
+  /** Series-level artwork, grouped by AniZip's `coverType` */
+  artwork: { fanart: string[]; banner: string[] };
+}
+
+const EMPTY_ANIZIP_META: AniZipMeta = {
+  titles: {},
+  thumbnails: {},
+  artwork: { fanart: [], banner: [] },
+};
+
+/**
+ * Fetch episode titles, per-episode still frames and series artwork from the
+ * AniZip API. The `episodes` object is keyed by episode number as a string,
+ * so it maps to episode numbers directly — no index guessing. Specials use
+ * non-numeric keys ("S1") and are skipped.
+ */
+export async function fetchAniZipMeta(anilistId: number): Promise<AniZipMeta> {
   try {
     const res = await fetch(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
-    if (!res.ok) return {};
+    if (!res.ok) return EMPTY_ANIZIP_META;
     const data = await res.json();
-    const episodes = data?.episodes;
-    if (!episodes) return {};
-    const map: Record<number, string> = {};
-    for (const [num, ep] of Object.entries(episodes)) {
-      const epData = ep as { title?: { en?: string; ja?: string } };
+
+    const titles: Record<number, string> = {};
+    const thumbnails: Record<number, string> = {};
+    for (const [key, ep] of Object.entries(data?.episodes ?? {})) {
+      const num = Number(key);
+      if (!Number.isInteger(num) || num < 1) continue;
+      const epData = ep as { title?: { en?: string; ja?: string }; image?: string };
       const title = epData?.title?.en || epData?.title?.ja || "";
       if (title && !title.startsWith("Episode ") && !title.startsWith("EPISODE ")) {
-        map[Number(num)] = title;
+        titles[num] = title;
+      }
+      if (epData?.image) thumbnails[num] = epData.image;
+    }
+
+    const artwork = { fanart: [] as string[], banner: [] as string[] };
+    for (const img of (data?.images ?? []) as { coverType?: string; url?: string }[]) {
+      if (!img?.url) continue;
+      const bucket = (img.coverType || "").toLowerCase();
+      // Only landscape types: the strip is 16:9, and Poster is portrait while
+      // Clearlogo is a transparent overlay — both read as broken art there.
+      if (bucket === "fanart" || bucket === "banner") {
+        artwork[bucket].push(img.url);
       }
     }
-    return map;
+
+    return { titles, thumbnails, artwork };
   } catch {
-    return {};
+    return EMPTY_ANIZIP_META;
   }
 }
 
@@ -190,6 +230,116 @@ export async function getUpcoming(page?: number, mediaType?: string): Promise<Pa
 
 export async function getCharacters(mediaId: number): Promise<MediaCharacters> {
   return invoke("get_media_characters", { mediaId });
+}
+
+export interface StaffRole {
+  media: MediaItem;
+  /** MAIN / SUPPORTING / BACKGROUND, for the character they played in it */
+  characterRole?: string;
+  characters: { id: number; name: { full: string }; image?: { large?: string } }[];
+}
+
+export interface StaffDetail {
+  id: number;
+  name: { full: string; native?: string };
+  image?: { large?: string };
+  /** AniList markdown rendered to HTML; pass through `stripSpoilers` first */
+  description?: string;
+  language?: string;
+  occupations: string[];
+  age?: number;
+  homeTown?: string;
+  yearsActive: number[];
+  favourites?: number;
+  dateOfBirth?: { year?: number | null; month?: number | null; day?: number | null };
+  roles: StaffRole[];
+  hasNextPage: boolean;
+  totalRoles: number;
+}
+
+/**
+ * A voice actor (or any staff member) and the roles they are credited with,
+ * most popular show first. `page` walks the filmography — prolific actors run
+ * to hundreds of credits.
+ */
+export async function getStaff(staffId: number, page?: number): Promise<StaffDetail | null> {
+  const res = await invoke<unknown>("get_staff", { staffId, page });
+  const staff = (res as { Staff?: Record<string, unknown> })?.Staff;
+  if (!staff) return null;
+
+  const cm = staff.characterMedia as {
+    pageInfo?: { hasNextPage?: boolean; total?: number };
+    edges?: {
+      characterRole?: string;
+      node?: MediaItem;
+      characters?: StaffRole["characters"];
+    }[];
+  } | undefined;
+
+  return {
+    id: staff.id as number,
+    name: (staff.name as StaffDetail["name"]) ?? { full: "" },
+    image: staff.image as StaffDetail["image"],
+    description: staff.description as string | undefined,
+    language: staff.languageV2 as string | undefined,
+    occupations: (staff.primaryOccupations as string[]) ?? [],
+    age: staff.age as number | undefined,
+    homeTown: staff.homeTown as string | undefined,
+    yearsActive: (staff.yearsActive as number[]) ?? [],
+    favourites: staff.favourites as number | undefined,
+    dateOfBirth: staff.dateOfBirth as StaffDetail["dateOfBirth"],
+    // The command returns AniList's raw JSON, so the media nodes arrive
+    // camelCase and need the same snake_case aliases every other media list
+    // in this file gets before components can read `cover_image`.
+    roles: (cm?.edges ?? [])
+      .filter((e): e is typeof e & { node: MediaItem } => !!e.node)
+      .map((e) => ({
+        media: snakify(e.node as unknown as Record<string, unknown>) as unknown as MediaItem,
+        characterRole: e.characterRole,
+        characters: e.characters ?? [],
+      })),
+    hasNextPage: cm?.pageInfo?.hasNextPage ?? false,
+    totalRoles: cm?.pageInfo?.total ?? 0,
+  };
+}
+
+/**
+ * Flatten `getCharacters`'s edge list into `Character` objects. The response
+ * has been seen unwrapped to varying depths depending on the transport, so
+ * every shape it has arrived in is accepted.
+ */
+export function flattenCharacterEdges(res: unknown): Character[] {
+  const r = res as {
+    Media?: { characters?: { edges?: unknown[] } };
+    media?: { characters?: { edges?: unknown[] } };
+    characters?: { edges?: unknown[] };
+    edges?: unknown[];
+  };
+  const edges =
+    r?.Media?.characters?.edges || r?.media?.characters?.edges || r?.characters?.edges || r?.edges || [];
+
+  type RawNode = Omit<Character, "role" | "voiceActors">;
+  type RawEdge = Partial<RawNode> & {
+    role?: string;
+    node?: Partial<RawNode>;
+    voiceActors?: Character["voiceActors"];
+  };
+
+  return (edges as RawEdge[]).map((edge): Character => {
+    const node = edge.node ?? edge;
+    return {
+      id: node.id ?? 0,
+      name: node.name ?? { full: "" },
+      image: node.image,
+      description: node.description,
+      age: node.age,
+      gender: node.gender,
+      favourites: node.favourites,
+      dateOfBirth: node.dateOfBirth,
+      role: edge.role ?? "",
+      voiceActors: edge.voiceActors ?? [],
+    };
+  });
 }
 
 export async function getSmartPlaylist(): Promise<{
@@ -475,6 +625,7 @@ export const mediaApi = {
     return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
   },
   getCharacters,
+  getStaff,
   getSmartPlaylist: async () => {
     const result = await getSmartPlaylist();
     return { media: snakifyMediaList(result?.Page?.media || []) };
@@ -759,7 +910,7 @@ export const mediaApi = {
   commitProgress: async () => {},
   startEditing: async () => {},
   cancelEditing: async () => {},
-  fetchAniZipTitles,
+  fetchAniZipMeta,
   fetchJikanFiller,
 };
 

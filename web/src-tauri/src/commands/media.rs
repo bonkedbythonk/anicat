@@ -266,6 +266,47 @@ pub async fn get_media_characters(
     get_media_characters_impl(state.inner(), media_id).await
 }
 
+#[tauri::command]
+pub async fn get_staff(
+    state: State<'_, AppState>,
+    staff_id: i64,
+    page: Option<i64>,
+) -> Result<Value, String> {
+    get_staff_impl(state.inner(), staff_id, page).await
+}
+
+pub async fn get_staff_impl(
+    state: &AppState,
+    staff_id: i64,
+    page: Option<i64>,
+) -> Result<Value, String> {
+    let page = page.unwrap_or(1).max(1);
+    let key = AniListCache::key(
+        "get_staff",
+        &[("id", &staff_id.to_string()), ("page", &page.to_string())],
+    );
+    if let Some(cached) = state.cache.get(&key) { return Ok(cached); }
+
+    let mut vars = HashMap::new();
+    vars.insert("id".to_string(), serde_json::json!(staff_id));
+    vars.insert("page".to_string(), serde_json::json!(page));
+    vars.insert("perPage".to_string(), serde_json::json!(24));
+
+    // Deserialized as a raw Value: the shape is display-only and deeply
+    // nested, so a typed mirror would be pure overhead here.
+    let result: Value = match state
+        .anilist_client
+        .execute(queries::STAFF_DETAIL_QUERY, vars)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
+
+    state.cache.set(key, result.clone(), "get_staff");
+    Ok(result)
+}
+
 pub async fn get_media_characters_impl(
     state: &AppState,
     media_id: i64,

@@ -466,18 +466,106 @@ fn looks_like_playlist(url: &str) -> bool {
     path.ends_with(".m3u8") || path.ends_with("master.txt")
 }
 
-/// First media URI in a playlist, resolved against the playlist's own URL.
-/// `None` when the body isn't a playlist we understand.
-fn first_playlist_entry(base_url: &str, body: &str) -> Option<String> {
-    let entry = body
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
-    reqwest::Url::parse(base_url)
-        .ok()?
-        .join(entry)
-        .ok()
-        .map(|u| u.to_string())
+/// What one hop down an HLS playlist leads to.
+#[derive(Debug, PartialEq)]
+enum PlaylistStep {
+    /// A master playlist, and the variant a player would actually choose.
+    Variant(String),
+    /// A media playlist's segment URIs, in playback order.
+    Segments(Vec<String>),
+    /// Not a playlist shape this understands. The caller must not invent a
+    /// verdict from it.
+    Unknown,
+}
+
+/// Read one playlist, resolving its URIs against its own URL.
+///
+/// A master playlist yields the **highest-bandwidth** variant, not the first
+/// one. That is not cosmetic: on anineko's HD-1 the ad-CDN revocations are
+/// per-variant, and on a measured episode 360p (the first entry) had 1 dead
+/// segment in 10 while 720p and 1080p each had 5. mpv and hls.js both climb to
+/// 1080p, so probing the first variant measures a stream nobody watches and
+/// passes a server that plays as a handful of disconnected chunks.
+fn parse_playlist(base_url: &str, body: &str) -> PlaylistStep {
+    let base = match reqwest::Url::parse(base_url) {
+        Ok(u) => u,
+        Err(_) => return PlaylistStep::Unknown,
+    };
+    let resolve = |uri: &str| base.join(uri).ok().map(|u| u.to_string());
+
+    let mut best_variant: Option<(u64, String)> = None;
+    let mut pending_bandwidth: Option<u64> = None;
+    let mut segments = Vec::new();
+
+    for line in body.lines().map(str::trim) {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(attrs) = line.strip_prefix("#EXT-X-STREAM-INF:") {
+            // Missing/unparseable BANDWIDTH sorts last but still competes, so a
+            // master playlist without the attribute still yields a variant.
+            pending_bandwidth = Some(parse_bandwidth(attrs).unwrap_or(0));
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        match pending_bandwidth.take() {
+            Some(bw) => {
+                if let Some(url) = resolve(line) {
+                    let better = match best_variant {
+                        Some((best, _)) => bw > best,
+                        None => true,
+                    };
+                    if better {
+                        best_variant = Some((bw, url));
+                    }
+                }
+            }
+            None => {
+                if let Some(url) = resolve(line) {
+                    segments.push(url);
+                }
+            }
+        }
+    }
+
+    if let Some((_, url)) = best_variant {
+        return PlaylistStep::Variant(url);
+    }
+    if segments.is_empty() {
+        return PlaylistStep::Unknown;
+    }
+    PlaylistStep::Segments(segments)
+}
+
+/// `BANDWIDTH=2800000` out of an `#EXT-X-STREAM-INF` attribute list.
+fn parse_bandwidth(attrs: &str) -> Option<u64> {
+    for attr in attrs.split(',') {
+        if let Some((key, value)) = attr.split_once('=') {
+            if key.trim() == "BANDWIDTH" {
+                return value.trim().parse().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Indices to sample from a segment list: spread across the whole playlist, so
+/// a partially revoked stream can't hide behind a healthy opening.
+fn sample_indices(len: usize, wanted: usize) -> Vec<usize> {
+    if len == 0 || wanted == 0 {
+        return Vec::new();
+    }
+    if wanted == 1 || len == 1 {
+        return vec![0];
+    }
+    let wanted = wanted.min(len);
+    let mut out: Vec<usize> = (0..wanted)
+        .map(|i| i * (len - 1) / (wanted - 1))
+        .collect();
+    out.dedup();
+    out
 }
 
 /// Ask an upstream whether it is actually serving media. Resolution can hand
@@ -512,6 +600,19 @@ async fn probe_stream(
     /// master -> variant -> segment. Two hops is the deepest real HLS goes;
     /// the cap also stops a self-referential playlist from looping.
     const MAX_PLAYLIST_HOPS: usize = 2;
+    /// Segments sampled from a media playlist, spread across it and issued
+    /// concurrently, so this still costs one `PROBE_TIMEOUT` on the play path.
+    ///
+    /// Eight rather than four because the revocations are scattered: a 4-sample
+    /// probe of HD-1's 1080p variant measured 1 dead, under any sane threshold,
+    /// on a stream that is ~40% revoked. At 8 the same streams read 3/8 and 4/8
+    /// while HD-2 reads 0/8 on both audio groups.
+    const MEDIA_SAMPLES: usize = 8;
+    /// Fraction of sampled segments that must be dead before the server is.
+    /// Loose enough that one expired segment is still a live server, which is
+    /// the `StreamProbe` bias toward Alive applied to a sample.
+    const DEAD_SAMPLE_NUMERATOR: usize = 1;
+    const DEAD_SAMPLE_DENOMINATOR: usize = 4;
 
     let with_headers = |mut req: reqwest::RequestBuilder| {
         if let Some(headers) = headers {
@@ -524,6 +625,7 @@ async fn probe_stream(
 
     // Walk playlists down to whatever they ultimately point at.
     let mut target = url.to_string();
+    let mut segments: Vec<String> = Vec::new();
     for _ in 0..MAX_PLAYLIST_HOPS {
         if !looks_like_playlist(&target) {
             break;
@@ -540,10 +642,14 @@ async fn probe_stream(
                     // Fetched fine but unreadable: not evidence of death.
                     Err(_) => return StreamProbe::Alive,
                 };
-                match first_playlist_entry(&target, &body) {
-                    Some(next) => target = next,
+                match parse_playlist(&target, &body) {
+                    PlaylistStep::Variant(next) => target = next,
+                    PlaylistStep::Segments(segs) => {
+                        segments = segs;
+                        break;
+                    }
                     // An empty or unrecognised playlist. Don't guess.
-                    None => return StreamProbe::Alive,
+                    PlaylistStep::Unknown => return StreamProbe::Alive,
                 }
             }
             Err(e) if e.is_timeout() => return StreamProbe::Alive,
@@ -551,21 +657,80 @@ async fn probe_stream(
         }
     }
 
-    // Range-probe the media itself.
-    let req = with_headers(client.get(&target))
-        .header("range", "bytes=0-1")
-        .timeout(PROBE_TIMEOUT);
-    match req.send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            if probe_status_is_dead(status.as_u16()) {
-                StreamProbe::Dead(format!("HTTP {}", status))
-            } else {
-                StreamProbe::Alive
+    // Range-probe the media itself. For HLS that means several segments spread
+    // across the episode, not just the first: HD-1's ad CDN revokes segments
+    // individually, so a stream that plays as a few disconnected chunks still
+    // serves segment 0 quite happily.
+    let targets: Vec<String> = if segments.is_empty() {
+        vec![target]
+    } else {
+        sample_indices(segments.len(), MEDIA_SAMPLES)
+            .into_iter()
+            .map(|i| segments[i].clone())
+            .collect()
+    };
+    let probed = targets.len();
+
+    let results = futures_util::future::join_all(targets.iter().map(|t| {
+        let req = with_headers(client.get(t))
+            .header("range", "bytes=0-1")
+            .timeout(PROBE_TIMEOUT);
+        async move { req.send().await }
+    }))
+    .await;
+
+    let mut dead = 0usize;
+    // Segments whose death is a property of the asset, not of the moment.
+    let mut revoked = 0usize;
+    // Segments that actually answered. A timeout is not evidence either way —
+    // a slow CDN is still a playable CDN, and mpv waits far longer than this —
+    // so it must not count as alive when the ratio below is taken, or eight
+    // concurrent requests to a slow host would dilute a real verdict into a
+    // pass.
+    let mut answered = 0usize;
+    let mut reason = String::new();
+    for result in results {
+        match result {
+            Ok(resp) => {
+                answered += 1;
+                let status = resp.status();
+                if probe_status_is_dead(status.as_u16()) {
+                    dead += 1;
+                    if probe_status_is_permanent(status.as_u16()) {
+                        revoked += 1;
+                    }
+                    reason = format!("HTTP {}", status);
+                }
+            }
+            Err(e) if e.is_timeout() => {}
+            Err(e) => {
+                answered += 1;
+                dead += 1;
+                reason = e.to_string();
             }
         }
-        Err(e) if e.is_timeout() => StreamProbe::Alive,
-        Err(e) => StreamProbe::Dead(e.to_string()),
+    }
+
+    // One revoked segment condemns the stream. The sample is 8 segments out of
+    // ~150, so finding even one means the episode has a hole the player will
+    // stop at — which is the symptom this exists to catch: HD-1 played "six
+    // seconds or six minutes and never a full one", the length decided by
+    // where its first revoked segment fell. Requiring two of them measured 2/8
+    // on a run where the same streams read 3/8 and 4/8 on either side of it,
+    // sitting right on the threshold for a bug that is not marginal at all.
+    //
+    // A transient death (5xx) still needs the sample to agree, and a
+    // single-target probe (a plain mp4, or a playlist with one entry) keeps the
+    // old all-or-nothing verdict — there is no sample to average.
+    let dead_enough = if probed <= 1 {
+        dead >= 1
+    } else {
+        revoked >= 1 || (dead > 1 && dead * DEAD_SAMPLE_DENOMINATOR >= answered * DEAD_SAMPLE_NUMERATOR)
+    };
+    if dead_enough {
+        StreamProbe::Dead(format!("{}/{} answered segments dead, last: {}", dead, answered, reason))
+    } else {
+        StreamProbe::Alive
     }
 }
 
@@ -610,6 +775,22 @@ impl ResolveTimings {
 /// server is worse than probing one that turns out to be dead.
 fn probe_status_is_dead(status: u16) -> bool {
     matches!(status, 403 | 404 | 410 | 451) || (500..600).contains(&status)
+}
+
+/// Whether a dead status is a property of the asset rather than of the moment.
+///
+/// 403/404/410/451 are the CDN saying this particular object is gone or
+/// forbidden, and it answers the same way every time — anineko's HD-1 returned
+/// byte-identical `403 {"code":1004,"error":"domain forbidden"}` for the same
+/// segments across repeated passes minutes apart. One of those inside an
+/// episode is a hole the player cannot get past, so one is enough to condemn
+/// the stream.
+///
+/// A 5xx is not: it may be the host having a bad second, and condemning a
+/// server on one of those would skip a stream that plays. Those still need the
+/// sample to agree.
+fn probe_status_is_permanent(status: u16) -> bool {
+    matches!(status, 403 | 404 | 410 | 451)
 }
 
 /// Human-facing provider name for notifications.
@@ -2351,8 +2532,8 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_order, first_playlist_entry, is_watched, looks_like_playlist,
-        probe_status_is_dead, resume_position,
+        candidate_order, is_watched, looks_like_playlist, parse_playlist, probe_status_is_dead,
+        probe_status_is_permanent, resume_position, sample_indices, PlaylistStep,
     };
     use crate::scraper::client::StreamServer;
 
@@ -2407,23 +2588,61 @@ mod tests {
     #[test]
     fn playlist_entries_resolve_against_the_playlist_url() {
         let master = "https://vivibebe.site/public/stream/a5be/master.m3u8";
-        // Relative variant, as vivibebe writes them.
-        let body = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n2676461080.m3u8\n";
-        assert_eq!(
-            first_playlist_entry(master, body).unwrap(),
-            "https://vivibebe.site/public/stream/a5be/2676461080.m3u8"
+        // Relative variants, as vivibebe writes them. The probe must follow the
+        // *highest* bandwidth, not the first listed: HD-1's ad CDN revokes
+        // segments per variant, and 360p (listed first) stays healthy while the
+        // 1080p the player actually plays is half dead.
+        let body = concat!(
+            "#EXTM3U\n",
+            "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,NAME=\"360p\"\n",
+            "321843360.m3u8\n",
+            "#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,NAME=\"1080p\"\n",
+            "3218431080.m3u8\n",
         );
-        // Absolute segment on a different host — the case that matters, since
-        // the segments live on an ad CDN, not on the playlist's host.
-        let body = "#EXTM3U\n#EXTINF:18.2,\nhttps://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/abc\n";
         assert_eq!(
-            first_playlist_entry(master, body).unwrap(),
-            "https://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/abc"
+            parse_playlist(master, body),
+            PlaylistStep::Variant(
+                "https://vivibebe.site/public/stream/a5be/3218431080.m3u8".into()
+            )
+        );
+        // Absolute segments on a different host — the case that matters, since
+        // the segments live on an ad CDN, not on the playlist's host.
+        let body = concat!(
+            "#EXTM3U\n",
+            "#EXTINF:18.2,\nhttps://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/a\n",
+            "#EXTINF:18.2,\nhttps://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/b\n",
+        );
+        assert_eq!(
+            parse_playlist(master, body),
+            PlaylistStep::Segments(vec![
+                "https://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/a".into(),
+                "https://p16-ad-sg.ibyteimg.com/obj/ad-site-i18n/b".into(),
+            ])
         );
         // Comments/tags only, or empty: nothing to probe, so the caller must
         // fall back to Alive rather than invent a verdict.
-        assert!(first_playlist_entry(master, "#EXTM3U\n#EXT-X-ENDLIST\n").is_none());
-        assert!(first_playlist_entry(master, "").is_none());
+        assert_eq!(
+            parse_playlist(master, "#EXTM3U\n#EXT-X-ENDLIST\n"),
+            PlaylistStep::Unknown
+        );
+        assert_eq!(parse_playlist(master, ""), PlaylistStep::Unknown);
+        // A master without BANDWIDTH still has to yield a variant rather than
+        // being mistaken for a segment list.
+        assert_eq!(
+            parse_playlist(master, "#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1x1\nv.m3u8\n"),
+            PlaylistStep::Variant("https://vivibebe.site/public/stream/a5be/v.m3u8".into())
+        );
+    }
+
+    #[test]
+    fn segment_samples_span_the_whole_playlist() {
+        // First, last and two in between: a stream whose opening plays and
+        // whose middle is revoked must not pass on the strength of segment 0.
+        assert_eq!(sample_indices(148, 8), vec![0, 21, 42, 63, 84, 105, 126, 147]);
+        // Short playlists degrade to "every segment", never out of bounds.
+        assert_eq!(sample_indices(3, 8), vec![0, 1, 2]);
+        assert_eq!(sample_indices(1, 8), vec![0]);
+        assert!(sample_indices(0, 8).is_empty());
     }
 
     #[test]
@@ -2436,6 +2655,15 @@ mod tests {
         // rejects Range with 405, and rate limiting.
         for alive in [200, 206, 302, 405, 416, 429] {
             assert!(!probe_status_is_dead(alive), "{} should be alive", alive);
+        }
+        // Only the per-asset rejections are permanent enough that a single one
+        // condemns a stream. A 5xx may be the host having a bad second, and
+        // still needs the rest of the sample to agree.
+        for permanent in [403, 404, 410, 451] {
+            assert!(probe_status_is_permanent(permanent), "{} is per-asset", permanent);
+        }
+        for transient in [500, 502, 503] {
+            assert!(!probe_status_is_permanent(transient), "{} is transient", transient);
         }
     }
 

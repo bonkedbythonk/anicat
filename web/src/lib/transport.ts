@@ -97,6 +97,7 @@ const ROUTES: Record<string, Route> = {
   },
   get_upcoming: { method: "GET", path: (a) => `/mobile-api/media/upcoming${qs({ page: a.page, media_type: a.mediaType })}` },
   get_media_characters: { method: "GET", path: (a) => `/mobile-api/media/${a.mediaId}/characters` },
+  get_staff: { method: "GET", path: (a) => `/mobile-api/staff/${a.staffId}${qs({ page: a.page })}` },
   get_smart_playlist: { method: "GET", path: () => "/mobile-api/smart-playlist" },
 
   get_episodes: {

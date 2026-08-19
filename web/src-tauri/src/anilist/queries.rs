@@ -241,8 +241,51 @@ query ($id: Int, $page: Int, $perPage: Int) {
     characters(page: $page, perPage: $perPage, sort: [ROLE, RELEVANCE]) {
       edges {
         role
-        node { id name { full } image { large } }
-        voiceActors(language: JAPANESE) { id name { full } image { large } language }
+        node {
+          id
+          name { full native }
+          image { large }
+          description(asHtml: true)
+          age gender favourites
+          dateOfBirth { year month day }
+        }
+        # Every language, not just Japanese: a dub viewer needs the English
+        # cast, and the client decides which languages to surface.
+        voiceActors(sort: [LANGUAGE, RELEVANCE]) { id name { full } image { large } language }
+      }
+    }
+  }
+}
+"#;
+
+/// A voice actor's roles, most popular show first — POPULARITY_DESC surfaces
+/// what they are actually known for, where START_DATE_DESC would lead with
+/// unaired announcements. Prolific actors have 500+ credits, hence the paging.
+pub const STAFF_DETAIL_QUERY: &str = r#"
+query ($id: Int, $page: Int, $perPage: Int) {
+  Staff(id: $id) {
+    id
+    name { full native }
+    image { large }
+    description(asHtml: true)
+    languageV2
+    primaryOccupations
+    age
+    homeTown
+    yearsActive
+    favourites
+    dateOfBirth { year month day }
+    characterMedia(page: $page, perPage: $perPage, sort: [POPULARITY_DESC]) {
+      pageInfo { hasNextPage total }
+      edges {
+        characterRole
+        node {
+          id type
+          title { romaji english }
+          coverImage { large medium }
+          format status seasonYear averageScore
+        }
+        characters { id name { full } image { large } }
       }
     }
   }

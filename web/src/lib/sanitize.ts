@@ -3,6 +3,40 @@ const ALLOWED_TAGS = new Set([
   "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code", "sub", "sup",
 ]);
 
+/**
+ * Remove AniList spoiler blocks from a description.
+ *
+ * AniList renders `~!spoiler!~` as `<span class='markdown_spoiler'>` — but
+ * `sanitizeHtml` below drops every class attribute, so a spoiler that reached
+ * it would render as ordinary visible text. Cut the whole block out first,
+ * counting nested spans so the matching close tag is the right one.
+ */
+export function stripSpoilers(html: string): string {
+  if (!html) return "";
+  const OPEN = /<span\s+class\s*=\s*['"]markdown_spoiler['"][^>]*>/i;
+  let out = html;
+  for (;;) {
+    const start = out.search(OPEN);
+    if (start === -1) return out;
+    const openTag = out.slice(start).match(OPEN)![0];
+    let depth = 1;
+    let i = start + openTag.length;
+    while (depth > 0 && i < out.length) {
+      const nextOpen = out.indexOf("<span", i);
+      const nextClose = out.indexOf("</span>", i);
+      if (nextClose === -1) return out.slice(0, start); // unbalanced: drop the rest
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 5;
+      } else {
+        depth -= 1;
+        i = nextClose + 7;
+      }
+    }
+    out = out.slice(0, start) + out.slice(i);
+  }
+}
+
 export function sanitizeHtml(html: string): string {
   if (!html) return "";
   // Remove script, style, iframe, object, embed, form, input, textarea tags entirely

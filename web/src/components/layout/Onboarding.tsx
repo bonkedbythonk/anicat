@@ -1,26 +1,36 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@/lib/transport";
-import {
-  Loader2,
-  CheckCircle2,
-  Globe,
-  ArrowRight,
-  Monitor,
-  Download,
-  ShieldAlert,
-  Clock,
-  Sparkles,
-  Palette
-} from "lucide-react";
+import { Loader2, Check } from "lucide-react";
 import { mediaApi, dispatchRefresh } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
+import { usesOverlayTitlebar } from "@/lib/platform";
 
 interface OnboardingProps {
   onComplete: () => void;
 }
 
+type Step = 1 | 2 | 3 | 4;
+type AccountState = "idle" | "waiting" | "connected" | "error";
+
+const LAST_STEP: Step = 4;
+
+const STEPS: { n: Step; label: string }[] = [
+  { n: 1, label: "Welcome" },
+  { n: 2, label: "AniList" },
+  { n: 3, label: "Playback" },
+  { n: 4, label: "Shortcuts" }
+];
+
+const SELECT_CLASS =
+  "min-w-[170px] bg-card border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium text-foreground outline-none focus:border-accent/40 cursor-pointer";
+
+const CARD_CLASS = "bg-card border border-border rounded-xl overflow-hidden";
+const CARD_HEADER_CLASS = "px-5 py-3.5 border-b border-border bg-foreground/[0.02]";
+const ROW_CLASS = "flex items-center gap-4 py-3 border-b border-border last:border-b-0";
+
 export function Onboarding({ onComplete }: OnboardingProps) {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<Step>(1);
+  const [seen, setSeen] = useState<Record<number, boolean>>({ 1: true });
   // Move focus into the panel on mount so keyboard users start inside the
   // dialog rather than on the app behind it.
   const panelRef = useRef<HTMLDivElement>(null);
@@ -31,12 +41,20 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [validating, setValidating] = useState(false);
   const [connectedUser, setConnectedUser] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authOpened, setAuthOpened] = useState(false);
   const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
   const [uiStyle, setUiStyle] = useState<"ink-and-index" | "sakura-zen" | "retro-manga">("ink-and-index");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
-  const [authPending, setAuthPending] = useState(false);
+
+  const account: AccountState = connectedUser
+    ? "connected"
+    : authError
+      ? "error"
+      : authOpened
+        ? "waiting"
+        : "idle";
 
   useEffect(() => {
     const savedStyle = (localStorage.getItem("anicat_ui_style") as "ink-and-index" | "sakura-zen" | "retro-manga" | null) || "ink-and-index";
@@ -61,6 +79,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }).catch(() => {});
   }, []);
 
+  const go = (n: Step) => {
+    setStep(n);
+    setSeen((s) => ({ ...s, [n]: true }));
+  };
+
   const handleGpuUpscalingChange = async (val: "on" | "off") => {
     setGpuUpscaling(val);
     try {
@@ -79,7 +102,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setTokenInput(val);
     const hashMatch = val.match(/#.*access_token=([^&]+)/);
     const token = hashMatch ? decodeURIComponent(hashMatch[1]) : val.trim();
-    
+
     if (token.length > 20) {
       setValidating(true);
       setAuthError(null);
@@ -93,7 +116,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           token_present: boolean;
           viewer_name: string | null;
         }>("check_health");
-        
+
         if (healthData.authenticated && healthData.viewer_name) {
           setConnectedUser(healthData.viewer_name);
           useAppStore.getState().setHealthState({
@@ -105,7 +128,6 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           });
           dispatchRefresh();
           window.dispatchEvent(new Event("anicat_health_recheck"));
-          setTimeout(() => setStep(3), 1500);
         } else {
           setAuthError(healthData.auth_error || "Invalid token or authorization rejected.");
         }
@@ -115,6 +137,23 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         setValidating(false);
       }
     }
+  };
+
+  const startAuth = () => {
+    setAuthError(null);
+    setAuthOpened(true);
+    invoke("start_anilist_auth").catch(() => {});
+  };
+
+  const disconnect = async () => {
+    setConnectedUser(null);
+    setAuthError(null);
+    setAuthOpened(false);
+    setTokenInput("");
+    try {
+      await mediaApi.updateConfig({ api: { anilist_token: "" } });
+    } catch {}
+    window.dispatchEvent(new Event("anicat_health_recheck"));
   };
 
   const handleThemeChange = (newTheme: "system" | "dark" | "light") => {
@@ -179,8 +218,58 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     onComplete();
   };
 
+  const statusLabel =
+    account === "connected" ? "Connected" : account === "error" ? "Failed" : account === "waiting" ? "Awaiting paste" : "Not connected";
+  const statusColor =
+    account === "connected" ? "text-success" : account === "error" ? "text-danger" : "text-muted-foreground/70";
+
+  // Skip is a per-step shortcut, not a single action: on the first screen it
+  // means "don't set anything up", later it just means "leave this one alone".
+  const skipLabel =
+    step === 1 ? "Skip setup" : step === 2 ? (account === "connected" ? "" : "Skip, connect later") : step === 3 ? "Use defaults" : "";
+  const onSkip = () => (step === 1 ? handleFinish() : go(Math.min(LAST_STEP, (step + 1)) as Step));
+
+  const styleCards = [
+    {
+      key: "ink-and-index" as const,
+      name: "Ink & Index",
+      sub: "Warm ink / Indigo accent",
+      swatch: "linear-gradient(135deg, #161310 0%, #1e1a15 60%, #252015 100%)",
+      chips: (
+        <>
+          <div className="flex-1 h-[30px] rounded-[10px]" style={{ background: "#1e1a15", border: "1px solid rgba(255,255,255,0.05)" }} />
+          <div className="flex-1 h-[30px] rounded-[10px]" style={{ background: "rgba(143,184,220,0.3)", border: "1px solid rgba(143,184,220,0.4)" }} />
+        </>
+      )
+    },
+    {
+      key: "sakura-zen" as const,
+      name: "Sakura Zen",
+      sub: "Soft pastel / Japanese editorial",
+      swatch: "linear-gradient(135deg, #130910 0%, #1a0e14 60%, #1f1018 100%)",
+      chips: (
+        <>
+          <div className="flex-1 h-[30px] rounded-[10px]" style={{ background: "rgba(244,180,196,0.08)", border: "1px solid rgba(232,160,180,0.2)" }} />
+          <div className="flex-1 h-[30px] rounded-[10px]" style={{ background: "rgba(232,160,180,0.25)", border: "1px solid rgba(232,160,180,0.4)" }} />
+        </>
+      )
+    },
+    {
+      key: "retro-manga" as const,
+      name: "Retro Manga",
+      sub: "Halftone dot / Manga panel style",
+      swatch: "linear-gradient(135deg, #191410 0%, #241e17 100%)",
+      chips: (
+        <>
+          <div className="flex-1 h-[30px] rounded-md" style={{ background: "#ede8e0", border: "3px solid #0c0a08" }} />
+          <div className="flex-1 h-[30px] rounded-md" style={{ background: "#c02024", border: "2px solid #0c0a08" }} />
+        </>
+      )
+    }
+  ];
+
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background/95 animate-fade-in p-4">
+    <div className="fixed inset-0 z-[999] bg-background animate-fade-in">
       {/* This blocks the whole app on first run, so it has to say so: without
           dialog semantics the sidebar behind it stayed in the tab order and
           focus never entered the panel. */}
@@ -190,347 +279,427 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         aria-modal="true"
         aria-label="Welcome to Anicat, setup"
         tabIndex={-1}
-        className="relative w-full max-w-lg bg-card border border-border rounded-lg p-8 shadow-xl shadow-black/20 flex flex-col space-y-6 max-h-[90vh] overflow-y-auto scrollbar-hide outline-none"
+        className="h-full flex outline-none text-foreground"
       >
-
-        {/* Step Indicators */}
-        <div className="flex justify-center space-x-2.5" role="progressbar" aria-valuemin={1} aria-valuemax={4} aria-valuenow={step} aria-label={`Step ${step} of 4`}>
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 1 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 2 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 3 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
-          <div className={`h-1.5 rounded-full transition-all duration-300 ${step === 4 ? "w-8 bg-accent" : "w-2.5 bg-border"}`} />
-        </div>
-
-        {/* Step 1: Welcome Screen */}
-        {step === 1 && (
-          <div className="space-y-6 text-center animate-fade-in">
-            <div className="flex justify-center">
-              <img src="/anicat_logo.png" alt="Anicat Logo" className="h-16 w-auto object-contain" />
+        {/* Step rail */}
+        <aside className="w-[200px] shrink-0 bg-card border-r border-border flex flex-col">
+          {usesOverlayTitlebar && <div data-tauri-drag-region className="h-10 shrink-0" />}
+          <nav className="flex-1" aria-label="Setup steps">
+            <div className="meta-mono text-muted-foreground/70 px-5 pt-4 pb-1.5">Setup</div>
+            {STEPS.map(({ n, label }) => {
+              const active = step === n;
+              return (
+                <button
+                  key={n}
+                  onClick={() => go(n)}
+                  aria-current={active ? "step" : undefined}
+                  className={`w-full flex items-center justify-between pl-5 pr-4 py-[7px] text-[13px] text-left cursor-pointer transition-colors ${
+                    active
+                      ? "bg-accent/10 shadow-[inset_2px_0_0_var(--accent-color)] text-foreground font-semibold"
+                      : "text-foreground/70 hover:text-foreground font-normal"
+                  }`}
+                >
+                  <span>{label}</span>
+                  <span className={`meta-mono ${!active && seen[n] ? "text-accent" : "text-muted-foreground/70"}`}>
+                    {!active && seen[n] ? (
+                      <>
+                        <Check size={12} aria-hidden="true" />
+                        <span className="sr-only">visited</span>
+                      </>
+                    ) : (
+                      n
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+          <div className="px-4 pb-4 flex flex-col gap-2.5">
+            <div className="flex justify-center pb-1 opacity-10 pointer-events-none">
+              <img src="/anicat_logo.png" alt="" className="h-20 object-contain grayscale" />
             </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-semibold tracking-tight text-foreground flex items-center justify-center gap-2">
-                <span>Welcome to Anicat</span>
-                <Sparkles className="text-accent " size={20} />
-              </h2>
-              <p className="text-sm text-muted-foreground leading-relaxed px-4">
-                Stream anime, read manga, and track your library automatically in a premium desktop interface.
-              </p>
-            </div>
+            <div className="meta-mono text-muted-foreground/70 text-center">Step {step} of {LAST_STEP}</div>
+          </div>
+        </aside>
 
-            <div className="space-y-3.5 text-left max-w-sm mx-auto bg-foreground/[0.02] border border-border p-5 rounded-lg">
-              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
-                <Globe size={18} className="text-accent shrink-0" />
-                <span>Syncs instantly with AniList (Anime & Manga)</span>
-              </div>
-              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
-                <Monitor size={18} className="text-accent shrink-0" />
-                <span>Media player & built-in manga reader</span>
-              </div>
-              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
-                <Sparkles size={18} className="text-accent shrink-0" />
-                <span>High-performance GPU upscaling (Anime4K)</span>
-              </div>
-              <div className="flex items-center space-x-3 text-xs text-foreground/80 font-semibold">
-                <Download size={18} className="text-accent shrink-0" />
-                <span>Offline download manager</span>
-              </div>
-            </div>
+        {/* Content column */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {usesOverlayTitlebar && <div data-tauri-drag-region className="h-10 shrink-0" />}
+          <div className="flex-1 overflow-y-auto px-10 pt-2">
+            <div className="max-w-[640px]">
 
+              {/* Step 1: Welcome */}
+              {step === 1 && (
+                <div className="animate-fade-in flex flex-col gap-6">
+                  <div>
+                    <h1 className="text-[22px] leading-[30px] font-semibold tracking-tight">Set up Anicat</h1>
+                    <p className="mt-0.5 text-[13px] text-muted-foreground">
+                      Four short screens. Nothing here is permanent, it all lives in Settings afterwards.
+                    </p>
+                  </div>
+                  <section className={CARD_CLASS}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">What setup covers</h2>
+                    </div>
+                    <div className="px-5 py-1">
+                      {[
+                        {
+                          step: "Step 2",
+                          title: "Connect AniList",
+                          body: "Pulls in your lists and keeps progress and scores in sync. Optional, playback and the episode list work without it."
+                        },
+                        {
+                          step: "Step 3",
+                          title: "Playback and appearance",
+                          body: "Subs or dubs, Anime4K upscaling, theme and skin."
+                        },
+                        {
+                          step: "Step 4",
+                          title: "Shortcuts",
+                          body: "The player keys worth knowing, plus how manga reading tracks back to AniList."
+                        }
+                      ].map((row) => (
+                        <div key={row.step} className="flex gap-4 py-3.5 border-b border-border last:border-b-0">
+                          <div className="meta-mono text-muted-foreground/70 w-[72px] shrink-0 pt-px">{row.step}</div>
+                          <div>
+                            <div className="text-[13px] font-medium">{row.title}</div>
+                            <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{row.body}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {/* Step 2: Connect AniList */}
+              {step === 2 && (
+                <div className="animate-fade-in flex flex-col gap-6">
+                  <div>
+                    <h1 className="text-[22px] leading-[30px] font-semibold tracking-tight">Connect AniList</h1>
+                    <p className="mt-0.5 text-[13px] text-muted-foreground">
+                      Used for tracking only. Watching and reading work either way.
+                    </p>
+                  </div>
+
+                  <section className={CARD_CLASS}>
+                    <div className={`${CARD_HEADER_CLASS} flex items-center justify-between gap-4`}>
+                      <div>
+                        <h2 className="text-[13px] font-semibold">Account</h2>
+                        <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                          Anicat opens AniList in your browser. Approve access, then copy the URL you land on back into the field below.
+                        </p>
+                      </div>
+                      <div className={`meta-mono whitespace-nowrap ${statusColor}`}>{statusLabel}</div>
+                    </div>
+
+                    <div className="px-5 pt-1 pb-4">
+                      {account === "idle" && (
+                        <div className={ROW_CLASS}>
+                          <div className="flex-1">
+                            <div className="text-[13px] font-medium">Authorize</div>
+                            <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                              Sign in and approve access. Progress, scores and list status sync both ways afterwards.
+                            </div>
+                          </div>
+                          <button
+                            onClick={startAuth}
+                            className="bg-accent hover:bg-accent-light text-black border-none rounded-[10px] px-[18px] py-2.5 text-[13px] font-semibold cursor-pointer whitespace-nowrap transition-colors"
+                          >
+                            Open AniList
+                          </button>
+                        </div>
+                      )}
+
+                      {account === "waiting" && (
+                        <div className={ROW_CLASS}>
+                          <div className="flex-1">
+                            <div className="text-[13px] font-medium">Waiting for your browser</div>
+                            <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                              Approve access in the tab that just opened, then paste the redirect URL below.
+                            </div>
+                          </div>
+                          <button
+                            onClick={startAuth}
+                            className="bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-[10px] px-[18px] py-2.5 text-[13px] font-semibold cursor-pointer whitespace-nowrap transition-colors"
+                          >
+                            Reopen
+                          </button>
+                        </div>
+                      )}
+
+                      {account === "connected" && (
+                        <div className={`${ROW_CLASS} animate-scale-in`}>
+                          <div className="flex-1">
+                            <div className="text-[13px] font-medium">
+                              Signed in as <span className="text-success">{connectedUser}</span>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                              Your lists are loading in the background. Nothing else to do here.
+                            </div>
+                          </div>
+                          <button
+                            onClick={disconnect}
+                            className="bg-transparent border border-border text-muted-foreground hover:text-foreground rounded-[10px] px-3.5 py-2 text-xs cursor-pointer whitespace-nowrap transition-colors"
+                          >
+                            Use another account
+                          </button>
+                        </div>
+                      )}
+
+                      {account === "error" && (
+                        <div className="animate-scale-in my-3.5 px-3.5 py-3 rounded-[10px] bg-danger/10 border border-danger/25 flex gap-3 items-start">
+                          <div className="flex-1">
+                            <div className="text-xs font-semibold text-danger-light">Authorization was rejected</div>
+                            <div className="text-xs text-muted-foreground mt-1 leading-relaxed">{authError}</div>
+                          </div>
+                          <button
+                            onClick={startAuth}
+                            className="bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-[10px] px-3.5 py-1.5 text-xs font-semibold cursor-pointer whitespace-nowrap transition-colors"
+                          >
+                            Try again
+                          </button>
+                        </div>
+                      )}
+
+                      {account !== "connected" && (
+                        <div className="pt-3 flex flex-col gap-2">
+                          <label htmlFor="anilist-token" className="text-xs text-muted-foreground leading-relaxed">
+                            Paste the redirect URL (or the token itself)
+                          </label>
+                          <input
+                            id="anilist-token"
+                            type="password"
+                            value={tokenInput}
+                            onChange={(e) => handleTokenChange(e.target.value)}
+                            placeholder="https://anilist.co/api/v2/oauth/..."
+                            className="w-full box-border bg-card border border-border rounded-[10px] px-3 py-2.5 text-[13px] text-foreground outline-none focus:border-accent/40 placeholder:text-muted-foreground/40"
+                          />
+                          {validating && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Loader2 size={14} className="animate-spin text-accent" />
+                              <span>Checking authentication...</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {/* Step 3: Playback and appearance */}
+              {step === 3 && (
+                <div className="animate-fade-in flex flex-col gap-6">
+                  <div>
+                    <h1 className="text-[22px] leading-[30px] font-semibold tracking-tight">Playback and appearance</h1>
+                    <p className="mt-0.5 text-[13px] text-muted-foreground">The handful of settings people change on day one.</p>
+                  </div>
+
+                  <section className={CARD_CLASS}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">Playback</h2>
+                    </div>
+                    <div className="px-5 pt-1 pb-3">
+                      <div className={ROW_CLASS}>
+                        <div className="flex-1">
+                          <label htmlFor="pref-translation" className="text-[13px] font-medium">Preferred translation</label>
+                          <p className="mt-0.5 text-xs text-muted-foreground">Which release Anicat reaches for first.</p>
+                        </div>
+                        <select
+                          id="pref-translation"
+                          value={translationType}
+                          onChange={(e) => handleTranslationTypeChange(e.target.value as "sub" | "dub")}
+                          className={SELECT_CLASS}
+                        >
+                          <option value="sub">Subtitled</option>
+                          <option value="dub">Dubbed</option>
+                        </select>
+                      </div>
+
+                      <div className={ROW_CLASS}>
+                        <div className="flex-1">
+                          <span className="text-[13px] font-medium">Anime4K upscaling</span>
+                          <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                            Sharper picture, more GPU load.{" "}
+                            <kbd className="px-1.5 py-px bg-foreground/[0.08] border border-border rounded text-[11px] font-mono">Ctrl 1</kbd>{" "}
+                            flips it mid-episode if it struggles.
+                          </p>
+                        </div>
+                        <button
+                          role="switch"
+                          aria-checked={gpuUpscaling === "on"}
+                          aria-label="Anime4K upscaling"
+                          onClick={() => handleGpuUpscalingChange(gpuUpscaling === "on" ? "off" : "on")}
+                          className={`relative h-[22px] w-[38px] shrink-0 rounded-full border-none cursor-pointer transition-colors ${
+                            gpuUpscaling === "on" ? "bg-accent" : "bg-foreground/20"
+                          }`}
+                        >
+                          <span
+                            className="absolute top-0.5 h-[18px] w-[18px] rounded-full bg-foreground transition-all"
+                            style={{ left: gpuUpscaling === "on" ? "18px" : "2px" }}
+                          />
+                        </button>
+                      </div>
+
+                      <div className={ROW_CLASS}>
+                        <div className="flex-1">
+                          <label htmlFor="pref-time" className="text-[13px] font-medium">Time format</label>
+                          <p className="mt-0.5 text-xs text-muted-foreground">Used by the airing schedule.</p>
+                        </div>
+                        <select
+                          id="pref-time"
+                          value={timeFormat}
+                          onChange={(e) => handleTimeFormatChange(e.target.value as "12h" | "24h")}
+                          className={SELECT_CLASS}
+                        >
+                          <option value="24h">24-hour</option>
+                          <option value="12h">12-hour (AM/PM)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className={`${CARD_CLASS} mb-2`}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">Appearance</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">Theme follows your system unless you pin it.</p>
+                    </div>
+                    <div className="px-5 pt-1 pb-4">
+                      <div className={ROW_CLASS}>
+                        <div className="flex-1">
+                          <label htmlFor="pref-theme" className="text-[13px] font-medium">Theme</label>
+                        </div>
+                        <select
+                          id="pref-theme"
+                          value={theme}
+                          onChange={(e) => handleThemeChange(e.target.value as "system" | "dark" | "light")}
+                          className={SELECT_CLASS}
+                        >
+                          <option value="system">System Default</option>
+                          <option value="dark">Dark</option>
+                          <option value="light">Light</option>
+                        </select>
+                      </div>
+
+                      <div className="pt-3 flex flex-col gap-3">
+                        <span className="text-[13px] font-medium">Style</span>
+                        <div className="grid grid-cols-3 gap-3">
+                          {styleCards.map((card) => (
+                            <button
+                              key={card.key}
+                              onClick={() => handleUiStyleChange(card.key)}
+                              aria-pressed={uiStyle === card.key}
+                              className={`rounded-xl overflow-hidden text-left cursor-pointer p-0 bg-transparent border-2 transition-colors ${
+                                uiStyle === card.key ? "border-accent" : "border-border"
+                              }`}
+                            >
+                              <div className="h-[76px] w-full" style={{ background: card.swatch }}>
+                                <div className="flex gap-1.5 p-2.5 h-full box-border items-end">{card.chips}</div>
+                              </div>
+                              <div className="px-3 py-2 bg-card">
+                                <div className="text-xs font-bold">{card.name}</div>
+                                <div className="text-[10px] text-muted-foreground mt-0.5">{card.sub}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {/* Step 4: Shortcuts */}
+              {step === 4 && (
+                <div className="animate-fade-in flex flex-col gap-6">
+                  <div>
+                    <h1 className="text-[22px] leading-[30px] font-semibold tracking-tight">Shortcuts</h1>
+                    <p className="mt-0.5 text-[13px] text-muted-foreground leading-relaxed">
+                      These work in the mpv window while an episode plays.
+                    </p>
+                  </div>
+
+                  <section className={CARD_CLASS}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">Toggles, Ctrl + number</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">Flipping one saves it back into Settings.</p>
+                    </div>
+                    <div className="px-5 pt-1 pb-3">
+                      {[
+                        ["Upscaling", "Ctrl 1"],
+                        ["Auto-skip intro", "Ctrl 2"],
+                        ["Autoplay next", "Ctrl 4"]
+                      ].map(([label, key]) => (
+                        <div key={key} className="flex justify-between items-center py-2.5 border-b border-border last:border-b-0">
+                          <span className="text-[13px]">{label}</span>
+                          <kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded-md text-[11px] font-mono">{key}</kbd>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className={CARD_CLASS}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">Actions, Shift + letter</h2>
+                    </div>
+                    <div className="px-5 pt-1 pb-3">
+                      {[
+                        ["Reload episode", "Shift R"],
+                        ["Skip segment", "Shift S"],
+                        ["Sub / dub", "Shift T"],
+                        ["Rotate video", "Shift V"]
+                      ].map(([label, key]) => (
+                        <div key={key} className="flex justify-between items-center py-2.5 border-b border-border last:border-b-0">
+                          <span className="text-[13px]">{label}</span>
+                          <kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded-md text-[11px] font-mono">{key}</kbd>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className={`${CARD_CLASS} mb-2`}>
+                    <div className={CARD_HEADER_CLASS}>
+                      <h2 className="text-[13px] font-semibold">Manga</h2>
+                    </div>
+                    <div className="px-5 py-3.5 text-xs text-muted-foreground leading-relaxed">
+                      Chapters open in the built-in reader. Reading progress is tracked and synced to AniList, so your library stays up to date
+                      without a second app.
+                    </div>
+                  </section>
+                </div>
+              )}
+
+            </div>
+          </div>
+
+          {/* Footer nav */}
+          <div className="shrink-0 border-t border-border px-10 py-3.5 flex items-center justify-between bg-foreground/[0.02]">
             <button
-              onClick={() => setStep(2)}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer"
+              onClick={() => go(Math.max(1, step - 1) as Step)}
+              className="bg-transparent border-none py-1.5 text-[13px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+              style={{ visibility: step === 1 ? "hidden" : "visible" }}
             >
-              <span>Get Started</span>
-              <ArrowRight size={16} />
+              Back
             </button>
-          </div>
-        )}
-
-        {/* Step 2: Connect AniList */}
-        {step === 2 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="space-y-2 text-center">
-              <h2 className="text-xl font-semibold text-foreground">Connect AniList</h2>
-              <p className="text-xs text-muted-foreground px-6 leading-relaxed">
-                Connect your account to access your custom watch lists, track anime/manga progress, and sync your rating history.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <button
-                onClick={() => {
-                  setAuthPending(true);
-                  invoke("start_anilist_auth")
-                    .then(() => setAuthPending(false))
-                    .catch(() => setAuthPending(false));
-                }}
-                className="w-full flex items-center justify-center space-x-2 py-3.5 bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-lg font-bold transition-all cursor-pointer"
-              >
-                {authPending ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin text-accent" />
-                    <span>Auth Window Opened...</span>
-                  </>
-                ) : (
-                  <>
-                    <Globe size={16} className="text-accent" />
-                    <span>Authorize with AniList</span>
-                  </>
-                )}
-              </button>
-
-              <div className="space-y-2">
-                <label className="meta-mono text-muted-foreground/70">Paste Authorization URL or Token</label>
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => handleTokenChange(e.target.value)}
-                  aria-label="AniList authorization URL or token"
-                  placeholder="Paste here to link account..."
-                  className="w-full bg-foreground/[0.02] border border-border rounded-lg p-3.5 text-sm font-medium focus:border-accent/40 outline-none transition-all placeholder:text-muted-foreground/40 text-foreground"
-                />
-              </div>
-
-              {/* Status Message */}
-              {validating && (
-                <div className="flex items-center justify-center space-x-2 text-xs text-muted-foreground bg-foreground/[0.01] py-2 rounded-lg">
-                  <Loader2 size={14} className="animate-spin text-accent" />
-                  <span>Checking authentication...</span>
-                </div>
-              )}
-
-              {connectedUser && (
-                <div className="flex items-center space-x-2.5 p-3 rounded-lg bg-success/10 border border-success/25 text-success-light text-xs font-semibold animate-scale-in">
-                  <CheckCircle2 size={16} />
-                  <span>Connected successfully as <strong className="text-foreground">{connectedUser}</strong>!</span>
-                </div>
-              )}
-
-              {authError && (
-                <div className="flex items-start space-x-2.5 p-3 rounded-lg bg-danger/10 border border-danger/25 text-danger-light text-xs leading-relaxed animate-scale-in">
-                  <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                  <span>{authError}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-between items-center pt-2">
-              <button onClick={() => setStep(1)} className="-m-2 p-2 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                Back
-              </button>
-              <button onClick={() => setStep(3)} className="-m-2 p-2 text-xs font-bold text-accent hover:text-accent-light transition-colors cursor-pointer">
-                Skip for now
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Preferences */}
-        {step === 3 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="space-y-2 text-center">
-              <h2 className="text-xl font-semibold text-foreground">Choose Preferences</h2>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Personalize your experience. These settings can always be updated later.
-              </p>
-            </div>
-
-            <div className="space-y-5">
-              {/* Theme preference */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Palette size={12} className="text-accent" />
-                  <span>Interface Theme</span>
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {(["system", "dark", "light"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => handleThemeChange(t)}
-                      aria-pressed={theme === t}
-                      className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                        theme === t
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Visual Skin Preference */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Palette size={12} className="text-accent" />
-                  <span>Visual Theme Skin</span>
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { key: "ink-and-index" as const, label: "Ink & Index" },
-                    { key: "sakura-zen" as const, label: "Sakura Zen" },
-                    { key: "retro-manga" as const, label: "Retro Manga" }
-                  ].map((t) => (
-                    <button
-                      key={t.key}
-                      onClick={() => handleUiStyleChange(t.key)}
-                      aria-pressed={uiStyle === t.key}
-                      className={`py-3 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                        uiStyle === t.key
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Time Format */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Clock size={12} className="text-accent" />
-                  <span>Time Format (for Airing Schedules)</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["24h", "12h"] as const).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => handleTimeFormatChange(f)}
-                      aria-pressed={timeFormat === f}
-                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                        timeFormat === f
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {f === "24h" ? "24-Hour (13:00)" : "12-Hour (1:00 PM)"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Preferred Translation (Sub/Dub) */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Globe size={12} className="text-accent" />
-                  <span>Preferred Translation</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["sub", "dub"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => handleTranslationTypeChange(t)}
-                      aria-pressed={translationType === t}
-                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                        translationType === t
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {t === "sub" ? "Subtitled" : "Dubbed"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* GPU Upscaling */}
-              <div className="space-y-2.5">
-                <label className="meta-mono text-muted-foreground/70 flex items-center gap-1.5">
-                  <Monitor size={12} className="text-accent" />
-                  <span>Anime4K GPU Upscaling</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["on", "off"] as const).map((g) => (
-                    <button
-                      key={g}
-                      onClick={() => handleGpuUpscalingChange(g)}
-                      aria-pressed={gpuUpscaling === g}
-                      className={`py-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                        gpuUpscaling === g
-                          ? "bg-accent text-black "
-                          : "bg-foreground/[0.03] border border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {g === "on" ? "On (Recommended)" : "Off"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-            </div>
-
-            <div className="pt-4 border-t border-border space-y-3">
-              <div className="text-center text-xs text-muted-foreground font-semibold">Would you like to see key player controls (like upscaling) and shortcuts?</div>
-              <div className="flex gap-3">
+            <div className="flex items-center gap-4">
+              {skipLabel && (
                 <button
-                  onClick={() => setStep(4)}
-                  className="flex-1 py-3 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer text-xs"
+                  onClick={onSkip}
+                  className="bg-transparent border-none py-1.5 text-[13px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                 >
-                  Yes, show shortcuts
+                  {skipLabel}
                 </button>
-                <button
-                  onClick={handleFinish}
-                  className="flex-1 py-3 bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border text-foreground rounded-lg font-bold transition-all cursor-pointer text-xs"
-                >
-                  No, skip to app
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Shortcuts & Info */}
-        {step === 4 && (
-          <div className="space-y-6 animate-fade-in max-h-[480px] overflow-y-auto pr-2">
-            <div className="space-y-2 text-center">
-              <h2 className="text-xl font-semibold text-foreground">Shortcuts & Info</h2>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Key features and player keyboard shortcuts.
-              </p>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">1. Settings — Ctrl + number</h3>
-                <p className="text-muted-foreground leading-relaxed">Toggle these live in the external MPV window during playback — they're saved back into your app settings too:</p>
-                <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Upscaling</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Auto-skip Intro</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Toggle Autoplay Next</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">2. Actions — Shift + letter</h3>
-                <p className="text-muted-foreground leading-relaxed">One-off playback actions, same MPV window:</p>
-                <div className="grid grid-cols-2 gap-2 bg-foreground/[0.02] border border-border p-3 rounded-lg">
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Reload Episode</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
-                  <div className="flex justify-between py-1 border-b border-border"><span className="text-muted-foreground">Skip Segment</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
-                  <div className="flex justify-between py-1"><span className="text-muted-foreground">Toggle Sub/Dub</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
-                  <div className="flex justify-between py-1"><span className="text-muted-foreground">Rotate Video</span><kbd className="px-1.5 py-0.5 bg-foreground/[0.08] border border-border rounded text-[10px] text-foreground font-mono">Shift + V</kbd></div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="font-bold text-accent uppercase tracking-wider text-[10px]">3. Manga Reading & Tracking</h3>
-                <p className="text-muted-foreground leading-relaxed">Read manga chapters with our built-in reader. Your reading progress is automatically tracked and synchronized to AniList, ensuring your library is always up to date.</p>
-              </div>
-            </div>
-
-            <div className="pt-2">
+              )}
               <button
-                onClick={handleFinish}
-                className="w-full py-3.5 bg-accent hover:bg-accent-light text-black rounded-lg font-bold  transition-all cursor-pointer"
+                onClick={() => (step === LAST_STEP ? handleFinish() : go((step + 1) as Step))}
+                className="bg-accent hover:bg-accent-light text-black border-none rounded-[10px] px-5 py-2.5 text-[13px] font-semibold cursor-pointer transition-colors"
               >
-                Let's Go!
+                {step === LAST_STEP ? "Start watching" : "Continue"}
               </button>
             </div>
           </div>
-        )}
-
+        </div>
       </div>
     </div>
   );

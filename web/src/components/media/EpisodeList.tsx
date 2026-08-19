@@ -28,6 +28,7 @@ interface EpisodeListProps {
   mediaTitle?: string;
   coverImage?: string;
   episodeTitleMap?: Record<number, string>;
+  episodeThumbMap?: Record<number, string>;
   fillerEpisodes?: number[] | Set<number>;
 }
 
@@ -47,6 +48,7 @@ export function EpisodeList({
   mediaTitle,
   coverImage,
   episodeTitleMap,
+  episodeThumbMap,
   fillerEpisodes,
 }: EpisodeListProps) {
   const translationType = useSettingsStore((s) => s.translationType);
@@ -54,6 +56,8 @@ export function EpisodeList({
   const [queueingEp, setQueueingEp] = useState<string | null>(null);
   const [localDownloadStatus, setLocalDownloadStatus] = useState<Record<string, string>>({});
   const [retrying, setRetrying] = useState(false);
+  // Stale TVDB/Crunchyroll URLs fall back to the plain number badge.
+  const [brokenThumbs, setBrokenThumbs] = useState<Set<number>>(new Set());
 
   const [expandedEpStreams, setExpandedEpStreams] = useState<string | null>(null);
   const [loadingStreamsEp, setLoadingStreamsEp] = useState<string | null>(null);
@@ -421,7 +425,30 @@ export function EpisodeList({
                   onClick={() => handlePlay(epNum)}
                   className={`flex items-center space-x-4 min-w-0 flex-1 text-left ${!isUnaired ? 'cursor-pointer' : ''}`}
                 >
-                  {/* Clean Episode Badge */}
+                  {/* Still frame, when one is known for this episode. Manga has
+                      no frames, and Low Data Mode skips the extra requests. */}
+                  {!isManga && !dataSaver && episodeThumbMap?.[Number(ep.number)] && !brokenThumbs.has(Number(ep.number)) ? (
+                    <div className={`relative w-24 aspect-video shrink-0 rounded-xl overflow-hidden bg-foreground/5 transition-all ${isWatched ? "opacity-60" : ""}`}>
+                      <img
+                        src={episodeThumbMap[Number(ep.number)]}
+                        alt=""
+                        loading="lazy"
+                        onError={() => setBrokenThumbs((prev) => new Set(prev).add(Number(ep.number)))}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        {playingEp === epNum ? (
+                          <Loader2 size={16} className="animate-spin text-white" />
+                        ) : (
+                          <Play size={16} fill="currentColor" className="text-white" />
+                        )}
+                      </div>
+                      <span className="absolute bottom-0.5 left-1.5 text-[10px] font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] group-hover:opacity-0 transition-opacity">
+                        {epNum}
+                      </span>
+                    </div>
+                  ) : (
+                  /* Clean Episode Badge */
                   <div className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-xl font-bold text-sm transition-all episode-badge-box ${
                     isWatched ? "bg-foreground/5 text-gray-500" :
                     isUnaired ? "bg-foreground/5 text-gray-700" :
@@ -437,7 +464,8 @@ export function EpisodeList({
                       </div>
                     )}
                   </div>
-                  
+                  )}
+
                   <div className="flex flex-col min-w-0 pr-4">
                     <span className={`text-sm font-medium truncate transition-colors ${
                       isWatched ? "text-gray-500" : 

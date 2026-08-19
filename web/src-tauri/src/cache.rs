@@ -57,6 +57,9 @@ impl AniListCache {
             // repeatedly for the same id across a single open+watch flow.
             "media_detail" => Duration::from_secs(60 * 60),
             "get_media_characters" => Duration::from_secs(6 * 3600),
+            // A voice actor's filmography changes about as often as a
+            // season announcement, and one modal can page through it.
+            "get_staff" => Duration::from_secs(6 * 3600),
             // Search results are stable within a session; the real churn is
             // unique queries while typing, which no cache helps (debounce
             // does). This mainly spares repeats/back-navigation.

@@ -716,6 +716,79 @@ mod tests {
         }
     }
 
+    // Live network test: a show whose AniList title is a 95-character mouthful
+    // and whose release groups all use the glued `Title SxxEyy` convention.
+    // Both of those independently produced "no streams found" on every episode
+    // — the long title returns nothing from Nyaa's AND-search, and the glued
+    // name failed title matching even when handed to it directly.
+    #[tokio::test]
+    #[ignore]
+    async fn live_find_candidates_for_a_long_titled_sxxeyy_show() {
+        let titles = vec![
+            "Saijo no Osewa: Takane no Hanadarake na Meimonkou de, Gakuin Ichi no Ojou-sama \
+             (Seikatsu Nouryoku Kaimu) wo Kagenagara Osewa suru Koto ni Narimashita"
+                .to_string(),
+            "Rich Girl Caretaker: I'm Secretly the Caregiver of the Most Popular Girl in This \
+             Rich Kid School"
+                .to_string(),
+        ];
+        let cands = search::find_candidates(
+            &client(),
+            &titles,
+            search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false },
+        )
+        .await;
+        assert!(!cands.is_empty(), "no candidates found");
+        let best = &cands[0];
+        println!("best: {} (score {}, seeders {})", best.name, best.score, best.seeders);
+        assert!(
+            search::filename_matches_episode(&best.name, 6) || best.assume_batch,
+            "best candidate is not episode 6: {}",
+            best.name
+        );
+        // "has an episode 6" is not enough — a wrong show or a wrong season has
+        // one too. Name the show.
+        let norm = search::normalize(&best.name);
+        assert!(
+            norm.contains("saijo no osewa") || norm.contains("rich girl caretaker"),
+            "best candidate is a different show: {}",
+            best.name
+        );
+    }
+
+    // Live network test: a colon in an AniList title separates a sequel or arc
+    // from its series as often as it separates a descriptive tail, and only the
+    // latter may be dropped from the search query. Truncating the former queries
+    // season 1, which has the same episode numbers, so nothing downstream
+    // catches it — the failure is silently watching the wrong season.
+    #[tokio::test]
+    #[ignore]
+    async fn live_sequels_are_not_collapsed_into_their_first_season() {
+        for (title, required) in [
+            ("Kaguya-sama wa Kokurasetai: Ultra Romantic", "ultra romantic"),
+            ("Kimetsu no Yaiba: Yuukaku-hen", "yuukaku"),
+            // A dash inside the title rather than a colon: the cour that
+            // follows it is a separate AniList entry with its own episode 6.
+            ("Sword Art Online: Alicization - War of Underworld", "war of underworld"),
+        ] {
+            let titles = vec![title.to_string()];
+            let cands = search::find_candidates(
+                &client(),
+                &titles,
+                search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false },
+            )
+            .await;
+            let best = cands.first().unwrap_or_else(|| panic!("no candidates for {}", title));
+            println!("best for {}: {} (score {})", title, best.name, best.score);
+            assert!(
+                search::normalize(&best.name).contains(required),
+                "{} resolved to a different season: {}",
+                title,
+                best.name
+            );
+        }
+    }
+
     // Live network + torrent test: resolve an episode and stream real bytes.
     //
     // If this fails instantly with "torrent session init failed: error

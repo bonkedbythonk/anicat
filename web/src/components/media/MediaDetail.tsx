@@ -3,15 +3,18 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile } from "lucide-react";
-import { mediaApi, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
-import { sanitizeHtml } from "@/lib/sanitize";
+import { mediaApi, flattenCharacterEdges, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
+import { sanitizeHtml, stripSpoilers } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
 import { dispatchRefresh, updateProgressInQueries, removeMediaFromQueries } from "@/lib/events";
-import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, formatAiringCountdown } from "@/lib/date";
+import { formatTime, formatRelativeTime, formatRelativeTimeFromUnix, formatAiringCountdown, formatFuzzyDate } from "@/lib/date";
 import { useProgressEditor } from "@/lib/useProgressEditor";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { FocusScope, ScopeNav, useFocusable } from "@/focus";
 import { EpisodeList } from "./EpisodeList";
+import { MediaGallery, buildGalleryImages } from "./MediaGallery";
+import { VoiceActorList } from "./VoiceActorList";
+import { StaffProfile } from "./StaffProfile";
 import { WatchGrid } from "./WatchGrid";
 import MangaReader from "./MangaReader";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
@@ -90,9 +93,16 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   
+  // The voice actor whose filmography is showing, if any. It replaces the
+  // character's own content inside the same dialog rather than stacking.
+  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
+  const closeCharacterModal = () => {
+    setSelectedCharacter(null);
+    setSelectedStaffId(null);
+  };
   const characterModalRef = useModalDismiss<HTMLDivElement>(
     !!selectedCharacter,
-    () => setSelectedCharacter(null)
+    closeCharacterModal
   );
   const [isResolvingTrailer, setIsResolvingTrailer] = useState(false);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
@@ -274,11 +284,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   };
   const prequel = useMemo(() => pickRel('PREQUEL'), [relations]);
   const sequel = useMemo(() => pickRel('SEQUEL'), [relations]);
-  const { data: anizipTitles = {} } = useQuery({
-    queryKey: ["anizip-titles", item.id],
-    queryFn: () => mediaApi.fetchAniZipTitles(item.id),
+  // Key deliberately differs from the old "anizip-titles": that cache is
+  // persisted, and a rehydrated entry from the titles-only shape would arrive
+  // here as a bare Record where an AniZipMeta is expected.
+  const { data: anizip } = useQuery({
+    queryKey: ["anizip-meta", item.id],
+    queryFn: () => mediaApi.fetchAniZipMeta(item.id),
     staleTime: 24 * 60 * 60 * 1000,
   });
+  const anizipTitles = anizip?.titles ?? {};
 
   // AniList scores your account in whichever format you picked under Settings
   // > List > Scoring System — the raw `score` value on a list entry is in that
@@ -317,31 +331,42 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       map[Number(num)] = title;
     }
     return map;
-  }, [fullItem, anizipTitles]);
+  }, [fullItem, anizip]);
+
+  /**
+   * Episode number -> still frame. AniZip keys its episodes by number, so it
+   * is authoritative; AniList's `streamingEpisodes` is a positional array that
+   * drifts on shows with specials or gaps, so it only fills a slot when its
+   * own title states the episode number.
+   */
+  const episodeThumbMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    const eps = fullItem?.streaming_episodes;
+    if (Array.isArray(eps)) {
+      eps.forEach((ep) => {
+        if (!ep?.thumbnail || !ep?.title) return;
+        const epNumMatch = ep.title.match(/^Episode\s+(\d+)/i);
+        if (!epNumMatch) return;
+        map[parseInt(epNumMatch[1], 10)] = ep.thumbnail;
+      });
+    }
+    for (const [num, url] of Object.entries(anizip?.thumbnails ?? {})) {
+      map[Number(num)] = url;
+    }
+    return map;
+  }, [fullItem, anizip]);
+
+  const galleryImages = useMemo(
+    () => buildGalleryImages(anizip, fullItem?.banner_image, episodeThumbMap),
+    [anizip, fullItem, episodeThumbMap],
+  );
 
   const {
     data: characters = [],
     isLoading: loadingChars,
   } = useQuery({
     queryKey: ["media-characters", item.id],
-    queryFn: async () => {
-      const res = await mediaApi.getCharacters(item.id);
-      const r = res as { Media?: { characters?: { edges?: unknown[] } }; media?: { characters?: { edges?: unknown[] } }; characters?: { edges?: unknown[] }; edges?: unknown[] };
-      const edges = r?.Media?.characters?.edges
-          || r?.media?.characters?.edges
-          || r?.characters?.edges
-          || r?.edges
-          || [];
-      // Flatten: each edge {role, node: {id, name, image}, voiceActors} -> {id, name, image, role, voiceActors}
-      type RawEdge = { role?: string; id?: number; name?: { full: string }; image?: { large?: string }; node?: { id?: number; name?: { full: string }; image?: { large?: string } }; voiceActors?: Character["voiceActors"] };
-      return (edges as RawEdge[]).map((edge): Character => ({
-        id: (edge.node?.id ?? edge.id) ?? 0,
-        name: (edge.node?.name ?? edge.name) ?? { full: "" },
-        image: edge.node?.image ?? edge.image,
-        role: edge.role ?? "",
-        voiceActors: edge.voiceActors ?? [],
-      }));
-    },
+    queryFn: async () => flattenCharacterEdges(await mediaApi.getCharacters(item.id)),
     enabled: activeTab === "characters",
   });
 
@@ -463,6 +488,14 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       }, 500);
     }
   };
+
+  const globalTranslationType = useSettingsStore((s) => s.translationType);
+  // Dub viewers want the English cast, everyone else the Japanese one. The
+  // per-show override wins over the global setting, same as playback.
+  const preferredVaLanguage =
+    (mediaPrefs?.translation_type ?? globalTranslationType) === "dub" ? "ENGLISH" : "JAPANESE";
+  const preferredVoiceActor = (char: Character) =>
+    char.voiceActors?.find((va) => va.language === preferredVaLanguage) ?? char.voiceActors?.[0];
 
   const autoskip = useSettingsStore((s) => s.autoskip);
   const setAutoskip = useSettingsStore((s) => s.setAutoskip);
@@ -1066,6 +1099,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             </div>
           </div>
 
+          {/* Stills strip — art style at a glance, without committing to the
+              trailer. Artwork is always safe to show; stills past what you've
+              watched sit behind the reveal. */}
+          {!isManga && galleryImages.length > 0 && (
+            <div className="mt-8">
+              <MediaGallery images={galleryImages} stillsAllowed={Math.max(3, actualProgress)} />
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="mt-8 space-y-6">
             <FocusScope
@@ -1182,6 +1224,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                       mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
                       coverImage={fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || ''}
                       episodeTitleMap={episodeTitleMap}
+                      episodeThumbMap={episodeThumbMap}
                       fillerEpisodes={fillerEpisodes}
                       onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)}
                       onWatch={(num) => handleUpdateProgress(Number(num))}
@@ -1197,22 +1240,43 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 )}
                 {activeTab === 'characters' && (
                   <motion.div key="characters" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
-                    <FocusScope name="detail-characters" orientation="horizontal" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {/* Portrait cards: AniList character art is 2:3, and the
+                        old square avatar cropped every face down to a chin. */}
+                    <FocusScope name="detail-characters" orientation="horizontal" className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
                       <ScopeNav />
                       {loadingChars ? (
-                        <div className="col-span-4 py-20 flex justify-center"><Loader2 className="animate-spin text-accent" size={24} /></div>
+                        <div className="col-span-full py-20 flex justify-center"><Loader2 className="animate-spin text-accent" size={24} /></div>
                       ) : characters.length > 0 ? (
-                        characters.map((char: Character) => (
-                          <FocusableButton key={char.id || char.name.full} onClick={() => setSelectedCharacter(char)} className="flex items-center space-x-3 p-3 glass-panel hover:bg-foreground/[0.03] transition-colors group character-card text-left">
-                            {char.image?.large && <img src={char.image.large} alt={char.name.full} className="w-14 h-14 rounded-xl object-cover shadow-lg" />}
-                            <div className="min-w-0">
-                              <div className="text-[13px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
-                              <div className="text-[10px] text-muted-foreground">{char.role?.replace(/_/g, ' ')?.toLowerCase()}</div>
-                            </div>
-                          </FocusableButton>
-                        ))
+                        characters.map((char: Character) => {
+                          const va = preferredVoiceActor(char);
+                          return (
+                            <FocusableButton
+                              key={char.id || char.name.full}
+                              onClick={() => setSelectedCharacter(char)}
+                              className="group text-left rounded-md overflow-hidden border border-border bg-foreground/[0.02] hover:border-accent/40 transition-all active:scale-[0.98] character-card"
+                            >
+                              <div className="relative w-full aspect-[2/3] overflow-hidden bg-foreground/5">
+                                {char.image?.large && (
+                                  <img
+                                    src={proxyImage(char.image.large)}
+                                    alt={char.name.full}
+                                    loading="lazy"
+                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                  />
+                                )}
+                                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-black uppercase tracking-wider text-white/90">
+                                  {char.role?.replace(/_/g, ' ')?.toLowerCase()}
+                                </span>
+                              </div>
+                              <div className="p-2 space-y-0.5">
+                                <div className="text-[12px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
+                                {va && <div className="text-[10px] text-muted-foreground truncate">{va.name.full}</div>}
+                              </div>
+                            </FocusableButton>
+                          );
+                        })
                       ) : (
-                        <div className="col-span-4 py-20 text-center text-muted-foreground text-xs font-bold">No character data available.</div>
+                        <div className="col-span-full py-20 text-center text-muted-foreground text-xs font-bold">No character data available.</div>
                       )}
                     </FocusScope>
                   </motion.div>
@@ -1310,34 +1374,72 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         <div 
           ref={characterModalRef}
           className="fixed inset-0 z-[200] flex items-center justify-center" 
-          onClick={() => setSelectedCharacter(null)}
+          onClick={closeCharacterModal}
           role="dialog"
           aria-modal="true"
           aria-label={selectedCharacter.name?.full || "Character Details"}
           tabIndex={-1}
         >
           <div className="absolute inset-0 bg-black/60" />
-          <div className="relative max-w-md w-[90%] bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setSelectedCharacter(null)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
+          <div className="relative max-w-lg w-[90%] max-h-[85vh] overflow-y-auto bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeCharacterModal} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors z-10"><X size={16} /></button>
+            {selectedStaffId ? (
+              /* Same dialog, swapped content: a second stacked modal would put
+                 two Escape handlers and two focus traps on the document. */
+              <StaffProfile
+                staffId={selectedStaffId}
+                onBack={() => setSelectedStaffId(null)}
+                onSelectMedia={(media) => { closeCharacterModal(); selectItem(media); }}
+              />
+            ) : (
+            <>
             <div className="flex items-start space-x-4">
-              {selectedCharacter.image?.large && <img src={selectedCharacter.image.large} alt={selectedCharacter.name?.full} className="w-20 h-20 rounded-xl object-cover shadow-lg shrink-0" />}
-              <div className="min-w-0 space-y-1">
+              {selectedCharacter.image?.large && <img src={proxyImage(selectedCharacter.image.large)} alt={selectedCharacter.name?.full} className="w-28 rounded-md aspect-[2/3] object-cover shadow-lg shrink-0" />}
+              <div className="min-w-0 space-y-1 pr-6">
                 <div className="text-base font-bold text-foreground">{selectedCharacter.name?.full}</div>
+                {selectedCharacter.name?.native && <div className="text-xs text-muted-foreground">{selectedCharacter.name.native}</div>}
                 <div className="text-[11px] text-muted-foreground capitalize">{selectedCharacter.role?.replace(/_/g, ' ')?.toLowerCase()}</div>
-                {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
-                  <div className="pt-2 space-y-1.5">
-                    <div className="meta-mono text-muted-foreground">Voice Actors</div>
-                    {selectedCharacter.voiceActors?.map((va) => (
-                      <div key={va.id} className="flex items-center space-x-2">
-                        {va.image?.large && <img src={va.image.large} alt={va.name?.full} className="w-6 h-6 rounded-full object-cover" />}
-                        <span className="text-xs text-foreground">{va.name?.full}</span>
-                        <span className="text-[10px] text-muted-foreground">{va.language}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <dl className="pt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+                  {[
+                    { label: 'Age', value: selectedCharacter.age },
+                    { label: 'Gender', value: selectedCharacter.gender },
+                    { label: 'Birthday', value: formatFuzzyDate(selectedCharacter.dateOfBirth) },
+                    { label: 'Favourites', value: selectedCharacter.favourites ? selectedCharacter.favourites.toLocaleString() : undefined },
+                  ].filter((f) => f.value).map((f) => (
+                    <div key={f.label} className="contents">
+                      <dt className="text-muted-foreground">{f.label}</dt>
+                      <dd className="text-foreground font-medium">{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
             </div>
+
+            {selectedCharacter.description && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                <div className="meta-mono text-muted-foreground">About</div>
+                {/* Spoiler blocks are cut before sanitizing: sanitizeHtml drops
+                    the class AniList marks them with, so they would otherwise
+                    render as plain visible text. */}
+                <div
+                  className="text-[12px] text-foreground/80 leading-relaxed whitespace-pre-line character-bio"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(stripSpoilers(selectedCharacter.description)) }}
+                />
+              </div>
+            )}
+
+            {(selectedCharacter.voiceActors?.length ?? 0) > 0 && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                <div className="meta-mono text-muted-foreground">Voice Actors</div>
+                <VoiceActorList
+                  voiceActors={selectedCharacter.voiceActors ?? []}
+                  preferredLanguage={preferredVaLanguage}
+                  onSelect={setSelectedStaffId}
+                />
+              </div>
+            )}
+            </>
+            )}
           </div>
         </div>
       )}

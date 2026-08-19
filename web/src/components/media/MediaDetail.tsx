@@ -194,12 +194,17 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   const {
     data: fullItemData,
     isLoading: loading,
+    isFetching: detailFetching,
   } = useQuery({
     queryKey: ["media-detail", item.id],
     queryFn: async () => {
       const details = await mediaApi.getDetails(item.id, isManga ? "MANGA" : "ANIME");
       return details;
     },
+    // Always revalidate on mount instead of inheriting the global 5min
+    // staleTime: this entry carries the progress a quick-play button turns
+    // into an episode number, and the persisted cache can be a day old.
+    staleTime: 0,
   });
   // Fall back to the always-present `item` prop so downstream code never
   // has to null-check the detail (the query data can be null).
@@ -382,14 +387,28 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     // (hasTriggeredInitial). Gating on config alone let a quick-play card
     // start on the global provider whenever config resolved first, silently
     // ignoring the per-show choice.
-    if (initialAction === "play" && !loading && config && !mediaPrefsPending && !hasTriggeredInitial) {
+    // `isLoading` alone is not enough when no episode was handed to us: with
+    // the persist-client plugin it is already false on the first commit
+    // whenever a persisted detail exists, so the trigger would compute
+    // `actualProgress + 1` from cached progress that can predate everything
+    // watched since — which is how a quick-play button ends up starting at
+    // episode 1. Wait for the refetch to land in that case.
+    const needsFreshProgress = !initialPlayEpisode && detailFetching;
+    if (
+      initialAction === "play" &&
+      !loading &&
+      !needsFreshProgress &&
+      config &&
+      !mediaPrefsPending &&
+      !hasTriggeredInitial
+    ) {
       setHasTriggeredInitial(true);
       handlePlayNext(
         initialPlayEpisode ? Number(initialPlayEpisode) : undefined,
         effectiveProvider ?? selectedProvider,
       );
     }
-  }, [initialAction, loading, config, mediaPrefsPending, hasTriggeredInitial, effectiveProvider, selectedProvider]);
+  }, [initialAction, loading, detailFetching, initialPlayEpisode, config, mediaPrefsPending, hasTriggeredInitial, effectiveProvider, selectedProvider]);
 
   // Measure whether synopsis actually overflows the collapsed height
   useEffect(() => {

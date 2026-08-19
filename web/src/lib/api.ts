@@ -1,4 +1,5 @@
 import { invoke } from "./transport";
+import { isCinemaId } from "./mediaId";
 import type {
   MediaItem,
   Episode,
@@ -602,6 +603,43 @@ export async function triggerUpdate(): Promise<void> {
 
 export { apiOrigin } from "./proxy";
 
+/** The named rows cinema mode's home screen is built from. The backend maps
+ *  each to a fixed TMDB endpoint, so this list and `row_path` in
+ *  `commands/cinema.rs` have to agree. */
+/** One episode of a series. `number` is the absolute count across seasons —
+ *  what the app stores and what auto-next adds one to — while `season` and
+ *  `episode_in_season` are for display and for the release search. */
+export interface CinemaEpisode {
+  number: number;
+  season: number | null;
+  episode_in_season: number | null;
+  title: string | null;
+  description: string | null;
+  thumbnail: string | null;
+  air_date: string | null;
+  duration: number | null;
+}
+
+/** One row of the local cinema library. */
+export interface CinemaLibraryEntry {
+  media_id: number;
+  media_type: string | null;
+  status: string | null;
+  score: number | null;
+  progress: number | null;
+  notes: string | null;
+  updated_at: string | null;
+}
+
+export type CinemaRow =
+  | "trending_movies"
+  | "trending_series"
+  | "popular_movies"
+  | "popular_series"
+  | "now_playing"
+  | "top_rated_movies"
+  | "top_rated_series";
+
 export const mediaApi = {
   getConfig,
   setConfig,
@@ -609,6 +647,19 @@ export const mediaApi = {
   getWatchActivity,
   searchMedia: searchAnime,
   getMediaDetail: async (id: number, mediaType?: string) => {
+    // The id says which catalog owns it, so callers don't have to. Without
+    // this a cinema id would be sent to AniList, which has never heard of it.
+    if (isCinemaId(id)) {
+      const result = await invoke<Record<string, unknown> | null>("tmdb_detail", { mediaId: id });
+      if (!result) return null;
+      // `similar` holds whole media items, and snakify only walks the object it
+      // is given — so without this the nested entries keep `coverImage` while
+      // every card reads `cover_image`, and the row renders as blank posters.
+      if (Array.isArray(result.similar)) {
+        result.similar = snakifyMediaList(result.similar);
+      }
+      return snakify(result);
+    }
     const result = await getAnimeDetail(id, mediaType);
     return result?.Media ? snakify(result.Media as unknown as Record<string, unknown>) : null;
   },
@@ -626,6 +677,56 @@ export const mediaApi = {
   },
   getCharacters,
   getStaff,
+
+  // Cinema mode. The backend hands these back in the same {Page:{media,
+  // pageInfo}} envelope the AniList commands use, so they unwrap through the
+  // same helper and produce the same MediaItem shape the cards already render.
+  cinemaRow: async (row: CinemaRow, page?: number) => {
+    const result = await invoke<PagedMedia>("tmdb_row", { row, page: page ?? 1 });
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
+  },
+  cinemaSearch: async (query: string, page?: number) => {
+    const result = await invoke<PagedMedia>("tmdb_search", { query, page: page ?? 1 });
+    return { media: snakifyMediaList(result?.Page?.media || []), page_info: result?.Page?.pageInfo || null };
+  },
+  /** Cinema mode's library, held locally rather than on a tracking service.
+   *  Entries carry only ids, so each is paired with its TMDB record before it
+   *  can be rendered. */
+  cinemaLibrary: async (): Promise<{ entry: CinemaLibraryEntry; media: MediaItem }[]> => {
+    const entries = await invoke<CinemaLibraryEntry[]>("get_library");
+    const cinema = (entries ?? []).filter((e) => isCinemaId(e.media_id));
+    const withMedia = await Promise.all(
+      cinema.map(async (entry) => {
+        try {
+          const media = (await mediaApi.getMediaDetail(entry.media_id)) as unknown as MediaItem;
+          return media ? { entry, media } : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return withMedia.filter((x): x is { entry: CinemaLibraryEntry; media: MediaItem } => x !== null);
+  },
+  /** Put a title on the watchlist, or move it between statuses. The library
+   *  is a local table, so this is the only thing that writes PLANNING —
+   *  watched state comes from playback instead. */
+  cinemaSetLibraryStatus: async (mediaId: number, mediaType: "MOVIE" | "TV", status: string) => {
+    return invoke("add_to_library", { mediaId, mediaType, status });
+  },
+  cinemaRemoveFromLibrary: async (mediaId: number) => {
+    return invoke("remove_from_library", { mediaId });
+  },
+  cinemaEpisodes: async (mediaId: number) => {
+    const result = await invoke<{ episodes: CinemaEpisode[] }>("tmdb_episodes", { mediaId });
+    return result?.episodes ?? [];
+  },
+  cinemaConfigured: async () => {
+    try {
+      return await invoke<boolean>("tmdb_configured");
+    } catch {
+      return false;
+    }
+  },
   getSmartPlaylist: async () => {
     const result = await getSmartPlaylist();
     return { media: snakifyMediaList(result?.Page?.media || []) };
@@ -739,6 +840,15 @@ export const mediaApi = {
     return invoke("resolve_stream", { mediaId, episodeNumber: epNum, provider });
   },
   getDetails: async (mediaId: number, mediaType?: string) => {
+    // MediaCard is shared between anime rows and cinema rows, and its hover
+    // prefetch calls this with no mediaType -- without this branch every
+    // cinema card hovered sent a live AniList query for a banded id AniList
+    // has never heard of, 404ing every time. getMediaDetail already knows
+    // how to route a cinema id; this is the second, separately-reachable
+    // path into the same bug.
+    if (isCinemaId(mediaId)) {
+      return (await mediaApi.getMediaDetail(mediaId)) as unknown as MediaItem | null;
+    }
     const result = await getAnimeDetail(mediaId, mediaType);
     if (!result?.Media) return null;
     const media = result.Media;

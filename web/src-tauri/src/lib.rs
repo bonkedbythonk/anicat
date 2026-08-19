@@ -2,10 +2,12 @@ pub mod anilist;
 pub mod cache;
 pub mod commands;
 pub mod discord;
+pub mod media_id;
 pub mod proxy;
 pub mod registry;
 pub mod scraper;
 pub mod state;
+pub mod tmdb;
 pub mod torrent;
 pub mod util;
 
@@ -122,6 +124,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::config::get_config,
             commands::config::update_config,
+            commands::cinema::tmdb_row,
+            commands::cinema::tmdb_search,
+            commands::cinema::tmdb_detail,
+            commands::cinema::tmdb_episodes,
+            commands::cinema::tmdb_configured,
             commands::media::search_media,
             commands::media::get_media_detail,
             commands::media::get_trending,

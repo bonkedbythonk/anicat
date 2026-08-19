@@ -4,7 +4,7 @@ import type { MediaItem } from "@/lib/types";
 
 interface EpisodeCardProps {
   item: MediaItem;
-  onSelect: (item: MediaItem, action?: "play") => void;
+  onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
 /** Continue-watching card: 16:9 landscape art, next-episode context, a thin
@@ -26,7 +26,7 @@ export function EpisodeCard({ item, onSelect }: EpisodeCardProps) {
   return (
     <div className="w-[188px] shrink-0">
       <button
-        onClick={() => onSelect(item, "play")}
+        onClick={() => onSelect(item, "play", String(nextEp))}
         className="relative block aspect-video w-full overflow-hidden rounded-[5px] bg-surface active:scale-[0.98] transition-transform"
         aria-label={`Play ${title} episode ${nextEp}`}
       >

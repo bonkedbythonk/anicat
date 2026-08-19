@@ -110,8 +110,11 @@ function QueueItem({
         )}
       </div>
       </button>
+      {/* Pass the episode explicitly: the detail page's own progress can be
+          served stale from the persisted query cache, and without an episode
+          here that stale value decides what plays (usually EP 1). */}
       <button
-        onClick={() => onSelect(item, "play")}
+        onClick={() => onSelect(item, "play", String(nextEp))}
         aria-label={`${first ? "Resume" : "Play"} ${name}, ${unit} ${nextEp}`}
         className={`shrink-0 rounded-md px-4 py-2 text-[12.5px] font-semibold cursor-pointer ${
           first

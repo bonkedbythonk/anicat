@@ -607,6 +607,98 @@ pub async fn resolve_stream_impl(
         cfg.general.fallback_provider.clone()
     };
 
+    // A film or series never goes to an anime provider, whatever
+    // `general.provider` says -- see the same branch in
+    // `resolve_stream_for_provider`. Without this the picker searched nyaa
+    // with titles gathered from AniList, which has never heard of these ids.
+    if crate::media_id::source_of(media_id).is_cinema() {
+        // The picker's spinner has nothing else telling it apart from a
+        // genuine hang -- one line here is the difference between "the log
+        // shows this never started" and "it's stuck after the title lookup".
+        log::info!("cinema: resolving releases for media {} ep {}", media_id, episode_number);
+        let (titles, year) =
+            super::playback::gather_movie_info_pub(state, media_id, title.clone()).await;
+        if titles.is_empty() {
+            log::warn!("cinema: no title available for media {}, cannot search", media_id);
+            return Ok(serde_json::json!({ "streams": [] }));
+        }
+
+        let choices = if crate::media_id::source_of(media_id) == crate::media_id::MediaSource::TmdbTv
+        {
+            let seasons = super::cinema::season_map_for(state, media_id).await?;
+            let Some((season, episode)) = crate::torrent::series::absolute_to_season_episode(
+                episode_number as i64,
+                &seasons,
+            ) else {
+                return Ok(serde_json::json!({ "streams": [] }));
+            };
+            state
+                .torrent
+                .list_candidates(
+                    &state.http_client,
+                    crate::torrent::ResolveTarget {
+                        media_id,
+                        episode: episode_number as i64,
+                        titles: &titles,
+                        allow_episodeless: false,
+                        episode_count: None,
+                        prefer_dub: false,
+                        browser_client: client.is_browser(),
+                        chosen_name: None,
+                        movie: None,
+                        series: Some(crate::torrent::series::EpisodeCriteria {
+                            season,
+                            episode,
+                            browser_client: client.is_browser(),
+                        }),
+                    },
+                )
+                .await
+        } else {
+            state
+                .torrent
+                .list_candidates(
+                    &state.http_client,
+                    crate::torrent::ResolveTarget {
+                        media_id,
+                        episode: 1,
+                        titles: &titles,
+                        allow_episodeless: true,
+                        episode_count: Some(1),
+                        prefer_dub: false,
+                        browser_client: client.is_browser(),
+                        chosen_name: None,
+                        movie: Some(crate::torrent::cinema::MovieCriteria {
+                            year,
+                            browser_client: client.is_browser(),
+                        }),
+                        series: None,
+                    },
+                )
+                .await
+        };
+
+        let streams: Vec<Value> = choices
+            .into_iter()
+            .map(|c| {
+                serde_json::json!({
+                    "name": c.name,
+                    // Sentinel, as for nyaa: the torrent is only added to the
+                    // session once this release is actually chosen.
+                    "url": "",
+                    "quality": "1080p",
+                    "seeders": c.seeders,
+                    "isM3U8": false,
+                    "headers": null,
+                    // Films and series carry no sub/dub distinction; the group
+                    // is what the picker labels a row with.
+                    "group": "soft_sub",
+                })
+            })
+            .collect();
+        return Ok(serde_json::json!({ "streams": streams }));
+    }
+
     if provider_name == "nyaa" {
         // List the available releases (search only, no download) so the
         // picker can offer each as a selectable server. The `url` is a
@@ -631,6 +723,8 @@ pub async fn resolve_stream_impl(
                     prefer_dub,
                     browser_client: client.is_browser(),
                     chosen_name: None,
+                    movie: None,
+                    series: None,
                 },
             )
             .await;

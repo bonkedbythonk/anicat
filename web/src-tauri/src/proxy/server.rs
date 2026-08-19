@@ -728,7 +728,7 @@ async fn player_preload_handler(
     // same bandwidth and stall the episode being watched. If the current
     // download already finished, the preload goes through and auto-next stays
     // instant; otherwise the next episode resolves at play time instead.
-    if pb.provider == "nyaa"
+    if crate::commands::playback::is_torrent_backed(&pb.provider, pb.media_id)
         && scoped.config.read().await.stream.data_saver
         && scoped.torrent.any_download_active().await
     {

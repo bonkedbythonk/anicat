@@ -26,6 +26,18 @@ interface AppState {
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
 
+  // Which world the shell is pointed at. "anime" is everything that existed
+  // before: AniList metadata, nyaa/anineko sources, AniList progress. "cinema"
+  // is movies and series off TMDB. The two never share a result set — each
+  // mode renders its own views against its own data — so the only thing this
+  // flag does is decide which of the two the shell is showing.
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+  // Until cinema mode has data behind it, the logo switch is inert unless this
+  // is turned on in Settings. Off by default so nobody lands in an empty world.
+  cinemaEnabled: boolean;
+  setCinemaEnabled: (enabled: boolean) => void;
+
   // Detail drawer
   selectedItem: MediaItem | null;
   detailStack: MediaItem[];
@@ -137,10 +149,33 @@ interface AppState {
 
 export type WatchStatus = "watching" | "completed" | "planning" | "paused" | "dropped" | "repeating";
 
+export type AppMode = "anime" | "cinema";
+
 export const useAppStore = create<AppState>((set) => ({
   currentView: "home",
   // Switching top-level view exits any detail page and drops its back-stack.
   setCurrentView: (currentView) => set({ currentView, selectedItem: null, detailStack: [], initialAction: null, initialPlayEpisode: null }),
+
+  appMode: localStorage.getItem("anicat_app_mode") === "cinema" ? "cinema" : "anime",
+  // Changing worlds lands on Home with no detail page open — a detail page
+  // holds an item from the mode you just left, and its back-stack is worse.
+  setAppMode: (appMode) => {
+    localStorage.setItem("anicat_app_mode", appMode);
+    set({ appMode, currentView: "home", selectedItem: null, detailStack: [], initialAction: null, initialPlayEpisode: null });
+  },
+
+  cinemaEnabled: localStorage.getItem("anicat_cinema_enabled") === "true",
+  setCinemaEnabled: (cinemaEnabled) =>
+    set(() => {
+      localStorage.setItem("anicat_cinema_enabled", String(cinemaEnabled));
+      // Turning it off while standing in cinema mode would strand the user in
+      // a world with no way back, since the switch goes with it.
+      if (!cinemaEnabled) {
+        localStorage.setItem("anicat_app_mode", "anime");
+        return { cinemaEnabled, appMode: "anime" as AppMode, currentView: "home" as ViewType, selectedItem: null, detailStack: [] };
+      }
+      return { cinemaEnabled };
+    }),
 
   selectedItem: null,
   detailStack: [],

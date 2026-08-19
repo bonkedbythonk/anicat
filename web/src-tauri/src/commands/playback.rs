@@ -35,6 +35,41 @@ pub(crate) fn resume_position(stop_time: i64, duration: i64) -> i64 {
     }
 }
 
+/// Whether a play will go through the embedded torrent session rather than a
+/// scraper.
+///
+/// Not the same question as "is the provider nyaa". Cinema mode is always
+/// torrent-backed whatever `general.provider` happens to say — that setting
+/// describes the anime world — so a guard written against the provider name
+/// alone silently stops applying the moment a film is playing.
+pub(crate) fn is_torrent_backed(provider: &str, media_id: i64) -> bool {
+    provider == "nyaa" || crate::media_id::source_of(media_id).is_cinema()
+}
+
+/// Which provider labels to try, in order, when resolving a stream.
+///
+/// For anime this is the configured fallback chain: try the primary
+/// provider, then the fallback, then the secondary fallback, skipping blanks
+/// and duplicates. For a cinema id it collapses to a single entry.
+/// `resolve_stream_for_provider` checks `is_cinema()` before it looks at the
+/// provider string at all, so every one of those three names would run the
+/// identical apibay-or-Knaben search and hit the identical failure -- three
+/// full search timeouts for one answer, and a log line reading "provider
+/// 'anineko' failed" for a film anineko was never going to have an opinion
+/// about.
+pub(crate) fn provider_fallback_chain(
+    media_id: i64,
+    provider_name: &str,
+    fallback_provider: String,
+    secondary_fallback: String,
+) -> Vec<String> {
+    if crate::media_id::source_of(media_id).is_cinema() {
+        vec![provider_name.to_string()]
+    } else {
+        vec![provider_name.to_string(), fallback_provider, secondary_fallback]
+    }
+}
+
 /// Path to mpv's JSON IPC socket.
 ///
 /// Not in `/tmp`. That socket is a command channel — everything this file sends
@@ -826,6 +861,56 @@ pub(crate) async fn effective_translation_type(state: &AppState, media_id: i64) 
     }
 }
 
+/// Titles and release year for a film, from TMDB.
+///
+/// The anime counterpart (`torrent::gather_media_info`) reads AniList, which
+/// has never heard of these ids. Both titles are offered because a film
+/// released here under a translated name is often seeded under its original
+/// one, and vice versa.
+/// `resolve_stream_impl` needs the same titles and year the play path uses.
+pub(crate) async fn gather_movie_info_pub(
+    state: &AppState,
+    media_id: i64,
+    frontend_title: Option<String>,
+) -> (Vec<String>, Option<i32>) {
+    gather_movie_info(state, media_id, frontend_title).await
+}
+
+async fn gather_movie_info(
+    state: &AppState,
+    media_id: i64,
+    frontend_title: Option<String>,
+) -> (Vec<String>, Option<i32>) {
+    let mut titles: Vec<String> = vec![];
+    let mut year = None;
+
+    if let Ok(detail) = super::cinema::tmdb_detail_impl(state, media_id).await {
+        year = detail
+            .get("seasonYear")
+            .and_then(|v| v.as_i64())
+            .map(|y| y as i32);
+        if let Some(t) = detail.get("title") {
+            for key in ["english", "romaji"] {
+                if let Some(v) = t.get(key).and_then(|v| v.as_str()) {
+                    if !v.is_empty() && !titles.iter().any(|e| e == v) {
+                        titles.push(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Whatever the detail page was displaying, as a last resort — the lookup
+    // above can fail on a cold cache with no network.
+    if let Some(t) = frontend_title {
+        if !t.is_empty() && !titles.contains(&t) {
+            titles.push(t);
+        }
+    }
+
+    (titles, year)
+}
+
 pub(crate) async fn resolve_stream_for_provider(
     state: &AppState,
     media_id: i64,
@@ -837,6 +922,102 @@ pub(crate) async fn resolve_stream_for_provider(
 ) -> Result<(String, Option<std::collections::HashMap<String, String>>, Option<String>), String> {
     let started = std::time::Instant::now();
     let mut timings = ResolveTimings::default();
+
+    // A film or series takes the torrent path regardless of which anime
+    // provider is configured: the scraper providers index anime and will never
+    // carry either, and `general.provider` describes the other world entirely.
+    if crate::media_id::source_of(media_id).is_cinema() {
+        let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
+        let (titles, year) = gather_movie_info(state, media_id, title).await;
+        if titles.is_empty() {
+            return Err("No title to search for".into());
+        }
+
+        // A series is searched by the season and episode a release name
+        // spells, recovered from the stored absolute number.
+        if crate::media_id::source_of(media_id) == crate::media_id::MediaSource::TmdbTv {
+            let seasons = super::cinema::season_map_for(state, media_id).await?;
+            let Some((season, episode)) =
+                crate::torrent::series::absolute_to_season_episode(episode_number, &seasons)
+            else {
+                return Err(format!(
+                    "Episode {} is past the end of this series",
+                    episode_number
+                ));
+            };
+            let url = state
+                .torrent
+                .resolve(
+                    &state.http_client,
+                    crate::torrent::ResolveTarget {
+                        media_id,
+                        episode: episode_number,
+                        titles: &titles,
+                        // A season pack is matched by filename inside the
+                        // torrent, which needs the episode number the files
+                        // use — that is the within-season one, not the
+                        // absolute one the app stores.
+                        allow_episodeless: false,
+                        episode_count: None,
+                        prefer_dub: false,
+                        browser_client: client.is_browser(),
+                        chosen_name: server.clone(),
+                        movie: None,
+                        series: Some(crate::torrent::series::EpisodeCriteria {
+                            season,
+                            episode,
+                            browser_client: client.is_browser(),
+                        }),
+                    },
+                    proxy_port,
+                )
+                .await;
+            timings.log(
+                "cinema",
+                media_id,
+                episode_number,
+                if url.is_ok() { "ok" } else { "failed" },
+                started.elapsed().as_millis(),
+            );
+            return url.map(|u| (u, None, None));
+        }
+
+        let url = state
+            .torrent
+            .resolve(
+                &state.http_client,
+                crate::torrent::ResolveTarget {
+                    media_id,
+                    // A film is its own single episode. `allow_episodeless` is
+                    // what stops the shared candidate loop from demanding an
+                    // episode number the release names never carry.
+                    episode: 1,
+                    titles: &titles,
+                    allow_episodeless: true,
+                    episode_count: Some(1),
+                    // Sub versus dub is an anime distinction; a film has one
+                    // audio track and the release names say nothing about it.
+                    prefer_dub: false,
+                    browser_client: client.is_browser(),
+                    chosen_name: server.clone(),
+                    movie: Some(crate::torrent::cinema::MovieCriteria {
+                        year,
+                        browser_client: client.is_browser(),
+                    }),
+                    series: None,
+                },
+                proxy_port,
+            )
+            .await;
+        timings.log(
+            "cinema",
+            media_id,
+            1,
+            if url.is_ok() { "ok" } else { "failed" },
+            started.elapsed().as_millis(),
+        );
+        return url.map(|u| (u, None, None));
+    }
 
     // Torrents don't go through the scraper: search Nyaa/SubsPlease, start
     // the embedded torrent session, and hand mpv the local range-stream URL.
@@ -864,6 +1045,8 @@ pub(crate) async fn resolve_stream_for_provider(
                     // `server`; honor it. Auto-play (Continue button) sends
                     // None and takes the best-scored candidate.
                     chosen_name: server.clone(),
+                    movie: None,
+                    series: None,
                 },
                 proxy_port,
             )
@@ -1072,7 +1255,7 @@ pub async fn preload_episode_impl(
     // is currently streaming, and browsing detail pages would kick off
     // downloads for episodes that may never be played. Resolve at play time
     // instead. Scraper providers stay preloaded either way (cheap requests).
-    if provider_name == "nyaa" && state.config.read().await.stream.data_saver {
+    if is_torrent_backed(&provider_name, media_id) && state.config.read().await.stream.data_saver {
         log::info!(
             "Low data mode: skipping torrent preload for media {} ep {}",
             media_id, episode_number
@@ -1476,7 +1659,7 @@ pub async fn start_playback(
             consumed_preload = Some(p.clone());
             (p.raw_url, p.headers, p.subtitle_url)
         } else {
-            let candidates = vec![provider_name.clone(), fallback_provider, secondary_fallback];
+            let candidates = provider_fallback_chain(media_id, &provider_name, fallback_provider, secondary_fallback);
             let mut tried = Vec::new();
             let mut last_err = String::new();
             let mut resolved = None;
@@ -1547,7 +1730,9 @@ pub async fn start_playback(
     // SaveMediaListEntry on every episode launch; now it just moves
     // Planning/Paused/etc. into Watching and is a no-op for an already-watching
     // series.
-    if state.anilist_client.has_token() && media_id > 0 {
+    // Cinema ids have no AniList entry to move into Watching, and sending one
+    // would edit whichever anime happens to share the number.
+    if state.anilist_client.has_token() && media_id > 0 && crate::media_id::is_anilist(media_id) {
         let already_current = state
             .cache
             .get_user_list_status(media_id)
@@ -1579,6 +1764,11 @@ pub async fn start_playback(
     let skip_times_arg = String::new();
     let state_clone = (*state).clone();
     let title_clone = title_str.clone();
+    // AniSkip indexes anime openings and endings, so it has nothing for a
+    // film — and asking anyway is not free: the resolver falls back to a
+    // Jikan title search and then retries mpv's IPC socket for several
+    // seconds before giving up.
+    if crate::media_id::is_anilist(media_id) {
     tokio::spawn(async move {
         // Bail if a newer episode has started while this resolver was queued —
         // its script-opts push would otherwise stomp the current episode.
@@ -1626,6 +1816,7 @@ pub async fn start_playback(
             }
         }
     });
+    }
 
     let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
     log::info!("mpv binary: {}", mpv_bin);
@@ -2248,6 +2439,42 @@ pub async fn record_playback_progress(
         );
     }
 
+    // Everything past this point talks to AniList, including the cache lookup
+    // below — `get_user_list_progress` is keyed by bare media_id, so a cinema
+    // id would read a slot that means nothing. The local write above is
+    // correct for every catalog (resume has to work in cinema mode too); the
+    // AniList half simply has nowhere to go for a movie or a series.
+    if !crate::media_id::is_anilist(media_id) {
+        // Cinema mode's library lives in SQLite rather than on a tracking
+        // service. Trakt would have been the counterpart to AniList here, but
+        // creating an API application for it now requires a paid account, so
+        // the local table -- which has existed unused since before cinema mode
+        // -- carries watched state instead.
+        if duration > 0 && is_watched(stop_time, duration) {
+            let source = crate::media_id::source_of(media_id);
+            // A film is one episode, so finishing it finishes the title. A
+            // series is only complete once the last episode is watched, and
+            // total_episodes is what the caller counted.
+            let complete = source == crate::media_id::MediaSource::TmdbMovie
+                || (total_episodes > 0 && episode_number >= total_episodes);
+            if let Err(e) = super::media::add_to_library_impl(
+                state,
+                user_id,
+                media_id,
+                if source == crate::media_id::MediaSource::TmdbMovie { "MOVIE" } else { "TV" }.to_string(),
+                Some(if complete { "COMPLETED" } else { "CURRENT" }.to_string()),
+                None,
+                Some(episode_number as i32),
+                None,
+            )
+            .await
+            {
+                log::error!("Failed to record cinema library entry for {}: {}", media_id, e);
+            }
+        }
+        return Ok(());
+    }
+
     if duration > 0 {
         // Completion is the ONLY automatic way AniList progress advances: you
         // played the episode past the watched threshold. Navigation (next/prev)
@@ -2532,8 +2759,9 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_order, is_watched, looks_like_playlist, parse_playlist, probe_status_is_dead,
-        probe_status_is_permanent, resume_position, sample_indices, PlaylistStep,
+        candidate_order, is_torrent_backed, is_watched, looks_like_playlist, parse_playlist,
+        probe_status_is_dead, probe_status_is_permanent, provider_fallback_chain, resume_position,
+        sample_indices, PlaylistStep,
     };
     use crate::scraper::client::StreamServer;
 
@@ -2721,6 +2949,43 @@ mod tests {
         // Unknown duration is never "watched".
         assert!(!is_watched(9999, 0));
         assert!(!is_watched(50, -1));
+    }
+
+    #[test]
+    fn a_cinema_play_counts_as_torrent_backed_whatever_the_anime_provider_is() {
+        let film = crate::media_id::encode(crate::media_id::MediaSource::TmdbMovie, 693134).unwrap();
+        let series = crate::media_id::encode(crate::media_id::MediaSource::TmdbTv, 94997).unwrap();
+
+        // The guards this feeds (Low Data Mode, on both the detail-page
+        // preload and the auto-next preload) used to ask only whether the
+        // provider was nyaa. `general.provider` describes the anime world, so
+        // with anineko configured a film would start a real torrent download
+        // with Low Data Mode on -- the exact thing the guard exists to stop.
+        assert!(is_torrent_backed("anineko", film));
+        assert!(is_torrent_backed("anineko", series));
+        assert!(is_torrent_backed("nyaa", film));
+
+        // Anime is unchanged: still decided by the provider alone.
+        assert!(is_torrent_backed("nyaa", 21202));
+        assert!(!is_torrent_backed("anineko", 21202));
+        assert!(!is_torrent_backed("mangakatana", 21202));
+    }
+
+    #[test]
+    fn a_cinema_id_never_retries_under_a_second_anime_provider_label() {
+        // Observed live: a film failed once under "nyaa", then the loop tried
+        // it again under "anineko" -- same is_cinema() branch, same apibay
+        // search, same failure, a second full timeout, and a log line
+        // claiming anineko had an opinion about a TMDB id it has never seen.
+        let film = crate::media_id::encode(crate::media_id::MediaSource::TmdbMovie, 693134).unwrap();
+        let chain = provider_fallback_chain(film, "nyaa", "anineko".into(), "none".into());
+        assert_eq!(chain, vec!["nyaa".to_string()]);
+    }
+
+    #[test]
+    fn an_anime_id_still_gets_the_full_fallback_chain() {
+        let chain = provider_fallback_chain(21202, "nyaa", "anineko".into(), "none".into());
+        assert_eq!(chain, vec!["nyaa".to_string(), "anineko".to_string(), "none".to_string()]);
     }
 
     #[test]

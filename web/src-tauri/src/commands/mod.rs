@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod cinema;
 pub mod config;
 pub mod media;
 pub mod user;

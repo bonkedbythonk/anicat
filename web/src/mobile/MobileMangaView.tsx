@@ -7,7 +7,7 @@ import { PosterRow } from "./PosterRow";
 import { BrowseRow } from "./BrowseRow";
 
 interface MobileMangaViewProps {
-  onSelect: (item: MediaItem, action?: "play" | null) => void;
+  onSelect: (item: MediaItem, action?: "play" | null, episode?: string | null) => void;
 }
 
 function titleOf(item: MediaItem): string {
@@ -92,7 +92,7 @@ export function MobileMangaView({ onSelect }: MobileMangaViewProps) {
                     </div>
                   </button>
                   <button
-                    onClick={() => onSelect(item, "play")}
+                    onClick={() => onSelect(item, "play", String(progress + 1))}
                     aria-label={`Continue reading ${titleOf(item)}`}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent active:scale-90 transition-transform"
                   >

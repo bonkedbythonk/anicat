@@ -29,7 +29,7 @@ pub struct Candidate {
 
 /// Standard open trackers appended to infohash-only magnets so peers are
 /// found even before DHT bootstraps.
-const TRACKERS: &[&str] = &[
+pub(crate) const TRACKERS: &[&str] = &[
     "http://nyaa.tracker.wf:7777/announce",
     "udp://open.stealth.si:80/announce",
     "udp://tracker.opentrackr.org:1337/announce",
@@ -702,6 +702,16 @@ const DEAD_SWARM_PENALTY: i64 = 350;
 /// release outranked one with 52.
 const TRUSTED_BONUS: i64 = 100;
 
+/// Build a magnet from a bare infohash, with the standard open trackers
+/// appended so peers are found before DHT bootstraps.
+pub(crate) fn magnet_from_infohash(infohash: &str) -> String {
+    let trackers: String = TRACKERS
+        .iter()
+        .map(|t| format!("&tr={}", urlencoding_encode(t)))
+        .collect();
+    format!("magnet:?xt=urn:btih:{}{}", infohash, trackers)
+}
+
 /// Score contribution from a swarm's seeder count.
 ///
 /// Square-root rather than linear: the difference between 2 and 20 seeders
@@ -710,7 +720,7 @@ const TRUSTED_BONUS: i64 = 100;
 /// this backwards — it was too flat at the low end to separate a dead swarm
 /// from a live one, and seeder count is the single strongest predictor of
 /// whether a torrent actually starts.
-fn seeder_score(seeders: u64) -> i64 {
+pub(crate) fn seeder_score(seeders: u64) -> i64 {
     ((seeders.min(SEEDER_SATURATION) as f64).sqrt() * SEEDER_WEIGHT) as i64
 }
 
@@ -994,11 +1004,7 @@ async fn search_nyaa(
         let magnet = if infohash.is_empty() {
             None
         } else {
-            let trackers: String = TRACKERS
-                .iter()
-                .map(|t| format!("&tr={}", urlencoding_encode(t)))
-                .collect();
-            Some(format!("magnet:?xt=urn:btih:{}{}", infohash, trackers))
+            Some(magnet_from_infohash(&infohash))
         };
         out.push(Candidate {
             name,
@@ -1100,7 +1106,7 @@ pub async fn find_candidates(
     all
 }
 
-fn urlencoding_encode(s: &str) -> String {
+pub(crate) fn urlencoding_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {

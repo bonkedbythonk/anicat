@@ -30,6 +30,17 @@ export interface MediaCoverImage {
 
 export interface MediaItem {
   id: number;
+  /** Cinema mode only, merged into the item by the tmdb_detail command: the
+   *  one-line tagline, a YouTube trailer id, the top-billed cast, the studios
+   *  or networks behind it, and similar titles. Merged rather than nested so
+   *  the fields that map onto this shape stay where every other consumer
+   *  already reads them. */
+  tagline?: string;
+  trailer_id?: string;
+  cast?: { id: number | null; name: string | null; character: string | null; photo: string | null }[];
+  studio_names?: string[];
+  similar?: MediaItem[];
+  gallery?: string[];
   id_mal?: number;
   type?: "ANIME" | "MANGA";
   title: MediaTitle;

@@ -47,6 +47,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
+  const cinemaEnabled = useAppStore((s) => s.cinemaEnabled);
+  const setCinemaEnabled = useAppStore((s) => s.setCinemaEnabled);
 
   const account: AccountState = connectedUser
     ? "connected"
@@ -367,6 +369,32 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </section>
+
+                  <section className={CARD_CLASS}>
+                    <div className={`${CARD_HEADER_CLASS} flex items-center justify-between gap-4`}>
+                      <div>
+                        <h2 className="text-[13px] font-semibold">Movies and series</h2>
+                        <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                          A second mode, switched with the sidebar logo. Needs a free TMDB token, added later in
+                          Settings — this only turns the switch on.
+                        </p>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={cinemaEnabled}
+                        aria-label="Movies and series"
+                        onClick={() => setCinemaEnabled(!cinemaEnabled)}
+                        className={`relative h-[22px] w-[38px] shrink-0 rounded-full border-none cursor-pointer transition-colors ${
+                          cinemaEnabled ? "bg-accent" : "bg-foreground/20"
+                        }`}
+                      >
+                        <span
+                          className="absolute top-0.5 h-[18px] w-[18px] rounded-full bg-foreground transition-all"
+                          style={{ left: cinemaEnabled ? "18px" : "2px" }}
+                        />
+                      </button>
                     </div>
                   </section>
                 </div>

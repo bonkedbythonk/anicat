@@ -5,6 +5,8 @@
 //! external client, no scraping of player pages — torrents don't rot the way
 //! streaming-site extractors do.
 
+pub mod cinema;
+pub mod series;
 pub mod search;
 pub mod stream;
 
@@ -60,6 +62,14 @@ pub struct ResolveTarget<'a> {
     /// name. That candidate is tried first; the rest stay as fallbacks so a
     /// pick that turns out to be dead still plays something.
     pub chosen_name: Option<String>,
+    /// Set for a film, which is searched by title and year rather than by
+    /// episode. Everything past candidate generation — the session, the
+    /// candidate loop, the range stream — is identical either way, so this
+    /// only swaps which search runs.
+    pub movie: Option<cinema::MovieCriteria>,
+    /// Set for an episode of a series, which is searched by season and
+    /// episode. Mutually exclusive with `movie`.
+    pub series: Option<series::EpisodeCriteria>,
 }
 
 /// One selectable torrent release, surfaced to the stream-server picker.
@@ -175,7 +185,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name } = target;
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria } = target;
         let criteria = search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client };
         let session = self.session().await?;
 
@@ -195,8 +205,13 @@ impl TorrentManager {
         if titles.is_empty() {
             return Err("No title to search torrents for".into());
         }
-        let mut candidates =
-            search::find_candidates(client, titles, criteria).await;
+        let mut candidates = match (movie, series_criteria) {
+            (Some(movie_criteria), _) => cinema::find_movie_candidates(client, titles, movie_criteria).await,
+            (_, Some(episode_criteria)) => {
+                series::find_episode_candidates(client, titles, episode_criteria).await
+            }
+            _ => search::find_candidates(client, titles, criteria).await,
+        };
         // Honor an explicit release pick: float the matching candidate to the
         // front (stable partition keeps the rest as ordered fallbacks).
         if let Some(ref chosen) = chosen_name {
@@ -210,16 +225,24 @@ impl TorrentManager {
             candidates.first().map(|c| c.name.as_str()).unwrap_or("-")
         );
         if candidates.is_empty() {
-            return Err(format!(
-                "No HD torrent found for '{}' episode {}",
-                titles[0], episode
-            ));
+            return Err(if movie.is_some() || series_criteria.is_some() {
+                format!("No torrent found for '{}'", titles[0])
+            } else {
+                format!("No HD torrent found for '{}' episode {}", titles[0], episode)
+            });
         }
+
+        // Which number the *files* inside a torrent use. For a series that is
+        // the within-season episode, since a season pack names its files
+        // SxxEyy — while `episode` stays absolute, because it is the identity
+        // the resolved-stream cache and the whole app are keyed by, and
+        // within-season numbers collide across seasons.
+        let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
 
         let mut last_err = String::new();
         for cand in candidates.iter().take(4) {
             match self
-                .try_candidate(client, &session, cand, episode, episode_count)
+                .try_candidate(client, &session, cand, file_episode, episode_count)
                 .await
             {
                 Ok(r) => {
@@ -251,16 +274,31 @@ impl TorrentManager {
         client: &reqwest::Client,
         target: ResolveTarget<'_>,
     ) -> Vec<TorrentChoice> {
-        let ResolveTarget { episode, titles, allow_episodeless, prefer_dub, browser_client, .. } = target;
+        let ResolveTarget {
+            episode, titles, allow_episodeless, prefer_dub, browser_client,
+            movie, series: series_criteria, ..
+        } = target;
         if titles.is_empty() {
             return vec![];
         }
-        search::find_candidates(
-            client,
-            titles,
-            search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client },
-        )
-            .await
+        // Which catalog this belongs to has to be honoured here exactly as it
+        // is in `resolve`. Destructuring these away and always running the
+        // anime search meant the picker offered nothing at all for a film or
+        // an episode: it searched nyaa for a title nyaa has never carried.
+        match (movie, series_criteria) {
+            (Some(movie_criteria), _) => cinema::find_movie_candidates(client, titles, movie_criteria).await,
+            (_, Some(episode_criteria)) => {
+                series::find_episode_candidates(client, titles, episode_criteria).await
+            }
+            _ => {
+                search::find_candidates(
+                    client,
+                    titles,
+                    search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client },
+                )
+                .await
+            }
+        }
             .into_iter()
             .map(|c| TorrentChoice {
                 name: c.name,
@@ -814,6 +852,8 @@ mod tests {
                     browser_client: false,
                     prefer_dub: false,
                     chosen_name: None,
+                    movie: None,
+                    series: None,
                 },
                 13370,
             )
@@ -835,6 +875,115 @@ mod tests {
         // Matroska magic: 1A 45 DF A3
         assert_eq!(&buf[..4], &[0x1A, 0x45, 0xDF, 0xA3], "not an mkv header");
         stream.seek(std::io::SeekFrom::Start(1024)).await.unwrap();
+
+        let _ = session.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored`
+    ///
+    /// The film counterpart of `live_resolve_and_stream`: proves the whole
+    /// cinema path down to real bytes — apibay search, year matching, magnet,
+    /// librqbit session, and the file the range endpoint would serve. mpv is
+    /// not involved, so this is the strongest check available without a
+    /// window on screen.
+    #[tokio::test]
+    #[ignore]
+    async fn live_resolve_and_stream_a_film() {
+        let dir = std::env::temp_dir().join("anicat-torrent-film-test");
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let titles = vec!["Dune".to_string()];
+        // A cinema id, as the playback path would pass it.
+        let media_id = crate::media_id::encode(crate::media_id::MediaSource::TmdbMovie, 438631).unwrap();
+        let url = mgr
+            .resolve(
+                &client(),
+                ResolveTarget {
+                    media_id,
+                    episode: 1,
+                    titles: &titles,
+                    allow_episodeless: true,
+                    episode_count: Some(1),
+                    browser_client: false,
+                    prefer_dub: false,
+                    chosen_name: None,
+                    movie: Some(cinema::MovieCriteria { year: Some(2021), browser_client: false }),
+                    series: None,
+                },
+                13370,
+            )
+            .await
+            .expect("resolve failed");
+        println!("film stream url: {}", url);
+
+        let session = mgr.session().await.unwrap();
+        let resolved = *mgr.resolved.lock().await.get(&(media_id, 1)).unwrap();
+        let handle = session.get(resolved.torrent_id.into()).unwrap();
+        let mut stream = handle.stream(resolved.file_id).unwrap();
+        let mut buf = vec![0u8; 1024 * 1024];
+        tokio::time::timeout(std::time::Duration::from_secs(240), stream.read_exact(&mut buf))
+            .await
+            .expect("timed out reading stream")
+            .expect("read failed");
+        // Films ship as mkv or mp4; accept either container rather than
+        // pinning the test to whichever release happens to win today.
+        let mkv = &buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
+        let mp4 = &buf[4..8] == b"ftyp";
+        assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
+
+        let _ = session.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored`
+    ///
+    /// The series counterpart: Knaben search, SxxEyy matching, magnet,
+    /// session, and real bytes off the stream the range endpoint serves.
+    #[tokio::test]
+    #[ignore]
+    async fn live_resolve_and_stream_an_episode() {
+        let dir = std::env::temp_dir().join("anicat-torrent-series-test");
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let titles = vec!["Silo".to_string()];
+        let media_id = crate::media_id::encode(crate::media_id::MediaSource::TmdbTv, 125988).unwrap();
+        let url = mgr
+            .resolve(
+                &client(),
+                ResolveTarget {
+                    media_id,
+                    // Absolute numbering: episode 1 is S01E01 here.
+                    episode: 1,
+                    titles: &titles,
+                    allow_episodeless: false,
+                    episode_count: None,
+                    browser_client: false,
+                    prefer_dub: false,
+                    chosen_name: None,
+                    movie: None,
+                    series: Some(series::EpisodeCriteria {
+                        season: 1,
+                        episode: 1,
+                        browser_client: false,
+                    }),
+                },
+                13370,
+            )
+            .await
+            .expect("resolve failed");
+        println!("episode stream url: {}", url);
+
+        let session = mgr.session().await.unwrap();
+        let resolved = *mgr.resolved.lock().await.get(&(media_id, 1)).unwrap();
+        let handle = session.get(resolved.torrent_id.into()).unwrap();
+        let mut stream = handle.stream(resolved.file_id).unwrap();
+        let mut buf = vec![0u8; 1024 * 1024];
+        tokio::time::timeout(std::time::Duration::from_secs(240), stream.read_exact(&mut buf))
+            .await
+            .expect("timed out reading stream")
+            .expect("read failed");
+        let mkv = &buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
+        let mp4 = &buf[4..8] == b"ftyp";
+        assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
 
         let _ = session.stop().await;
         let _ = std::fs::remove_dir_all(&dir);

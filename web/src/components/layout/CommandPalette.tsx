@@ -29,6 +29,11 @@ const NAV_TARGETS: { label: string; view: ViewType }[] = [
   { label: "Go to Settings", view: "settings" },
 ];
 
+/** Cinema mode has no Manga, Schedule or History view to jump to. */
+const CINEMA_NAV_TARGETS = NAV_TARGETS.filter(
+  (t) => !["schedule", "manga", "profile"].includes(t.view),
+);
+
 function PaletteRowButton({ row }: { row: PaletteRow }) {
   const { ref, isFocused, tabIndex } = useFocusable<HTMLButtonElement>();
 
@@ -140,6 +145,7 @@ export function CommandPalette() {
   const isAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const activeFocusScope = useAppStore((s) => s.activeFocusScope);
   const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+  const appMode = useAppStore((s) => s.appMode);
 
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -147,20 +153,23 @@ export function CommandPalette() {
 
   // Library pool: watching + repeating + planning (the lists you actually
   // jump to). Shares query keys with the home view, so usually cache-warm.
+  // All three are AniList-backed, so cinema mode leaves them off rather than
+  // offering anime rows in a movie world.
+  const animeContent = open && isAuthenticated && appMode === "anime";
   const watchingQ = useQuery({
     queryKey: ["home-watching"],
     queryFn: () => mediaApi.getUserList("watching", "ANIME"),
-    enabled: open && isAuthenticated,
+    enabled: animeContent,
   });
   const repeatingQ = useQuery({
     queryKey: ["home-repeating"],
     queryFn: () => mediaApi.getUserList("repeating", "ANIME"),
-    enabled: open && isAuthenticated,
+    enabled: animeContent,
   });
   const planningQ = useQuery({
     queryKey: ["home-planning"],
     queryFn: () => mediaApi.getUserList("planning", "ANIME"),
-    enabled: open && isAuthenticated,
+    enabled: animeContent,
   });
 
   const [debounced, setDebounced] = useState("");
@@ -172,7 +181,7 @@ export function CommandPalette() {
   const anilistQ = useQuery({
     queryKey: ["palette-search", debounced],
     queryFn: () => mediaApi.search(debounced, "ANIME", 1, {}),
-    enabled: open && debounced.length >= 3,
+    enabled: open && debounced.length >= 3 && appMode === "anime",
     staleTime: 60_000,
   });
 
@@ -202,11 +211,16 @@ export function CommandPalette() {
     for (const m of libMatches) {
       const progress = m.user_status?.progress ?? m.media_list_entry?.progress ?? 0;
       const total = m.episodes || 0;
+      // A rewatch whose progress still sits at the old total restarts at EP 1
+      // (AniList keeps a REPEATING entry there until the first episode lands).
+      const isRepeating =
+        (m.user_status?.status || m.media_list_entry?.status || "").toUpperCase() === "REPEATING";
+      const nextEp = isRepeating && total > 0 && progress >= total ? 1 : progress + 1;
       out.push({
         kind: "library",
         key: `lib-${m.id}`,
         label: m.title.english || m.title.romaji || "",
-        hint: `EP ${progress + 1}${total ? ` / ${total}` : ""}`,
+        hint: `EP ${nextEp}${total ? ` / ${total}` : ""}`,
         cover: m.cover_image?.medium || m.cover_image?.large,
         run: () => {
           close();
@@ -217,17 +231,19 @@ export function CommandPalette() {
         out.push({
           kind: "action",
           key: `play-${m.id}`,
-          label: `Resume ${m.title.english || m.title.romaji} EP ${progress + 1}`,
+          label: `Resume ${m.title.english || m.title.romaji} EP ${nextEp}`,
           hint: "Enter",
           run: () => {
             close();
-            openDetail(m, "play");
+            // Same episode the label promises — leaving it out lets the
+            // detail page's (possibly stale) cached progress pick instead.
+            openDetail(m, "play", String(nextEp));
           },
         });
       }
     }
 
-    for (const nav of NAV_TARGETS) {
+    for (const nav of appMode === "cinema" ? CINEMA_NAV_TARGETS : NAV_TARGETS) {
       if (!q || nav.label.toLowerCase().includes(q)) {
         out.push({
           kind: "nav",
@@ -258,7 +274,7 @@ export function CommandPalette() {
     }
 
     return out;
-  }, [query, watchingQ.data, repeatingQ.data, planningQ.data, anilistQ.data]);
+  }, [query, watchingQ.data, repeatingQ.data, planningQ.data, anilistQ.data, appMode]);
 
   useEffect(() => {
     if (!open) return;

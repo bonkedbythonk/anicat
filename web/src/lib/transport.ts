@@ -100,6 +100,12 @@ const ROUTES: Record<string, Route> = {
   get_staff: { method: "GET", path: (a) => `/mobile-api/staff/${a.staffId}${qs({ page: a.page })}` },
   get_smart_playlist: { method: "GET", path: () => "/mobile-api/smart-playlist" },
 
+  tmdb_row: { method: "GET", path: (a) => `/mobile-api/cinema/row${qs({ row: a.row, page: a.page })}` },
+  tmdb_search: { method: "GET", path: (a) => `/mobile-api/cinema/search${qs({ query: a.query, page: a.page })}` },
+  tmdb_detail: { method: "GET", path: (a) => `/mobile-api/cinema/${a.mediaId}` },
+  tmdb_configured: { method: "GET", path: () => "/mobile-api/cinema/configured" },
+  tmdb_episodes: { method: "GET", path: (a) => `/mobile-api/cinema/${a.mediaId}/episodes` },
+
   get_episodes: {
     method: "GET",
     path: (a) => `/mobile-api/media/${a.mediaId}/episodes${qs({

@@ -64,6 +64,15 @@ impl AniListCache {
             // unique queries while typing, which no cache helps (debounce
             // does). This mainly spares repeats/back-navigation.
             "search_media" => Duration::from_secs(10 * 60),
+            // TMDB's own lists turn over slowly (trending is weekly, popular
+            // barely moves day to day), and a detail record is near-static.
+            "tmdb_row" => Duration::from_secs(6 * 3600),
+            "tmdb_search" => Duration::from_secs(10 * 60),
+            "tmdb_detail" => Duration::from_secs(24 * 3600),
+            // An episode list changes when a season airs, not day to day, but
+            // it costs one request per season so it is worth holding longer
+            // than a detail record.
+            "tmdb_episodes" => Duration::from_secs(24 * 3600),
             _ => Duration::from_secs(60),
         }
     }

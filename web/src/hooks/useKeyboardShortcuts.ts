@@ -7,6 +7,9 @@ const VIEW_KEYS = [
   "notifications", "profile", "settings", "downloads",
 ] as const;
 
+/** The views cinema mode actually has. Settings and Downloads are shared. */
+const CINEMA_VIEWS: ViewType[] = ["home", "search", "lists", "settings", "downloads"];
+
 const LETTER_SHORTCUTS: Record<string, ViewType> = {
   "h": "home",
   "/": "search",
@@ -22,9 +25,13 @@ export function useKeyboardShortcuts() {
   const selectedItem = useAppStore((s) => s.selectedItem);
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+  const appMode = useAppStore((s) => s.appMode);
 
   useEffect(() => {
     function navigate(view: ViewType) {
+      // Cinema mode has no Manga, Schedule, History or Notifications, so their
+      // shortcuts would otherwise land on a view the sidebar can't highlight.
+      if (appMode === "cinema" && !CINEMA_VIEWS.includes(view)) return;
       // If a detail page is open, close it first so the view switch is
       // actually visible and the sidebar highlight stays in sync.
       if (selectedItem) closeDetail();
@@ -83,5 +90,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setCurrentView, selectedItem, closeDetail, setPaletteOpen, setActiveFocusScope]);
+  }, [setCurrentView, selectedItem, closeDetail, setPaletteOpen, setActiveFocusScope, appMode]);
 }

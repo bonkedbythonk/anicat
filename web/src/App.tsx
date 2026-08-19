@@ -15,6 +15,12 @@ import { ListsView } from "@/components/views/ListsView";
 import { ScheduleView } from "@/components/views/ScheduleView";
 
 import { ProfileView } from "@/components/views/ProfileView";
+import { CinemaPlaceholderView } from "@/components/views/CinemaPlaceholderView";
+import { CinemaHomeView } from "@/components/views/CinemaHomeView";
+import { CinemaSearchView } from "@/components/views/CinemaSearchView";
+import { CinemaDetail } from "@/components/views/CinemaDetail";
+import { CinemaLibraryView } from "@/components/views/CinemaLibraryView";
+import { isCinemaId } from "@/lib/mediaId";
 
 const MangaView = lazy(() => import("@/components/views/MangaView").then(m => ({ default: m.MangaView })));
 const SettingsView = lazy(() => import("@/components/views/SettingsView").then(m => ({ default: m.SettingsView })));
@@ -39,6 +45,7 @@ async function loadConfig() {
 
 export default function App() {
   const currentView = useAppStore((s) => s.currentView);
+  const appMode = useAppStore((s) => s.appMode);
   const selectedItem = useAppStore((s) => s.selectedItem);
   const initialAction = useAppStore((s) => s.initialAction);
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
@@ -195,6 +202,19 @@ export default function App() {
 
   const renderView = () => {
     const onSelect = openDetail;
+    // Settings and Downloads are shared between worlds. Library is the one
+    // cinema view still waiting on a backend — it needs watch data, which
+    // arrives with Trakt.
+    if (appMode === "cinema") {
+      switch (currentView) {
+        case "home": return <CinemaHomeView onSelect={onSelect} />;
+        case "search": return <CinemaSearchView onSelect={onSelect} />;
+        case "lists": return <CinemaLibraryView onSelect={onSelect} />;
+        case "settings": return <SettingsView health={health} />;
+        case "downloads": return <DownloadsView />;
+        default: return <CinemaPlaceholderView />;
+      }
+    }
     switch (currentView) {
       case "home": return <HomeView onSelect={onSelect} />;
       case "manga": return <MangaView onSelect={onSelect} />;
@@ -341,7 +361,15 @@ export default function App() {
               transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
               className="flex-1 overflow-y-auto scroll-container transform-gpu h-full w-full"
             >
-              <MediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
+              {/* A cinema item must never reach MediaDetail: that component
+                  drives the anime pipeline, and pointing it at a film starts
+                  an AniList lookup, an anineko and nyaa episode scrape, and a
+                  stream preload for a title none of them carry. */}
+              {isCinemaId(selectedItem.id) ? (
+                <CinemaDetail item={selectedItem} onClose={closeDetail} onSelect={openDetail} />
+              ) : (
+                <MediaDetail item={selectedItem} initialAction={initialAction || undefined} onClose={closeDetail} />
+              )}
             </motion.div>
           ) : (
             <motion.div

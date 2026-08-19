@@ -71,6 +71,11 @@ pub fn routes() -> Router<ProxyState> {
         .route("/media/seasonal", get(get_seasonal))
         .route("/media/upcoming", get(get_upcoming))
         .route("/smart-playlist", get(get_smart_playlist))
+        .route("/cinema/row", get(tmdb_row))
+        .route("/cinema/search", get(tmdb_search))
+        .route("/cinema/configured", get(tmdb_configured))
+        .route("/cinema/{media_id}", get(tmdb_detail))
+        .route("/cinema/{media_id}/episodes", get(tmdb_episodes))
         .route("/media/{id}", get(get_media_detail))
         .route("/media/{id}/characters", get(get_media_characters))
         .route("/staff/{id}", get(get_staff))
@@ -361,6 +366,63 @@ async fn get_trending(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let scoped = state.scoped_for(auth).await;
     ok_or_500(crate::commands::media::get_trending_impl(&scoped, q.page, q.media_type).await)
+}
+
+// ── cinema mode (TMDB) ─────────────────────────────────────
+//
+// The TMDB token belongs to the app rather than to a person, so unlike the
+// AniList routes these need no per-user scoping — every friend reads the same
+// catalog through the owner's one token.
+
+#[derive(Deserialize)]
+struct CinemaRowQuery {
+    row: String,
+    page: Option<i64>,
+}
+
+async fn tmdb_row(
+    State(state): State<ProxyState>,
+    _auth: AuthedUser,
+    Query(q): Query<CinemaRowQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::cinema::tmdb_row_impl(&state.app_state, q.row, q.page).await)
+}
+
+#[derive(Deserialize)]
+struct CinemaSearchQuery {
+    query: String,
+    page: Option<i64>,
+}
+
+async fn tmdb_search(
+    State(state): State<ProxyState>,
+    _auth: AuthedUser,
+    Query(q): Query<CinemaSearchQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::cinema::tmdb_search_impl(&state.app_state, q.query, q.page).await)
+}
+
+async fn tmdb_detail(
+    State(state): State<ProxyState>,
+    _auth: AuthedUser,
+    Path(media_id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::cinema::tmdb_detail_impl(&state.app_state, media_id).await)
+}
+
+async fn tmdb_episodes(
+    State(state): State<ProxyState>,
+    _auth: AuthedUser,
+    Path(media_id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    ok_or_500(crate::commands::cinema::tmdb_episodes_impl(&state.app_state, media_id).await)
+}
+
+async fn tmdb_configured(
+    State(state): State<ProxyState>,
+    _auth: AuthedUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    Ok(Json(Value::Bool(state.app_state.tmdb_client.has_token())))
 }
 
 #[derive(Deserialize)]

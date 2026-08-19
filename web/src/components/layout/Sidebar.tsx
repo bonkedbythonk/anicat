@@ -18,6 +18,15 @@ const libraryItems: NavItem[] = [
   { label: "History", view: "profile" },
 ];
 
+// Cinema mode drops Manga (no equivalent) and Schedule (built on AniList
+// airing data, which has no counterpart until TV series land). History stays
+// out until there is watch data behind it.
+const cinemaItems: NavItem[] = [
+  { label: "Up Next", view: "home", shortcut: "H" },
+  { label: "Library", view: "lists", shortcut: "L" },
+  { label: "Search", view: "search", shortcut: "/" },
+];
+
 const systemItems: NavItem[] = [
   { label: "Downloads", view: "downloads", shortcut: "D" },
   { label: "Settings", view: "settings" },
@@ -86,11 +95,54 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
   );
 }
 
+/** The logo, which doubles as the switch between worlds once cinema mode is
+ *  enabled in Settings. Until then it stays the decorative mark it has always
+ *  been — an inert button would only advertise a mode with nothing behind it. */
+function ModeSwitch() {
+  const appMode = useAppStore((s) => s.appMode);
+  const setAppMode = useAppStore((s) => s.setAppMode);
+  const cinemaEnabled = useAppStore((s) => s.cinemaEnabled);
+  const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
+
+  const mark = (
+    <img src="/anicat_logo.png" alt="" className="h-20 object-contain filter grayscale" />
+  );
+
+  if (!cinemaEnabled) {
+    return (
+      <div className="flex justify-center pb-2 opacity-10 pointer-events-none select-none mix-blend-luminosity">
+        {mark}
+      </div>
+    );
+  }
+
+  const toCinema = appMode === "anime";
+
+  return (
+    <div className="flex flex-col items-center gap-1 pb-2">
+      <button
+        ref={ref}
+        tabIndex={tabIndex}
+        onClick={() => setAppMode(toCinema ? "cinema" : "anime")}
+        title={toCinema ? "Switch to movies and series" : "Switch to anime and manga"}
+        aria-label={toCinema ? "Switch to movies and series" : "Switch to anime and manga"}
+        className="flex flex-col items-center rounded-md px-2 py-1 opacity-25 hover:opacity-70 focus-visible:opacity-70 cursor-pointer select-none mix-blend-luminosity transition-opacity"
+      >
+        {mark}
+      </button>
+      <span aria-hidden="true" className="meta-mono text-[9px] text-muted-foreground">
+        {appMode === "cinema" ? "Movies and series" : "Anime and manga"}
+      </span>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
   const apiConnected = useAppStore((s) => s.apiConnected);
   const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const isOffline = useAppStore((s) => s.isOffline);
+  const appMode = useAppStore((s) => s.appMode);
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
 
   const syncLabel = isOffline
@@ -112,14 +164,12 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto scrollbar-hide pb-2">
         {/* "Browse", not "Library" — the group used to share its name with the
             Library item inside it. */}
-        <NavGroup title="Browse" items={libraryItems} />
+        <NavGroup title="Browse" items={appMode === "cinema" ? cinemaItems : libraryItems} />
         <NavGroup title="System" items={systemItems} />
       </nav>
 
       <div className="px-4 pb-4 space-y-3">
-        <div className="flex justify-center pb-2 opacity-10 pointer-events-none select-none mix-blend-luminosity">
-          <img src="/anicat_logo.png" alt="Anicat Logo" className="h-20 object-contain filter grayscale" />
-        </div>
+        <ModeSwitch />
         <button
           ref={ref}
           tabIndex={tabIndex}

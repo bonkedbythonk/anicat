@@ -70,6 +70,16 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
 
   const [imageLoaded, setImageLoaded] = useState(false);
 
+  // A cached image can finish decoding before React attaches onLoad, and then
+  // the fade-in never fires and the poster stays at opacity-0 — a blank card
+  // over a perfectly good image. AniList covers hide this because they go
+  // through the local proxy and are never that fast; TMDB's CDN is. Ask the
+  // element itself on mount rather than waiting for an event that already
+  // happened.
+  const imageRef = useCallback((node: HTMLImageElement | null) => {
+    if (node?.complete && node.naturalWidth > 0) setImageLoaded(true);
+  }, []);
+
   return (
     <button
       ref={ref}
@@ -87,6 +97,7 @@ const MediaCard = memo(function MediaCard({ item, onSelect }: MediaCardProps) {
           made the roving-tabindex card look focused when nothing was. */}
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-surface border border-border card-glow">
         <img
+          ref={imageRef}
           src={item.cover_image?.large || item.cover_image?.medium}
           alt={title}
           loading="lazy"

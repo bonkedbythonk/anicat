@@ -97,9 +97,13 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
 
   const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
 
-  const { data: fullItemData, isLoading: loading } = useQuery({
+  const { data: fullItemData, isLoading: loading, isFetching: detailFetching } = useQuery({
     queryKey: ["media-detail", item.id],
     queryFn: () => mediaApi.getDetails(item.id, isManga ? "MANGA" : "ANIME"),
+    // Always revalidate on mount rather than inheriting the global 5min
+    // staleTime: this entry's progress is what a quick-play button turns into
+    // an episode number, and the persisted cache can be a day old.
+    staleTime: 0,
   });
   const fullItem = fullItemData ?? item;
   const banner = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large;
@@ -201,7 +205,12 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
   // page only applies to this one automatic trigger, never to later manual
   // clicks of the Continue button (see handlePlayNext).
   useEffect(() => {
-    if (initialAction === "play" && !loading && config && !hasTriggeredInitial) {
+    // With no episode handed to us the trigger derives one from cached
+    // progress, and the persist-client plugin makes `isLoading` false on the
+    // first commit whenever a persisted detail exists — stale progress there
+    // starts the show at episode 1. Wait for the refetch in that case.
+    const needsFreshProgress = !initialPlayEpisode && detailFetching;
+    if (initialAction === "play" && !loading && !needsFreshProgress && config && !hasTriggeredInitial) {
       setHasTriggeredInitial(true);
       const initialProvider = config?.general?.provider as string | undefined;
       handlePlayNext(
@@ -210,7 +219,7 @@ export function MobileMediaDetail({ item, onClose, initialAction }: MobileMediaD
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialAction, loading, config, hasTriggeredInitial]);
+  }, [initialAction, loading, detailFetching, initialPlayEpisode, config, hasTriggeredInitial]);
 
   useEffect(() => {
     if (!synopsisRef.current) return;

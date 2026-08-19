@@ -89,8 +89,22 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                     config.api.anilist_token = t.clone();
                     state.anilist_client.set_token(t);
                 }
+                "api.tmdb_token" => {
+                    let token = value.as_str().map(|s| s.to_string());
+                    let t = if token.as_deref() == Some("") { None } else { token };
+                    config.api.tmdb_token = t.clone();
+                    // Push it into the live client too, so cinema mode starts
+                    // working the moment the field is saved rather than at the
+                    // next launch.
+                    state.tmdb_client.set_token(t);
+                }
                 "api" => {
                     if let Some(api_obj) = value.as_object() {
+                        if let Some(token) = api_obj.get("tmdb_token").and_then(|v| v.as_str()) {
+                            let t = if token.is_empty() { None } else { Some(token.to_string()) };
+                            config.api.tmdb_token = t.clone();
+                            state.tmdb_client.set_token(t);
+                        }
                         if let Some(token) = api_obj.get("token").or_else(|| api_obj.get("anilist_token")).and_then(|v| v.as_str()) {
                             let t = if token.is_empty() { None } else { Some(token.to_string()) };
                             config.api.anilist_token = t.clone();

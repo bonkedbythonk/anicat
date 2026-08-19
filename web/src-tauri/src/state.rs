@@ -66,6 +66,10 @@ pub struct ApiConfig {
     pub anilist_token: Option<String>,
     #[serde(default)]
     pub anilist_username: Option<String>,
+    /// TMDB read access token, for cinema mode's catalog. Absent until the
+    /// user pastes one in; cinema mode has no metadata without it.
+    #[serde(default)]
+    pub tmdb_token: Option<String>,
 }
 
 /// Settings for the LAN-facing mobile PWA. This is an anti-accidental-entry
@@ -143,6 +147,10 @@ pub struct AppStateInner {
     pub config_path: String,
     pub db_path: String,
     pub anilist_client: crate::anilist::AniListClient,
+    /// Cinema mode's catalog. Shared across users on the Pi rather than held
+    /// per-user like the AniList client: a TMDB token identifies the app, not
+    /// a person, so there is nothing to isolate.
+    pub tmdb_client: crate::tmdb::TmdbClient,
     pub http_client: reqwest::Client,
     pub scraper_manager: Arc<crate::scraper::ScraperManager>,
     pub cache: crate::cache::AniListCache,
@@ -360,6 +368,9 @@ impl AppState {
             anilist_client.set_username(Some(username.clone()));
         }
 
+        let tmdb_client =
+            crate::tmdb::TmdbClient::new(http_client.clone(), config.api.tmdb_token.clone());
+
         let (scraper_python, scraper_script) = resolve_scraper_paths();
         let scraper_manager = crate::scraper::ScraperManager::new(
             http_client.clone(),
@@ -378,6 +389,7 @@ impl AppState {
                 config_path: config_path.to_string_lossy().to_string(),
                 db_path,
                 anilist_client,
+                tmdb_client,
                 http_client,
                 scraper_manager: Arc::new(scraper_manager),
                 cache: crate::cache::AniListCache::new(),
@@ -673,6 +685,7 @@ mod tests {
                 config_path: String::new(),
                 db_path: ":memory:".to_string(),
                 anilist_client: crate::anilist::AniListClient::new(http_client.clone(), None),
+                tmdb_client: crate::tmdb::TmdbClient::new(http_client.clone(), None),
                 http_client,
                 scraper_manager: Arc::new(crate::scraper::ScraperManager::new(reqwest::Client::new(), String::new(), String::new())),
                 cache: crate::cache::AniListCache::new(),

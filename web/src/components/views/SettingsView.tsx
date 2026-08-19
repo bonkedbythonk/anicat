@@ -17,6 +17,8 @@ export function SettingsView({ health }: SettingsViewProps) {
   const apiAuthenticated = useAppStore((s) => s.apiAuthenticated);
   const authError = useAppStore((s) => s.authError);
   const tokenPresent = useAppStore((s) => s.tokenPresent);
+  const cinemaEnabled = useAppStore((s) => s.cinemaEnabled);
+  const setCinemaEnabled = useAppStore((s) => s.setCinemaEnabled);
   const [config, setConfig] = useState<Record<string, Record<string, unknown>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -514,6 +516,29 @@ export function SettingsView({ health }: SettingsViewProps) {
               </CardSection>
 
               <CardSection title="Advanced" description="Rarely need to change these after initial setup.">
+                <SettingField
+                  label="Movies and series"
+                  description="Adds a second mode for movies and series. Click the logo at the bottom of the sidebar to switch worlds. Still being built, so it has no catalogue yet."
+                >
+                  <SettingToggle on={cinemaEnabled} onChange={setCinemaEnabled} />
+                </SettingField>
+
+                {cinemaEnabled && (
+                  <SettingField
+                    label="TMDB Token"
+                    description="Where movie and series details come from. Free from themoviedb.org, under Settings then API."
+                  >
+                    <input
+                      type="password"
+                      aria-label="TMDB token"
+                      value={String(config.api?.tmdb_token || "")}
+                      onChange={(e) => updateField("api", "tmdb_token", e.target.value)}
+                      placeholder="Paste your read access token"
+                      className="w-full bg-transparent border border-border rounded-md py-2.5 px-3 text-sm focus:border-accent outline-none transition-all"
+                    />
+                  </SettingField>
+                )}
+
                 <SettingField label="Discord Rich Presence" description="Show current anime in your Discord status.">
                   <SettingToggle
                     on={Boolean(config.general?.discord)}
@@ -1091,9 +1116,18 @@ function SettingField({ label, description, children, stack }: { label: string; 
   );
 }
 
-function SettingToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function SettingToggle({ on, onChange, disabled, ...rest }: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  // SettingField clones an aria-labelledby onto its child; without forwarding
+  // it the switch renders with no accessible name at all, which is what every
+  // toggle on this screen used to do.
+  "aria-labelledby"?: string;
+}) {
   return (
     <button
+      {...rest}
       role="switch"
       aria-checked={on}
       disabled={disabled}

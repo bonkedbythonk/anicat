@@ -1113,7 +1113,7 @@ mod tests {
             .expect("read failed");
         // Films ship as mkv or mp4; accept either container rather than
         // pinning the test to whichever release happens to win today.
-        let mkv = &buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
+        let mkv = buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
         let mp4 = &buf[4..8] == b"ftyp";
         assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
 
@@ -1167,7 +1167,7 @@ mod tests {
             .await
             .expect("timed out reading stream")
             .expect("read failed");
-        let mkv = &buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
+        let mkv = buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
         let mp4 = &buf[4..8] == b"ftyp";
         assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
 

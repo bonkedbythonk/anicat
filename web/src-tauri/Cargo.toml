@@ -1,6 +1,6 @@
 [package]
 name = "anicat"
-version = "5.6.0"
+version = "5.7.0"
 license = "GPL-3.0-only"
 edition = "2021"
 # Without this, adding the anicat-server [[bin]] below makes `cargo run`

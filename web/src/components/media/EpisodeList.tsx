@@ -269,7 +269,7 @@ export function EpisodeList({
       episodeNumber: parseInt(epNum, 10),
       title: mediaTitle,
       coverImage: coverImage,
-      statusText: selectedProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+      statusText: "Starting...",
       step: selectedProvider === "nyaa" ? 2 : 1,
     });
 
@@ -310,7 +310,7 @@ export function EpisodeList({
       episodeNumber: parseInt(epNum, 10),
       title: mediaTitle,
       coverImage: coverImage,
-      statusText: selectedProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+      statusText: "Starting...",
       step: selectedProvider === "nyaa" ? 2 : 1,
     });
 

@@ -125,7 +125,7 @@ impl AniListClient {
         }
 
         let query_first_line = query.lines().map(|s| s.trim()).find(|s| !s.is_empty()).unwrap_or("");
-        log::info!("Sending request to AniList API: query='{}' variables={}", query_first_line, vars_str);
+        log::debug!("Sending request to AniList API: query='{}' variables={}", query_first_line, vars_str);
         let resp = req
             .send()
             .await
@@ -172,7 +172,7 @@ impl AniListClient {
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));
         }
 
-        log::info!("AniList request succeeded (HTTP {})", status.as_u16());
+        log::debug!("AniList request succeeded (HTTP {})", status.as_u16());
 
         // Proactive throttle: when the remaining budget for this window runs
         // low, insert a short cooldown so the next requests spread out instead

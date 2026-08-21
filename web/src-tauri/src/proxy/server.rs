@@ -711,6 +711,13 @@ async fn player_preload_handler(
     if pb.total_episodes > 0 && next_ep > pb.total_episodes {
         return Ok("ok");
     }
+    // Matched on translation_type too — a sub/dub toggle restarts playback
+    // (see player_toggle_translation_handler) for the *current* episode, but
+    // this preload is for the *next* one and isn't touched by that restart,
+    // so it can still be sitting here resolved under the pre-toggle
+    // preference when auto-next later consumes it.
+    let translation_type = crate::commands::playback::effective_translation_type(&scoped, pb.media_id).await;
+
     // Already preloaded for this target — don't repeat. Matched on provider
     // too, like `preload_episode_impl` does: an entry resolved through a
     // different provider is a different stream, and `start_playback` won't
@@ -718,7 +725,7 @@ async fn player_preload_handler(
     {
         let slot = scoped.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
-            if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider && p.client == crate::state::StreamClient::Mpv {
+            if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider && p.client == crate::state::StreamClient::Mpv && p.translation_type == translation_type {
                 return Ok("ok");
             }
         }
@@ -772,6 +779,7 @@ async fn player_preload_handler(
                     episode_number: next_ep,
                     provider: pb.provider.clone(),
                     client: crate::state::StreamClient::Mpv,
+                    translation_type,
                     raw_url,
                     headers,
                     subtitle_url,

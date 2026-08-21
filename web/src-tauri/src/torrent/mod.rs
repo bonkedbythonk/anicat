@@ -259,7 +259,58 @@ impl TorrentManager {
         }
 
         let mut last_err = String::new();
-        for cand in candidates.iter().take(4) {
+        let mut candidates_iter = candidates.iter().take(4);
+
+        // Race the top two candidates instead of trying them one at a time.
+        // A dead-but-not-quite candidate (peers connect, then nothing —
+        // "no seeders (pre-buffer timed out)") burns most of PREBUFFER_TIMEOUT
+        // before the sequential loop even starts the next one; observed live,
+        // that alone was 35-40s of a 65s resolve. Racing means the wait is
+        // bounded by whichever candidate actually works, not by however long
+        // the first pick takes to fail.
+        if let (Some(cand_a), Some(cand_b)) = (candidates_iter.next(), candidates_iter.next()) {
+            let fut_a = self.try_candidate(client, &session, cand_a, file_episode, episode_count);
+            let fut_b = self.try_candidate(client, &session, cand_b, file_episode, episode_count);
+            tokio::pin!(fut_a);
+            tokio::pin!(fut_b);
+
+            let (result, winner, loser_fut, loser) = tokio::select! {
+                r = &mut fut_a => (r, cand_a, fut_b, cand_b),
+                r = &mut fut_b => (r, cand_b, fut_a, cand_a),
+            };
+
+            let result = match result {
+                Ok(r) => Ok((r, winner)),
+                Err(e) => {
+                    log::warn!("torrent: candidate '{}' failed: {}", winner.name, e);
+                    last_err = e;
+                    // The loser was still mid-flight, not dead — worth
+                    // waiting on rather than falling all the way through to
+                    // the sequential candidates below.
+                    match loser_fut.await {
+                        Ok(r) => Ok((r, loser)),
+                        Err(e) => {
+                            log::warn!("torrent: candidate '{}' failed: {}", loser.name, e);
+                            last_err = e;
+                            Err(())
+                        }
+                    }
+                }
+            };
+
+            if let Ok((r, cand)) = result {
+                self.resolved.lock().await.insert((media_id, episode), r);
+                let dir = self.cache_dir.clone();
+                tokio::task::spawn_blocking(move || cleanup_cache(&dir));
+                log::info!(
+                    "torrent: streaming '{}' (torrent {}, file {})",
+                    cand.name, r.torrent_id, r.file_id
+                );
+                return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
+            }
+        }
+
+        for cand in candidates_iter {
             match self
                 .try_candidate(client, &session, cand, file_episode, episode_count)
                 .await

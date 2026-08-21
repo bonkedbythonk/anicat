@@ -496,7 +496,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           episodeNumber: nextEpNum,
           title: title,
           coverImage: coverImg,
-          statusText: activeProvider === "nyaa" ? "Connecting to torrent swarm..." : "Searching stream sources...",
+          statusText: "Starting...",
           step: activeProvider === "nyaa" ? 2 : 1,
         });
 

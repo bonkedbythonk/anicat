@@ -52,7 +52,7 @@ pub async fn search_media_impl(
     year: Option<i64>,
     min_score: Option<i64>,
 ) -> Result<Value, String> {
-    log::info!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
+    log::debug!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
     let _has_token = state.anilist_client.has_token();
     // "ALL" is the combined anime+manga search the search view uses once there
     // is a query to run. AniList's `media(type:)` returns both types when the

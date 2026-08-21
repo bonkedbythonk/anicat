@@ -84,7 +84,7 @@ pub async fn get_user_list_impl(
                 for (idx, list) in lists.iter().enumerate() {
                     let name = list.get("name").and_then(|n| n.as_str()).unwrap_or("");
                     let entries = list.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0);
-                    log::info!("  List[{}]: name={}, entries={}", idx, name, entries);
+                    log::debug!("  List[{}]: name={}, entries={}", idx, name, entries);
                 }
             }
 

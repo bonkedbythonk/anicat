@@ -1439,11 +1439,13 @@ pub async fn preload_episode_impl(
         return Ok(());
     }
 
+    let translation_type = effective_translation_type(state, media_id).await;
+
     // Already preloaded for this exact target — skip.
     {
         let slot = state.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
-            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name && p.client == client {
+            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name && p.client == client && p.translation_type == translation_type {
                 return Ok(());
             }
         }
@@ -1474,6 +1476,7 @@ pub async fn preload_episode_impl(
                     episode_number,
                     provider: provider_name.clone(),
                     client,
+                    translation_type,
                     raw_url,
                     headers,
                     subtitle_url,
@@ -1799,6 +1802,15 @@ pub async fn start_playback(
             }
         }
 
+        // Recomputed here rather than reused from earlier in the function: a
+        // mid-playback sub/dub toggle writes the new preference and then
+        // calls start_playback for the very episode that may already have a
+        // preload cached under the *old* preference (the near-end preload
+        // fires long before a toggle could happen). Without this check the
+        // reuse below would hand back the stale-translation stream and the
+        // toggle would silently do nothing.
+        let translation_type = effective_translation_type(&state, media_id).await;
+
         let preloaded = {
             let mut slot = state.preloaded_stream.lock().await;
             match slot.take() {
@@ -1810,6 +1822,7 @@ pub async fn start_playback(
                         // never have been given, and vice versa; taking the
                         // wrong one silently plays the wrong file.
                         && p.client == crate::state::StreamClient::Mpv
+                        && p.translation_type == translation_type
                         && p.at.elapsed() < PRELOAD_MAX_AGE =>
                 {
                     Some(p)

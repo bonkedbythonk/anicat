@@ -287,6 +287,11 @@ pub struct PreloadedStream {
     /// keyed by media/episode/provider only, so consumers must also match on
     /// this or a desktop preload gets handed to the PWA.
     pub client: StreamClient,
+    /// "sub" or "dub" at resolve time. A preload started before a mid-playback
+    /// sub/dub toggle is keyed the same as one started after — same media,
+    /// episode, provider, client — so without this a toggle's restart could
+    /// silently reuse the stale-translation stream instead of re-resolving.
+    pub translation_type: String,
     pub raw_url: String,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub subtitle_url: Option<String>,

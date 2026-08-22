@@ -57,6 +57,15 @@ jobs:
           # Fix rpath in the copied mpv binary so it finds dylibs in @executable_path/../Resources/lib
           install_name_tool -add_rpath "@executable_path/../Resources/lib" web/src-tauri/resources/mpv 2>/dev/null || true
 
+          # install_name_tool rewrites Mach-O load commands in place, which
+          # invalidates the ad-hoc signature the linker embeds in Homebrew's
+          # mpv binary by default. The app bundle itself is unsigned (no
+          # signingIdentity in tauri.conf.json), so nothing re-signs it
+          # afterward — the kernel then refuses to exec a binary with a
+          # broken signature blob and kills it with SIGKILL on launch.
+          # Re-sign ad-hoc to make the edited binary valid again.
+          codesign --force -s - web/src-tauri/resources/mpv
+
           # Ensure all copied dylibs are readable by the Cargo build script
           chmod 755 web/src-tauri/resources/lib/*.dylib 2>/dev/null || true
           chmod 755 web/src-tauri/resources/mpv

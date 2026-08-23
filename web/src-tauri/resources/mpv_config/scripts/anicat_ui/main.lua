@@ -308,8 +308,15 @@ local SHADERS = {
   "~~/shaders/Anime4K_Upscale_CNN_x2_S.glsl",
 }
 
+-- mpv path-list options split on ";" on Windows and ":" on Unix (drive
+-- letters collide with ":") -- same reason the launch-time --glsl-shaders arg
+-- in commands/playback.rs picks its separator per-OS. package.config's first
+-- line is the platform's directory separator ("\\" on Windows, "/" elsewhere),
+-- so it doubles as a reliable OS check without shelling out.
+local PATH_LIST_SEP = (package.config:sub(1, 1) == '\\') and ';' or ':'
+
 local function enable_standard_shaders()
-  mp.commandv("change-list", "glsl-shaders", "set", table.concat(SHADERS, ":"))
+  mp.commandv("change-list", "glsl-shaders", "set", table.concat(SHADERS, PATH_LIST_SEP))
   refresh_shaders_state()
 end
 

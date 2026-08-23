@@ -145,7 +145,6 @@ pub fn run() {
             commands::media::clear_provider_cache,
             commands::media::get_media_prefs,
             commands::media::set_media_prefs,
-            commands::media::debug_provider_streams,
             commands::media::get_library,
             commands::media::add_to_library,
             commands::media::remove_from_library,

@@ -951,66 +951,6 @@ pub async fn clear_provider_cache_impl(
 }
 
 #[tauri::command]
-pub async fn debug_provider_streams(
-    state: State<'_, AppState>,
-    media_id: i64,
-    episode_number: i32,
-    provider: Option<String>,
-) -> Result<serde_json::Value, String> {
-    let provider_name = match provider {
-        Some(p) if !p.is_empty() => p,
-        _ => state.config.read().await.general.provider.clone(),
-    };
-    let fallback = {
-        let cfg = state.config.read().await;
-        cfg.general.fallback_provider.clone()
-    };
-    let db = state.open_db()?;
-
-    let providers = if fallback != provider_name {
-        vec![provider_name.as_str(), fallback.as_str()]
-    } else {
-        vec![provider_name.as_str()]
-    };
-
-    let mut slug = None;
-    let mut resolved_provider = provider_name.clone();
-    for prov in &providers {
-        if let Some(s) = registry::service::get_provider_slug(&db, media_id, prov) {
-            slug = Some(s);
-            resolved_provider = prov.to_string();
-            break;
-        }
-        if let Some(found_slug) = resolve_and_save_provider_slug(
-            &state,
-            media_id,
-            prov,
-            false, // debug_provider_streams is always anime
-            None,
-        )
-        .await?
-        {
-            slug = Some(found_slug);
-            resolved_provider = prov.to_string();
-            break;
-        }
-        log::info!("debug_provider_streams: '{}' found no match", prov);
-    }
-
-    let slug = slug.ok_or_else(|| format!(
-        r#"{{"error":"no_slug","media_id":{},"provider":"{}","hint":"No results on primary or fallback provider"}}"#,
-        media_id, provider_name
-    ))?;
-
-    let mut result = state.scraper_manager.debug_streams(&slug, episode_number, &resolved_provider).await?;
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert("resolved_slug".to_string(), serde_json::json!(slug));
-        obj.insert("provider".to_string(), serde_json::json!(resolved_provider));
-    }
-    Ok(result)
-}
-
-#[tauri::command]
 pub async fn get_chapter_pages(
     state: State<'_, AppState>,
     media_id: i64,

@@ -1138,13 +1138,40 @@ async fn proxy_handler(
 
     req_builder = req_builder.header("accept", "*/*");
 
-    let upstream = req_builder
-        .send()
-        .await
-        .map_err(|e| {
-            log::error!("Proxy request to {} failed: {}", url, e);
-            StatusCode::BAD_GATEWAY
-        })?;
+    // A CDN 429 here used to reach mpv untouched. Enough of those in a row
+    // (segment CDNs like anineko's ration hard under load) make mpv's HLS
+    // demuxer give up on the whole stream, which falls back to mpv's generic
+    // playlist demuxer — and that one doesn't resolve the proxy's
+    // intentionally relative playlist entries (see `rewrite_playlist`)
+    // against the manifest's fetch URL, so it hands mpv a schemeless path it
+    // can't open at all. A brief retry here absorbs the rate limit before it
+    // ever reaches that failure mode.
+    const SEGMENT_RETRY_MAX: u32 = 3;
+    const SEGMENT_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
+    let mut upstream = None;
+    for attempt in 0..=SEGMENT_RETRY_MAX {
+        let resp = req_builder
+            .try_clone()
+            .expect("GET request with no streaming body is always cloneable")
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Proxy request to {} failed: {}", url, e);
+                StatusCode::BAD_GATEWAY
+            })?;
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS && attempt < SEGMENT_RETRY_MAX {
+            log::warn!(
+                "Proxy got 429 from {} (attempt {}/{}), retrying",
+                url, attempt + 1, SEGMENT_RETRY_MAX
+            );
+            tokio::time::sleep(SEGMENT_RETRY_BASE_DELAY * (attempt + 1)).await;
+            continue;
+        }
+        upstream = Some(resp);
+        break;
+    }
+    let upstream = upstream.expect("loop always assigns before exiting");
 
     let mut status = upstream.status();
     let upstream_headers = upstream.headers().clone();

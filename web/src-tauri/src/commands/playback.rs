@@ -1100,6 +1100,8 @@ pub(crate) async fn resolve_stream_for_provider(
                             episode,
                             browser_client: client.is_browser(),
                         }),
+                        entry: Default::default(),
+                        sibling_titles: &[],
                     },
                     proxy_port,
                 )
@@ -1137,6 +1139,11 @@ pub(crate) async fn resolve_stream_for_provider(
                         browser_client: client.is_browser(),
                     }),
                     series: None,
+                    entry: crate::torrent::layout::EntryHint {
+                        kind: crate::torrent::layout::EntryKind::Movie,
+                        ..Default::default()
+                    },
+                    sibling_titles: &[],
                 },
                 proxy_port,
             )
@@ -1156,7 +1163,7 @@ pub(crate) async fn resolve_stream_for_provider(
     if provider_name == "nyaa" {
         let prefer_dub = effective_translation_type(state, media_id).await == "dub";
         let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-        let (titles, episode_count) =
+        let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
             crate::torrent::gather_media_info(state, media_id, title).await;
         // Movies/OVAs (single "episode") legitimately have no episode number
         // in their release names.
@@ -1179,6 +1186,8 @@ pub(crate) async fn resolve_stream_for_provider(
                     chosen_name: server.clone(),
                     movie: None,
                     series: None,
+                    entry: hint,
+                    sibling_titles: &siblings,
                 },
                 proxy_port,
             )
@@ -1361,11 +1370,15 @@ pub(crate) async fn resolve_stream_for_provider(
                 provider_name
             );
             state.scraper_manager.force_restart().await;
-            if let Ok(fresh_servers) = state
+            if let Ok(mut fresh_servers) = state
                 .scraper_manager
                 .get_streams(slug, episode_number as i32, provider_name)
                 .await
             {
+                fresh_servers.retain(|s| !s.name.eq_ignore_ascii_case("doodstream"));
+                if client.is_browser() {
+                    fresh_servers.retain(|s| s.browser_ok.unwrap_or(true));
+                }
                 if !fresh_servers.is_empty() {
                     let retry_selected = select_server(&fresh_servers, server, &translation_type, target_quality);
                     let retry_ordered = candidate_order(&fresh_servers, retry_selected);

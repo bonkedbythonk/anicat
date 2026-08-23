@@ -6,6 +6,7 @@
 //! streaming-site extractors do.
 
 pub mod cinema;
+pub mod layout;
 pub mod seadex;
 pub mod series;
 pub mod search;
@@ -71,13 +72,39 @@ pub struct ResolveTarget<'a> {
     /// Set for an episode of a series, which is searched by season and
     /// episode. Mutually exclusive with `movie`.
     pub series: Option<series::EpisodeCriteria>,
+    /// The titles of the franchise's other AniList entries, when known.
+    /// Only read for an OVA or specials entry, where every sibling shares
+    /// this entry's title and a release of one matches all of them — see
+    /// `search::names_a_sibling`.
+    pub sibling_titles: &'a [String],
+    /// Where this AniList entry sits in its franchise — which season it is,
+    /// and whether it is a TV run, an OVA/specials collection or a film. Used
+    /// only once a torrent's file list is in hand, to find this entry's own
+    /// episodes inside a pack that holds several seasons' worth. See
+    /// `layout::select`.
+    pub entry: layout::EntryHint,
+}
+
+/// What every candidate in one resolve is judged against. Constant across the
+/// candidate loop, so it is built once and lent to each `try_candidate` rather
+/// than passed as six repeated arguments.
+struct CandidateContext<'a> {
+    titles: &'a [String],
+    alts: &'a [String],
+    hint: layout::EntryHint,
+    /// The episode as the *files* number it: within-season for Western TV,
+    /// entry-relative for anime. Distinct from the absolute number the app
+    /// keys everything else by.
+    episode: i64,
+    episode_count: Option<i64>,
+    allow_episodeless: bool,
 }
 
 /// One selectable torrent release, surfaced to the stream-server picker.
 pub struct TorrentChoice {
     pub name: String,
     pub seeders: u64,
-    pub prefer_dub: bool,
+    pub is_dub: bool,
 }
 
 pub struct TorrentManager {
@@ -194,8 +221,15 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria } = target;
-        let criteria = search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client };
+        let ResolveTarget { media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles } = target;
+        let criteria = search::ReleaseCriteria {
+            episode,
+            allow_episodeless,
+            prefer_dub,
+            browser_client,
+            extras: entry.kind == layout::EntryKind::Extra,
+            episode_count,
+        };
         let session = self.session().await?;
 
         // Reuse a previous resolution if the torrent is still in the session.
@@ -219,7 +253,7 @@ impl TorrentManager {
             (_, Some(episode_criteria)) => {
                 series::find_episode_candidates(client, titles, episode_criteria).await
             }
-            _ => search::find_candidates(client, titles, criteria).await,
+            _ => search::find_candidates(client, titles, sibling_titles, criteria).await,
         };
         // Which number the *files* inside a torrent use. For a series that is
         // the within-season episode, since a season pack names its files
@@ -227,6 +261,22 @@ impl TorrentManager {
         // the resolved-stream cache and the whole app are keyed by, and
         // within-season numbers collide across seasons.
         let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
+        // Where this entry sits in its franchise, as `try_candidate` needs it
+        // to find the right season's files inside a combined pack. Western TV
+        // states its season outright in `EpisodeCriteria`; for anime it comes
+        // from AniList via `gather_media_info`, and is left unknown rather
+        // than guessed when nothing establishes it.
+        let hint = match series_criteria {
+            Some(c) => layout::EntryHint {
+                kind: layout::EntryKind::Tv,
+                season: Some(c.season),
+                season_at_least: None,
+            },
+            None => entry,
+        };
+        // Titles normalized once, so an alias inside a torrent's own paths is
+        // told apart from a title continuation — same rule the search uses.
+        let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
         // A human already picked the release for this exact AniList entry, so
         // when SeaDex has one it goes in ahead of every regex-matched result —
         // and, unlike the regex search, it can be the *only* candidate for the
@@ -259,7 +309,15 @@ impl TorrentManager {
         }
 
         let mut last_err = String::new();
-        let mut candidates_iter = candidates.iter().take(4);
+        // Collected rather than iterated. Peeling two candidates off an
+        // iterator to test for a pair consumes both even when there is only
+        // one — so a media with a single candidate (every scattered
+        // OVA/specials entry, whose one release is often the only one that
+        // exists) raced nothing, then walked an already-empty iterator, and
+        // failed with "All torrent candidates failed (last error: )" without
+        // ever having tried it.
+        let shortlist: Vec<&search::Candidate> = candidates.iter().take(4).collect();
+        let raced = shortlist.len() >= 2;
 
         // Race the top two candidates instead of trying them one at a time.
         // A dead-but-not-quite candidate (peers connect, then nothing —
@@ -268,9 +326,10 @@ impl TorrentManager {
         // that alone was 35-40s of a 65s resolve. Racing means the wait is
         // bounded by whichever candidate actually works, not by however long
         // the first pick takes to fail.
-        if let (Some(cand_a), Some(cand_b)) = (candidates_iter.next(), candidates_iter.next()) {
-            let fut_a = self.try_candidate(client, &session, cand_a, file_episode, episode_count);
-            let fut_b = self.try_candidate(client, &session, cand_b, file_episode, episode_count);
+        if let [cand_a, cand_b, ..] = shortlist[..] {
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless };
+            let fut_a = self.try_candidate(client, &session, cand_a, &ctx);
+            let fut_b = self.try_candidate(client, &session, cand_b, &ctx);
             tokio::pin!(fut_a);
             tokio::pin!(fut_b);
 
@@ -310,9 +369,14 @@ impl TorrentManager {
             }
         }
 
-        for cand in candidates_iter {
+        for cand in shortlist.iter().skip(if raced { 2 } else { 0 }).copied() {
             match self
-                .try_candidate(client, &session, cand, file_episode, episode_count)
+                .try_candidate(
+                    client,
+                    &session,
+                    cand,
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless },
+                )
                 .await
             {
                 Ok(r) => {
@@ -346,7 +410,7 @@ impl TorrentManager {
     ) -> Vec<TorrentChoice> {
         let ResolveTarget {
             media_id, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client,
-            movie, series: series_criteria, ..
+            movie, series: series_criteria, entry, sibling_titles, ..
         } = target;
         if titles.is_empty() {
             return vec![];
@@ -364,7 +428,15 @@ impl TorrentManager {
                 search::find_candidates(
                     client,
                     titles,
-                    search::ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client },
+                    sibling_titles,
+                    search::ReleaseCriteria {
+                        episode,
+                        allow_episodeless,
+                        prefer_dub,
+                        browser_client,
+                        extras: entry.kind == layout::EntryKind::Extra,
+                        episode_count,
+                    },
                 )
                 .await
             }
@@ -378,10 +450,13 @@ impl TorrentManager {
         }
         candidates
             .into_iter()
-            .map(|c| TorrentChoice {
-                name: c.name,
-                seeders: c.seeders,
-                prefer_dub,
+            .map(|c| {
+                let is_dub = search::is_dub_release(&search::normalize(&c.name));
+                TorrentChoice {
+                    name: c.name,
+                    seeders: c.seeders,
+                    is_dub,
+                }
             })
             .collect()
     }
@@ -642,8 +717,7 @@ impl TorrentManager {
         client: &reqwest::Client,
         session: &Arc<Session>,
         cand: &search::Candidate,
-        episode: i64,
-        episode_count: Option<i64>,
+        ctx: &CandidateContext<'_>,
     ) -> Result<Resolved, String> {
         // Prefer the .torrent file (instant metadata) over the magnet.
         let add = if let Some(ref url) = cand.torrent_url {
@@ -701,8 +775,8 @@ impl TorrentManager {
             })
             .map_err(|e| format!("no metadata: {}", e))?;
 
-        let videos: Vec<&(usize, String, u64)> = files
-            .iter()
+        let videos: Vec<(usize, String, u64)> = files
+            .into_iter()
             .filter(|(_, name, _)| {
                 let lower = name.to_lowercase();
                 VIDEO_EXTS.iter().any(|e| lower.ends_with(&format!(".{}", e)))
@@ -717,47 +791,36 @@ impl TorrentManager {
         // complete-series batch (see `Candidate::assume_batch`): its name said
         // nothing about episodes, so "one video file" is evidence the
         // assumption was wrong — a real 25-episode batch has 25 files. Fall
-        // through to the filename check, which rejects it and moves on to the
+        // through to the layout check, which rejects it and moves on to the
         // next candidate rather than playing episode 1 when episode 13 was
         // asked for.
         let file_id = if videos.len() == 1 && !cand.assume_batch {
             Some(videos[0].0)
         } else {
-            // Which episode number the *files* use for the one being asked
-            // for. Decided before any literal match, not after it: when a
-            // release numbers a split cour absolutely (files 12-23 for an
-            // AniList entry of 1-12), a file literally named "12" exists and is
-            // the wrong episode — it is that entry's episode 1. Taking the
-            // literal match first would quietly play the wrong thing, which is
-            // worse than the "episode not found" this started as.
-            let numbered: Vec<i64> = videos
-                .iter()
-                .filter_map(|(_, name, _)| search::filename_episode(name))
-                .collect();
-            let wanted = match search::absolute_episode(&numbered, episode, episode_count) {
-                Some(absolute) => {
-                    log::info!(
-                        "torrent: '{}' numbers episodes absolutely; episode {} is file {}",
-                        cand.name, episode, absolute
-                    );
-                    absolute
-                }
-                None => episode,
+            // Everything else — which season's folder this entry is, whether
+            // the pack numbers its files absolutely, where the specials live —
+            // is `layout`'s problem, decided from the paths themselves.
+            let req = layout::SelectRequest {
+                titles: ctx.titles,
+                alts: ctx.alts,
+                hint: ctx.hint,
+                episode: ctx.episode,
+                episode_count: ctx.episode_count,
+                release_name: &cand.name,
+                allow_episodeless: ctx.allow_episodeless,
             };
-
-            let mut best: Option<(usize, u64)> = None;
-            for (i, name, len) in &videos {
-                if search::filename_matches_episode(name, wanted)
-                    && best.map(|(_, l)| *len > l).unwrap_or(true)
-                {
-                    best = Some((*i, *len));
+            match layout::select(&videos, &req) {
+                Ok(index) => Some(index),
+                Err(e) => {
+                    log::info!("torrent: '{}' rejected: {}", cand.name, e);
+                    None
                 }
             }
-            best.map(|(i, _)| i)
         };
+
         let Some(file_id) = file_id else {
             let _ = session.delete(torrent_id.into(), false).await;
-            return Err(format!("episode {} not found inside torrent", episode));
+            return Err(format!("episode {} not found inside torrent", ctx.episode));
         };
 
         // Select the wanted file — as a union with whatever is already
@@ -803,16 +866,27 @@ impl TorrentManager {
     }
 }
 
-/// Search titles for a media (best first) plus what we know about its total
-/// episode count. Titles: the user's manual override (saved as the "nyaa"
-/// provider slug via the re-match UI) first, then AniList romaji/english/
-/// synonyms, then whatever the frontend sent. Count: AniList `episodes`, or
-/// aired-so-far for currently-airing shows.
+/// What a media is, as far as searching torrents for it is concerned.
+pub(crate) struct MediaInfo {
+    /// Search titles, best first: the user's manual override (saved as the
+    /// "nyaa" provider slug via the re-match UI) first, then AniList
+    /// romaji/english/synonyms, then whatever the frontend sent.
+    pub titles: Vec<String>,
+    /// AniList `episodes`, or aired-so-far for currently-airing shows.
+    pub episode_count: Option<i64>,
+    /// Where this entry sits in its franchise — see `layout::EntryHint`.
+    pub hint: layout::EntryHint,
+    /// The franchise's other AniList entries, by title. See
+    /// `ResolveTarget::sibling_titles`.
+    pub siblings: Vec<String>,
+}
+
+/// Gather everything about a media that a torrent search needs.
 pub(crate) async fn gather_media_info(
     state: &crate::state::AppState,
     media_id: i64,
     frontend_title: Option<String>,
-) -> (Vec<String>, Option<i64>) {
+) -> MediaInfo {
     let mut titles: Vec<String> = vec![];
     {
         if let Ok(db) = state.open_db() {
@@ -823,6 +897,12 @@ pub(crate) async fn gather_media_info(
     }
 
     let mut episode_count = None;
+    let mut kind = layout::EntryKind::Tv;
+    // Whether AniList knows of an earlier TV entry this one continues. Not a
+    // season number — a franchise can be three entries deep — but enough to
+    // rule out a pack's season-1 files for an entry that cannot be season 1.
+    let mut has_tv_prequel = false;
+    let mut sibling_titles: Vec<String> = vec![];
     let detail_res = crate::commands::media::fetch_media_detail_cached(state, media_id, false).await;
     if let Ok(detail) = detail_res {
         if let Some(m) = detail.media {
@@ -850,6 +930,41 @@ pub(crate) async fn gather_media_info(
                         .and_then(|n| n.episode)
                         .map(|e| (e as i64 - 1).max(0))
                 });
+            // An OVA or a specials collection is not a season of anything:
+            // release groups file both under `Extras/`, `Specials/` or `S00`,
+            // and number them in their own `SP01..` sequence.
+            kind = match m.format.as_deref() {
+                Some("MOVIE") => layout::EntryKind::Movie,
+                Some("OVA") | Some("SPECIAL") | Some("MUSIC") => layout::EntryKind::Extra,
+                _ => layout::EntryKind::Tv,
+            };
+            let is_tv = |f: Option<&str>| matches!(f, Some("TV") | Some("TV_SHORT") | Some("ONA"));
+            let edges = m.relations.and_then(|r| r.edges).unwrap_or_default();
+            has_tv_prequel = edges.iter().any(|e| {
+                e.relation_type.as_deref() == Some("PREQUEL")
+                    && e.node.as_ref().is_some_and(|n| is_tv(n.format.as_deref()))
+            });
+            // Every directly related entry's titles. Which relation it is
+            // doesn't matter — an OVA can be a SIDE_STORY of the series, a
+            // SEQUEL of another OVA, or a SPECIAL of either, and all three
+            // are equally capable of being mistaken for this one.
+            // Adaptations of and by other media are the exception: the
+            // manga's title is this entry's own title, so keeping it would
+            // make the entry disown its own releases.
+            for edge in &edges {
+                if matches!(edge.relation_type.as_deref(), Some("ADAPTATION") | Some("SOURCE")) {
+                    continue;
+                }
+                let Some(node) = edge.node.as_ref() else { continue };
+                let Some(t) = node.title.as_ref() else { continue };
+                for cand in [t.romaji.as_ref(), t.english.as_ref()] {
+                    if let Some(c) = cand.filter(|c| !c.is_empty() && c.is_ascii()) {
+                        if !sibling_titles.contains(c) {
+                            sibling_titles.push(c.clone());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -858,7 +973,33 @@ pub(crate) async fn gather_media_info(
             titles.push(t);
         }
     }
-    (titles, episode_count)
+
+    // The season number, only when something actually establishes it: the
+    // title spelling it out ("Mob Psycho 100 II"), or the entry having no TV
+    // prequel at all, which makes it the franchise's first season by
+    // definition. A named sequel ("... Burst") states nothing and gets
+    // `None` — treating that as season 1 is precisely what selects the
+    // previous season's files out of a combined pack.
+    //
+    // Only for a TV entry. An OVA or specials entry has no season of its own —
+    // it belongs to one — and its titles are full of numbers that are not
+    // season markers ("Shinmai Maou no Testament Burst Episode 11" is a real
+    // AniList synonym for a one-episode OVA).
+    let season = if kind == layout::EntryKind::Tv {
+        search::stated_season(&titles).or(if has_tv_prequel { None } else { Some(1) })
+    } else {
+        None
+    };
+    let hint = layout::EntryHint {
+        kind,
+        season,
+        season_at_least: if kind == layout::EntryKind::Tv && has_tv_prequel && season.is_none() {
+            Some(2)
+        } else {
+            None
+        },
+    };
+    MediaInfo { titles, episode_count, hint, siblings: sibling_titles }
 }
 
 fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
@@ -947,7 +1088,7 @@ mod tests {
     #[ignore]
     async fn live_find_candidates() {
         let titles = vec!["Sousou no Frieren".to_string()];
-        let cands = search::find_candidates(&client(), &titles, search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false }).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }).await;
         assert!(!cands.is_empty(), "no candidates found");
         let best = &cands[0];
         println!("best: {} (score {}, seeders {})", best.name, best.score, best.seeders);
@@ -960,7 +1101,7 @@ mod tests {
         );
         // A short/ambiguous title must not match unrelated shows.
         let titles = vec!["Monster".to_string()];
-        let cands = search::find_candidates(&client(), &titles, search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false }).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }).await;
         for c in &cands {
             let n = search::normalize(&c.name);
             assert!(!n.contains("pocket"), "false positive: {}", c.name);
@@ -986,7 +1127,8 @@ mod tests {
         let cands = search::find_candidates(
             &client(),
             &titles,
-            search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false },
+            &[],
+            search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
         )
         .await;
         assert!(!cands.is_empty(), "no candidates found");
@@ -1070,7 +1212,8 @@ mod tests {
             let cands = search::find_candidates(
                 &client(),
                 &titles,
-                search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false },
+                &[],
+                search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
             )
             .await;
             let best = cands.first().unwrap_or_else(|| panic!("no candidates for {}", title));
@@ -1082,6 +1225,498 @@ mod tests {
                 best.name
             );
         }
+    }
+
+    /// Live, one-off content check: resolve an episode, write the first
+    /// megabytes to a file and leave it for `ffprobe`/`mpv` to inspect. Not
+    /// an assertion — the path it prints is what a human plays to confirm the
+    /// picture on screen is the episode that was asked for.
+    #[tokio::test]
+    #[ignore]
+    async fn live_dump_a_resolved_episode_for_inspection() {
+        let dir = std::env::temp_dir().join("anicat-torrent-dump");
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let titles = vec![
+            "Shinmai Maou no Testament".to_string(),
+            "The Testament of Sister New Devil".to_string(),
+        ];
+        mgr.resolve(
+            &client(),
+            ResolveTarget {
+                media_id: 20678,
+                episode: 1,
+                titles: &titles,
+                allow_episodeless: false,
+                episode_count: Some(12),
+                prefer_dub: false,
+                browser_client: false,
+                chosen_name: None,
+                movie: None,
+                series: None,
+                sibling_titles: &[],
+                entry: layout::EntryHint {
+                    kind: layout::EntryKind::Tv,
+                    season: Some(1),
+                    season_at_least: None,
+                },
+            },
+            13370,
+        )
+        .await
+        .expect("resolve failed");
+        let session = mgr.session().await.unwrap();
+        let r = *mgr.resolved.lock().await.get(&(20678, 1)).unwrap();
+        let handle = session.get(r.torrent_id.into()).unwrap();
+        let mut stream = handle.stream(r.file_id).unwrap();
+        let mut buf = vec![0u8; 8 * 1024 * 1024];
+        tokio::time::timeout(std::time::Duration::from_secs(300), stream.read_exact(&mut buf))
+            .await
+            .expect("timed out")
+            .expect("read failed");
+        let out = std::env::temp_dir().join("anicat-episode-head.mkv");
+        std::fs::write(&out, &buf).unwrap();
+        println!("wrote {}", out.display());
+        let _ = session.stop().await;
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored --nocapture`
+    ///
+    /// Selection against live search results, with no swarm involved: every
+    /// candidate the real search returns for each entry of a split franchise
+    /// has its .torrent fetched over HTTP and its file list run through
+    /// `layout::select`. A candidate is allowed to decline (that is the
+    /// designed answer for a pack it cannot place), but a candidate that
+    /// answers must answer with a file belonging to the entry that asked.
+    ///
+    /// Separate from `live_resolves_every_entry_of_a_split_franchise` on
+    /// purpose: that one proves bytes flow, and so depends on swarm health;
+    /// this one proves the *choice* is right and depends on nothing but Nyaa
+    /// being reachable.
+    #[tokio::test]
+    #[ignore]
+    async fn live_selects_the_right_file_for_every_entry() {
+        struct Case {
+            titles: &'static [&'static str],
+            episode: i64,
+            episode_count: Option<i64>,
+            hint: layout::EntryHint,
+            allow_episodeless: bool,
+            expect_any: &'static [&'static str],
+            reject: &'static [&'static str],
+            /// The franchise's other entries, as AniList relations give them.
+            siblings: &'static [&'static str],
+        }
+        let tv = |season: Option<u32>, at_least: Option<u32>| layout::EntryHint {
+            kind: layout::EntryKind::Tv,
+            season,
+            season_at_least: at_least,
+        };
+        let extra = layout::EntryHint {
+            kind: layout::EntryKind::Extra,
+            season: None,
+            season_at_least: None,
+        };
+        // What AniList's `relations` actually return for each entry — one hop,
+        // and thinner than the franchise. 20678 knows the specials and the
+        // season 1 OVA; the season 1 OVA knows only the two TV seasons, which
+        // is why Departures cannot be recognised as a relative of it at all.
+        // Modelled exactly rather than idealised: a test fed the whole
+        // franchise would prove a check that production never gets to run.
+        const REL_SEASON_ONE: &[&str] = &[
+            "Shinmai Maou no Testament Specials",
+            "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou",
+        ];
+        const REL_BURST: &[&str] = &[
+            "Shinmai Maou no Testament Burst Specials",
+            "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou",
+            "Shinmai Maou no Testament Burst: Toujou Basara no Shigoku Heiwa na Nichijou",
+        ];
+        const REL_SPECIALS: &[&str] = &["Shinmai Maou no Testament"];
+        const REL_BURST_SPECIALS: &[&str] = &["Shinmai Maou no Testament Burst"];
+        const REL_DEPARTURES: &[&str] = &[
+            "Shinmai Maou no Testament Departures: Maria no Hizou Eizou",
+            "Shinmai Maou no Testament Burst: Toujou Basara no Shigoku Heiwa na Nichijou",
+        ];
+        const REL_SEASON_ONE_OVA: &[&str] = &[
+            "Shinmai Maou no Testament",
+            "Shinmai Maou no Testament Burst",
+        ];
+        // The real AniList entries: 20678 (TV, 12), 21110 (TV, 10), 21209
+        // (SPECIAL, 6), 102508 (SPECIAL, 5), 100451 (OVA, 1), 21247 (OVA, 1).
+        let cases = [
+            Case {
+                titles: &["Shinmai Maou no Testament", "The Testament of Sister New Devil"],
+                episode: 1,
+                episode_count: Some(12),
+                hint: tv(Some(1), None),
+                allow_episodeless: false,
+                expect_any: &["01", "e01", "- 1 "],
+                siblings: REL_SEASON_ONE,
+                reject: &["burst", "s02", "season 2", "departures", "ncop", "nced"],
+            },
+            Case {
+                titles: &["Shinmai Maou no Testament", "The Testament of Sister New Devil"],
+                episode: 12,
+                episode_count: Some(12),
+                hint: tv(Some(1), None),
+                allow_episodeless: false,
+                expect_any: &["12"],
+                siblings: REL_SEASON_ONE,
+                reject: &["burst", "s02", "season 2", "departures"],
+            },
+            Case {
+                titles: &["Shinmai Maou no Testament Burst", "The Testament of Sister New Devil BURST"],
+                episode: 1,
+                episode_count: Some(10),
+                hint: tv(None, Some(2)),
+                allow_episodeless: false,
+                expect_any: &["burst", "s02", "season 2"],
+                siblings: REL_BURST,
+                reject: &["departures", "ncop", "nced", "s01", "season 1"],
+            },
+            Case {
+                titles: &["Shinmai Maou no Testament Burst", "The Testament of Sister New Devil BURST"],
+                episode: 10,
+                episode_count: Some(10),
+                hint: tv(None, Some(2)),
+                allow_episodeless: false,
+                expect_any: &["10"],
+                siblings: REL_BURST,
+                reject: &["departures", "s01", "season 1"],
+            },
+            Case {
+                titles: &["Shinmai Maou no Testament Specials", "The Testament of Sister New Devil Specials"],
+                episode: 1,
+                episode_count: Some(6),
+                hint: extra,
+                allow_episodeless: false,
+                expect_any: &["sp1", "sp01", "special", "s00"],
+                siblings: REL_SPECIALS,
+                reject: &["burst"],
+            },
+            Case {
+                titles: &[
+                    "Shinmai Maou no Testament Burst Specials",
+                    "The Testament of Sister New Devil BURST Specials",
+                ],
+                episode: 1,
+                episode_count: Some(5),
+                hint: extra,
+                allow_episodeless: false,
+                expect_any: &["sp1", "sp01", "special", "s00"],
+                siblings: REL_BURST_SPECIALS,
+                reject: &[],
+            },
+            Case {
+                titles: &["Shinmai Maou no Testament Departures", "The Testament of Sister New Devil DEPARTURES"],
+                episode: 1,
+                episode_count: Some(1),
+                hint: extra,
+                allow_episodeless: true,
+                expect_any: &["departures"],
+                siblings: REL_DEPARTURES,
+                reject: &["ncop", "nced"],
+            },
+            Case {
+                titles: &[
+                    "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou",
+                    "Shinmai Maou no Testament OVA",
+                ],
+                episode: 1,
+                episode_count: Some(1),
+                hint: extra,
+                allow_episodeless: true,
+                expect_any: &["ova", "oad", "e13", "hard"],
+                siblings: REL_SEASON_ONE_OVA,
+                reject: &["burst", "departures", "ncop", "nced"],
+            },
+        ];
+
+        let http = client();
+        let mut failures: Vec<String> = vec![];
+        for case in cases {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let titles: Vec<String> = case.titles.iter().map(|t| t.to_string()).collect();
+            let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
+            let siblings: Vec<String> = case.siblings.iter().map(|t| t.to_string()).collect();
+            let candidates = search::find_candidates(
+                &http,
+                &titles,
+                &siblings,
+                search::ReleaseCriteria {
+                    episode: case.episode,
+                    allow_episodeless: case.allow_episodeless,
+                    prefer_dub: false,
+                    browser_client: false,
+                    extras: case.hint.kind == layout::EntryKind::Extra,
+                    episode_count: case.episode_count,
+                },
+            )
+            .await;
+            println!("\n=== {} ep {} — {} candidates", titles[0], case.episode, candidates.len());
+            if candidates.is_empty() {
+                failures.push(format!("{} ep {}: no candidates at all", titles[0], case.episode));
+                continue;
+            }
+            let mut answered = 0;
+            for cand in candidates.iter().take(8) {
+                let Some(ref url) = cand.torrent_url else { continue };
+                let Ok(resp) = http.get(url).send().await else { continue };
+                let Ok(bytes) = resp.bytes().await else { continue };
+                let Ok(meta) = librqbit::torrent_from_bytes::<librqbit::ByteBuf>(&bytes) else {
+                    continue;
+                };
+                let Ok(details) = meta.info.iter_file_details() else { continue };
+                let files: Vec<(usize, String, u64)> = details
+                    .enumerate()
+                    .filter_map(|(i, d)| {
+                        let path = d.filename.to_pathbuf().ok()?.to_string_lossy().to_string();
+                        Some((i, path, d.len))
+                    })
+                    .filter(|(_, name, _)| {
+                        let lower = name.to_lowercase();
+                        VIDEO_EXTS.iter().any(|e| lower.ends_with(&format!(".{}", e)))
+                    })
+                    .collect();
+                if files.is_empty() {
+                    continue;
+                }
+                let req = layout::SelectRequest {
+                    titles: &titles,
+                    alts: &alts,
+                    hint: case.hint,
+                    episode: case.episode,
+                    episode_count: case.episode_count,
+                    release_name: &cand.name,
+                    allow_episodeless: case.allow_episodeless,
+                };
+                // A single-file release is taken as-is by `try_candidate`
+                // before `layout` is consulted; mirror that here.
+                let chosen = if files.len() == 1 && !cand.assume_batch {
+                    Ok(files[0].0)
+                } else {
+                    layout::select(&files, &req)
+                };
+                match chosen {
+                    Ok(index) => {
+                        let path = &files.iter().find(|(i, _, _)| *i == index).unwrap().1;
+                        answered += 1;
+                        println!("    {} -> {}", cand.name, path);
+                        let lower = path.to_lowercase();
+                        if !case.expect_any.is_empty()
+                            && !case.expect_any.iter().any(|f| lower.contains(f))
+                        {
+                            failures.push(format!(
+                                "{} ep {}: '{}' chose '{}', which carries none of {:?}",
+                                titles[0], case.episode, cand.name, path, case.expect_any
+                            ));
+                        }
+                        if let Some(bad) = case.reject.iter().find(|f| lower.contains(**f)) {
+                            failures.push(format!(
+                                "{} ep {}: '{}' chose '{}', which belongs to another entry ('{}')",
+                                titles[0], case.episode, cand.name, path, bad
+                            ));
+                        }
+                    }
+                    Err(e) => println!("    {} -> declined ({})", cand.name, e),
+                }
+            }
+            if answered == 0 {
+                failures.push(format!(
+                    "{} ep {}: every candidate declined; nothing would play",
+                    titles[0], case.episode
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "\n  {}", failures.join("\n  "));
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored --nocapture`
+    ///
+    /// The franchise-splitting case end to end, on the real network: five
+    /// separate AniList entries of "The Testament of Sister New Devil" — two
+    /// TV seasons, two specials collections and an OVA — each resolved
+    /// through the real search and the real torrent session, asserting the
+    /// file that comes back belongs to that entry and no other.
+    ///
+    /// Ids, titles and episode counts are the real ones. The hints are what
+    /// `gather_media_info` derives for each: season 1 is known outright (no
+    /// TV prequel), Burst is known only to be a sequel, and neither specials
+    /// entry has a season of its own.
+    #[tokio::test]
+    #[ignore]
+    async fn live_resolves_every_entry_of_a_split_franchise() {
+        struct Case {
+            media_id: i64,
+            titles: &'static [&'static str],
+            episode: i64,
+            episode_count: Option<i64>,
+            hint: layout::EntryHint,
+            allow_episodeless: bool,
+            /// Lowercased fragments, one of which the chosen path must carry.
+            expect_any: &'static [&'static str],
+            /// Lowercased fragments the chosen path must not carry.
+            reject: &'static [&'static str],
+            siblings: &'static [&'static str],
+        }
+        /// The franchise's other entries, as AniList relations give them.
+        const FRANCHISE: &[&str] = &[
+            "Shinmai Maou no Testament",
+            "Shinmai Maou no Testament Burst",
+            "Shinmai Maou no Testament Specials",
+            "Shinmai Maou no Testament Burst Specials",
+            "Shinmai Maou no Testament Departures",
+            "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou",
+        ];
+        let tv = |season: Option<u32>, at_least: Option<u32>| layout::EntryHint {
+            kind: layout::EntryKind::Tv,
+            season,
+            season_at_least: at_least,
+        };
+        let extra = layout::EntryHint {
+            kind: layout::EntryKind::Extra,
+            season: None,
+            season_at_least: None,
+        };
+        let cases = [
+            Case {
+                media_id: 20678,
+                titles: &["Shinmai Maou no Testament", "The Testament of Sister New Devil"],
+                episode: 1,
+                episode_count: Some(12),
+                hint: tv(Some(1), None),
+                allow_episodeless: false,
+                expect_any: &["01", "e01", "- 1"],
+                siblings: FRANCHISE,
+                reject: &["burst", "s02", "season 2", "departures", "ncop", "nced"],
+            },
+            Case {
+                media_id: 20678,
+                titles: &["Shinmai Maou no Testament", "The Testament of Sister New Devil"],
+                episode: 12,
+                episode_count: Some(12),
+                hint: tv(Some(1), None),
+                allow_episodeless: false,
+                expect_any: &["12"],
+                siblings: FRANCHISE,
+                reject: &["burst", "s02", "season 2", "departures"],
+            },
+            Case {
+                media_id: 21110,
+                titles: &["Shinmai Maou no Testament Burst", "The Testament of Sister New Devil BURST"],
+                episode: 1,
+                episode_count: Some(10),
+                hint: tv(None, Some(2)),
+                allow_episodeless: false,
+                expect_any: &["burst", "s02", "season 2"],
+                siblings: FRANCHISE,
+                reject: &["departures", "ncop", "nced"],
+            },
+            Case {
+                media_id: 21209,
+                titles: &["Shinmai Maou no Testament Specials", "The Testament of Sister New Devil Specials"],
+                episode: 1,
+                episode_count: Some(6),
+                hint: extra,
+                allow_episodeless: false,
+                expect_any: &["sp1", "sp01", "special", "s00"],
+                siblings: FRANCHISE,
+                reject: &["burst"],
+            },
+            Case {
+                media_id: 100451,
+                titles: &["Shinmai Maou no Testament Departures", "The Testament of Sister New Devil DEPARTURES"],
+                episode: 1,
+                episode_count: Some(1),
+                hint: extra,
+                allow_episodeless: true,
+                expect_any: &["departures"],
+                siblings: FRANCHISE,
+                reject: &["ncop", "nced"],
+            },
+        ];
+
+        let dir = std::env::temp_dir().join("anicat-torrent-franchise-test");
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let mut failures: Vec<String> = vec![];
+        for case in cases {
+            // Nyaa rate-limits, and one pass of this test fires six RSS
+            // queries per case. Without a pause between them the later cases
+            // come back empty and read as a matching failure that isn't one.
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let titles: Vec<String> = case.titles.iter().map(|t| t.to_string()).collect();
+            let siblings: Vec<String> = case.siblings.iter().map(|t| t.to_string()).collect();
+            let resolved = mgr
+                .resolve(
+                    &client(),
+                    ResolveTarget {
+                        media_id: case.media_id,
+                        episode: case.episode,
+                        titles: &titles,
+                        allow_episodeless: case.allow_episodeless,
+                        episode_count: case.episode_count,
+                        prefer_dub: false,
+                        browser_client: false,
+                        chosen_name: None,
+                        movie: None,
+                        series: None,
+                        entry: case.hint,
+                        sibling_titles: &siblings,
+                    },
+                    13370,
+                )
+                .await;
+            let url = match resolved {
+                Ok(url) => url,
+                Err(e) => {
+                    failures.push(format!("{} ep {}: resolve failed: {}", case.media_id, case.episode, e));
+                    continue;
+                }
+            };
+            let session = mgr.session().await.unwrap();
+            let r = *mgr.resolved.lock().await.get(&(case.media_id, case.episode)).unwrap();
+            let handle = session.get(r.torrent_id.into()).unwrap();
+            let path = handle
+                .with_metadata(|m| {
+                    m.file_infos[r.file_id]
+                        .relative_filename
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .unwrap();
+            println!("{} ep {} -> {}\n    ({})", case.media_id, case.episode, path, url);
+            let lower = path.to_lowercase();
+            if !case.expect_any.iter().any(|f| lower.contains(f)) {
+                failures.push(format!(
+                    "{} ep {}: chose '{}', which carries none of {:?}",
+                    case.media_id, case.episode, path, case.expect_any
+                ));
+            }
+            if let Some(bad) = case.reject.iter().find(|f| lower.contains(**f)) {
+                failures.push(format!(
+                    "{} ep {}: chose '{}', which belongs to another entry ('{}')",
+                    case.media_id, case.episode, path, bad
+                ));
+            }
+        }
+
+        // One real read, so this proves playable bytes and not just a name.
+        let session = mgr.session().await.unwrap();
+        if let Some(r) = mgr.resolved.lock().await.get(&(20678, 1)).copied() {
+            let handle = session.get(r.torrent_id.into()).unwrap();
+            let mut stream = handle.stream(r.file_id).unwrap();
+            let mut buf = vec![0u8; 1024 * 1024];
+            tokio::time::timeout(std::time::Duration::from_secs(240), stream.read_exact(&mut buf))
+                .await
+                .expect("timed out reading stream")
+                .expect("read failed");
+            let mkv = buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
+            let mp4 = &buf[4..8] == b"ftyp";
+            assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
+        }
+        let _ = session.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(failures.is_empty(), "wrong file chosen:\n  {}", failures.join("\n  "));
     }
 
     // Live network + torrent test: resolve an episode and stream real bytes.
@@ -1111,6 +1746,12 @@ mod tests {
                     chosen_name: None,
                     movie: None,
                     series: None,
+                    sibling_titles: &[],
+                    entry: layout::EntryHint {
+                        kind: layout::EntryKind::Tv,
+                        season: Some(1),
+                        season_at_least: None,
+                    },
                 },
                 13370,
             )
@@ -1166,6 +1807,8 @@ mod tests {
                     chosen_name: None,
                     movie: Some(cinema::MovieCriteria { year: Some(2021), browser_client: false }),
                     series: None,
+                    sibling_titles: &[],
+                    entry: layout::EntryHint { kind: layout::EntryKind::Movie, ..Default::default() },
                 },
                 13370,
             )
@@ -1222,6 +1865,8 @@ mod tests {
                         episode: 1,
                         browser_client: false,
                     }),
+                    entry: Default::default(),
+                    sibling_titles: &[],
                 },
                 13370,
             )

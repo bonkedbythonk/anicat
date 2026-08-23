@@ -410,7 +410,7 @@ pub async fn get_episodes_impl(
     if provider_name == "nyaa" && !is_manga {
         let count = match episode_count.filter(|&n| n > 0) {
             Some(n) => Some(n),
-            None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.1,
+            None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.episode_count,
         };
         let episodes: Vec<crate::scraper::client::Episode> = (1..=count.unwrap_or(0))
             .map(|n| crate::scraper::client::Episode {
@@ -651,6 +651,8 @@ pub async fn resolve_stream_impl(
                             episode,
                             browser_client: client.is_browser(),
                         }),
+                        entry: Default::default(),
+                        sibling_titles: &[],
                     },
                 )
                 .await
@@ -673,6 +675,11 @@ pub async fn resolve_stream_impl(
                             browser_client: client.is_browser(),
                         }),
                         series: None,
+                        entry: crate::torrent::layout::EntryHint {
+                            kind: crate::torrent::layout::EntryKind::Movie,
+                            ..Default::default()
+                        },
+                        sibling_titles: &[],
                     },
                 )
                 .await
@@ -707,7 +714,7 @@ pub async fn resolve_stream_impl(
         // we never download every candidate just to populate the list.
         let prefer_dub =
             super::playback::effective_translation_type(state, media_id).await == "dub";
-        let (titles, episode_count) =
+        let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
             crate::torrent::gather_media_info(state, media_id, None).await;
         let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
         let choices = state
@@ -725,6 +732,8 @@ pub async fn resolve_stream_impl(
                     chosen_name: None,
                     movie: None,
                     series: None,
+                    entry: hint,
+                    sibling_titles: &siblings,
                 },
             )
             .await;
@@ -734,7 +743,7 @@ pub async fn resolve_stream_impl(
                 // Fansub torrent releases mux subtitles as a selectable track,
                 // not burned into the video — "hard_sub" was wrong for every
                 // non-dub release here.
-                let group = if c.prefer_dub { "dub" } else { "soft_sub" };
+                let group = if c.is_dub { "dub" } else { "soft_sub" };
                 serde_json::json!({
                     "name": c.name,
                     // Sentinel — resolved lazily when the user picks it.

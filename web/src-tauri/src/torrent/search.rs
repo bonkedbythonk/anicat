@@ -82,7 +82,7 @@ fn search_query_form(title: &str) -> String {
 /// dozen and up, so the length of the subtitle separates them cleanly.
 const MIN_DROPPABLE_SUBTITLE_WORDS: usize = 6;
 
-fn short_title(title: &str) -> Option<String> {
+pub(crate) fn short_title(title: &str) -> Option<String> {
     let (head, subtitle) = title.split_once(':')?;
     let head = head.trim();
     if head.split_whitespace().count() < 2 {
@@ -92,6 +92,15 @@ fn short_title(title: &str) -> Option<String> {
         return None;
     }
     Some(head.to_string())
+}
+
+/// Whether a (normalized) release name actually carries an English dub
+/// track, judged from the name itself rather than from what the caller
+/// asked for. Used both to score `prefer_dub` matches and to label
+/// candidates so a sub-only release never gets tagged "dub" just because
+/// dub was the requested preference.
+pub fn is_dub_release(name_norm: &str) -> bool {
+    name_norm.contains("dual audio") || name_norm.contains("english dub")
 }
 
 pub fn normalize(s: &str) -> String {
@@ -219,12 +228,48 @@ fn is_ignorable_suffix_token(t: &str) -> bool {
         "extra", "extras", "movie", "movies", "film", "gekijouban", "the",
         "short", "shorts", "complete", "series", "collection", "batch", "tv", "bd", "bdrip", "bluray",
         "remastered", "uncensored", "dual", "audio", "multi", "subs", "subbed", "dubbed",
+        // Container, codec and source tags. Present for the same reason the
+        // format words above are: they trail a title in filenames written
+        // without brackets ("Show - OAD_BD720p_10bit.mkv"), where `segments`
+        // has no punctuation to split on and so hands the whole tail over as
+        // part of the title.
+        "mkv", "mp4", "avi", "webm", "m4v", "web", "dl", "webrip", "webdl", "hdtv", "dvd", "dvdrip",
+        "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "hi10", "hi10p",
+        "flac", "aac", "ac3", "eac3", "opus", "ddp", "truehd", "raw", "eng", "engsub",
     ];
     // Bare numbers and "s01"-style markers: part of how a season is written,
     // never part of which show it is.
-    t.chars().all(|c| c.is_ascii_digit())
+    if t.chars().all(|c| c.is_ascii_digit())
         || (t.starts_with('s') && t.len() <= 3 && t[1..].chars().all(|c| c.is_ascii_digit()))
         || WORDS.contains(&t)
+    {
+        return true;
+    }
+    // A resolution, with or without a source glued to the front of it:
+    // "1080p", "bd720p". Bracketed in most naming conventions, bare in the
+    // underscore-separated ones.
+    let resolution = |t: &str| {
+        t.len() >= 4
+            && t.ends_with('p')
+            && t[..t.len() - 1].chars().all(|c| c.is_ascii_digit())
+    };
+    if resolution(t) {
+        return true;
+    }
+    for prefix in ["bd", "hd", "sd"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            if resolution(rest) {
+                return true;
+            }
+        }
+    }
+    // Bit depth: "10bit", "8bit".
+    if let Some(depth) = t.strip_suffix("bit") {
+        if !depth.is_empty() && depth.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Does one segment name the queried show? The query must be the segment's
@@ -411,7 +456,7 @@ pub(crate) fn title_matches_with_alts(query_norm: &str, name: &str, alts: &[Stri
 ///
 /// Distinct from `season_of`, which answers 1 for "no marker" — a default that
 /// is right for comparing two titles but hides whether anything was said.
-fn explicit_season(norm: &str) -> Option<u32> {
+pub(crate) fn explicit_season(norm: &str) -> Option<u32> {
     // "s02e06" states its season as plainly as "S2" does, but no word boundary
     // follows the number so none of the patterns below can see it. Reading it
     // is not optional: `segment_matches` now matches this naming, and without
@@ -427,6 +472,148 @@ fn explicit_season(norm: &str) -> Option<u32> {
     // Season 1 stated outright, rather than merely unmarked.
     let re = regex_lite::Regex::new(r"\bs0*1\b|\bseason 0*1\b|\b1st season\b").unwrap();
     re.is_match(norm).then_some(1)
+}
+
+/// Words that name a *kind* of release rather than a particular one. Shared
+/// by the extras-marker stripping and the sibling check: "OVA" tells you what
+/// something is, never which one it is, and a franchise's entries are told
+/// apart by the words that are left.
+const KIND_WORDS: &[&str] = &[
+    "special", "specials", "ova", "ovas", "oad", "oads", "ona", "sp", "extra", "extras",
+    "movie", "movies", "film", "season", "seasons", "part",
+];
+
+/// Does this release name a *different* entry of the same franchise?
+///
+/// A franchise's extras all share a title. "Shinmai Maou no Testament
+/// Departures" contains "Shinmai Maou no Testament" outright, so a release of
+/// Departures matches the OVA entry's title exactly as well as the OVA's own
+/// release does — and both are single-file, one-episode releases, so nothing
+/// downstream can tell them apart either. Every signal that separates them is
+/// in the words the two entries *don't* share.
+///
+/// So: a release is disowned when it spells out everything that makes a
+/// sibling that sibling, and nothing of what makes this entry itself. Kind
+/// words are excluded from both sides — "OVA" is what an entry is, never
+/// which one — and a sibling whose title adds nothing to this one's (a
+/// parent series, say) can't disown anything.
+///
+/// Best-effort, and silent when it cannot help: AniList's `relations` are one
+/// hop, so a franchise's OVAs are often not related to *each other* — the
+/// season 1 OVA of this franchise names the two TV seasons and nothing else,
+/// which leaves Departures three hops away and invisible here. That is what
+/// `names_an_unrelated_extra` covers instead, from the release name alone.
+/// Neither is a guarantee; together they cover the shapes seen in the wild.
+///
+/// `titles` and `siblings` arrive raw; both are normalized here.
+pub(crate) fn names_a_sibling(name_norm: &str, titles: &[String], siblings: &[String]) -> bool {
+    let content = |t: &str| -> Vec<String> {
+        normalize(t)
+            .split(' ')
+            .filter(|w| !w.is_empty() && !KIND_WORDS.contains(w))
+            .map(|w| w.to_string())
+            .collect()
+    };
+    let has = |word: &str| {
+        format!(" {} ", name_norm).contains(&format!(" {} ", word))
+    };
+    let own: Vec<String> = titles.iter().flat_map(|t| content(t)).collect();
+    for sibling in siblings {
+        let sib = content(sibling);
+        let sibling_only: Vec<&String> = sib.iter().filter(|w| !own.contains(w)).collect();
+        if sibling_only.is_empty() || !sibling_only.iter().all(|w| has(w)) {
+            continue;
+        }
+        let ours_only: Vec<&String> = own.iter().filter(|w| !sib.contains(w)).collect();
+        if !ours_only.iter().any(|w| has(w)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does this release name an extra that isn't this one, judged from the name
+/// alone?
+///
+/// The companion to `names_a_sibling`, for the (common) case where AniList
+/// doesn't relate two OVAs of the same franchise closely enough to know they
+/// are different things. A release that qualifies its kind — "- OVA
+/// Departures", "Burst Specials" — is naming *which* extra it is, and if that
+/// qualifier is a word this entry's own titles never use, it is naming a
+/// different one.
+///
+/// Deliberately narrow. Only a short chunk carrying a kind word counts, and
+/// only one unknown word in it: a longer chunk is a title or a tag run
+/// ("OAD BD720p 10bit SmoodFlamez" is a group signing its work, not a
+/// qualifier), and a chunk that is all kind words and numbers is a pack
+/// listing its contents ("Complete Series+OVAs+Specials"), which says nothing
+/// about which entry it is.
+fn names_an_unrelated_extra(name: &str, titles: &[String]) -> bool {
+    const MAX_QUALIFIER_TOKENS: usize = 3;
+    // Words that join a pack's contents together rather than naming any of it.
+    const GLUE: &[&str] = &["with", "and", "plus", "all", "full", "incl", "including", "only"];
+    let own: Vec<String> = titles
+        .iter()
+        .flat_map(|t| normalize(t).split(' ').map(|w| w.to_string()).collect::<Vec<_>>())
+        .filter(|w| !w.is_empty())
+        .collect();
+    for segment in segments(name, &[]) {
+        let tokens: Vec<&str> = segment.split(' ').filter(|t| !t.is_empty()).collect();
+        if tokens.len() > MAX_QUALIFIER_TOKENS || !tokens.iter().any(|t| KIND_WORDS.contains(t)) {
+            continue;
+        }
+        let unknown: Vec<&&str> = tokens
+            .iter()
+            .filter(|t| {
+                !KIND_WORDS.contains(*t)
+                    && !GLUE.contains(*t)
+                    && !is_ignorable_suffix_token(t)
+                    && !own.iter().any(|w| w == *t)
+            })
+            .collect();
+        if unknown.len() == 1 {
+            return true;
+        }
+    }
+    false
+}
+
+/// A normalized title with any trailing "Specials"/"OVA"/"OAD" removed.
+///
+/// AniList names an extras entry by appending the kind to the parent series
+/// ("Shinmai Maou no Testament Burst Specials"). Release groups never do —
+/// the word appears in a folder name or a release's own description, not as
+/// part of the title they match on — so the two spellings can only recognise
+/// each other with the marker gone.
+pub(crate) fn strip_extras_marker(norm: &str) -> String {
+    const MARKERS: &[&str] = &[
+        "special", "specials", "ova", "ovas", "oad", "oads", "sp", "extras", "extra",
+    ];
+    let mut tokens: Vec<&str> = norm.split(' ').filter(|t| !t.is_empty()).collect();
+    while tokens.len() > 1 && MARKERS.contains(tokens.last().unwrap()) {
+        tokens.pop();
+    }
+    tokens.join(" ")
+}
+
+/// The season number this entry's own titles state, if any of them state one.
+///
+/// AniList spells a sequel's season in the title or not at all — "Mob Psycho
+/// 100 II" says 2, "Shinmai Maou no Testament Burst" says nothing even though
+/// it is season 2. Only the first answer is usable as a season number, which
+/// is why this returns `Option` and the caller treats `None` as "unknown"
+/// rather than as season 1: inside a combined-seasons batch, guessing 1 for a
+/// named sequel selects the previous season's files.
+pub fn stated_season(titles: &[String]) -> Option<u32> {
+    // A title that is itself a number reads as a season number: "86" parses
+    // as season 86, and AniList carries plenty of such titles and synonyms.
+    // Nothing in circulation has more than a handful of seasons, so a number
+    // out of that range is a title, not a season.
+    const MAX_PLAUSIBLE_SEASON: u32 = 20;
+    titles
+        .iter()
+        .find_map(|t| explicit_season(&normalize(t)))
+        .filter(|n| *n <= MAX_PLAUSIBLE_SEASON)
 }
 
 /// Is this segment purely a season marker, carrying no title of its own?
@@ -456,7 +643,7 @@ fn is_pure_season_segment(norm: &str) -> bool {
 /// Season number expressed in a normalized title: "s2", "season 2",
 /// "2nd season", "r2" (Code Geass-style sequel marker, "R2" = "Rebellion 2").
 /// Absent marker means season 1.
-fn season_of(norm: &str) -> u32 {
+pub fn season_of(norm: &str) -> u32 {
     for re in [
         r"\bs(\d{1,2})\b",
         r"\bseason (\d{1,2})\b",
@@ -649,11 +836,29 @@ pub fn filename_matches_episode(name: &str, episode: i64) -> bool {
 
 /// The episode number a filename states, if it states one.
 pub fn filename_episode(name: &str) -> Option<i64> {
-    let stripped = strip_noise(name);
+    // Underscore is a separator to a good half of the release groups
+    // ("Show_-_01_(BD1080p).mkv", "Show - 01_BD720p_10bit.mkv") and a word
+    // character to a regex, so the episode patterns below — which all end at a
+    // word boundary — could not see a number with one glued to it. Whole packs
+    // parsed as having no episode numbers at all because of it.
+    let stripped = strip_noise(&name.replace('_', " "));
     match parse_episode(&stripped) {
         (Some(e), _) if e >= 0.0 && e.fract() == 0.0 => Some(e as i64),
         _ => None,
     }
+}
+
+/// The season a filename (or, for a batch, its full in-torrent path) states
+/// explicitly, if any — "Season 2/[EMBER] ... S02E01 ....mkv" is season 2,
+/// "[SubsPlease] Show - 05.mkv" states none. Distinct from `filename_episode`
+/// in that an unmarked file means "unknown", not "season 1": a combined
+/// "Season 1+2" batch can hold two files that both literally match the same
+/// episode number (one per season, differing only by this marker), and
+/// treating "no marker" as season 1 would make an actually-season-2 file
+/// that happens to lack a tag look like a false conflict with a season-1
+/// request instead of the "don't know" it really is.
+pub fn filename_season(name: &str) -> Option<u32> {
+    explicit_season(&normalize(name))
 }
 
 /// Translate a relative episode number into the absolute one a release uses.
@@ -675,6 +880,22 @@ pub fn filename_episode(name: &str) -> Option<i64> {
 /// the two apart — a 12-file run answers a 12-episode entry (remap) but not the
 /// 23-episode entry for the whole series (don't). An unknown count never
 /// remaps.
+/// Whether a release name announces multiple seasons bundled into one pack
+/// ("Season 1+2+OVA", "S1+S2 Batch"). `absolute_episode`'s split-cour
+/// heuristic assumes every file in a numbered run belongs to *this* AniList
+/// entry's own season — a combined-seasons pack violates that outright (a
+/// 12-file run starting past episode 1 is just as likely to be the *other*
+/// season's episodes as a split-cour continuation), so it must never be
+/// trusted to remap episode numbers for one.
+pub fn multi_season_batch(name_norm: &str) -> bool {
+    regex_lite::Regex::new(r"\bseasons?\s+\d{1,2}(?:\s+\d{1,2}){1,}\b")
+        .unwrap()
+        .is_match(name_norm)
+        || regex_lite::Regex::new(r"\bs\d{1,2}\s+s\d{1,2}\b")
+            .unwrap()
+            .is_match(name_norm)
+}
+
 pub fn absolute_episode(
     filename_episodes: &[i64],
     episode: i64,
@@ -810,6 +1031,15 @@ pub fn browser_incompatible_codec(name_norm: &str) -> bool {
     name_norm.split(' ').any(|t| t.starts_with("ddp"))
 }
 
+/// This entry's own titles alongside those of the franchise's other AniList
+/// entries. Only read for an extras entry, where the two are the difference
+/// between "the OVA" and "the other OVA" — see `names_a_sibling`.
+#[derive(Clone, Copy)]
+pub struct SiblingTitles<'a> {
+    pub own: &'a [String],
+    pub related: &'a [String],
+}
+
 /// What a release is being scored against. Bundled rather than passed as a
 /// fourth and fifth positional `bool`, which had already made call sites read
 /// as `(name, q, 13, false, false)`.
@@ -821,6 +1051,16 @@ pub struct ReleaseCriteria {
     /// The stream is bound for a browser `<video>` element rather than mpv.
     /// mpv plays everything here, so this is only ever set for the mobile PWA.
     pub browser_client: bool,
+    /// This AniList entry is an OVA or a specials collection rather than a
+    /// TV run. Two things follow: the entry's title carries a kind marker
+    /// release names never do, and its episodes are numbered from 1 while a
+    /// release numbers the same files as part of one continuous specials
+    /// sequence ("S00E03-E08" for the six specials AniList calls 1-6).
+    pub extras: bool,
+    /// How many episodes this entry has, when known. Only read for `extras`,
+    /// where it is what tells a range covering *this* entry apart from one
+    /// covering the franchise's other specials.
+    pub episode_count: Option<i64>,
 }
 
 /// Score a release name against the wanted episode. None = reject.
@@ -828,11 +1068,31 @@ fn score_release(
     name: &str,
     query_norm: &str,
     alts: &[String],
+    siblings: &SiblingTitles<'_>,
     criteria: ReleaseCriteria,
 ) -> Option<(i64, bool)> {
-    let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client } = criteria;
+    let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client, extras, episode_count } = criteria;
     let name_norm = normalize(name);
+    // An extras entry is matched with its kind marker dropped — see
+    // `strip_extras_marker`. The Nyaa query itself keeps the word, so this
+    // loosens what counts as a hit without widening what is searched for.
+    let stripped_query;
+    let query_norm = if extras {
+        stripped_query = strip_extras_marker(query_norm);
+        stripped_query.as_str()
+    } else {
+        query_norm
+    };
     if !title_matches_with_alts(query_norm, name, alts) {
+        return None;
+    }
+    // For an extras entry only: the franchise's other entries share this
+    // one's title, so a release of any of them matches it. See
+    // `names_a_sibling`.
+    if extras
+        && (names_a_sibling(&name_norm, siblings.own, siblings.related)
+            || names_an_unrelated_extra(name, siblings.own))
+    {
         return None;
     }
     let hd = name_norm.contains("1080");
@@ -846,6 +1106,21 @@ fn score_release(
     let mut score = match (exact, range) {
         (Some(e), _) if (e - ep).abs() < 0.01 => 1000,
         (None, Some((a, b))) if ep >= a && ep <= b => 600,
+        // A specials release states the range the *franchise* numbers those
+        // files, not the range AniList does: "S00E03-E08" is the six specials
+        // this entry calls 1 through 6. Length is what makes the two the same
+        // set — a run exactly as long as the entry, holding the episode
+        // asked for once it is counted from its own start. Same reasoning as
+        // `absolute_episode`, applied to the release name instead of the
+        // files inside it, and only where the mismatch is structural.
+        (None, Some((a, b)))
+            if extras
+                && episode_count == Some((b - a + 1.0) as i64)
+                && ep >= 1.0
+                && ep <= b - a + 1.0 =>
+        {
+            600
+        }
         (None, None) if allow_episodeless => 400,
         // No episode information anywhere in the name. Nearly every
         // complete-series BD release is named this way, and rejecting them
@@ -875,7 +1150,7 @@ fn score_release(
     if looks_like_film && !allow_episodeless && exact.is_none() {
         score -= FILM_MISMATCH_PENALTY;
     }
-    if prefer_dub && (name_norm.contains("dual audio") || name_norm.contains("dual-audio") || name_norm.contains("english dub")) {
+    if prefer_dub && is_dub_release(&name_norm) {
         score += 250;
     }
     if browser_client && browser_incompatible_codec(&name_norm) {
@@ -963,6 +1238,7 @@ async fn search_nyaa(
     query: &str,
     query_title_norm: &str,
     alts: &[String],
+    siblings: &SiblingTitles<'_>,
     criteria: ReleaseCriteria,
 ) -> Vec<Candidate> {
     let mut out = vec![];
@@ -1003,7 +1279,7 @@ async fn search_nyaa(
         let trusted = field(item, "nyaa:trusted") == "Yes";
         let torrent_url = field(item, "link");
         let infohash = field(item, "nyaa:infoHash");
-        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, alts, criteria) else {
+        let Some((mut score, assume_batch)) = score_release(&name, query_title_norm, alts, siblings, criteria) else {
             continue;
         };
         if trusted {
@@ -1042,6 +1318,7 @@ async fn search_nyaa(
 pub async fn find_candidates(
     client: &reqwest::Client,
     titles: &[String],
+    related_titles: &[String],
     criteria: ReleaseCriteria,
 ) -> Vec<Candidate> {
     let episode = criteria.episode;
@@ -1072,6 +1349,7 @@ pub async fn find_candidates(
     // to bound the number of *searches*, doesn't also narrow what counts as an
     // alias.
     let alts: Vec<String> = titles.iter().map(|t| normalize(t)).collect();
+    let siblings = SiblingTitles { own: titles, related: related_titles };
 
     for title in &expanded {
         all.extend(search_subsplease(client, title, &alts, episode, prefer_dub).await);
@@ -1111,7 +1389,7 @@ pub async fn find_candidates(
     for batch in futures_util::future::join_all(
         queries
             .iter()
-            .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, *crit)),
+            .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
     )
     .await
     {
@@ -1141,16 +1419,35 @@ pub(crate) fn urlencoding_encode(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// No franchise relations known — how every pre-existing assertion here
+    /// was written, and what the sibling check degrades to when AniList has
+    /// nothing to say about an entry's relatives.
+    pub(super) const NO_SIBLINGS: SiblingTitles<'static> = SiblingTitles { own: &[], related: &[] };
+
     /// Criteria for an mpv-bound resolve, which is what every pre-existing
     /// ordering assertion below was written against — mpv decodes everything,
     /// so no codec penalty applies and the tiers behave as they always did.
     fn crit(episode: i64, allow_episodeless: bool, prefer_dub: bool) -> ReleaseCriteria {
-        ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client: false }
+        ReleaseCriteria {
+            episode,
+            allow_episodeless,
+            prefer_dub,
+            browser_client: false,
+            extras: false,
+            episode_count: None,
+        }
     }
 
     /// The same, bound for a browser `<video>` element.
     fn crit_browser(episode: i64, allow_episodeless: bool, prefer_dub: bool) -> ReleaseCriteria {
-        ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client: true }
+        ReleaseCriteria {
+            episode,
+            allow_episodeless,
+            prefer_dub,
+            browser_client: true,
+            extras: false,
+            episode_count: None,
+        }
     }
 
     #[test]
@@ -1221,9 +1518,9 @@ mod tests {
         // plus the largest bonuses the incompatible one could pick up. Even
         // then it must lose, or a phone gets handed a stream it cannot decode.
         let (av1_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], crit_browser(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], &NO_SIBLINGS, crit_browser(13, false, false)).unwrap();
         let (h264_batch, _) =
-            score_release("[Grp] Toradora [1080p BD]", &q, &[], crit_browser(13, false, false)).unwrap();
+            score_release("[Grp] Toradora [1080p BD]", &q, &[], &NO_SIBLINGS, crit_browser(13, false, false)).unwrap();
         assert!(
             av1_exact + TRUSTED_BONUS + seeder_score(SEEDER_SATURATION) < h264_batch,
             "AV1 exact ({}) must sink below H.264 batch ({}) even fully bonused",
@@ -1238,9 +1535,9 @@ mod tests {
         // exact-episode tier must still win.
         let q = normalize("Toradora");
         let (av1_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p AV1]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         let (h264_exact, _) =
-            score_release("[Grp] Toradora - 13 [1080p]", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[Grp] Toradora - 13 [1080p]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         assert_eq!(av1_exact, h264_exact);
     }
 
@@ -1251,7 +1548,7 @@ mod tests {
         // never thresholded.
         let q = normalize("Toradora");
         assert!(
-            score_release("[Grp] Toradora - 13 [1080p HEVC 10bit]", &q, &[], crit_browser(13, false, false))
+            score_release("[Grp] Toradora - 13 [1080p HEVC 10bit]", &q, &[], &NO_SIBLINGS, crit_browser(13, false, false))
                 .is_some()
         );
     }
@@ -1497,12 +1794,12 @@ mod tests {
         // contain episode 5 — it should not consume a candidate slot ahead of
         // releases that can.
         let q = normalize("K-On!");
-        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, &[], crit(5, false, false)).unwrap();
-        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, &[], crit(5, false, false)).unwrap();
+        let (film, _) = score_release("[MTBB] K-ON! the Movie (2011) (BD 1080p)", &q, &[], &NO_SIBLINGS, crit(5, false, false)).unwrap();
+        let (series, _) = score_release("[MTBB] K-ON! S1 (BD 1080p)", &q, &[], &NO_SIBLINGS, crit(5, false, false)).unwrap();
         assert!(series > film);
         // For an actual film lookup (allow_episodeless), no penalty applies.
         let kk = normalize("Koe no Katachi");
-        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, &[], crit(1, true, false)).unwrap();
+        let (movie_ok, _) = score_release("[Judas] Koe no Katachi (A Silent Voice) [BD 1080p]", &kk, &[], &NO_SIBLINGS, crit(1, true, false)).unwrap();
         assert!(movie_ok > 0);
     }
 
@@ -1531,13 +1828,13 @@ mod tests {
             assert!(
                 score_release(
                     "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH][Multiple Subtitle]",
-                    &q, &[], crit(ep, false, false)).is_some(),
+                    &q, &[], &NO_SIBLINGS, crit(ep, false, false)).is_some(),
                 "episode {} must match the batch containing it", ep
             );
         }
         // Outside the stated range it must still be rejected.
         assert!(score_release(
-            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, &[], crit(13, false, false)).is_none());
+            "[Erai-raws] 86 Eighty-Six Part 2 - 01 ~ 12 [1080p][BATCH]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1570,6 +1867,41 @@ mod tests {
     }
 
     #[test]
+    fn filename_season_reads_the_explicit_marker_and_nothing_else() {
+        // The two files that actually collided in the EMBER batch: same
+        // literal episode number, disambiguated only by folder + SxxExx tag.
+        assert_eq!(
+            filename_season("Season 1/[EMBER] Shinmai Maou no Testament - S01E01.mkv"),
+            Some(1)
+        );
+        assert_eq!(
+            filename_season("Season 2/[EMBER] Shinmai Maou no Testament - S02E01.mkv"),
+            Some(2)
+        );
+        // No marker at all means "unknown", not "season 1" — a file like
+        // this must never be excluded just for lacking a tag.
+        assert_eq!(filename_season("[SubsPlease] Frieren - 05 (1080p).mkv"), None);
+    }
+
+    #[test]
+    fn multi_season_batch_flags_combined_season_packs() {
+        // The exact release that mapped season 1 episode 1 to season 2's
+        // episode 1: a 12-episode-per-season show packed as one torrent,
+        // whose files happen to number 13-24 for season 2 — a span that
+        // coincidentally matches season 1's own episode_count of 12, so
+        // absolute_episode would otherwise misfire on it.
+        let name = normalize(
+            "[EMBER] The Testament of Sister New Devil (2015-2016) (Season 1+2+OVA) (Uncensored) [BDRip] [1080p Dual Audio HEVC 10 bits] (Shinmai Maou no Testament)",
+        );
+        assert!(multi_season_batch(&name));
+        assert!(multi_season_batch(&normalize("Show S1+S2 Batch [1080p]")));
+
+        // A normal single-season release must not be flagged.
+        assert!(!multi_season_batch(&normalize("[Chihiro] Shinmai Maou no Testament [Blu-ray 1080p Hi10P FLAC]")));
+        assert!(!multi_season_batch(&normalize("Show Season 2 [1080p][BATCH]")));
+    }
+
+    #[test]
     fn a_bracketed_range_survives_noise_stripping() {
         // Release naming doesn't agree on which punctuation wraps the range.
         // "(01-25)" always parsed; "[01-25]" was deleted with the group tags
@@ -1587,10 +1919,10 @@ mod tests {
         // Rejecting these is what left a finished show with three candidates
         // when the site had a dozen.
         let (untagged, assume_batch) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         assert!(assume_batch);
         let (explicit, explicit_batch) =
-            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         assert!(!explicit_batch);
         assert!(explicit > untagged, "a release that states its range must outrank an assumed one");
     }
@@ -1598,8 +1930,8 @@ mod tests {
     #[test]
     fn seven_twenty_is_accepted_but_never_outranks_ten_eighty() {
         let q = normalize("Toradora");
-        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], crit(13, false, false)).unwrap();
-        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, &[], crit(13, false, false)).unwrap();
+        let (hd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [1080p]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
+        let (sd, _) = score_release("[Erai-raws] Toradora - 01 ~ 25 [720p]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         assert!(sd < hd);
         // The seeder bonus saturates below SD_PENALTY, so it can never promote
         // a 720p release over the same release in 1080p.
@@ -1609,7 +1941,7 @@ mod tests {
         );
         assert!(sd + seeder_score(SEEDER_SATURATION) < hd);
         // Anything below 720p is still rejected outright.
-        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, &[], crit(13, false, false)).is_none());
+        assert!(score_release("[Grp] Toradora - 01 ~ 25 [480p DVD]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).is_none());
     }
 
     #[test]
@@ -1633,11 +1965,11 @@ mod tests {
         // whether either would actually download.
         let q = normalize("Toradora");
         let (dead_base, _) =
-            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[HorribleSubs] Toradora! (DUB) (01-25) [1080p] (Batch)", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         let dead = dead_base + TRUSTED_BONUS + seeder_score(2) - DEAD_SWARM_PENALTY;
 
         let (live_base, assumed) =
-            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], crit(13, false, false)).unwrap();
+            score_release("[Sokudo] Toradora! [1080p BD AV1][dual audio]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         let live = live_base + seeder_score(52);
 
         assert!(assumed);
@@ -1650,8 +1982,8 @@ mod tests {
         // release that names the exact episode — that ordering is correctness,
         // not preference.
         let q = normalize("Show");
-        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, &[], crit(13, false, false)).unwrap();
-        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, &[], crit(13, false, false)).unwrap();
+        let (exact, _) = score_release("[Grp] Show - 13 [1080p]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
+        let (batch, _) = score_release("[Grp] Show [1080p BD]", &q, &[], &NO_SIBLINGS, crit(13, false, false)).unwrap();
         assert!(exact + seeder_score(20) > batch + seeder_score(SEEDER_SATURATION));
     }
 
@@ -1675,3 +2007,149 @@ mod tests {
 }
 
 
+
+#[cfg(test)]
+mod extras_tests {
+    use super::*;
+
+    /// The two real specials releases for "The Testament of Sister New Devil",
+    /// scored against the two real AniList specials entries. Each release
+    /// states the range the *franchise* numbers its specials by ("S00E03-E08",
+    /// "S00E09-E13") while AniList numbers each collection from 1, so a
+    /// literal range check rejects every episode of both.
+    /// The franchise's other AniList entries, as `relations` hands them back.
+    const FRANCHISE: &[&str] = &[
+        "Shinmai Maou no Testament",
+        "Shinmai Maou no Testament Burst",
+        "Shinmai Maou no Testament Specials",
+        "Shinmai Maou no Testament Burst Specials",
+        "Shinmai Maou no Testament Departures",
+        "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou",
+    ];
+
+    #[test]
+    fn a_release_that_qualifies_its_ova_names_which_ova_it_is() {
+        // AniList relates the season 1 OVA to the two TV seasons and to
+        // nothing else, so Departures is three hops away and `names_a_sibling`
+        // cannot see it. The release name can: "- OVA Departures" says which
+        // OVA it is, in a word this entry's titles never use.
+        let own: Vec<String> = vec![
+            "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou".into(),
+            "Shinmai Maou no Testament OVA".into(),
+        ];
+        assert!(names_an_unrelated_extra(
+            "[Anime Time] The Testament Of Sister New Devil (Shinmai Maou no Testament) - OVA Departures [1080p][HEVC 10bit x265][AAC][Multi-Subs].mkv",
+            &own
+        ));
+
+        // Everything that legitimately carries this OVA must survive. A pack
+        // listing its contents ("Season 1+2+OVA", "Complete Series+OVAs+
+        // Specials") names no particular extra; a group signing an
+        // underscore-separated name ("OAD_BD720p_10bit_SmoodFlamez") is not
+        // qualifying anything; and a release of this OVA itself qualifies it
+        // with words the entry does use.
+        for name in [
+            "[EMBER] The Testament of Sister New Devil (2015-2016) (Season 1+2+OVA) (Uncensored) [BDRip] [1080p Dual Audio HEVC 10 bits] (Shinmai Maou no Testament)",
+            "[DB] Shinmai Maou no Testament | The Testament of Sister New Devil (Complete Series+OVAs+Specials) (Uncensored) [Dual Audio 10bit BD1080p][HEVC-x265]",
+            "Shinmai Maou no Testament Complete Batch  Seasons 1+2 With OVAS+OAD_(BD720p_10bit_SmoodFlamez)",
+            "[BKC] Shinmai Maou no Testament OVA | The Testament of Sister New Devil OVA (BD 1080p x264 Hi10P FLAC Dual Audio)",
+            "The Testament of Sister New Devil (Shinmai Maou no Testament) (2015) 01-12 + OVA [BD 1080p Hi10P AAC dual-audio][kuchikirukia]",
+        ] {
+            assert!(!names_an_unrelated_extra(name, &own), "disowned its own release: {}", name);
+        }
+
+        // And the Departures entry keeps the release the OVA entry gave up.
+        let departures: Vec<String> = vec![
+            "Shinmai Maou no Testament Departures".into(),
+            "The Testament of Sister New Devil DEPARTURES".into(),
+        ];
+        assert!(!names_an_unrelated_extra(
+            "[Anime Time] The Testament Of Sister New Devil (Shinmai Maou no Testament) - OVA Departures [1080p][HEVC 10bit x265][AAC][Multi-Subs].mkv",
+            &departures
+        ));
+    }
+
+    #[test]
+    fn a_release_of_a_sibling_ova_is_not_this_ova() {
+        // Every one-episode extra of this franchise is a single-file release
+        // whose name contains the series title, so all of them match the OVA
+        // entry's title and none of them can be told apart by episode number
+        // — there is only ever episode 1. What separates them is the word
+        // the other entry owns and this one doesn't.
+        let own: Vec<String> = vec![
+            "Shinmai Maou no Testament: Toujou Basara no Hard Sweet na Nichijou".into(),
+            "Shinmai Maou no Testament OVA".into(),
+        ];
+        let related: Vec<String> = FRANCHISE.iter().map(|t| t.to_string()).collect();
+        let departures = normalize(
+            "[Anime Time] The Testament Of Sister New Devil (Shinmai Maou no Testament) - OVA Departures [1080p][HEVC 10bit x265][AAC][Multi-Subs].mkv",
+        );
+        assert!(names_a_sibling(&departures, &own, &related), "Departures is a different entry");
+        let burst_ova = normalize("[Nep_Blanc] Shinmai Maou No Testament BURST OVA [1080p] [x265] [10Bit] [Subbed]");
+        assert!(names_a_sibling(&burst_ova, &own, &related), "the Burst OVA is a different entry");
+
+        // This entry's own releases, and the franchise packs that contain it,
+        // must survive: "OVAs" and "Specials" say what a pack holds, not
+        // which entry it is.
+        let ember = normalize(
+            "[EMBER] The Testament of Sister New Devil (2015-2016) (Season 1+2+OVA) (Uncensored) [BDRip] [1080p Dual Audio HEVC 10 bits] (Shinmai Maou no Testament)",
+        );
+        assert!(!names_a_sibling(&ember, &own, &related));
+        let db = normalize(
+            "[DB] Shinmai Maou no Testament | The Testament of Sister New Devil (Complete Series+OVAs+Specials) (Uncensored) [Dual Audio 10bit BD1080p][HEVC-x265]",
+        );
+        assert!(!names_a_sibling(&db, &own, &related));
+        let own_ova = normalize("[BKC] Shinmai Maou no Testament OVA | The Testament of Sister New Devil OVA (BD 1080p x264 Hi10P FLAC Dual Audio)");
+        assert!(!names_a_sibling(&own_ova, &own, &related));
+
+        // And the Departures entry itself must keep its own release.
+        let departures_own: Vec<String> = vec![
+            "Shinmai Maou no Testament Departures".into(),
+            "The Testament of Sister New Devil DEPARTURES".into(),
+        ];
+        assert!(!names_a_sibling(&departures, &departures_own, &related));
+    }
+
+    #[test]
+    fn a_specials_release_answers_an_entry_that_numbers_from_one() {
+        const KUROMII: &str = "[SCY-Kuromii] The Testament of Sister New Devil (2015) - S00E03-E08 - Specials (BD 1080p x264 10-bit Hi10P FLAC 2.0) | Shinmai Maou no Testament: Loli Ero Succubus Maria no Characommentary Tsuki Hizou Eizou";
+        const BURST_SP: &str = "[SCY] The Testament of Sister New Devil (2015) - S00E09-E13 - Burst Specials (BD 1080p x264 10-bit Hi10P FLAC 2.0) | Shinmai Maou no Testament Burst Specials";
+        let crit = |episode: i64, count: i64| ReleaseCriteria {
+            episode,
+            allow_episodeless: false,
+            prefer_dub: false,
+            browser_client: false,
+            extras: true,
+            episode_count: Some(count),
+        };
+        // Scored as the real entries are: with their own titles, which is
+        // what `names_an_unrelated_extra` reads to tell "Burst Specials" from
+        // "Specials".
+        let own_s: Vec<String> = vec![
+            "Shinmai Maou no Testament Specials".into(),
+            "The Testament of Sister New Devil Specials".into(),
+        ];
+        let own_b: Vec<String> = vec![
+            "Shinmai Maou no Testament Burst Specials".into(),
+            "The Testament of Sister New Devil BURST Specials".into(),
+        ];
+        let sib_s = SiblingTitles { own: &own_s, related: &[] };
+        let sib_b = SiblingTitles { own: &own_b, related: &[] };
+        let q = normalize("The Testament of Sister New Devil Specials");
+        assert!(score_release(KUROMII, &q, &[], &sib_s, crit(1, 6)).is_some(), "six-special entry, episode 1");
+        assert!(score_release(KUROMII, &q, &[], &sib_s, crit(6, 6)).is_some(), "six-special entry, episode 6");
+        // The other collection is five long *and* qualifies itself as Burst's,
+        // a word this entry's titles never use — either one disowns it.
+        assert!(score_release(BURST_SP, &q, &[], &sib_s, crit(1, 6)).is_none(), "wrong collection");
+        // The Burst collection is reached by its romaji title rather than its
+        // English one: the release names the entry as "Shinmai Maou no
+        // Testament Burst Specials" in its alias tail and never spells out
+        // "The Testament of Sister New Devil BURST" there. Both titles are
+        // searched for every entry, so one of them landing is enough — which
+        // is also why matching stays anchored rather than being loosened
+        // until every spelling hits.
+        let qb = normalize("Shinmai Maou no Testament Burst Specials");
+        assert!(score_release(BURST_SP, &qb, &[], &sib_b, crit(1, 5)).is_some(), "five-special entry");
+        assert!(score_release(KUROMII, &qb, &[], &sib_b, crit(1, 5)).is_none(), "the other collection");
+    }
+}

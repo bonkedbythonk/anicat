@@ -48,49 +48,6 @@ export function SettingsView({ health }: SettingsViewProps) {
   const [logoutState, setLogoutState] = useState<"idle" | "confirming" | "loggingOut">("idle");
   const [registryState, setRegistryState] = useState<"idle" | "confirming" | "wiping" | "done">("idle");
   const [resetOnboardingState, setResetOnboardingState] = useState<"idle" | "confirming">("idle");
-  const [debugBusy, setDebugBusy] = useState(false);
-  const [debugResult, setDebugResult] = useState<{ ok: boolean; summary: string; raw: string } | null>(null);
-  const debugNameRef = useRef<HTMLInputElement>(null);
-  const debugEpisodeRef = useRef<HTMLInputElement>(null);
-  const debugProviderRef = useRef<HTMLSelectElement>(null);
-
-  // Provider test: resolve the first search match, ask the backend to fetch
-  // streams for the given episode, and report a clean pass/fail. The full raw
-  // response is kept only behind a copy button for bug reports.
-  const runProviderTest = useCallback(async () => {
-    const name = debugNameRef.current?.value?.trim();
-    const ep = parseInt(debugEpisodeRef.current?.value || "1", 10) || 1;
-    const provider = debugProviderRef.current?.value || "anineko";
-    if (!name) return;
-    setDebugBusy(true);
-    setDebugResult(null);
-    try {
-      const res = await mediaApi.search(name, "ANIME", 1);
-      const first = res?.media?.[0];
-      if (!first?.id) {
-        setDebugResult({ ok: false, summary: `No anime found for "${name}".`, raw: "" });
-        return;
-      }
-      const title = first.title?.english || first.title?.romaji || name;
-      const data = await invoke<Record<string, unknown>>("debug_provider_streams", {
-        mediaId: first.id,
-        episodeNumber: ep,
-        provider,
-      });
-      const streams = (data?.final_streams as unknown[]) || [];
-      const errors = (data?.errors as string[]) || [];
-      const ok = streams.length > 0;
-      const summary = ok
-        ? `${streams.length} stream${streams.length === 1 ? "" : "s"} found for ${title} episode ${ep} on ${provider}.`
-        : `No streams found for ${title} episode ${ep} on ${provider}.${errors.length ? ` First error: ${errors[0]}` : ""}`;
-      setDebugResult({ ok, summary, raw: JSON.stringify(data, null, 2) });
-    } catch (err) {
-      setDebugResult({ ok: false, summary: "Test failed: " + String(err), raw: "" });
-    } finally {
-      setDebugBusy(false);
-    }
-  }, []);
-
   const hasUpdate = Boolean(health?.update_available || stagedHasUpdate);
 
   useEffect(() => {
@@ -685,7 +642,7 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField
                   label="GPU Upscaling"
-                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Ctrl+1 in-player toggles this too."
+                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Best on screens above 1080p; smaller displays won't show much difference. Ctrl+1 in-player toggles this too."
                 >
                   <SettingToggle
                     on={(config.stream?.shader_profile || "on") !== "off"}
@@ -977,49 +934,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                 </button>
                 <div className="w-full h-40 bg-foreground/[0.03] rounded-md p-3 text-[10px] font-mono text-muted-foreground overflow-y-auto border border-border whitespace-pre-wrap text-left font-sans leading-normal">
                   {logsText}
-                </div>
-              </CardSection>
-
-              {/* Provider Test */}
-              <CardSection title="Provider Test" description="Check whether a provider can fetch streams for an episode.">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={debugNameRef}
-                      type="text"
-                      placeholder="Anime name"
-                      aria-label="Anime name"
-                      onKeyDown={(e) => { if (e.key === "Enter") runProviderTest(); }}
-                      className="flex-1 bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground placeholder:text-muted-foreground"
-                    />
-                    <input ref={debugEpisodeRef} type="number" min="1" placeholder="Ep" defaultValue="1" aria-label="Episode number" className="w-[64px] bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all text-foreground" />
-                    <select ref={debugProviderRef} defaultValue="anineko" aria-label="Provider" className="bg-surface border border-border rounded-md p-3 text-sm font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground">
-                      <option value="anineko" className="bg-surface">AniNeko</option>
-                    </select>
-                    <button
-                      onClick={runProviderTest}
-                      disabled={debugBusy}
-                      className="px-4 py-3 rounded-md bg-accent hover:bg-accent-light text-white font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {debugBusy ? <Loader2 size={16} className="animate-spin" /> : null}
-                      Test
-                    </button>
-                  </div>
-                  {debugResult && (
-                    <div className={`flex items-start gap-2 rounded-md p-3 text-sm border ${debugResult.ok ? "bg-success/10 border-success/20 text-success-light" : "bg-danger/10 border-danger/20 text-danger-light"}`}>
-                      {debugResult.ok ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <XCircle size={16} className="shrink-0 mt-0.5" />}
-                      <span className="flex-1 leading-relaxed">{debugResult.summary}</span>
-                      {debugResult.raw && (
-                        <button
-                          onClick={() => navigator.clipboard.writeText(debugResult.raw)}
-                          className="shrink-0 p-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/[0.10] text-muted-foreground hover:text-foreground transition-all"
-                          title="Copy raw response for a bug report"
-                        >
-                          <Copy size={13} />
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
               </CardSection>
 

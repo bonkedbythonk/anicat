@@ -2333,8 +2333,17 @@ pub async fn start_playback(
         // track survived on its own with nothing to override it. Clear the
         // list first, exactly like the referrer/user-agent/http-header-fields
         // resets above do, so each episode starts from an empty one.
+        //
+        // Cleared with `change-list ... clr`, not by setting the property to
+        // an empty string: `sub-files` is a list, and mpv reads "" as a
+        // one-element list holding an empty filename rather than as an empty
+        // list. Verified against a live mpv over this same IPC socket --
+        // set_property to "" leaves the property reading `[""]`, and mpv then
+        // dutifully tries to open it, which is the "Cannot open file ''" /
+        // "Can not open external file ." pair in the log on every torrent
+        // episode. `clr` leaves it `[]`.
         commands.push(serde_json::json!({
-            "command": ["set_property", "sub-files", ""]
+            "command": ["change-list", "sub-files", "clr", ""]
         }));
         let mut load_options = format!("start={}", resume_seconds);
         if let Some(ref sub_url) = subtitle_url {

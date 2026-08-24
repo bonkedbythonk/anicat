@@ -1246,21 +1246,37 @@ async fn search_nyaa(
         "https://nyaa.si/?page=rss&c=1_2&f=0&s=seeders&o=desc&q={}",
         urlencoding_encode(query)
     );
-    let body = match client.get(&url).send().await {
-        // A rate-limit or an outage answers with a body that simply has no
-        // <item> in it, which is indistinguishable from "this show has no
-        // releases" once it reaches the parser — and the symptom, "no streams
-        // found", is the same as a genuine miss. Say which one it was.
-        Ok(r) if !r.status().is_success() => {
-            log::warn!("torrent: nyaa search returned HTTP {} for '{}'", r.status(), query);
-            return out;
+    // A rate-limit or an outage answers with a body that simply has no <item>
+    // in it, which is indistinguishable from "this show has no releases" once
+    // it reaches the parser — and the symptom, "no streams found", is the same
+    // as a genuine miss. Say which one it was, and give a throttled query one
+    // more chance before writing the release off: a 429 here doesn't fail a
+    // play outright, it quietly shrinks the candidate pool, so the release
+    // that wins is whichever survived the throttle rather than the best one.
+    let mut body = String::new();
+    for attempt in 0..=1 {
+        match client.get(&url).send().await {
+            Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                continue;
+            }
+            Ok(r) if !r.status().is_success() => {
+                log::warn!("torrent: nyaa search returned HTTP {} for '{}'", r.status(), query);
+                return out;
+            }
+            Ok(r) => {
+                body = r.text().await.unwrap_or_default();
+                break;
+            }
+            Err(e) => {
+                log::warn!("torrent: nyaa search failed: {}", e);
+                return out;
+            }
         }
-        Ok(r) => r.text().await.unwrap_or_default(),
-        Err(e) => {
-            log::warn!("torrent: nyaa search failed: {}", e);
-            return out;
-        }
-    };
+    }
+    if body.is_empty() {
+        return out;
+    }
     let item_re = regex_lite::Regex::new(r"(?s)<item>(.*?)</item>").unwrap();
     let field = |item: &str, tag: &str| -> String {
         regex_lite::Regex::new(&format!(r"(?s)<{tag}>(.*?)</{tag}>"))
@@ -1383,17 +1399,23 @@ pub async fn find_candidates(
         queries.push((format!("{} 1080p", q_title), norm, criteria));
     }
 
-    // Concurrently: this is on the play path, and the fan-out is now three
-    // queries per title where a sequential walk would spend a round-trip on
-    // each.
-    for batch in futures_util::future::join_all(
-        queries
-            .iter()
-            .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
-    )
-    .await
-    {
-        all.extend(batch);
+    // Concurrent, but only so far. This is on the play path and a sequential
+    // walk would spend a round-trip on each of a dozen queries — except that
+    // firing all twelve at once is what made Nyaa throttle them: measured
+    // against the live site, four concurrent requests all answer 200 while
+    // eight return two 429s and twelve return six. Every throttled query is a
+    // silently smaller candidate pool.
+    const MAX_CONCURRENT_NYAA_QUERIES: usize = 4;
+    for chunk in queries.chunks(MAX_CONCURRENT_NYAA_QUERIES) {
+        for batch in futures_util::future::join_all(
+            chunk
+                .iter()
+                .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
+        )
+        .await
+        {
+            all.extend(batch);
+        }
     }
 
     // Dedupe by name, best score wins.

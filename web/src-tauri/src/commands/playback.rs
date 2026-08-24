@@ -2086,6 +2086,23 @@ pub async fn start_playback(
     }
     cmd.arg("--force-window=yes");
     cmd.arg("--ontop");
+    // mpv 0.41 prefers its AVFoundation audio output on macOS, and that one
+    // dies when the system flushes the renderer under it. Pausing and leaving
+    // the player sitting is enough to trigger it: macOS posts
+    // AVSampleBufferAudioRendererWasFlushedAutomaticallyNotification at an
+    // idle renderer, mpv restarts the output from that notification, and the
+    // allocation it makes on the way back up trips a libmalloc assertion —
+    // "BUG IN LIBMALLOC", SIGTRAP, window gone, mid-episode. Two crash
+    // reports on one evening, identical stacks down to the frame
+    // (-[AVMediaDataRequester _requestMediaDataIfReady] into
+    // _xzm_malloc_large_huge).
+    //
+    // coreaudio is the long-standing AudioUnit output and never touches
+    // AVSampleBufferAudioRenderer, so the notification that starts all this
+    // simply doesn't reach it. Pinned rather than merely reordered: falling
+    // back to avfoundation would land right back on the crash.
+    #[cfg(target_os = "macos")]
+    cmd.arg("--ao=coreaudio");
     cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));
 
     if resume_seconds > 0 {

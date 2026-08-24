@@ -101,7 +101,22 @@ pub fn routes() -> Router<ProxyState> {
 // ── config (global — not per-user; mirrors the single desktop config.toml) ─
 
 async fn get_config(State(state): State<ProxyState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    ok_or_500(crate::commands::config::get_config_impl(&state.app_state).await)
+    let mut config = crate::commands::config::get_config_impl(&state.app_state)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))))?;
+    // Whether this server can hand the phone a torrent release it can
+    // actually play. Without ffmpeg the phone gets raw Matroska, which Safari
+    // cannot open at all -- so the picker hides the torrent source rather
+    // than offering one that fails on tap. Reported by the server because
+    // only the server knows whether ffmpeg is installed; the browser's own
+    // Matroska support is checked separately and either one is enough.
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "remux_available".to_string(),
+            serde_json::json!(state.app_state.inner.remux.is_available().await),
+        );
+    }
+    Ok(Json(config))
 }
 
 async fn update_config(
@@ -693,6 +708,38 @@ struct ResolvePlaybackBody {
     can_play_matroska: Option<bool>,
 }
 
+/// Put a torrent release through ffmpeg and hand back the HLS path, or `None`
+/// to fall through to serving the file as it is.
+async fn remux_torrent_stream(
+    manager: &crate::proxy::remux::RemuxManager,
+    loopback_url: &str,
+    path_and_query: &str,
+) -> Option<String> {
+    if !manager.is_available().await {
+        return None;
+    }
+    // "/torrent-stream?t=1&f=5" -- the ids the session is keyed by, so two
+    // requests for one episode share an ffmpeg instead of racing.
+    let query = path_and_query.split_once('?').map(|(_, q)| q).unwrap_or("");
+    let mut torrent_id = None;
+    let mut file_id = None;
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("t", v)) => torrent_id = v.parse().ok(),
+            Some(("f", v)) => file_id = v.parse().ok(),
+            _ => {}
+        }
+    }
+    let (torrent_id, file_id) = (torrent_id?, file_id?);
+    match manager.start(loopback_url, torrent_id, file_id, 0).await {
+        Ok(url) => Some(url),
+        Err(e) => {
+            log::warn!("remux: falling back to the raw file: {}", e);
+            None
+        }
+    }
+}
+
 /// Mobile has no mpv — instead of `start_playback` spawning a native player,
 /// this resolves the stream the same way and hands the client a proxied,
 /// relative URL a plain `<video>` tag can play directly. It still updates
@@ -720,10 +767,17 @@ async fn resolve_playback(
     // Both provider slots can arrive as "nyaa" from the server's global
     // config.toml — `general.provider` when the client sends none, and
     // `general.fallback_provider` whenever the primary fails. The PWA's own
-    // pickers hide nyaa on a device that can't demux Matroska, but neither of
+    // pickers hide nyaa on a device that can't play torrents, but neither of
     // those paths passes through them, which is how a phone that had it hidden
     // still ended up staring at a stalled <video>. Refuse it here instead:
     // an honest error beats a stream that cannot start.
+    //
+    // The flag now answers "can this device play a torrent release by any
+    // route", which includes the server remuxing it into HLS — see
+    // `canPlayTorrents` on the client and `crate::proxy::remux` here. The wire
+    // name stays as it was: a phone can be running a bundle cached from before
+    // the remux path existed, and for that client the old meaning is still the
+    // right answer.
     let can_play_matroska = body.can_play_matroska.unwrap_or(true);
     let torrents_unusable = |p: &str| p == "nyaa" && !can_play_matroska;
     if torrents_unusable(&provider_name) && !torrents_unusable(&fallback_provider) && !fallback_provider.is_empty() && fallback_provider != "none" {
@@ -790,10 +844,27 @@ async fn resolve_playback(
     // headers, so route the phone straight at it instead of through /proxy —
     // that also sidesteps /proxy's SSRF allowlist, which deliberately never
     // permits loopback hosts.
-    let mut stream_url = if let Some(path_and_query) = raw_url.strip_prefix("http://127.0.0.1:").and_then(|rest| {
+    let torrent_path = raw_url.strip_prefix("http://127.0.0.1:").and_then(|rest| {
         rest.split_once('/').map(|(_, tail)| format!("/{tail}"))
-    }).filter(|p| p.starts_with("/torrent-stream")) {
-        path_and_query
+    }).filter(|p| p.starts_with("/torrent-stream"));
+    // A torrent release is Matroska, which Safari cannot open at all -- so on
+    // the phone it goes through ffmpeg first, which copies the streams into
+    // fragmented MP4 and serves them as HLS. See `crate::proxy::remux`.
+    //
+    // Falls back to handing over the raw file when ffmpeg isn't installed or
+    // the release turns out to need more than a remux (10-bit H.264, AV1):
+    // that is the behaviour this path had before, and on a browser that can
+    // play Matroska it still works.
+    let mut remuxed = false;
+    let mut stream_url = if let Some(path_and_query) = torrent_path {
+        let manager = &app_state.inner.remux;
+        match remux_torrent_stream(manager, &raw_url, &path_and_query).await {
+            Some(url) => {
+                remuxed = true;
+                url
+            }
+            None => path_and_query,
+        }
     } else {
         format!("/proxy?url={}", crate::util::percent_encode(&raw_url))
     };
@@ -887,8 +958,17 @@ async fn resolve_playback(
 
     Ok(Json(serde_json::json!({
         "stream_url": stream_url,
-        "resume_seconds": resume_seconds,
-        "subtitle_url": subtitle_url,
+        // A remuxed stream is produced from the start of the file at playback
+        // speed, so a position further in simply has no segments yet and
+        // seeking to it stalls rather than resumes. Offering a resume the
+        // stream cannot honour is worse than not offering one; starting the
+        // remux at the saved position instead needs the reported position
+        // shifted by that offset everywhere it is read, which is its own
+        // change.
+        "resume_seconds": if remuxed { 0 } else { resume_seconds },
+        // The subtitles ride inside the HLS playlist as their own rendition,
+        // so there is no sidecar track to attach.
+        "subtitle_url": if remuxed { None } else { subtitle_url },
     })))
 }
 

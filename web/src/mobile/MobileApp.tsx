@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import { getConfig, getHealth, mediaApi } from "@/lib/api";
 import { getMobileToken, clearMobileToken, mobileFetch } from "@/lib/transport";
-import { applyMobileSettings, canPlayTorrents } from "./mobileSettings";
+import { applyMobileSettings, canPlayTorrents, setServerRemuxAvailable } from "./mobileSettings";
 
 import { ScheduleView } from "@/components/views/ScheduleView";
 import { ProfileView } from "@/components/views/ProfileView";
@@ -25,6 +25,10 @@ async function loadConfig() {
   try {
     const config = await getConfig();
     useSettingsStore.getState().loadFromConfig(config);
+    // Whether the server can repackage a torrent release into something this
+    // browser can play. Read before applyMobileSettings, which drops a saved
+    // "nyaa" preference on a device that cannot play torrents by any route.
+    setServerRemuxAvailable(Boolean((config as { remux_available?: boolean })?.remux_available));
   } catch {
     // Config will use defaults
   }

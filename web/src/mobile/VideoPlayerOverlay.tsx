@@ -207,14 +207,19 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
   }, []);
   useEffect(() => () => clearStallWatch(), [clearStallWatch]);
 
-  // Torrent playback is the one source whose failures are a fixed property of
-  // the browser rather than a flaky server: releases are .mkv (and often HEVC
-  // or 10-bit H.264), which no amount of retrying makes playable. Both the
-  // error path and the silent readyState=0 path below say so plainly, since
-  // "try another server" is advice that cannot work here.
-  const isTorrentStream = !!streamUrl?.startsWith("/torrent-stream");
-  const TORRENT_UNPLAYABLE =
-    "This browser can't play torrent releases — they're .mkv files. Switch Source to AniNeko in Playback Settings.";
+  // Torrent playback reaches the player two ways. The server remuxes the
+  // release into HLS when it can (/mobile-hls/...), which is what makes it
+  // playable on a browser that has no Matroska support at all. When it can't
+  // -- no ffmpeg, or a release whose video would need re-encoding rather than
+  // repackaging -- the raw .mkv is handed over instead, and failure there is
+  // a fixed property of the browser rather than a flaky server, so "try
+  // another server" is advice that cannot work.
+  const isRawTorrentStream = !!streamUrl?.startsWith("/torrent-stream");
+  const isRemuxedStream = !!streamUrl?.startsWith("/mobile-hls/");
+  const isTorrentStream = isRawTorrentStream || isRemuxedStream;
+  const TORRENT_UNPLAYABLE = isRemuxedStream
+    ? "This release stopped mid-stream. It may still be downloading — wait a moment and try again, or switch Source to AniNeko in Playback Settings."
+    : "This browser can't play torrent releases — they're .mkv files. Switch Source to AniNeko in Playback Settings.";
 
   const handleVideoError = () => {
     const mediaError = videoRef.current?.error;
@@ -249,6 +254,9 @@ export function VideoPlayerOverlay(props: VideoPlayerOverlayProps) {
       const parsed = new URL(streamUrl, window.location.origin);
       inner = decodeURIComponent(parsed.searchParams.get("url") || streamUrl);
     } catch { /* keep streamUrl */ }
+    // A remuxed torrent is same-origin HLS rather than /proxy?url=..., so the
+    // unwrap above leaves it as-is; either way what decides is whether the
+    // thing being loaded is a playlist.
     const isHls = inner.includes(".m3u8");
 
     if (!isHls) {

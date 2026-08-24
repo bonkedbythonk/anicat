@@ -167,6 +167,13 @@ pub async fn start_proxy(
         // Ungated like /proxy: mpv fetches this from loopback without a
         // token, and it only exposes video bytes of torrents this app added.
         .route("/torrent-stream", get(crate::torrent::stream::torrent_stream_handler))
+        // Ungated for the same reason as /proxy and /torrent-stream above: a
+        // <video> element fetches its own playlist and segments and cannot be
+        // made to send a token, and these expose bytes of a torrent this app
+        // is already streaming to that same phone.
+        .route("/mobile-hls/{id}/{file}", get(super::remux::session_file_handler))
+        .route("/mobile-hls/{id}/{dir}/{file}", get(super::remux::session_nested_handler))
+        .route("/mobile-hls/stop", get(super::remux::stop_handler))
         .route("/health", get(health_handler))
         // Unauthenticated on purpose: /auth and /session/login are the login
         // endpoints themselves (single-PIN and per-user respectively), and

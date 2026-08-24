@@ -189,6 +189,10 @@ pub struct AppStateInner {
     /// Embedded torrent engine for the "nyaa" provider. Lazy: no torrent
     /// session (DHT, listeners) exists until the first torrent playback.
     pub torrent: Arc<crate::torrent::TorrentManager>,
+    /// Remuxes a torrent release into HLS for browsers that cannot open
+    /// Matroska — which is every Safari, and so the whole PWA on iOS. Idle
+    /// until a phone plays a torrent; see `crate::proxy::remux`.
+    pub remux: Arc<crate::proxy::remux::RemuxManager>,
     /// Per-user AniList client/cache, lazily populated the first time
     /// `AppState::scoped_for_user` sees a given `user_id`. Never touched for
     /// `user_id == 0` (the desktop/single-user sentinel) — that path returns
@@ -407,6 +411,7 @@ impl AppState {
                 preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 torrent: Arc::new(crate::torrent::TorrentManager::new()),
+                remux: Arc::new(crate::proxy::remux::RemuxManager::new()),
                 user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 user_playback: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             }),
@@ -703,6 +708,7 @@ mod tests {
                 preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 torrent: Arc::new(crate::torrent::TorrentManager::new()),
+                remux: Arc::new(crate::proxy::remux::RemuxManager::new()),
                 user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 user_playback: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             }),

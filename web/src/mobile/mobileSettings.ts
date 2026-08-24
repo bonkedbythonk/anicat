@@ -29,7 +29,20 @@ const RETIRED_PROVIDERS = ["mkissa", "allanime", "gogoanime", "anizone", "animep
  * Feature-detected rather than UA-sniffed. WebKit returns "" from canPlayType
  * for Matroska; Chromium returns "probably".
  */
+/** Set from the server's config payload. The server remuxes a release into
+ * HLS when ffmpeg is present, which is what makes torrents playable on a
+ * browser with no Matroska support of its own -- every Safari, and so the
+ * whole PWA on iOS. */
+let serverRemuxAvailable = false;
+
+export function setServerRemuxAvailable(available: boolean): void {
+  serverRemuxAvailable = available;
+}
+
+/** Whether this device can play a torrent release at all, by either route:
+ * the browser opening the .mkv itself, or the server repackaging it first. */
 export function canPlayTorrents(): boolean {
+  if (serverRemuxAvailable) return true;
   try {
     const video = document.createElement("video");
     return video.canPlayType('video/x-matroska; codecs="avc1.640028,mp4a.40.2"') !== "";

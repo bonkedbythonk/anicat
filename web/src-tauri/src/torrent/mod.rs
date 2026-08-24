@@ -117,6 +117,24 @@ pub struct TorrentManager {
     /// SeaDex's parsed release list per AniList `media_id` — see
     /// `seadex::find_candidates`'s doc comment for why this is cached at all.
     seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
+    /// Which files are currently selected inside each live torrent, oldest
+    /// first. librqbit's own `only_files()` is an unordered set, so the
+    /// recency this needs to bound the selection is tracked here instead.
+    selected_files: tokio::sync::Mutex<HashMap<usize, Vec<usize>>>,
+}
+
+/// How many files stay selected inside one torrent: the one playing, and the
+/// one preloaded behind it.
+const SELECTED_FILES_KEPT: usize = 2;
+
+/// Record `file_id` as the most recently wanted file of a torrent, dropping
+/// whatever fell out of the window. Most recent last.
+fn retain_recent(recent: &mut Vec<usize>, file_id: usize) {
+    recent.retain(|f| *f != file_id);
+    recent.push(file_id);
+    if recent.len() > SELECTED_FILES_KEPT {
+        recent.drain(..recent.len() - SELECTED_FILES_KEPT);
+    }
 }
 
 impl Default for TorrentManager {
@@ -143,6 +161,7 @@ impl TorrentManager {
             resolved: tokio::sync::Mutex::new(HashMap::new()),
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
+            selected_files: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -758,6 +777,7 @@ impl TorrentManager {
             .is_err()
         {
             let _ = session.delete(torrent_id.into(), false).await;
+            self.selected_files.lock().await.remove(&torrent_id);
             return Err("torrent failed to initialize".into());
         }
 
@@ -820,23 +840,40 @@ impl TorrentManager {
 
         let Some(file_id) = file_id else {
             let _ = session.delete(torrent_id.into(), false).await;
+            self.selected_files.lock().await.remove(&torrent_id);
             return Err(format!("episode {} not found inside torrent", ctx.episode));
         };
 
-        // Select the wanted file — as a union with whatever is already
-        // selected, not a replacement. Preloading the next episode reuses the
-        // same batch torrent, and replacing the selection would deselect the
-        // episode currently streaming to mpv: librqbit cancels its queued
-        // pieces, capping it to the 32MB rolling stream-lookahead window while
-        // the preloaded file downloads full-speed in natural piece order.
-        // That bandwidth theft + tiny runway is exactly what showed up as
-        // "cache 0.0MB, chunk, freeze" mid-playback.
-        let mut wanted: std::collections::HashSet<usize> = std::iter::once(file_id).collect();
-        if already_managed {
-            if let Some(prev) = handle.only_files() {
-                wanted.extend(prev);
+        // Select the wanted file alongside the one selected just before it,
+        // and nothing older.
+        //
+        // Not a plain replacement: preloading the next episode reuses the same
+        // batch torrent, and deselecting the episode currently streaming to
+        // mpv makes librqbit cancel its queued pieces, capping it to the 32MB
+        // rolling stream-lookahead window while the preloaded file downloads
+        // full-speed in natural piece order. That bandwidth theft plus a tiny
+        // runway is what showed up as "cache 0.0MB, chunk, freeze" mid-play.
+        //
+        // But it was a union with everything ever selected, which never shrank
+        // — so an evening on one season pack ended up selecting every episode
+        // watched and fetching all of them at full speed, long after playback
+        // had moved on. Measured on a real session: six episodes of a 12-file
+        // pack, 10.1 GiB, downloaded to completion while the viewer was
+        // watching something else entirely.
+        //
+        // Two is the whole requirement: whatever is playing, and whatever was
+        // preloaded next. A resolve only ever happens for one or the other.
+        let wanted: std::collections::HashSet<usize> = {
+            let mut selected = self.selected_files.lock().await;
+            let recent = selected.entry(torrent_id).or_default();
+            // A freshly added torrent shares nothing with whatever held this
+            // id before it.
+            if !already_managed {
+                recent.clear();
             }
-        }
+            retain_recent(recent, file_id);
+            recent.iter().copied().collect()
+        };
         session
             .update_only_files(&handle, &wanted)
             .await
@@ -853,6 +890,7 @@ impl TorrentManager {
         // which for these releases is where the container header lives.
         if let Err(e) = self.prebuffer(&handle, file_id).await {
             let _ = session.delete(torrent_id.into(), false).await;
+            self.selected_files.lock().await.remove(&torrent_id);
             return Err(e);
         }
 
@@ -1050,6 +1088,30 @@ fn cleanup_cache(dir: &std::path::Path) {
     }
 }
 
+/// What a file actually costs on disk, rather than how long it claims to be.
+///
+/// librqbit lays down every file in a torrent up front, whether or not it is
+/// selected, so a 20GB season pack occupies 20GB of *apparent* length from the
+/// moment it is added while holding only the few episodes actually fetched.
+/// Summing `len()` therefore told the cache it was 7x over its cap when it was
+/// under it, and evicted a whole session's worth of episodes — the two just
+/// watched included — the moment the grace window let it.
+#[cfg(unix)]
+fn allocated_size(md: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    // st_blocks is always in 512-byte units, whatever the filesystem's own
+    // block size is.
+    md.blocks() * 512
+}
+
+/// Windows has no sparse-aware size in `std`, and the alternative is a raw
+/// `GetCompressedFileSize` call for a cache heuristic. Overcounting a sparse
+/// file there costs an early eviction, never a wrong file.
+#[cfg(not(unix))]
+fn allocated_size(md: &std::fs::Metadata) -> u64 {
+    md.len()
+}
+
 fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
     let mut size = 0u64;
     let mut mtime = std::time::SystemTime::UNIX_EPOCH;
@@ -1065,7 +1127,7 @@ fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
             }
         }
     } else if let Some(md) = meta_of(path) {
-        size = md.len();
+        size = allocated_size(&md);
         mtime = md.modified().unwrap_or(mtime);
     }
     (size, mtime)
@@ -1075,6 +1137,51 @@ fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    #[test]
+    fn the_selection_keeps_what_plays_and_what_was_preloaded() {
+        // Watching straight through a season pack: each episode is resolved,
+        // then the next is preloaded behind it. Only ever two files stay
+        // selected, and the one playing is never the one dropped.
+        let mut recent = vec![];
+        retain_recent(&mut recent, 0); // play episode 1
+        assert_eq!(recent, vec![0]);
+        retain_recent(&mut recent, 1); // preload episode 2
+        assert_eq!(recent, vec![0, 1]);
+        retain_recent(&mut recent, 2); // episode 2 plays, preload episode 3
+        assert_eq!(recent, vec![1, 2], "episode 1 dropped, episode 2 still playing");
+        retain_recent(&mut recent, 3);
+        assert_eq!(recent, vec![2, 3]);
+        // Re-resolving a file already selected re-dates it rather than
+        // selecting it twice -- jumping back to the previous episode must not
+        // evict the one it is jumping from.
+        retain_recent(&mut recent, 2);
+        assert_eq!(recent, vec![3, 2]);
+    }
+
+    /// Regression: a 20GB pack whose files are laid down up front, holding
+    /// almost nothing, counted as 20GB against a 3GB cap.
+    #[cfg(unix)]
+    #[test]
+    fn cache_accounting_counts_disk_used_not_length_claimed() {
+        let dir = std::env::temp_dir().join(format!("anicat-sparse-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("episode.mkv");
+        // Two gigabytes of nothing, exactly as librqbit leaves an unselected
+        // file in a season pack.
+        std::fs::File::create(&file).unwrap().set_len(2 * 1024 * 1024 * 1024).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().len(), 2 * 1024 * 1024 * 1024);
+
+        let (size, _) = dir_size_and_mtime(&dir);
+        assert!(
+            size < 16 * 1024 * 1024,
+            "sparse file counted as {} bytes; the cap can't hold against that",
+            size
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
@@ -1717,6 +1824,107 @@ mod tests {
         let _ = session.stop().await;
         let _ = std::fs::remove_dir_all(&dir);
         assert!(failures.is_empty(), "wrong file chosen:\n  {}", failures.join("\n  "));
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored --nocapture`
+    ///
+    /// Walk three episodes of one batch and watch what stays selected. The
+    /// selection used to be a union that never shrank, so this grew to three
+    /// files here and to a whole season pack over an evening -- every one of
+    /// them fetched at full speed, long after playback had moved on.
+    ///
+    /// Drives `try_candidate` rather than `resolve`, because `resolve` races
+    /// its top candidates and a single-episode release always prebuffers
+    /// faster than a 28-file batch. That race is right for playback and wrong
+    /// for this test: it never lets the batch path run.
+    #[tokio::test]
+    #[ignore]
+    async fn live_selection_stays_bounded_across_episodes() {
+        let dir = std::env::temp_dir().join("anicat-torrent-selection-test");
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let titles = vec!["Sousou no Frieren".to_string()];
+        let http = client();
+        let candidates = search::find_candidates(
+            &http,
+            &titles,
+            &[],
+            search::ReleaseCriteria {
+                episode: 1,
+                allow_episodeless: false,
+                prefer_dub: false,
+                browser_client: false,
+                extras: false,
+                episode_count: Some(28),
+            },
+        )
+        .await;
+        let batch = candidates
+            .iter()
+            .find(|c| c.name.contains("01-28"))
+            .expect("no whole-season batch among the candidates");
+        println!("batch: {}", batch.name);
+
+        let session = mgr.session().await.unwrap();
+        let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
+        let mut file_ids = vec![];
+        let mut torrent_id = 0usize;
+        for episode in 1..=3 {
+            let ctx = CandidateContext {
+                titles: &titles,
+                alts: &alts,
+                hint: layout::EntryHint {
+                    kind: layout::EntryKind::Tv,
+                    season: Some(1),
+                    season_at_least: None,
+                },
+                episode,
+                episode_count: Some(28),
+                allow_episodeless: false,
+            };
+            let resolved = mgr
+                .try_candidate(&http, &session, batch, &ctx)
+                .await
+                .unwrap_or_else(|e| panic!("episode {} failed: {}", episode, e));
+            torrent_id = resolved.torrent_id;
+            let handle = session.get(resolved.torrent_id.into()).unwrap();
+            let mut selected: Vec<usize> = handle.only_files().unwrap_or_default().into_iter().collect();
+            selected.sort_unstable();
+            println!("episode {} -> file {}, selected {:?}", episode, resolved.file_id, selected);
+            assert!(
+                selected.contains(&resolved.file_id),
+                "episode {} is not among the files it selected: {:?}",
+                episode, selected
+            );
+            assert!(
+                selected.len() <= SELECTED_FILES_KEPT,
+                "episode {} left {} files selected: {:?}",
+                episode, selected.len(), selected
+            );
+
+            // The episode before this one stays selected -- that is what keeps
+            // a preloaded next episode from stealing the pieces mpv is
+            // currently reading.
+            if let Some(previous) = file_ids.last() {
+                assert!(
+                    selected.contains(previous),
+                    "the episode still playing was dropped: {:?}",
+                    selected
+                );
+            }
+            file_ids.push(resolved.file_id);
+        }
+        assert_ne!(file_ids[0], file_ids[2], "three episodes resolved to one file");
+
+        let handle = session.get(torrent_id.into()).unwrap();
+        let selected = handle.only_files().unwrap_or_default();
+        assert!(
+            !selected.contains(&file_ids[0]),
+            "the first episode is still selected after two more: {:?}",
+            selected
+        );
+
+        let _ = session.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // Live network + torrent test: resolve an episode and stream real bytes.

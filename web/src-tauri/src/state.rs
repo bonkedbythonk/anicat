@@ -58,6 +58,26 @@ pub struct StreamConfig {
     pub shader_profile: String,
     #[serde(default = "default_translation_type")]
     pub translation_type: String,
+    /// Ceiling on how fast a torrent may download, in megabytes per second.
+    /// Zero means no ceiling, which is what this always did.
+    ///
+    /// Exists because a swarm pulling at 50 MB/s with sixty half-open peer
+    /// connections is a very different load on a laptop's radio than the
+    /// steady single stream every other provider produces, and Bluetooth
+    /// headphones share that radio. 1080p needs about 1 MB/s sustained, so
+    /// even a low ceiling here leaves several times the headroom playback
+    /// actually uses — it costs only how quickly the rest of the episode
+    /// arrives behind you.
+    ///
+    /// Read once, when the torrent session is created, so a change takes
+    /// effect on the next launch.
+    #[serde(default = "default_torrent_download_limit")]
+    pub torrent_download_limit_mbps: u32,
+}
+
+/// Unlimited, matching the behaviour before the setting existed.
+fn default_torrent_download_limit() -> u32 {
+    0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -392,6 +412,10 @@ impl AppState {
             discord.connect();
         }
 
+        let torrent = Arc::new(crate::torrent::TorrentManager::new());
+        // Before anything can create the session, which reads it once.
+        torrent.set_download_limit_mbps(config.stream.torrent_download_limit_mbps);
+
         let app_state = Self {
             inner: Arc::new(AppStateInner {
                 config: Arc::new(RwLock::new(config)),
@@ -410,7 +434,7 @@ impl AppState {
                 preloaded_stream: Arc::new(tokio::sync::Mutex::new(None)),
                 preloading: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 playback_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                torrent: Arc::new(crate::torrent::TorrentManager::new()),
+                torrent: torrent.clone(),
                 remux: Arc::new(crate::proxy::remux::RemuxManager::new()),
                 user_anilist: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 user_playback: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -465,6 +489,11 @@ impl AppState {
 
     pub async fn save_config(&self) -> Result<(), Box<dyn std::error::Error>> {
         let config = self.inner.config.read().await;
+        // Takes effect for a session not yet created; an already-running one
+        // keeps the ceiling it was built with until the next launch.
+        self.inner
+            .torrent
+            .set_download_limit_mbps(config.stream.torrent_download_limit_mbps);
         let toml_str = toml::to_string_pretty(&*config)?;
         if let Some(parent) = std::path::Path::new(&self.inner.config_path).parent() {
             std::fs::create_dir_all(parent)?;

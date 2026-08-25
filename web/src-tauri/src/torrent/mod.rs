@@ -117,6 +117,10 @@ pub struct TorrentManager {
     /// SeaDex's parsed release list per AniList `media_id` — see
     /// `seadex::find_candidates`'s doc comment for why this is cached at all.
     seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
+    /// Ceiling on download speed in bytes per second, or zero for none. Set
+    /// from config before the session is created; see
+    /// `StreamConfig::torrent_download_limit_mbps`.
+    download_limit_bps: std::sync::atomic::AtomicU32,
     /// Which files are currently selected inside each live torrent, oldest
     /// first. librqbit's own `only_files()` is an unordered set, so the
     /// recency this needs to bound the selection is tracked here instead.
@@ -162,7 +166,19 @@ impl TorrentManager {
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
+            download_limit_bps: std::sync::atomic::AtomicU32::new(0),
         }
+    }
+
+    /// Set the download ceiling, in megabytes per second (0 = unlimited).
+    /// Only read when the session is first created, so this has to happen
+    /// before the first torrent play — which is where `AppState` calls it,
+    /// at startup and whenever config is saved.
+    pub fn set_download_limit_mbps(&self, mbps: u32) {
+        self.download_limit_bps.store(
+            mbps.saturating_mul(1024 * 1024),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     pub async fn session(&self) -> Result<Arc<Session>, String> {
@@ -171,8 +187,19 @@ impl TorrentManager {
                 std::fs::create_dir_all(&self.cache_dir).map_err(|e| e.to_string())?;
                 // Built twice: once normally, once without DHT persistence if
                 // the stored state turns out to be unusable. See below.
-                let opts = |disable_dht_persistence: bool| SessionOptions {
+                let limit_bps = self.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
+                if limit_bps > 0 {
+                    log::info!(
+                        "torrent: download limited to {} MB/s",
+                        limit_bps / (1024 * 1024)
+                    );
+                }
+                let opts = move |disable_dht_persistence: bool| SessionOptions {
                     disable_dht_persistence,
+                    ratelimits: librqbit::limits::LimitsConfig {
+                        upload_bps: None,
+                        download_bps: std::num::NonZeroU32::new(limit_bps),
+                    },
                     // Never seed — see the Cargo.toml note on the feature.
                     disable_upload: true,
                     // A dead/unreachable peer under the library's 10s default
@@ -1137,6 +1164,31 @@ fn dir_size_and_mtime(path: &std::path::Path) -> (u64, std::time::SystemTime) {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    #[test]
+    fn a_zero_download_limit_means_unlimited() {
+        // librqbit takes the ceiling as NonZeroU32, where None is "no limit".
+        // Zero has to land there rather than as a literal zero bytes per
+        // second, which would stall every torrent outright.
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-limit-test"));
+        manager.set_download_limit_mbps(0);
+        let bps = manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(bps, 0);
+        assert!(std::num::NonZeroU32::new(bps).is_none(), "zero must mean unlimited");
+
+        manager.set_download_limit_mbps(5);
+        let bps = manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(bps, 5 * 1024 * 1024);
+        assert!(std::num::NonZeroU32::new(bps).is_some());
+
+        // A ceiling large enough to overflow the byte conversion would wrap to
+        // something tiny and throttle playback to nothing.
+        manager.set_download_limit_mbps(u32::MAX);
+        assert_eq!(
+            manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed),
+            u32::MAX
+        );
+    }
 
     #[test]
     fn the_selection_keeps_what_plays_and_what_was_preloaded() {

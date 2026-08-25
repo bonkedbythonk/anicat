@@ -1090,6 +1090,35 @@ fn png_decoy_len(head: &[u8]) -> Option<usize> {
     (offset < head.len()).then_some(offset)
 }
 
+/// Attempts made against a segment that answers 429 before giving up on it.
+const SEGMENT_RETRY_MAX: u32 = 3;
+/// Doubling from half a second: 0.5s, 1s, 2s. The ladder used to be
+/// 150/300/450ms, which spent all three attempts inside a single second and
+/// then gave up — against a rate limiter thinking in seconds that is
+/// indistinguishable from not retrying at all. Observed live: three 429s
+/// inside 900ms, "hls: Failed to open segment 118", and mpv left to retry the
+/// whole segment itself a second later.
+const SEGMENT_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+/// A cap on what a `Retry-After` may talk us into. Some CDNs answer with tens
+/// of seconds, which is a fine instruction for a crawler and a stalled player
+/// for us — past a few seconds mpv is better off failing the segment and
+/// moving on.
+const SEGMENT_RETRY_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// How long to wait before retrying a rate-limited segment.
+///
+/// Prefers what the server asked for, since a limiter knows its own window
+/// better than any ladder we pick. Only the delta-seconds form is read: the
+/// HTTP-date form is legal but vanishingly rare from segment CDNs, and
+/// misreading one costs a stalled segment.
+fn segment_retry_delay(attempt: u32, retry_after: Option<&str>) -> std::time::Duration {
+    retry_after
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(SEGMENT_RETRY_BASE_DELAY * 2u32.pow(attempt))
+        .min(SEGMENT_RETRY_MAX_WAIT)
+}
+
 async fn proxy_handler(
     State(state): State<ProxyState>,
     Query(params): Query<ProxyQuery>,
@@ -1153,9 +1182,6 @@ async fn proxy_handler(
     // against the manifest's fetch URL, so it hands mpv a schemeless path it
     // can't open at all. A brief retry here absorbs the rate limit before it
     // ever reaches that failure mode.
-    const SEGMENT_RETRY_MAX: u32 = 3;
-    const SEGMENT_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
-
     let mut upstream = None;
     for attempt in 0..=SEGMENT_RETRY_MAX {
         let resp = req_builder
@@ -1168,11 +1194,15 @@ async fn proxy_handler(
                 StatusCode::BAD_GATEWAY
             })?;
         if resp.status() == StatusCode::TOO_MANY_REQUESTS && attempt < SEGMENT_RETRY_MAX {
-            log::warn!(
-                "Proxy got 429 from {} (attempt {}/{}), retrying",
-                url, attempt + 1, SEGMENT_RETRY_MAX
+            let wait = segment_retry_delay(
+                attempt,
+                resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()),
             );
-            tokio::time::sleep(SEGMENT_RETRY_BASE_DELAY * (attempt + 1)).await;
+            log::warn!(
+                "Proxy got 429 from {} (attempt {}/{}), retrying in {}ms",
+                url, attempt + 1, SEGMENT_RETRY_MAX, wait.as_millis()
+            );
+            tokio::time::sleep(wait).await;
             continue;
         }
         upstream = Some(resp);
@@ -1422,6 +1452,34 @@ async fn proxy_handler(
 
 #[cfg(test)]
 mod tests {
+    use super::segment_retry_delay;
+
+    #[test]
+    fn a_rate_limited_segment_backs_off_over_seconds_not_milliseconds() {
+        use std::time::Duration;
+        // The whole ladder used to fit inside 900ms, which a limiter counting
+        // in seconds never notices. Three attempts now span 3.5s.
+        assert_eq!(segment_retry_delay(0, None), Duration::from_millis(500));
+        assert_eq!(segment_retry_delay(1, None), Duration::from_millis(1000));
+        assert_eq!(segment_retry_delay(2, None), Duration::from_millis(2000));
+
+        // A server that states its window wins over the ladder, in both
+        // directions -- a short one gets playback moving again sooner.
+        assert_eq!(segment_retry_delay(0, Some("2")), Duration::from_secs(2));
+        assert_eq!(segment_retry_delay(2, Some("1")), Duration::from_secs(1));
+
+        // ...but only so far. A crawler can wait a minute; a player cannot.
+        assert_eq!(segment_retry_delay(0, Some("60")), Duration::from_secs(4));
+
+        // The HTTP-date form and anything else unparseable falls back to the
+        // ladder rather than to zero, which would hammer the limiter.
+        assert_eq!(
+            segment_retry_delay(1, Some("Wed, 21 Oct 2026 07:28:00 GMT")),
+            Duration::from_millis(1000)
+        );
+        assert_eq!(segment_retry_delay(0, Some("")), Duration::from_millis(500));
+    }
+
     use super::{host_is_allowed, png_decoy_len};
 
     /// A minimal but structurally real PNG: signature, IHDR, IEND.

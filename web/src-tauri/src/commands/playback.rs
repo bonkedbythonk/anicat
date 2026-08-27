@@ -377,6 +377,27 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     if let Some(ref base) = base_dir {
         let mpv_bin = base.join(mpv_name);
         let lib_dir = base.join("lib");
+        // macOS: the same binary, but launched from inside the mpv.app that
+        // scripts/make_mpv_app.sh assembles, so it has an Info.plist and the
+        // Dock shows anicat's player icon instead of the generic placeholder.
+        // Its dylibs still live in the flat lib/ beside the bundle: the load
+        // commands read `@executable_path/lib`, which points nowhere two
+        // directories deeper, so the DYLD_LIBRARY_PATH set at spawn is what
+        // actually resolves them.
+        #[cfg(target_os = "macos")]
+        {
+            let app_dir = base.join("mpv.app");
+            let app_bin = app_dir.join("Contents").join("MacOS").join("mpv");
+            if app_bin.exists() {
+                log::info!("Using bundled mpv.app at: {}", app_bin.display());
+                strip_quarantine_once(&app_dir, &lib_dir);
+                return Ok((
+                    app_bin.to_string_lossy().to_string(),
+                    config_dir,
+                    strip_verbatim_prefix(lib_dir.to_string_lossy().to_string()),
+                ));
+            }
+        }
         if mpv_bin.exists() {
             log::info!("Using bundled mpv at: {}", mpv_bin.display());
             strip_quarantine_once(&mpv_bin, &lib_dir);
@@ -393,7 +414,12 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     // in it — check known install locations first before falling back to which.
     #[cfg(target_os = "macos")]
     {
-        let known = ["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv", "/usr/bin/mpv"];
+        let known = [
+            "/Applications/mpv.app/Contents/MacOS/mpv",
+            "/opt/homebrew/bin/mpv",
+            "/usr/local/bin/mpv",
+            "/usr/bin/mpv",
+        ];
         for p in &known {
             if std::path::Path::new(p).exists() {
                 log::info!("Found system mpv at: {}", p);
@@ -408,13 +434,24 @@ fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String>
     }
 
     // Fall back to dev resources directory
-    let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
-        .join(mpv_name);
+    let dev_resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+    let dev_lib_dir = dev_resources.join("lib");
+    #[cfg(target_os = "macos")]
+    {
+        let dev_app_dir = dev_resources.join("mpv.app");
+        let dev_app_bin = dev_app_dir.join("Contents").join("MacOS").join("mpv");
+        if dev_app_bin.exists() {
+            log::info!("Using dev-tree mpv.app at: {}", dev_app_bin.display());
+            strip_quarantine_once(&dev_app_dir, &dev_lib_dir);
+            return Ok((
+                dev_app_bin.to_string_lossy().to_string(),
+                config_dir,
+                dev_lib_dir.to_string_lossy().to_string(),
+            ));
+        }
+    }
+    let dev_path = dev_resources.join(mpv_name);
     if dev_path.exists() {
-        let dev_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("lib");
         strip_quarantine_once(&dev_path, &dev_lib_dir);
         return Ok((
             dev_path.to_string_lossy().to_string(),

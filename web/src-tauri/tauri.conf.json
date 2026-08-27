@@ -58,6 +58,7 @@
     "resources": [
       "resources/mpv",
       "resources/mpv.exe",
+      "resources/mpv.app/**/*",
       "resources/mpv_config/*",
       "resources/mpv_config/**/*",
       "resources/lib/*",

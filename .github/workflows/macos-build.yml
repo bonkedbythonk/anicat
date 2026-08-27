@@ -70,6 +70,10 @@ jobs:
           chmod 755 web/src-tauri/resources/lib/*.dylib 2>/dev/null || true
           chmod 755 web/src-tauri/resources/mpv
 
+          # Wrap the binary in an .app so the player carries anicat's Dock
+          # icon. The dylibs stay in resources/lib -- see make_mpv_app.sh.
+          bash scripts/make_mpv_app.sh web/src-tauri/resources
+
           # Stub mpv.exe so Tauri's resource glob doesn't fail (macOS build only)
           touch web/src-tauri/resources/mpv.exe
 

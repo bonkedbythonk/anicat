@@ -82,6 +82,11 @@ echo "=== 2c. Ad-hoc signing every bundled dylib (mpv only had the two top-level
 xattr -cr "$RESOURCES_DIR/lib" 2>/dev/null || true
 find "$RESOURCES_DIR/lib" -name "*.dylib" -exec codesign -s - --force {} \; 2>/dev/null || true
 
+echo "=== 2d. Wrapping mpv in an .app so it gets anicat's Dock icon ==="
+# Purely cosmetic, and deliberately a separate script: macos-build.yml builds
+# the same bundle from its own (Homebrew, not cask) copy of the binary.
+bash "$(dirname "$0")/make_mpv_app.sh" "$RESOURCES_DIR"
+
 echo "=== 3. Setting up isolated themed configuration directories ==="
 mkdir -p "$CONFIG_DIR/scripts"
 mkdir -p "$CONFIG_DIR/scripts/anicat_ui"

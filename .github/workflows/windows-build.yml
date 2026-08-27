@@ -68,6 +68,9 @@ jobs:
           }
           # Tauri's resource globs expect these to exist even if empty.
           New-Item -ItemType File -Force -Path web/src-tauri/resources/mpv | Out-Null
+          # Same reason: resources/mpv.app is a macOS-only bundle, and an
+          # unmatched glob is a hard bundling error.
+          New-Item -ItemType File -Force -Path web/src-tauri/resources/mpv.app/Contents/MacOS/mpv | Out-Null
 
       - name: Install frontend deps
         working-directory: web

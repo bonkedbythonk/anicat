@@ -736,7 +736,13 @@ impl TorrentManager {
         // swarm that DOES have peers still gets the full timeout below, even
         // if those peers are slow to actually send data.
         const PEER_GRACE: std::time::Duration = std::time::Duration::from_millis(3500);
-        const PEER_POLL: std::time::Duration = std::time::Duration::from_millis(1000);
+        // Short, because this poll is a flat tax on *every* play, not just the
+        // dead ones: a fresh add never has a live peer on the first check, so
+        // at the old 1000ms every resolve slept a full second here regardless
+        // of when peers actually connected — measured at peers=1000ms on three
+        // consecutive healthy resolves, to the millisecond. Checking a stats
+        // snapshot is cheap; the grace budget above is unchanged.
+        const PEER_POLL: std::time::Duration = std::time::Duration::from_millis(150);
         let grace_start = std::time::Instant::now();
         loop {
             let live = handle
@@ -764,6 +770,12 @@ impl TorrentManager {
         let want = PREBUFFER_BYTES.min(file_len as usize);
         let mut got = 0usize;
         let mut buf = vec![0u8; 256 * 1024];
+        let fetched_at_prebuffer_start = handle
+            .stats()
+            .live
+            .as_ref()
+            .map(|l| l.snapshot.fetched_bytes)
+            .unwrap_or(0);
         let started = std::time::Instant::now();
         while got < want {
             let Some(remaining) = PREBUFFER_TIMEOUT.checked_sub(started.elapsed()) else {
@@ -824,6 +836,43 @@ impl TorrentManager {
         // One retry window gives a recovering swarm a second chance without
         // meaningfully softening the check for one that's actually just slow
         // (still two strikes, not an escalating grace period).
+        // ...but when the pre-buffer above did real network work, it already
+        // *is* that measurement, and sampling again just to re-learn it costs
+        // a flat THROUGHPUT_SAMPLE on every healthy play. Three consecutive
+        // resolves of the same episode measured prebuffer=12021/5055/1439ms
+        // followed by throughput=3001/3001/3000ms, then reported 4.8-8.9 MB/s
+        // against a 291 KB/s requirement -- three seconds spent confirming
+        // what the previous twelve had just shown.
+        //
+        // Only when the window is long enough to mean something and the bytes
+        // came off the swarm: `fetched_bytes` ignores anything the disk cache
+        // served, so the case this whole check exists for -- an instant
+        // pre-buffer out of a previous session's partial download, proving
+        // nothing about today's peers -- reads as zero here and falls through
+        // to the explicit sample below exactly as before.
+        const MIN_IMPLICIT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(1);
+        let prebuffer_window = started.elapsed();
+        if prebuffer_window >= MIN_IMPLICIT_SAMPLE {
+            let fetched_during_prebuffer = handle
+                .stats()
+                .live
+                .as_ref()
+                .map(|l| l.snapshot.fetched_bytes)
+                .unwrap_or(0)
+                .saturating_sub(fetched_at_prebuffer_start);
+            let prebuffer_bps =
+                fetched_during_prebuffer as f64 / prebuffer_window.as_secs_f64();
+            if prebuffer_bps >= required_bps {
+                stages.throughput_ms = stages.take();
+                log::info!(
+                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) from the pre-buffer window itself",
+                    prebuffer_bps / 1024.0,
+                    required_bps / 1024.0
+                );
+                return Ok(());
+            }
+        }
+
         let mut last_bps = 0.0f64;
         for attempt in 0..2 {
             let fetched_before = handle

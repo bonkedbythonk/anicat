@@ -138,5 +138,12 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
 
     // Drop write lock before saving (save_config acquires its own read lock)
     drop(config);
+    // Keep the sidecar's respawn warm-up list pointed at whatever the play
+    // path would actually reach now — otherwise a provider switched here
+    // leaves a later respawn warming the one the user moved off, and the
+    // first play on the new provider pays the cold start this exists to
+    // absorb. Cheap enough to redo on every save rather than diffing.
+    let providers = crate::state::scraper_providers_to_warm(state).await;
+    state.scraper_manager.set_warm_providers(&providers);
     state.save_config().await.map_err(|e| e.to_string())
 }

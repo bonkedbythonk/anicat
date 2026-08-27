@@ -55,6 +55,34 @@ async def last_used():
     return {"seconds_since_last_use": time.monotonic() - _last_used}
 
 
+@app.get("/warmup")
+async def warmup(provider: str = Query("anineko")):
+    """Do a provider's expensive first-request work now, off the play path.
+
+    Importing a provider module (curl_cffi and friends), constructing it, and
+    letting it reach its site once is most of what makes the first stream
+    lookup of a session slow. The Rust side calls this right after spawning
+    the sidecar, while the user is still browsing.
+
+    Always answers 200: a warm-up is best-effort by definition, and a failure
+    here must not read as "the sidecar is broken" to the caller -- the first
+    real request will simply pay the cost it always paid.
+    """
+    try:
+        prov = _load_provider(provider)
+        if prov is None:
+            return {"warmed": False, "reason": f"unknown provider: {provider}"}
+        warm = getattr(prov, "warmup", None)
+        if warm is None:
+            # Import + construction alone is still a real chunk of the cost.
+            return {"warmed": True, "detail": "loaded"}
+        await warm()
+        return {"warmed": True}
+    except Exception as e:
+        logger.warning("Warmup failed for %s: %s", provider, e)
+        return {"warmed": False, "reason": str(e)}
+
+
 @app.get("/search")
 async def search(query: str = Query(...), provider: str = Query("anineko")):
     _touch()

@@ -2241,12 +2241,24 @@ pub async fn start_playback(
         cmd.arg("--cache=yes");
         cmd.arg("--cache-pause=yes");
         cmd.arg("--cache-pause-initial=yes");
-        // 30s of media, not the 3s it used to be: resuming after 3s buffered
-        // meant any starved stretch played as a play-3s/freeze/play-3s
-        // stutter loop. A healthy swarm fills 30s of media in a few wall
-        // seconds, so the worst case is one slightly longer rebuffer with
-        // real playback between stalls.
-        cmd.arg("--cache-pause-wait=30");
+        // One option, two jobs that want opposite values. Mid-playback it is
+        // the rebuffer runway, and 30s is right there: resuming after the 3s
+        // it used to be meant any starved stretch played as a
+        // play-3s/freeze/play-3s stutter loop. But `cache-pause-initial`
+        // reuses the same number as the *startup* gate, and 30s of media is
+        // ~19MB at 1080p — on a thin swarm that is a minute or more of the
+        // window sitting frozen on its first frame before anything moves,
+        // which is most of what "mpv takes ages to start" actually was.
+        //
+        // So launch with the short gate and let the Lua script raise it to
+        // TORRENT_REBUFFER_WAIT once playback is genuinely under way (see
+        // restore_rebuffer_wait in scripts/anicat_ui/main.lua) — the startup
+        // gate and the rebuffer runway stop having to be the same number.
+        // 10s is still over 3x the value that caused the stutter loop, so a
+        // stream that stalls before the script's handover is no worse off
+        // than it was under the old behavior. Keep the two constants in
+        // step: this one and the Lua one are a pair.
+        cmd.arg("--cache-pause-wait=10");
         cmd.arg("--demuxer-max-bytes=1GiB");
         cmd.arg("--demuxer-max-back-bytes=256MiB");
         cmd.arg("--demuxer-readahead-secs=120");
@@ -2422,8 +2434,9 @@ pub async fn start_playback(
         // process — those CLI args are globals for that process's lifetime.
         // An auto-next off such an episode onto a non-torrent stream (a
         // fallback provider, a mixed-provider series) then inherited
-        // cache-pause-initial=yes and cache-pause-wait=30, so mpv sat
-        // buffering 30s of an ordinary HLS stream before showing a frame —
+        // cache-pause-initial=yes and a torrent-sized cache-pause-wait (the
+        // Lua handover above has by then raised it back to 30), so mpv sat
+        // buffering half a minute of an ordinary HLS stream before a frame —
         // the "doesn't play immediately" symptom. Restore what a fresh
         // non-torrent launch would have had: mpv's own defaults, plus copies
         // of the two demuxer values mpv.conf sets. Those copies are the
@@ -2432,7 +2445,7 @@ pub async fn start_playback(
         if is_torrent_stream {
             load_options.push_str(
                 ",network-timeout=0,cache=yes,cache-pause=yes,cache-pause-initial=yes,\
-                 cache-pause-wait=30,demuxer-max-bytes=1GiB,demuxer-max-back-bytes=256MiB,\
+                 cache-pause-wait=10,demuxer-max-bytes=1GiB,demuxer-max-back-bytes=256MiB,\
                  demuxer-readahead-secs=120,force-seekable=yes",
             );
         } else {

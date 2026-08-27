@@ -70,6 +70,10 @@ pub struct AnimeInfo {
 /// down, but needs the solving Chrome version and a wall-clock timestamp
 /// persisted alongside it or the rehydrated session fingerprint won't match.
 const IDLE_TIMEOUT_SECS: u64 = 1800;
+/// Providers the Python sidecar actually implements — the only ones worth
+/// sending to `/warmup`. `nyaa` is served by the embedded torrent engine and
+/// `none` is the "no fallback" sentinel; neither has a sidecar module.
+const SIDECAR_PROVIDERS: &[&str] = &["anineko", "mangakatana", "mkissa", "allanime"];
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -198,7 +202,12 @@ async fn sidecar_body(resp: reqwest::Response) -> Result<String, String> {
 
 pub struct ScraperManager {
     process: Arc<Mutex<Option<ScraperProcess>>>,
-    spawn_lock: tokio::sync::Mutex<()>,
+    /// Shared, not per-clone. `AppState` is `Clone` and hands out copies
+    /// freely, so a lock created fresh in `clone()` serialized a spawn only
+    /// against itself — two clones could pass the double-check inside their
+    /// own locks and each start a sidecar, which for anineko means two
+    /// headless Chrome challenge solves for one cold start.
+    spawn_lock: Arc<tokio::sync::Mutex<()>>,
     http_client: reqwest::Client,
     python_path: String,
     scraper_script: String,
@@ -210,19 +219,28 @@ pub struct ScraperManager {
     /// Skips requests to a provider that has been failing at transport level,
     /// so a dead site doesn't cost the full timeout budget on every play.
     breaker: ProviderBreaker,
+    /// Providers to warm after a *re*spawn, remembered from the last
+    /// `prewarm` (boot) or `set_warm_providers` (a provider changed in
+    /// settings). See `ensure_running`.
+    warm_providers: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Whether a sidecar has been started before in this app run, so a
+    /// respawn can be told from the first spawn.
+    spawned_once: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Clone for ScraperManager {
     fn clone(&self) -> Self {
         Self {
             process: self.process.clone(),
-            spawn_lock: tokio::sync::Mutex::new(()),
+            spawn_lock: self.spawn_lock.clone(),
             http_client: self.http_client.clone(),
             python_path: self.python_path.clone(),
             scraper_script: self.scraper_script.clone(),
             failure_notifier: self.failure_notifier.clone(),
             failure_notified: self.failure_notified.clone(),
             breaker: self.breaker.clone(),
+            warm_providers: self.warm_providers.clone(),
+            spawned_once: self.spawned_once.clone(),
         }
     }
 }
@@ -235,13 +253,15 @@ impl ScraperManager {
     ) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
-            spawn_lock: tokio::sync::Mutex::new(()),
+            spawn_lock: Arc::new(tokio::sync::Mutex::new(())),
             http_client,
             python_path,
             scraper_script,
             failure_notifier: Arc::new(std::sync::Mutex::new(None)),
             failure_notified: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             breaker: ProviderBreaker::default(),
+            warm_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
+            spawned_once: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -276,9 +296,71 @@ impl ScraperManager {
     /// lands during app launch instead of stalling the user's first search.
     /// Best-effort: a failure here just means the first real request pays the
     /// startup cost (and reports it) as before.
-    pub async fn prewarm(&self) {
-        if let Err(e) = self.ensure_running().await {
-            log::warn!("[scraper] Prewarm failed, will retry on first request: {}", e);
+    /// `providers` are warmed inside the sidecar afterwards (see `/warmup` in
+    /// `scraper/main.py`): the module import, the `curl_cffi` session and the
+    /// first, possibly Cloudflare-challenged, round trip to the site are the
+    /// rest of the cold start, and they are worth strictly more than the
+    /// process spawn alone. Providers the sidecar knows nothing about (`nyaa`,
+    /// `none`) are skipped here rather than round-tripped for a no-op.
+    pub async fn prewarm(&self, providers: &[String]) {
+        self.set_warm_providers(providers);
+        let port = match self.ensure_running().await {
+            Ok(port) => port,
+            Err(e) => {
+                log::warn!("[scraper] Prewarm failed, will retry on first request: {}", e);
+                return;
+            }
+        };
+        self.warm(port).await;
+    }
+
+    /// Remember which providers a respawned sidecar should warm. Called at
+    /// boot with the configured chain, and again whenever a provider changes
+    /// in settings so a respawn doesn't warm the one the user moved off.
+    pub fn set_warm_providers(&self, providers: &[String]) {
+        let wanted: Vec<String> = providers
+            .iter()
+            .filter(|p| SIDECAR_PROVIDERS.contains(&p.as_str()))
+            .fold(Vec::new(), |mut acc, p| {
+                if !acc.contains(p) {
+                    acc.push(p.clone());
+                }
+                acc
+            });
+        if let Ok(mut guard) = self.warm_providers.lock() {
+            *guard = wanted;
+        }
+    }
+
+    /// Pay the remembered providers' first-request costs against a sidecar
+    /// that is already up on `port`.
+    async fn warm(&self, port: u16) {
+        let providers = match self.warm_providers.lock() {
+            Ok(guard) => guard.clone(),
+            Err(e) => e.into_inner().clone(),
+        };
+        for provider in &providers {
+            let provider = provider.as_str();
+            let started = Instant::now();
+            let url = format!("http://127.0.0.1:{}/warmup?provider={}", port, provider);
+            // Long, because the slow path this exists to absorb *is* a
+            // headless Chrome launch solving a Cloudflare challenge. Nothing
+            // waits on this, so a slow warm-up costs the user nothing.
+            match self
+                .http_client
+                .get(&url)
+                .timeout(Duration::from_secs(120))
+                .send()
+                .await
+            {
+                Ok(resp) => log::info!(
+                    "[scraper] warmed '{}' in {}ms ({})",
+                    provider,
+                    started.elapsed().as_millis(),
+                    resp.text().await.unwrap_or_default().trim()
+                ),
+                Err(e) => log::warn!("[scraper] warm-up of '{}' failed: {}", provider, e),
+            }
         }
     }
 
@@ -601,6 +683,29 @@ impl ScraperManager {
                 // A healthy start re-arms the one-shot failure notification.
                 self.failure_notified
                     .store(false, std::sync::atomic::Ordering::SeqCst);
+                // Boot spawns are warmed by `prewarm` itself. Every *later*
+                // spawn is the idle watchdog's kill being undone (see
+                // IDLE_TIMEOUT_SECS): the sidecar comes back cold, with the
+                // Cloudflare clearance that died with the old process, and
+                // nothing warmed it — so the first play after any half-hour
+                // idle stretch paid the full cold start, headless Chrome
+                // solve included. Warm it here instead.
+                //
+                // Detached, because the caller is usually a real request that
+                // must not wait on this, and harmless alongside it: the
+                // provider's own clearance lock (`_clearance_lock` in
+                // anineko.py) means a warm-up racing a live request shares
+                // one solve rather than starting a second.
+                if self
+                    .spawned_once
+                    .swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    let warmer = self.clone();
+                    tokio::spawn(async move {
+                        log::info!("[scraper] sidecar respawned cold — warming in the background");
+                        warmer.warm(port).await;
+                    });
+                }
                 Ok(port)
             }
             Err(e) => {

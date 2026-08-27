@@ -1331,11 +1331,41 @@ async fn search_nyaa(
 
 /// Find ranked torrent candidates for `titles` (AniList romaji/english/
 /// synonyms, best first) episode `episode`.
+/// How hard to look before answering.
+///
+/// The two callers want opposite things. The play path wants the *first*
+/// releases that will actually play, as fast as possible; the release picker
+/// wants everything there is, because the user opened it precisely to see the
+/// options the auto-pick passed over.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Breadth {
+    /// Stop once the pool holds enough healthy, episode-stating releases to
+    /// fill the shortlist `resolve` actually races.
+    Fast,
+    /// Query every title variant, always.
+    Full,
+}
+
+/// Candidates of this quality make further querying pointless for the play
+/// path: the release names its episode (so no in-torrent verification is
+/// needed to know it is the right one), its swarm is above the
+/// probably-dead line, and it survived scoring with room to spare -- a
+/// browser-incompatible release, penalized by 1200, can never clear this.
+fn is_strong(c: &Candidate) -> bool {
+    !c.assume_batch && c.seeders >= LOW_SEEDER_THRESHOLD && c.score >= 600
+}
+
+/// How many strong candidates are enough to stop. `resolve` races the top two
+/// and keeps two more as sequential fallbacks, so this is the size of the pool
+/// it can actually reach before it gives up on the provider entirely.
+const ENOUGH_STRONG_CANDIDATES: usize = 4;
+
 pub async fn find_candidates(
     client: &reqwest::Client,
     titles: &[String],
     related_titles: &[String],
     criteria: ReleaseCriteria,
+    breadth: Breadth,
 ) -> Vec<Candidate> {
     let episode = criteria.episode;
     let prefer_dub = criteria.prefer_dub;
@@ -1367,17 +1397,26 @@ pub async fn find_candidates(
     let alts: Vec<String> = titles.iter().map(|t| normalize(t)).collect();
     let siblings = SiblingTitles { own: titles, related: related_titles };
 
+    let subsplease_started = std::time::Instant::now();
     for title in &expanded {
         all.extend(search_subsplease(client, title, &alts, episode, prefer_dub).await);
     }
+    let subsplease_ms = subsplease_started.elapsed().as_millis();
 
     // The per-episode queries can never legitimately match an untagged release,
     // so they always score with allow_episodeless off regardless of what the
     // caller asked for; only the batch query honours it.
     let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
-    let mut queries: Vec<(String, String, ReleaseCriteria)> = vec![];
+    // Grouped by title variant rather than flat, because a *round* is now the
+    // unit of work that can be skipped: the variants are ordered worst-last
+    // (a manual override first, then AniList romaji/english, then short
+    // forms), so once a round has produced enough playable releases the
+    // remaining rounds are querying progressively less likely spellings of a
+    // title that already worked.
+    let mut rounds: Vec<Vec<(String, String, ReleaseCriteria)>> = vec![];
     for title in &expanded {
         let norm = normalize(title);
+        let mut queries: Vec<(String, String, ReleaseCriteria)> = vec![];
         // Nyaa's own full-text search takes the query literally, so title
         // punctuation narrows it. AniList's romaji is the canonical, punctuated
         // form ("Toradora!"), and searching that verbatim returned roughly half
@@ -1397,6 +1436,7 @@ pub async fn find_candidates(
             single,
         ));
         queries.push((format!("{} 1080p", q_title), norm, criteria));
+        rounds.push(queries);
     }
 
     // Concurrent, but only so far. This is on the play path and a sequential
@@ -1404,11 +1444,17 @@ pub async fn find_candidates(
     // firing all twelve at once is what made Nyaa throttle them: measured
     // against the live site, four concurrent requests all answer 200 while
     // eight return two 429s and twelve return six. Every throttled query is a
-    // silently smaller candidate pool.
+    // silently smaller candidate pool. A round is three queries, so it fits
+    // inside that budget whole and no round is ever split across two waves.
     const MAX_CONCURRENT_NYAA_QUERIES: usize = 4;
-    for chunk in queries.chunks(MAX_CONCURRENT_NYAA_QUERIES) {
+    debug_assert!(rounds.iter().all(|r| r.len() <= MAX_CONCURRENT_NYAA_QUERIES));
+    let nyaa_started = std::time::Instant::now();
+    let mut query_count = 0usize;
+    let total_rounds = rounds.len();
+    for (round, queries) in rounds.iter().enumerate() {
+        query_count += queries.len();
         for batch in futures_util::future::join_all(
-            chunk
+            queries
                 .iter()
                 .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
         )
@@ -1416,7 +1462,39 @@ pub async fn find_candidates(
         {
             all.extend(batch);
         }
+        // Measured before this existed: four title variants meant twelve
+        // queries in three throttled waves, 5.7s of a play spent searching —
+        // and for the overwhelming majority of shows the first variant is the
+        // one the releases are actually named after, so waves two and three
+        // were re-asking a question already answered. Never checked before a
+        // full Nyaa round has run, so the pool always holds Nyaa releases to
+        // fall back on and not just SubsPlease's optimistic ones.
+        if breadth == Breadth::Fast && round + 1 < total_rounds {
+            let strong = all.iter().filter(|c| is_strong(c)).count();
+            if strong >= ENOUGH_STRONG_CANDIDATES {
+                log::info!(
+                    "[resolve] torrent search stopping after round {}/{}: {} strong candidates",
+                    round + 1, total_rounds, strong
+                );
+                break;
+            }
+        }
     }
+
+    // The two halves of the search cost very different things: SubsPlease is
+    // one sequential API call per title variant, while Nyaa is `query_count`
+    // RSS queries throttled into chunks of four precisely because firing them
+    // all at once gets them 429'd. Separated because the fix for a slow one is
+    // not the fix for a slow other -- fewer title variants versus a different
+    // concurrency cap.
+    log::info!(
+        "[resolve] torrent search titles={} subsplease={}ms nyaa={}ms queries={} raw_hits={}",
+        expanded.len(),
+        subsplease_ms,
+        nyaa_started.elapsed().as_millis(),
+        query_count,
+        all.len()
+    );
 
     // Dedupe by name, best score wins.
     all.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
@@ -1445,6 +1523,40 @@ mod tests {
     /// was written, and what the sibling check degrades to when AniList has
     /// nothing to say about an entry's relatives.
     pub(super) const NO_SIBLINGS: SiblingTitles<'static> = SiblingTitles { own: &[], related: &[] };
+
+    fn candidate(score: i64, seeders: u64, assume_batch: bool) -> Candidate {
+        Candidate {
+            name: "release".into(),
+            magnet: None,
+            torrent_url: None,
+            seeders,
+            score,
+            assume_batch,
+        }
+    }
+
+    #[test]
+    fn only_healthy_episode_stating_releases_stop_the_search_early() {
+        // Exact episode, well seeded: the case the early exit exists for.
+        assert!(is_strong(&candidate(1000, 50, false)));
+        // Exactly on both bars.
+        assert!(is_strong(&candidate(600, LOW_SEEDER_THRESHOLD, false)));
+        // A release whose episode is only an assumption is not evidence the
+        // search is done — try_candidate may yet reject it for not containing
+        // the episode at all.
+        assert!(!is_strong(&candidate(1400, 50, true)));
+        // Below the probably-dead seeder line: it would cost the peer grace
+        // and pre-buffer budget before failing, which is what the remaining
+        // rounds exist to avoid.
+        assert!(!is_strong(&candidate(1400, LOW_SEEDER_THRESHOLD - 1, false)));
+        // Browser-incompatible: penalized by 1200, so even a saturated exact
+        // match lands far under the bar and can never end the search.
+        assert!(!is_strong(&candidate(
+            1000 + TRUSTED_BONUS + seeder_score(400) - BROWSER_INCOMPATIBLE_PENALTY,
+            400,
+            false
+        )));
+    }
 
     /// Criteria for an mpv-bound resolve, which is what every pre-existing
     /// ordering assertion below was written against — mpv decodes everything,

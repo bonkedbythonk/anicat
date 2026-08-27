@@ -110,6 +110,21 @@ pub fn run() {
                 }
             });
 
+            // Same reasoning as the torrent session above, for the other
+            // source: the scraper sidecar is spawned lazily on its first
+            // request, and for anineko that first request also pays a module
+            // import, a TLS handshake and — when Cloudflare is challenging —
+            // a headless Chrome solve. All of it landed on the play path, so
+            // the first stream of a session took several seconds longer than
+            // every one after it. The headless build already warmed at boot;
+            // desktop never did.
+            let scraper_warm = app_state.scraper_manager.clone();
+            let scraper_warm_state = app_state.clone();
+            tauri::async_runtime::spawn(async move {
+                let providers = state::scraper_providers_to_warm(&scraper_warm_state).await;
+                scraper_warm.prewarm(&providers).await;
+            });
+
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = handle1.await {
                     log::error!("HLS proxy task panicked: {:?}", e);

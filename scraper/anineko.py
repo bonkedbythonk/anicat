@@ -362,6 +362,34 @@ class AniNekoProvider:
             resp = self.session.get(url, **kwargs)
         return resp
 
+    async def warmup(self) -> None:
+        """Pay this provider's cold-start cost before the user asks for a stream.
+
+        Everything expensive about the first anineko request happens once and
+        then sticks around on this instance: DNS + TLS handshake to anineko.to,
+        the `curl_cffi` impersonation session, and -- when Cloudflare is
+        actually challenging -- a headless Chrome launch to solve it. Cold,
+        that is several seconds landing squarely on the play path. Fetching
+        the home page at startup moves all of it off that path.
+
+        Deliberately mirrors `_cf_get` rather than calling the solver up
+        front: if CF isn't challenging, no browser is launched at all, exactly
+        as in the normal request path. Failures are the caller's to swallow --
+        a warm-up that didn't work just means the first real request pays what
+        it always paid.
+        """
+        loop = asyncio.get_running_loop()
+        url = f"{BASE_URL}/home"
+        # `session.get` is curl_cffi's *synchronous* call; awaiting `_cf_get`
+        # directly would park the uvicorn event loop for the whole timeout.
+        # Warm-up runs while the user is browsing and may well overlap a real
+        # play, so it goes to a thread -- same reason `get_streams` does.
+        resp = await loop.run_in_executor(
+            None, lambda: self.session.get(url, timeout=15)
+        )
+        if self._handle_cf_block(resp):
+            await self._ensure_clearance()
+
     async def search(self, query: str) -> list[AnimeRef]:
         attempts = self._build_search_attempts(query)
 

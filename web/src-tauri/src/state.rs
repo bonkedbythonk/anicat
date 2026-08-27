@@ -617,6 +617,20 @@ impl AppState {
     }
 }
 
+/// Which providers are worth warming in the scraper sidecar at startup: the
+/// configured anime provider and its fallbacks, plus the manga provider, in
+/// the order the play path would reach them. `ScraperManager::prewarm` drops
+/// the ones the sidecar doesn't implement (`nyaa`, `none`) and de-duplicates.
+pub async fn scraper_providers_to_warm(state: &AppState) -> Vec<String> {
+    let config = state.config.read().await;
+    vec![
+        config.general.provider.clone(),
+        config.general.fallback_provider.clone(),
+        config.general.secondary_fallback_provider.clone(),
+        config.general.manga_provider.clone(),
+    ]
+}
+
 impl std::ops::Deref for AppState {
     type Target = AppStateInner;
     fn deref(&self) -> &Self::Target {

@@ -75,6 +75,8 @@ local state = {
   preload_sent = false,
   end_reported = false,
   early_eof_reported = false,
+  rebuffer_wait_restored = false,
+  rebuffer_baseline = nil,
 }
 
 local function parse_skip_times(raw)
@@ -686,11 +688,56 @@ local function register_script_messages()
   end
 end
 
+-- Rebuffer runway for a torrent stream, restored once playback is under way.
+--
+-- The backend launches torrent streams with a much shorter cache-pause-wait
+-- (see is_torrent_stream in commands/playback.rs) because mpv reuses that one
+-- number for two unrelated jobs: the initial cache-pause-initial gate, where
+-- 30s of media is ~19MB and a thin swarm spends a minute frozen on the first
+-- frame earning it, and the mid-playback rebuffer, where resuming too early
+-- is what produced the old play/freeze/play stutter loop. Only the startup
+-- gate needs the small value, and it has done its job the moment frames are
+-- actually moving -- so put the generous one back here. Keep this in step
+-- with the launch-side constant; they are a pair.
+local TORRENT_REBUFFER_WAIT = 30
+-- Seconds of *elapsed* playback, not an absolute position: an episode resumed
+-- at 10:00 opens with time-pos already there, and an absolute threshold would
+-- hand over before a single frame had actually been played. Measured from the
+-- first position seen after file-loaded, and time-pos only advances while
+-- frames move -- a file still sitting behind the initial cache gate never
+-- reaches it.
+local REBUFFER_HANDOVER_SECS = 3
+
+local function restore_rebuffer_wait(pos)
+  if state.rebuffer_wait_restored or not pos then
+    return
+  end
+  -- Both loadfile branches set cache-pause-initial explicitly (torrent yes,
+  -- everything else no), so it reads as a reliable "is this episode coming
+  -- off the torrent proxy" marker even on an mpv process that launched on a
+  -- stream of the other kind.
+  if not mp.get_property_bool('cache-pause-initial') then
+    state.rebuffer_wait_restored = true
+    return
+  end
+  if not state.rebuffer_baseline then
+    state.rebuffer_baseline = pos
+    return
+  end
+  if pos - state.rebuffer_baseline < REBUFFER_HANDOVER_SECS then
+    return
+  end
+  state.rebuffer_wait_restored = true
+  mp.set_property_number('cache-pause-wait', TORRENT_REBUFFER_WAIT)
+  msg.info('playback under way: cache-pause-wait raised to ' .. TORRENT_REBUFFER_WAIT)
+end
+
 mp.observe_property('time-pos', 'number', function(name, val)
   if val and val > 0 then
     state.last_pos = val
     state.position = val
   end
+  restore_rebuffer_wait(val)
   render_unforced()
 end)
 mp.observe_property('duration', 'number', render_unforced)
@@ -720,6 +767,11 @@ mp.register_event('file-loaded', function()
   state.preload_sent = false
   state.end_reported = false
   state.early_eof_reported = false
+  -- Each episode arrives with the short startup gate re-applied (a fresh
+  -- launch via CLI args, an auto-next via loadfile's per-file options), so
+  -- the handover has to re-arm per file rather than once per process.
+  state.rebuffer_wait_restored = false
+  state.rebuffer_baseline = nil
   state.duration = mp.get_property_number('duration') or 0
   if next_timeout then
     next_timeout:kill()

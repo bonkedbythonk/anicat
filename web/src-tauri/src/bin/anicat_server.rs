@@ -28,8 +28,10 @@ async fn main() {
     // Prewarm the scraper sidecar at boot instead of on the first mobile
     // request, so its startup cost isn't on some friend's critical path.
     let scraper_manager_clone = app_state.scraper_manager.clone();
+    let warm_state = app_state.clone();
     tokio::spawn(async move {
-        scraper_manager_clone.prewarm().await;
+        let providers = anicat::state::scraper_providers_to_warm(&warm_state).await;
+        scraper_manager_clone.prewarm(&providers).await;
     });
 
     let bound = anicat::proxy::server::start_proxy(client, None, app_state.clone()).await;

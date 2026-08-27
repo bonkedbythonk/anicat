@@ -100,6 +100,66 @@ struct CandidateContext<'a> {
     allow_episodeless: bool,
 }
 
+/// Elapsed time of each stage of one candidate's attempt, logged as a single
+/// line when the attempt ends either way.
+///
+/// The torrent path is where "pressing play took ages" now lives, and until
+/// this existed the log said only which candidate won and how long the whole
+/// resolve took. The stages behave nothing alike: fetching a `.torrent` and
+/// adding it are HTTP-fast, metadata is a DHT round trip, `peers` is bounded
+/// by `PEER_GRACE`, and `throughput` spends a flat 3s (6s if the first sample
+/// is low) *by design*. Which of those a slow play was made of decides which
+/// constant is worth touching -- and two of them are already tuned against
+/// numbers nothing has re-measured since.
+struct CandidateStages {
+    last: std::time::Instant,
+    /// Downloading the `.torrent` file (skipped for a magnet).
+    fetch_ms: u128,
+    /// `session.add_torrent`.
+    add_ms: u128,
+    /// Waiting for torrent metadata -- the magnet/DHT round trip.
+    metadata_ms: u128,
+    /// Picking the file inside the torrent and selecting it.
+    select_ms: u128,
+    /// Waiting for the first live peer (bounded by `PEER_GRACE`).
+    peers_ms: u128,
+    /// Reading the first `PREBUFFER_BYTES` off the swarm.
+    prebuffer_ms: u128,
+    /// The fixed-length throughput sample that follows it.
+    throughput_ms: u128,
+}
+
+impl CandidateStages {
+    fn new() -> Self {
+        Self {
+            last: std::time::Instant::now(),
+            fetch_ms: 0,
+            add_ms: 0,
+            metadata_ms: 0,
+            select_ms: 0,
+            peers_ms: 0,
+            prebuffer_ms: 0,
+            throughput_ms: 0,
+        }
+    }
+
+    /// Milliseconds since the previous stage ended, and start the next one.
+    fn take(&mut self) -> u128 {
+        let elapsed = self.last.elapsed().as_millis();
+        self.last = std::time::Instant::now();
+        elapsed
+    }
+
+    fn log(&self, name: &str, outcome: &str, total_ms: u128) {
+        log::info!(
+            "[resolve] torrent candidate outcome={} total={}ms fetch={}ms add={}ms \
+             metadata={}ms select={}ms peers={}ms prebuffer={}ms throughput={}ms '{}'",
+            outcome, total_ms, self.fetch_ms, self.add_ms, self.metadata_ms,
+            self.select_ms, self.peers_ms, self.prebuffer_ms, self.throughput_ms, name
+        );
+    }
+}
+
 /// One selectable torrent release, surfaced to the stream-server picker.
 pub struct TorrentChoice {
     pub name: String,
@@ -276,7 +336,13 @@ impl TorrentManager {
             extras: entry.kind == layout::EntryKind::Extra,
             episode_count,
         };
+        let mut stage = std::time::Instant::now();
         let session = self.session().await?;
+        // Normally ~0 because startup warms the session, but a cold one
+        // bootstraps DHT before anything else can happen — worth telling
+        // apart from a slow search.
+        let session_ms = stage.elapsed().as_millis();
+        stage = std::time::Instant::now();
 
         // Reuse a previous resolution if the torrent is still in the session.
         // It may have been paused when the last playback stopped, so unpause
@@ -286,6 +352,12 @@ impl TorrentManager {
             if let Some(r) = resolved.get(&(media_id, episode)).filter(|r| r.browser_playable || !browser_client) {
                 if let Some(handle) = session.get(r.torrent_id.into()) {
                     let _ = session.unpause(&handle).await;
+                    // Says why a play was instant, so a fast one isn't
+                    // mistaken for evidence about the cold path.
+                    log::info!(
+                        "[resolve] torrent reused torrent {} file {} for media={} ep={} (session={}ms)",
+                        r.torrent_id, r.file_id, media_id, episode, session_ms
+                    );
                     return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
                 }
             }
@@ -299,8 +371,18 @@ impl TorrentManager {
             (_, Some(episode_criteria)) => {
                 series::find_episode_candidates(client, titles, episode_criteria).await
             }
-            _ => search::find_candidates(client, titles, sibling_titles, criteria).await,
+            _ => {
+                search::find_candidates(
+                    client,
+                    titles,
+                    sibling_titles,
+                    criteria,
+                    search::Breadth::Fast,
+                )
+                .await
+            }
         };
+        let search_ms = stage.elapsed().as_millis();
         // Which number the *files* inside a torrent use. For a series that is
         // the within-season episode, since a season pack names its files
         // SxxEyy — while `episode` stays absolute, because it is the identity
@@ -328,8 +410,10 @@ impl TorrentManager {
         // and, unlike the regex search, it can be the *only* candidate for the
         // scattered OVA/special/"Lite" entries a franchise splits into, so this
         // has to run before the "no candidates" check below, not after it.
+        let stage = std::time::Instant::now();
         let mut seadex_candidates =
             seadex::find_candidates(client, &self.seadex_cache, media_id, titles, file_episode, allow_episodeless, episode_count).await;
+        let seadex_ms = stage.elapsed().as_millis();
         if !seadex_candidates.is_empty() {
             candidates.append(&mut seadex_candidates);
             candidates.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
@@ -339,11 +423,18 @@ impl TorrentManager {
         if let Some(ref chosen) = chosen_name {
             candidates.sort_by_key(|c| c.name != *chosen);
         }
+        // The other half of the picture is per-candidate (see
+        // `CandidateStages`); this half is everything that happens before the
+        // first candidate is touched, which on a rate-limited Nyaa is where a
+        // surprising amount of a slow play actually goes.
         log::info!(
-            "torrent: {} candidates for '{}' ep {} (best: {})",
-            candidates.len(),
-            titles[0],
+            "[resolve] torrent lookup media={} ep={} candidates={} session={}ms search={}ms seadex={}ms (best: {})",
+            media_id,
             episode,
+            candidates.len(),
+            session_ms,
+            search_ms,
+            seadex_ms,
             candidates.first().map(|c| c.name.as_str()).unwrap_or("-")
         );
         if candidates.is_empty() {
@@ -483,6 +574,10 @@ impl TorrentManager {
                         extras: entry.kind == layout::EntryKind::Extra,
                         episode_count,
                     },
+                    // The picker exists to show what the auto-pick didn't
+                    // take, so it asks every title variant even though the
+                    // play path no longer does.
+                    search::Breadth::Full,
                 )
                 .await
             }
@@ -621,6 +716,7 @@ impl TorrentManager {
         &self,
         handle: &Arc<librqbit::ManagedTorrent>,
         file_id: usize,
+        stages: &mut CandidateStages,
     ) -> Result<(), String> {
         use tokio::io::AsyncReadExt;
         // Was 6MB: on a slow-but-alive swarm this alone was the wait (a
@@ -652,10 +748,13 @@ impl TorrentManager {
                 break;
             }
             if grace_start.elapsed() >= PEER_GRACE {
+                stages.peers_ms = stages.take();
                 return Err("no seeders (no peers connected)".to_string());
             }
             tokio::time::sleep(PEER_POLL).await;
         }
+
+        stages.peers_ms = stages.take();
 
         let mut stream = handle
             .clone()
@@ -667,16 +766,24 @@ impl TorrentManager {
         let mut buf = vec![0u8; 256 * 1024];
         let started = std::time::Instant::now();
         while got < want {
-            let remaining = PREBUFFER_TIMEOUT
-                .checked_sub(started.elapsed())
-                .ok_or_else(|| "no seeders (pre-buffer timed out)".to_string())?;
+            let Some(remaining) = PREBUFFER_TIMEOUT.checked_sub(started.elapsed()) else {
+                stages.prebuffer_ms = stages.take();
+                return Err("no seeders (pre-buffer timed out)".to_string());
+            };
             match tokio::time::timeout(remaining, stream.read(&mut buf)).await {
                 Ok(Ok(0)) => break, // reached EOF (tiny file)
                 Ok(Ok(n)) => got += n,
-                Ok(Err(e)) => return Err(format!("pre-buffer read failed: {}", e)),
-                Err(_) => return Err("no seeders (pre-buffer timed out)".to_string()),
+                Ok(Err(e)) => {
+                    stages.prebuffer_ms = stages.take();
+                    return Err(format!("pre-buffer read failed: {}", e));
+                }
+                Err(_) => {
+                    stages.prebuffer_ms = stages.take();
+                    return Err("no seeders (pre-buffer timed out)".to_string());
+                }
             }
         }
+        stages.prebuffer_ms = stages.take();
         log::info!(
             "torrent: pre-buffered {} KB in {:?}",
             got / 1024,
@@ -735,6 +842,7 @@ impl TorrentManager {
             last_bps =
                 fetched_after.saturating_sub(fetched_before) as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
             if last_bps >= required_bps {
+                stages.throughput_ms = stages.take();
                 log::info!(
                     "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s){}",
                     last_bps / 1024.0,
@@ -751,6 +859,7 @@ impl TorrentManager {
                 );
             }
         }
+        stages.throughput_ms = stages.take();
         Err(format!(
             "swarm too slow: {:.0} KB/s, needs {:.0} KB/s to plausibly keep up",
             last_bps / 1024.0,
@@ -758,12 +867,36 @@ impl TorrentManager {
         ))
     }
 
+    /// Times every stage of the attempt and logs one line for it, win or
+    /// lose -- a candidate that *fails* slowly is exactly as interesting as
+    /// one that succeeds slowly, since the play path waits on both.
     async fn try_candidate(
         &self,
         client: &reqwest::Client,
         session: &Arc<Session>,
         cand: &search::Candidate,
         ctx: &CandidateContext<'_>,
+    ) -> Result<Resolved, String> {
+        let started = std::time::Instant::now();
+        let mut stages = CandidateStages::new();
+        let out = self
+            .try_candidate_inner(client, session, cand, ctx, &mut stages)
+            .await;
+        stages.log(
+            &cand.name,
+            if out.is_ok() { "ok" } else { "failed" },
+            started.elapsed().as_millis(),
+        );
+        out
+    }
+
+    async fn try_candidate_inner(
+        &self,
+        client: &reqwest::Client,
+        session: &Arc<Session>,
+        cand: &search::Candidate,
+        ctx: &CandidateContext<'_>,
+        stages: &mut CandidateStages,
     ) -> Result<Resolved, String> {
         // Prefer the .torrent file (instant metadata) over the magnet.
         let add = if let Some(ref url) = cand.torrent_url {
@@ -783,6 +916,8 @@ impl TorrentManager {
             return Err("candidate has neither torrent url nor magnet".into());
         };
 
+        stages.fetch_ms = stages.take();
+
         let opts = AddTorrentOptions {
             overwrite: true,
             ..Default::default()
@@ -797,16 +932,22 @@ impl TorrentManager {
             AddTorrentResponse::ListOnly(_) => return Err("unexpected list-only response".into()),
         };
         let torrent_id = handle.id();
+        stages.add_ms = stages.take();
 
         if tokio::time::timeout(INIT_TIMEOUT, handle.wait_until_initialized())
             .await
-            .map_err(|_| "timed out fetching torrent metadata".to_string())?
+            .map_err(|_| {
+                stages.metadata_ms = stages.take();
+                "timed out fetching torrent metadata".to_string()
+            })?
             .is_err()
         {
+            stages.metadata_ms = stages.take();
             let _ = session.delete(torrent_id.into(), false).await;
             self.selected_files.lock().await.remove(&torrent_id);
             return Err("torrent failed to initialize".into());
         }
+        stages.metadata_ms = stages.take();
 
         // Pick the file: single video file, or the one whose name carries the
         // requested episode number.
@@ -907,6 +1048,7 @@ impl TorrentManager {
             .map_err(|e| format!("file selection failed: {}", e))?;
         // Errors if the torrent isn't paused — that's the normal case.
         let _ = session.unpause(&handle).await;
+        stages.select_ms = stages.take();
 
         // Pre-buffer the file header before handing mpv the URL. This does two
         // things: it proves the torrent actually has reachable seeders (a dead
@@ -915,7 +1057,7 @@ impl TorrentManager {
         // it means mpv starts reading into already-downloaded data instead of
         // spinning on byte 0. Reading the start also forces the first pieces,
         // which for these releases is where the container header lives.
-        if let Err(e) = self.prebuffer(&handle, file_id).await {
+        if let Err(e) = self.prebuffer(&handle, file_id, stages).await {
             let _ = session.delete(torrent_id.into(), false).await;
             self.selected_files.lock().await.remove(&torrent_id);
             return Err(e);
@@ -1246,8 +1388,13 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_find_candidates() {
+        // These tests are the only way to see the `[resolve]` stage timings
+        // without running the whole app; nothing else here initializes a
+        // logger, so `--nocapture` would otherwise print none of them.
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
         let titles = vec!["Sousou no Frieren".to_string()];
-        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }, search::Breadth::Full).await;
         assert!(!cands.is_empty(), "no candidates found");
         let best = &cands[0];
         println!("best: {} (score {}, seeders {})", best.name, best.score, best.seeders);
@@ -1260,11 +1407,65 @@ mod tests {
         );
         // A short/ambiguous title must not match unrelated shows.
         let titles = vec!["Monster".to_string()];
-        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }, search::Breadth::Full).await;
         for c in &cands {
             let n = search::normalize(&c.name);
             assert!(!n.contains("pocket"), "false positive: {}", c.name);
         }
+    }
+
+    /// Live. `cargo test --lib torrent -- --ignored --nocapture`
+    ///
+    /// The play path stops querying title variants once it has enough healthy
+    /// releases (`Breadth::Fast`). That is only safe if it still finds the
+    /// same release the exhaustive search would have picked — a faster search
+    /// that picks a worse torrent is not faster, it just fails later, in
+    /// prebuffer, having spent the peer grace to get there.
+    #[tokio::test]
+    #[ignore]
+    async fn live_fast_breadth_finds_the_same_best_candidate() {
+        // These tests are the only way to see the `[resolve]` stage timings
+        // without running the whole app; nothing else here initializes a
+        // logger, so `--nocapture` would otherwise print none of them.
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
+        // The worst case on purpose: a title long enough to expand to the
+        // full four variants, i.e. twelve queries in three throttled waves
+        // under `Full`. A one-variant show has nothing to skip.
+        let titles = vec![
+            "Saijo no Osewa: Takane no Hanadarake na Meimonkou de, Gakuin Ichi no Ojou-sama \
+             (Seikatsu Nouryoku Kaimu) wo Kagenagara Osewa suru Koto ni Narimashita"
+                .to_string(),
+            "Rich Girl Caretaker: I'm Secretly the Caregiver of the Most Popular Girl in This \
+             Rich Kid School"
+                .to_string(),
+        ];
+        let criteria = search::ReleaseCriteria {
+            episode: 6,
+            allow_episodeless: false,
+            prefer_dub: false,
+            browser_client: false,
+            extras: false,
+            episode_count: None,
+        };
+        let full_started = std::time::Instant::now();
+        let full =
+            search::find_candidates(&client(), &titles, &[], criteria, search::Breadth::Full).await;
+        let full_ms = full_started.elapsed().as_millis();
+        let fast_started = std::time::Instant::now();
+        let fast =
+            search::find_candidates(&client(), &titles, &[], criteria, search::Breadth::Fast).await;
+        let fast_ms = fast_started.elapsed().as_millis();
+        println!(
+            "full: {} candidates in {}ms (best: {})\nfast: {} candidates in {}ms (best: {})",
+            full.len(), full_ms, full[0].name,
+            fast.len(), fast_ms, fast[0].name,
+        );
+        assert!(!fast.is_empty(), "fast breadth found nothing");
+        assert_eq!(
+            fast[0].name, full[0].name,
+            "fast breadth picked a different best candidate"
+        );
     }
 
     // Live network test: a show whose AniList title is a 95-character mouthful
@@ -1288,6 +1489,7 @@ mod tests {
             &titles,
             &[],
             search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
+            search::Breadth::Full,
         )
         .await;
         assert!(!cands.is_empty(), "no candidates found");
@@ -1373,6 +1575,7 @@ mod tests {
                 &titles,
                 &[],
                 search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
+                search::Breadth::Full,
             )
             .await;
             let best = cands.first().unwrap_or_else(|| panic!("no candidates for {}", title));
@@ -1610,6 +1813,7 @@ mod tests {
                     extras: case.hint.kind == layout::EntryKind::Extra,
                     episode_count: case.episode_count,
                 },
+                search::Breadth::Full,
             )
             .await;
             println!("\n=== {} ep {} — {} candidates", titles[0], case.episode, candidates.len());
@@ -1908,6 +2112,7 @@ mod tests {
                 extras: false,
                 episode_count: Some(28),
             },
+            search::Breadth::Full,
         )
         .await;
         let batch = candidates
@@ -2102,6 +2307,11 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_resolve_and_stream_an_episode() {
+        // These tests are the only way to see the `[resolve]` stage timings
+        // without running the whole app; nothing else here initializes a
+        // logger, so `--nocapture` would otherwise print none of them.
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
         let dir = std::env::temp_dir().join("anicat-torrent-series-test");
         let mgr = TorrentManager::with_cache_dir(dir.clone());
         let titles = vec!["Silo".to_string()];

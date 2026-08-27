@@ -9,6 +9,26 @@ use crate::state::AppState;
 
 static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync::Mutex::new(None);
 
+/// Which mpv process the exit monitor below is allowed to speak for.
+///
+/// Bumped by `kill_current_mpv`, so every monitor can tell "the process I was
+/// watching exited" from "the process I was watching was replaced". The two
+/// look identical from inside the monitor -- `CURRENT_MPV` is empty either
+/// way -- and treating the second as the first is what made auto-next fail
+/// intermittently.
+///
+/// Any start that cannot hand its stream to a running mpv over IPC kills the
+/// old process and spawns a new one. The old instance's monitor then observes
+/// an empty `CURRENT_MPV`, waits its 2s "let the Lua script report position"
+/// grace, and runs a teardown that by then belongs to the *new* episode:
+/// `current_playback = None`, `emit_playback_active(false)`, and
+/// `torrent.pause_all()`. Every player callback silently no-ops afterwards --
+/// the next `next` request logs "No current playback session found for next
+/// episode request", and the torrent sits paused at whatever percentage it
+/// had reached, neither downloading nor seeding, while mpv plays on out of
+/// its already-buffered bytes.
+static MPV_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// An episode counts as "watched" once playback passes this fraction of its
 /// duration. The same line decides completion (advancing AniList progress) and
 /// stops offering a resume — there is exactly one watched threshold.
@@ -285,7 +305,22 @@ fn emit_playback_active(app: &AppHandle, active: bool) {
     let _ = app.emit("anicat_playback_state", serde_json::json!({ "active": active }));
 }
 
+/// Whether a monitor holding `generation` is still speaking for the mpv
+/// process that is actually running.
+fn mpv_generation_is_current(generation: u64) -> bool {
+    MPV_GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation
+}
+
+/// The generation a freshly launched mpv owns.
+fn current_mpv_generation() -> u64 {
+    MPV_GENERATION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub async fn kill_current_mpv() {
+    // Before the handle is taken, so a monitor that wakes up mid-kill already
+    // sees a generation it doesn't own rather than an empty CURRENT_MPV it
+    // mistakes for its own process exiting.
+    MPV_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let child = {
         if let Ok(mut guard) = CURRENT_MPV.lock() {
             guard.take()
@@ -2504,6 +2539,9 @@ pub async fn start_playback(
     }
 
     kill_current_mpv().await;
+    // Claimed after the kill bumped it, so this launch owns every generation
+    // check until something kills mpv again.
+    let mpv_gen = current_mpv_generation();
 
     log::info!("Launching mpv command: {:?}", cmd);
     let mut child = cmd
@@ -2554,8 +2592,16 @@ pub async fn start_playback(
     let app_handle = app.clone();
     let app_state_clone = (*state).clone();
     tokio::spawn(async move {
+        let mut warned_still_alive = false;
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if !mpv_generation_is_current(mpv_gen) {
+                log::info!(
+                    "mpv exit monitor for media {} ep {} superseded by a newer player; stopping without teardown",
+                    monitor_media_id, monitor_episode
+                );
+                return;
+            }
             // `None` status means "exited, but we never saw how" (monitor lost
             // the handle, or try_wait itself failed) — not treated as a crash.
             let (exited, exit_status) = {
@@ -2627,6 +2673,44 @@ pub async fn start_playback(
 
                 // Give the Lua script time to send position via player/stop
                 tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                // Re-checked after the sleep as well: a new episode can start
+                // inside that window, and everything below this point (the
+                // progress fallback, `active:false`, `pause_all`, clearing
+                // `current_playback`) would otherwise land on it.
+                if !mpv_generation_is_current(mpv_gen) {
+                    log::info!(
+                        "mpv exit monitor for media {} ep {}: a newer player started during teardown; leaving its session alone",
+                        monitor_media_id, monitor_episode
+                    );
+                    return;
+                }
+                // Last line of defence, and deliberately not covered by the
+                // generation check: the monitor also concludes "exited" from
+                // a `try_wait` error, and this teardown is destructive enough
+                // (it clears `current_playback` and pauses the torrent
+                // underneath a running player) that a wrong conclusion costs
+                // the rest of the session. A live mpv answers its IPC socket;
+                // a dead one has unlinked it, and `kill_current_mpv` removes
+                // it explicitly. Seen in the wild as a torrent stuck paused
+                // at a partial percentage with zero peers while playback ran
+                // on out of the 1GiB demuxer cache, and every later player
+                // callback -- including auto-next -- refused with "No current
+                // playback session found".
+                if try_send_ipc(&get_ipc_path(), vec![]).await.is_ok() {
+                    // Keep watching rather than returning: the player is
+                    // alive now, but whatever it eventually does still needs
+                    // the progress save and the torrent pause below. Warned
+                    // once so an abnormal state doesn't fill the log at the
+                    // poll rate.
+                    if !warned_still_alive {
+                        log::warn!(
+                            "mpv exit monitor for media {} ep {} thought the player exited, but its IPC socket still answers; not tearing the session down",
+                            monitor_media_id, monitor_episode
+                        );
+                        warned_still_alive = true;
+                    }
+                    continue;
+                }
 
                 // If player_stop already saved position, current_playback is None.
                 // If still set, save last known position as a fallback.
@@ -3091,6 +3175,24 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 
 #[cfg(test)]
 mod tests {
+    /// The exit monitor of a replaced mpv must not run its teardown: doing so
+    /// clears the `current_playback` of the episode that replaced it and
+    /// pauses its torrent, which is how auto-next intermittently ended with
+    /// "No current playback session found for next episode request" and a
+    /// torrent stalled at a partial percentage.
+    #[tokio::test]
+    async fn a_replaced_mpv_monitor_stops_speaking_for_the_player() {
+        let first = super::current_mpv_generation();
+        assert!(super::mpv_generation_is_current(first));
+        // What the kill-and-respawn path does before launching the new mpv.
+        super::kill_current_mpv().await;
+        assert!(
+            !super::mpv_generation_is_current(first),
+            "the killed player's monitor still believes it owns the session"
+        );
+        let second = super::current_mpv_generation();
+        assert!(super::mpv_generation_is_current(second));
+    }
     use super::{
         candidate_order, is_torrent_backed, is_watched, looks_like_playlist, parse_playlist,
         probe_status_is_dead, probe_status_is_permanent, provider_fallback_chain, resume_position,

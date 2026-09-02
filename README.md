@@ -38,6 +38,7 @@ It covers four kinds of media, and they do not share a backend:
 - [Building from Source](#building-from-source)
 - [Dependencies](#dependencies)
 - [Legal](#legal)
+- [License](#license)
 
 ---
 
@@ -89,7 +90,7 @@ Cinema mode is the one exception: films and TV are catalogued by TMDB, so it sta
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, vertical sidebars for unobstructive desktop reading, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85% — closing the player is not required. Inline editing from the detail page.
 - **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
-- **Schedule** — 7-day airing calendar filtered to your watching list.
+- **Schedule** — 7-day airing calendar, with a toggle between everything airing and just your watching list.
 - **Discovery** — Customizable home layout (show/hide rows: trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
 - **Discord Rich Presence** — Shows what you are watching in your Discord status.
 - **Themes** — Four UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga, and Ink & Index.

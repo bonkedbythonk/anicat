@@ -4,6 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::source::{StreamSource, TorrentIndex};
 use crate::util::percent_encode;
 use crate::state::AppState;
 
@@ -29,6 +30,60 @@ static CURRENT_MPV: std::sync::Mutex<Option<tokio::process::Child>> = std::sync:
 /// its already-buffered bytes.
 static MPV_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// When mpv was last handed an actual file to open.
+///
+/// The exit monitor reports a launch failure only when mpv dies within a few
+/// seconds of being given something to play. That used to be the same instant
+/// as the spawn, because the stream URL was in the argv -- but the window is
+/// now put on screen *before* the stream is resolved, so the process is
+/// routinely tens of seconds old by the time a `loadfile` reaches it. Measured
+/// from the spawn, a cold play whose stream mpv could not open fell outside
+/// the window and reported nothing at all, while `--idle=once` quit the player
+/// and the ordinary teardown dismissed the toast on the way out.
+static MPV_FILE_HANDOVER: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+/// The `MPV_GENERATION` of a window that was raised idle and has not been
+/// handed a file yet; 0 when there is no such window.
+///
+/// Not the same question as "did *this* call raise the window". A start that
+/// is superseded leaves its idle window up on purpose, for the newer start to
+/// reuse -- so when it is the *newer* start whose resolve comes back empty,
+/// the window to take down is one it never spawned. Tracking the window rather
+/// than the caller is what stops that case leaving a black `--ontop` window
+/// with nothing behind it and nobody who considers it theirs.
+static IDLE_MPV_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Records that mpv has just been given a file. Called from every path that
+/// commits a running player to a stream.
+fn record_mpv_file_handover() {
+    {
+        let mut guard = match MPV_FILE_HANDOVER.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        *guard = Some(std::time::Instant::now());
+    }
+    // Whatever window is up, it is no longer an empty one waiting on a
+    // resolve, so nothing may take it down as if it were.
+    IDLE_MPV_GENERATION.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The instant the running mpv was given a file, or its spawn instant when it
+/// has not been given one yet. A handover recorded before this process started
+/// belongs to the previous player, so it is ignored rather than trusted.
+fn mpv_launch_reference(spawn_instant: std::time::Instant) -> std::time::Instant {
+    let guard = match MPV_FILE_HANDOVER.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    match *guard {
+        Some(at) if at > spawn_instant => at,
+        _ => spawn_instant,
+    }
+}
+
 /// An episode counts as "watched" once playback passes this fraction of its
 /// duration. The same line decides completion (advancing AniList progress) and
 /// stops offering a resume — there is exactly one watched threshold.
@@ -52,41 +107,6 @@ pub(crate) fn resume_position(stop_time: i64, duration: i64) -> i64 {
         0
     } else {
         stop_time
-    }
-}
-
-/// Whether a play will go through the embedded torrent session rather than a
-/// scraper.
-///
-/// Not the same question as "is the provider nyaa". Cinema mode is always
-/// torrent-backed whatever `general.provider` happens to say — that setting
-/// describes the anime world — so a guard written against the provider name
-/// alone silently stops applying the moment a film is playing.
-pub(crate) fn is_torrent_backed(provider: &str, media_id: i64) -> bool {
-    provider == "nyaa" || crate::media_id::source_of(media_id).is_cinema()
-}
-
-/// Which provider labels to try, in order, when resolving a stream.
-///
-/// For anime this is the configured fallback chain: try the primary
-/// provider, then the fallback, then the secondary fallback, skipping blanks
-/// and duplicates. For a cinema id it collapses to a single entry.
-/// `resolve_stream_for_provider` checks `is_cinema()` before it looks at the
-/// provider string at all, so every one of those three names would run the
-/// identical apibay-or-Knaben search and hit the identical failure -- three
-/// full search timeouts for one answer, and a log line reading "provider
-/// 'anineko' failed" for a film anineko was never going to have an opinion
-/// about.
-pub(crate) fn provider_fallback_chain(
-    media_id: i64,
-    provider_name: &str,
-    fallback_provider: String,
-    secondary_fallback: String,
-) -> Vec<String> {
-    if crate::media_id::source_of(media_id).is_cinema() {
-        vec![provider_name.to_string()]
-    } else {
-        vec![provider_name.to_string(), fallback_provider, secondary_fallback]
     }
 }
 
@@ -275,14 +295,55 @@ async fn wait_for_mpv_window(ipc_path: &str, timeout: std::time::Duration) -> bo
     }
 }
 
+/// Tells the webview what the backend now holds for one episode.
+///
+/// The store's `preloadStatus` map is push-fed and never polled while a detail
+/// page is open, so every path that empties, refuses or refills the single
+/// preload slot has to call this. A missing "idle" is not a cosmetic drift: the
+/// episode list refuses to re-preload anything the map still calls "ready", so
+/// one unreported eviction leaves that episode cold *and* unwarmable for the
+/// rest of the session.
+pub(crate) fn emit_preload_status(
+    app: Option<&AppHandle>,
+    media_id: i64,
+    episode_number: i64,
+    status: &str,
+) {
+    let Some(app) = app else { return };
+    let _ = app.emit(
+        "stream_preload_status",
+        serde_json::json!({
+            "media_id": media_id,
+            "episode_number": episode_number,
+            "status": status,
+        }),
+    );
+}
+
 /// Puts a preloaded stream back after a start that took it out of the slot
 /// but then bailed (superseded by a newer start). Only fills an empty slot:
 /// whatever a later preload has already put there is fresher by definition.
-async fn restore_preload(state: &AppState, entry: Option<crate::state::PreloadedStream>) {
+async fn restore_preload(
+    state: &AppState,
+    app: Option<&AppHandle>,
+    entry: Option<crate::state::PreloadedStream>,
+) {
     let Some(entry) = entry else { return };
-    let mut slot = state.preloaded_stream.lock().await;
-    if slot.is_none() {
-        *slot = Some(entry);
+    let (media_id, episode_number) = (entry.media_id, entry.episode_number);
+    let restored = {
+        let mut slot = state.preloaded_stream.lock().await;
+        if slot.is_none() {
+            *slot = Some(entry);
+            true
+        } else {
+            false
+        }
+    };
+    // Taking it out already reported it gone, so a successful put-back has to
+    // report it back — otherwise the survivor of a double press finds the
+    // stream ready in the slot while the webview still calls that episode cold.
+    if restored {
+        emit_preload_status(app, media_id, episode_number, "ready");
     }
 }
 
@@ -693,6 +754,183 @@ fn mpv_log_path() -> Option<String> {
 
     let _ = std::fs::create_dir_all(&dir);
     Some(dir.join("mpv.log").to_string_lossy().to_string())
+}
+
+/// Move the last launch's mpv log aside, right before mpv truncates it.
+///
+/// mpv rewrites --log-file from scratch on every launch, and auto-next
+/// relaunches it per episode, so by the time anyone goes looking the log of
+/// the player that actually misbehaved is gone -- an mpv that grew to 140 GB
+/// and was jetsam-killed left nothing at all behind. One kept generation
+/// covers "the player before this one", which is the case that matters.
+/// Called only from the launch path: `mpv_log_path` itself is read in log
+/// messages and must stay free of side effects.
+fn rotate_mpv_log(current: &str) {
+    let path = std::path::Path::new(current);
+    if !path.exists() {
+        return;
+    }
+    let _ = std::fs::rename(path, path.with_file_name("mpv.prev.log"));
+}
+
+/// The complete `anicat_ui-` script-opts map, built in exactly one place.
+///
+/// `set_property script-opts` *replaces* the map rather than merging into it,
+/// so a key one writer sets and another forgets is deleted from the running
+/// player instead of left alone -- `shader_profile` was once exactly that, and
+/// a reused mpv silently dropped upscaling for the rest of a binge. Three
+/// callers write the whole map (the idle launch, the full launch, and the
+/// episode-transition IPC batch); building it here is what stops them
+/// drifting. The key set has to stay equal to the `opts` table main.lua
+/// declares.
+///
+/// `skip_times` is always present, empty included: without the key the Lua
+/// observer falls back to whatever the *previous* episode's value was.
+// One argument per key by design: the map is the point, and hiding half of it
+// behind a struct would put the drift this function exists to prevent back one
+// level down.
+#[allow(clippy::too_many_arguments)]
+fn build_script_opts(
+    proxy_port: u16,
+    media_id: i64,
+    skip_times: &str,
+    autoskip: bool,
+    auto_next: bool,
+    episode_number: i64,
+    total_episodes: i64,
+    shader_profile: &str,
+) -> String {
+    // Where the Lua script sends its callbacks. It used to hardcode 13370, but
+    // the proxy only *prefers* that port -- when something else already holds
+    // it, `proxy::server::start` falls back to an OS-assigned one (and says so
+    // in the log). The stream URL is built from the real port, so video played
+    // perfectly while every callback went to whatever else owned 13370: no
+    // progress, no resume position, no watched detection, no preload, and
+    // next/prev doing nothing at all. Exactly the "playback works but the app
+    // forgets everything" report, and invisible unless you thought to check
+    // `lsof -i :13370`.
+    let parts = [
+        format!("anicat_ui-proxy_port={}", proxy_port),
+        format!("anicat_ui-media_id={}", media_id),
+        // Commas are mpv's own --script-opts delimiter, so an encoded comma is
+        // the only way a multi-segment skip list survives the parse.
+        format!("anicat_ui-skip_times={}", skip_times.replace(',', "%2C")),
+        format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }),
+        format!("anicat_ui-auto_next={}", if auto_next { "yes" } else { "no" }),
+        format!("anicat_ui-current_episode={}", episode_number),
+        format!("anicat_ui-total_episodes={}", total_episodes),
+        format!("anicat_ui-shader_profile={}", shader_profile),
+    ];
+    parts.join(",")
+}
+
+/// Adds the Anime4K chain to a launch command when upscaling is on.
+///
+/// Shared by both launch paths because `--glsl-shaders` is a process-global
+/// the episode-transition batch never re-sends -- it asks the Lua script to
+/// reconcile against mpv's live value instead -- so whichever launch actually
+/// starts the player is the only chance to set it.
+fn apply_shader_args(cmd: &mut tokio::process::Command, config_dir: &str, shader_profile: &str) {
+    if shader_profile == "off" {
+        return;
+    }
+    let shader_dir = std::path::Path::new(config_dir).join("shaders");
+    // Anime4K official "Mode A (Fast)" — the recommended low-end-GPU preset
+    // (Restore + 2x CNN upscale at M, final S refinement). Mode A is the
+    // most popular general anime mode; tuned for the MacBook's thermals,
+    // where the VL/HQ variants pegged the GPU and overheated it.
+    // Source: github.com/bloc97/Anime4K (Template/GLSL_*_Low-end/input.conf)
+    let shader_names = [
+        "Anime4K_Clamp_Highlights.glsl",
+        "Anime4K_Restore_CNN_M.glsl",
+        "Anime4K_Upscale_CNN_x2_M.glsl",
+        "Anime4K_AutoDownscalePre_x2.glsl",
+        "Anime4K_AutoDownscalePre_x4.glsl",
+        "Anime4K_Upscale_CNN_x2_S.glsl",
+    ];
+    let shader_arg: Vec<String> = shader_names
+        .iter()
+        .map(|n| shader_dir.join(n))
+        // Only pass shaders that are actually present — missing files would
+        // make mpv refuse to start (e.g. a build without the bundled
+        // Anime4K shaders). Absent shaders just mean no upscaling.
+        .filter(|p| p.exists())
+        .filter_map(|p| p.to_str().map(|s| s.to_string()))
+        .collect();
+    if !shader_arg.is_empty() {
+        // mpv uses ";" as path-list separator on Windows (because ":" appears
+        // in drive letters), and ":" on macOS/Linux.
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        cmd.arg(format!("--glsl-shaders={}", shader_arg.join(sep)));
+    }
+}
+
+/// Points the child at the bundled mpv's own dylibs.
+///
+/// Shared by both launch paths: on macOS the bundled binary's load commands
+/// read `@executable_path/lib`, which resolves nowhere from inside mpv.app, so
+/// a launch without this simply fails to start.
+fn apply_mpv_env(cmd: &mut tokio::process::Command, lib_dir: &str) {
+    if cfg!(target_os = "macos") && !lib_dir.is_empty() {
+        cmd.env("DYLD_LIBRARY_PATH", lib_dir);
+        let icd_path = std::path::Path::new(lib_dir).join("vk_icd.json");
+        cmd.env("VK_ICD_FILENAMES", icd_path);
+    }
+    if cfg!(target_os = "linux") {
+        cmd.env("LD_LIBRARY_PATH", lib_dir);
+    }
+    if cfg!(target_os = "windows") && !lib_dir.is_empty() {
+        // Windows resolves DLLs via the exe directory and PATH; prepend the
+        // bundled lib dir so any mpv DLLs there are found.
+        let existing = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{};{}", lib_dir, existing));
+    }
+}
+
+/// Ceiling on the mpv child's memory footprint before the watchdog kills it.
+///
+/// An mpv left paused in the background with the lid shut grew to 139.9 GB
+/// (2.2 GB resident, 136.6 GB compressed, 47k VM regions, and only 209s of
+/// CPU across its whole life -- a slow leak of ~3 MB buffers, not a busy
+/// loop) and the kernel jetsam-killed the machine out from under everything
+/// else. mpv's own legitimate ceiling here is the demuxer cache the launch
+/// args set: 1 GiB forward + 256 MiB back, plus the Anime4K render chain's
+/// textures. 6 GiB leaves that room several times over, so anything above it
+/// is the leak and not playback.
+#[cfg(target_os = "macos")]
+const MPV_FOOTPRINT_LIMIT_BYTES: u64 = 6 * 1024 * 1024 * 1024;
+
+/// How many 500ms monitor ticks between footprint samples. The leak took
+/// hours, so 10s is far more often than it needs to be looked at.
+#[cfg(target_os = "macos")]
+const MPV_FOOTPRINT_SAMPLE_TICKS: u32 = 20;
+
+/// The process's memory footprint in bytes, as Activity Monitor reports it.
+///
+/// Deliberately not RSS: the runaway mpv was only 2.2 GB *resident*, with the
+/// other 136.6 GB sitting in the compressor. `ri_phys_footprint` is the field
+/// that counts those compressed pages, so RSS would have read as healthy the
+/// entire time.
+#[cfg(target_os = "macos")]
+fn process_footprint_bytes(pid: u32) -> Option<u64> {
+    let mut info: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+    let rc = unsafe {
+        libc::proc_pid_rusage(
+            pid as libc::c_int,
+            libc::RUSAGE_INFO_V2,
+            &mut info as *mut _ as *mut libc::rusage_info_t,
+        )
+    };
+    if rc == 0 {
+        Some(info.ri_phys_footprint)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_footprint_bytes(_pid: u32) -> Option<u64> {
+    None
 }
 
 fn server_speed_rank(server: &crate::scraper::client::StreamServer) -> u8 {
@@ -1165,16 +1403,6 @@ fn probe_status_is_permanent(status: u16) -> bool {
     matches!(status, 403 | 404 | 410 | 451)
 }
 
-/// Human-facing provider name for notifications.
-pub(crate) fn provider_label(provider: &str) -> &str {
-    match provider {
-        "anineko" => "AniNeko",
-        "mangakatana" => "MangaKatana",
-        "nyaa" => "Torrents",
-        other => other,
-    }
-}
-
 /// Resolve a playable stream URL (+ headers) for one provider: find/auto-map
 /// its slug, scrape the episode, and pick the best server for the configured
 /// sub/dub preference. Returns Err with a reason if anything in that chain
@@ -1260,154 +1488,161 @@ pub(crate) async fn resolve_stream_for_provider(
     let started = std::time::Instant::now();
     let mut timings = ResolveTimings::default();
 
-    // A film or series takes the torrent path regardless of which anime
-    // provider is configured: the scraper providers index anime and will never
-    // carry either, and `general.provider` describes the other world entirely.
-    if crate::media_id::source_of(media_id).is_cinema() {
+    // One decision for the whole function: which backend serves this request.
+    // Every arm below returns, so what follows the block is the scraper path.
+    if let StreamSource::Torrent(index) = StreamSource::resolve(media_id, provider_name) {
         let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-        let (titles, year) = gather_movie_info(state, media_id, title).await;
-        if titles.is_empty() {
-            return Err("No title to search for".into());
-        }
-
-        // A series is searched by the season and episode a release name
-        // spells, recovered from the stored absolute number.
-        if crate::media_id::source_of(media_id) == crate::media_id::MediaSource::TmdbTv {
-            let seasons = super::cinema::season_map_for(state, media_id).await?;
-            let Some((season, episode)) =
-                crate::torrent::series::absolute_to_season_episode(episode_number, &seasons)
-            else {
-                return Err(format!(
-                    "Episode {} is past the end of this series",
-                    episode_number
-                ));
-            };
-            let url = state
-                .torrent
-                .resolve(
-                    &state.http_client,
-                    crate::torrent::ResolveTarget {
-                        media_id,
-                        episode: episode_number,
-                        titles: &titles,
-                        // A season pack is matched by filename inside the
-                        // torrent, which needs the episode number the files
-                        // use — that is the within-season one, not the
-                        // absolute one the app stores.
-                        allow_episodeless: false,
-                        episode_count: None,
-                        prefer_dub: false,
-                        browser_client: client.is_browser(),
-                        chosen_name: server.clone(),
-                        movie: None,
-                        series: Some(crate::torrent::series::EpisodeCriteria {
-                            season,
-                            episode,
+        return match index {
+            // A series is searched by the season and episode a release name
+            // spells, recovered from the stored absolute number.
+            TorrentIndex::Series => {
+                let (titles, _year) = gather_movie_info(state, media_id, title).await;
+                if titles.is_empty() {
+                    return Err("No title to search for".into());
+                }
+                let seasons = super::cinema::season_map_for(state, media_id).await?;
+                let Some((season, episode)) =
+                    crate::torrent::series::absolute_to_season_episode(episode_number, &seasons)
+                else {
+                    return Err(format!(
+                        "Episode {} is past the end of this series",
+                        episode_number
+                    ));
+                };
+                let url = state
+                    .torrent
+                    .resolve(
+                        &state.http_client,
+                        crate::torrent::ResolveTarget {
+                            media_id,
+                            episode: episode_number,
+                            titles: &titles,
+                            // A season pack is matched by filename inside the
+                            // torrent, which needs the episode number the files
+                            // use — that is the within-season one, not the
+                            // absolute one the app stores.
+                            allow_episodeless: false,
+                            episode_count: None,
+                            prefer_dub: false,
                             browser_client: client.is_browser(),
-                        }),
-                        entry: Default::default(),
-                        sibling_titles: &[],
-                    },
-                    proxy_port,
-                )
-                .await;
-            timings.log(
-                "cinema",
-                media_id,
-                episode_number,
-                if url.is_ok() { "ok" } else { "failed" },
-                started.elapsed().as_millis(),
-            );
-            return url.map(|u| (u, None, None));
-        }
-
-        let url = state
-            .torrent
-            .resolve(
-                &state.http_client,
-                crate::torrent::ResolveTarget {
+                            chosen_name: server.clone(),
+                            movie: None,
+                            series: Some(crate::torrent::series::EpisodeCriteria {
+                                season,
+                                episode,
+                                browser_client: client.is_browser(),
+                            }),
+                            entry: Default::default(),
+                            sibling_titles: &[],
+                        },
+                        proxy_port,
+                    )
+                    .await;
+                timings.log(
+                    "cinema",
                     media_id,
-                    // A film is its own single episode. `allow_episodeless` is
-                    // what stops the shared candidate loop from demanding an
-                    // episode number the release names never carry.
-                    episode: 1,
-                    titles: &titles,
-                    allow_episodeless: true,
-                    episode_count: Some(1),
-                    // Sub versus dub is an anime distinction; a film has one
-                    // audio track and the release names say nothing about it.
-                    prefer_dub: false,
-                    browser_client: client.is_browser(),
-                    chosen_name: server.clone(),
-                    movie: Some(crate::torrent::cinema::MovieCriteria {
-                        year,
-                        browser_client: client.is_browser(),
-                    }),
-                    series: None,
-                    entry: crate::torrent::layout::EntryHint {
-                        kind: crate::torrent::layout::EntryKind::Movie,
-                        ..Default::default()
-                    },
-                    sibling_titles: &[],
-                },
-                proxy_port,
-            )
-            .await;
-        timings.log(
-            "cinema",
-            media_id,
-            1,
-            if url.is_ok() { "ok" } else { "failed" },
-            started.elapsed().as_millis(),
-        );
-        return url.map(|u| (u, None, None));
-    }
-
-    // Torrents don't go through the scraper: search Nyaa/SubsPlease, start
-    // the embedded torrent session, and hand mpv the local range-stream URL.
-    if provider_name == "nyaa" {
-        let prefer_dub = effective_translation_type(state, media_id).await == "dub";
-        let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-        let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
-            crate::torrent::gather_media_info(state, media_id, title).await;
-        // Movies/OVAs (single "episode") legitimately have no episode number
-        // in their release names.
-        let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
-        let url = state
-            .torrent
-            .resolve(
-                &state.http_client,
-                crate::torrent::ResolveTarget {
+                    episode_number,
+                    if url.is_ok() { "ok" } else { "failed" },
+                    started.elapsed().as_millis(),
+                );
+                url.map(|u| (u, None, None))
+            }
+            TorrentIndex::Movie => {
+                let (titles, year) = gather_movie_info(state, media_id, title).await;
+                if titles.is_empty() {
+                    return Err("No title to search for".into());
+                }
+                let url = state
+                    .torrent
+                    .resolve(
+                        &state.http_client,
+                        crate::torrent::ResolveTarget {
+                            media_id,
+                            // A film is its own single episode.
+                            // `allow_episodeless` is what stops the shared
+                            // candidate loop from demanding an episode number
+                            // the release names never carry.
+                            episode: 1,
+                            titles: &titles,
+                            allow_episodeless: true,
+                            episode_count: Some(1),
+                            // Sub versus dub is an anime distinction; a film
+                            // has one audio track and the release names say
+                            // nothing about it.
+                            prefer_dub: false,
+                            browser_client: client.is_browser(),
+                            chosen_name: server.clone(),
+                            movie: Some(crate::torrent::cinema::MovieCriteria {
+                                year,
+                                browser_client: client.is_browser(),
+                            }),
+                            series: None,
+                            entry: crate::torrent::layout::EntryHint {
+                                kind: crate::torrent::layout::EntryKind::Movie,
+                                ..Default::default()
+                            },
+                            sibling_titles: &[],
+                        },
+                        proxy_port,
+                    )
+                    .await;
+                timings.log(
+                    "cinema",
                     media_id,
-                    episode: episode_number,
-                    titles: &titles,
-                    allow_episodeless,
-                    episode_count,
-                    prefer_dub,
-                    browser_client: client.is_browser(),
-                    // The stream picker passes the chosen release name back as
-                    // `server`; honor it. Auto-play (Continue button) sends
-                    // None and takes the best-scored candidate.
-                    chosen_name: server.clone(),
-                    movie: None,
-                    series: None,
-                    entry: hint,
-                    sibling_titles: &siblings,
-                },
-                proxy_port,
-            )
-            .await;
-        // Torrents skip every stage below (no slug, no scraper, and prebuffer
-        // is a far stronger liveness check than the probe), so this line is
-        // just the total — but it keeps one grep-able marker for every play.
-        timings.log(
-            provider_name,
-            media_id,
-            episode_number,
-            if url.is_ok() { "ok" } else { "failed" },
-            started.elapsed().as_millis(),
-        );
-        return url.map(|u| (u, None, None));
+                    1,
+                    if url.is_ok() { "ok" } else { "failed" },
+                    started.elapsed().as_millis(),
+                );
+                url.map(|u| (u, None, None))
+            }
+            // Search Nyaa/SubsPlease, start the embedded torrent session, and
+            // hand mpv the local range-stream URL.
+            TorrentIndex::Anime => {
+                let prefer_dub = effective_translation_type(state, media_id).await == "dub";
+                let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
+                    crate::torrent::gather_media_info(state, media_id, title).await;
+                // Movies/OVAs (single "episode") legitimately have no episode
+                // number in their release names.
+                let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
+                let url = state
+                    .torrent
+                    .resolve(
+                        &state.http_client,
+                        crate::torrent::ResolveTarget {
+                            media_id,
+                            episode: episode_number,
+                            titles: &titles,
+                            allow_episodeless,
+                            episode_count,
+                            prefer_dub,
+                            browser_client: client.is_browser(),
+                            // The stream picker passes the chosen release name
+                            // back as `server`; honor it. Auto-play (Continue
+                            // button) sends None and takes the best-scored
+                            // candidate.
+                            chosen_name: server.clone(),
+                            movie: None,
+                            series: None,
+                            entry: hint,
+                            sibling_titles: &siblings,
+                        },
+                        proxy_port,
+                    )
+                    .await;
+                // Torrents skip every stage below (no slug, no scraper, and
+                // prebuffer is a far stronger liveness check than the probe),
+                // so this line is just the total — but it keeps one grep-able
+                // marker for every play.
+                timings.log(
+                    provider_name,
+                    media_id,
+                    episode_number,
+                    if url.is_ok() { "ok" } else { "failed" },
+                    started.elapsed().as_millis(),
+                );
+                url.map(|u| (u, None, None))
+            }
+        };
     }
 
     // Read any cached slug in a scoped block so the (non-Sync) DB connection is
@@ -1646,8 +1881,27 @@ pub async fn preload_episode(
     episode_number: i64,
     provider: Option<String>,
     title: Option<String>,
+    speculative: Option<bool>,
 ) -> Result<(), String> {
-    preload_episode_impl(state.inner(), media_id, episode_number, provider, title, crate::state::StreamClient::Mpv, Some(app)).await
+    // Absent means primary: the detail page's Continue warm-up and every other
+    // caller predate the flag, and a preload the user is about to consume is
+    // the safer thing to assume of an unlabelled one. Only the episode list's
+    // hover/focus guess sends `true`.
+    let priority = if speculative.unwrap_or(false) {
+        crate::state::PreloadPriority::Speculative
+    } else {
+        crate::state::PreloadPriority::Primary
+    };
+    preload_episode_impl(
+        state.inner(),
+        media_id,
+        episode_number,
+        provider,
+        title,
+        crate::state::PreloadOrigin { client: crate::state::StreamClient::Mpv, priority },
+        Some(app),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1686,9 +1940,10 @@ pub async fn preload_episode_impl(
     episode_number: i64,
     provider: Option<String>,
     title: Option<String>,
-    client: crate::state::StreamClient,
+    origin: crate::state::PreloadOrigin,
     app: Option<AppHandle>,
 ) -> Result<(), String> {
+    let crate::state::PreloadOrigin { client, priority } = origin;
     let provider_name = match provider {
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
@@ -1699,7 +1954,9 @@ pub async fn preload_episode_impl(
     // is currently streaming, and browsing detail pages would kick off
     // downloads for episodes that may never be played. Resolve at play time
     // instead. Scraper providers stay preloaded either way (cheap requests).
-    if is_torrent_backed(&provider_name, media_id) && state.config.read().await.stream.data_saver {
+    if StreamSource::resolve(media_id, &provider_name).is_torrent()
+        && state.config.read().await.stream.data_saver
+    {
         log::info!(
             "Low data mode: skipping torrent preload for media {} ep {}",
             media_id, episode_number
@@ -1711,16 +1968,16 @@ pub async fn preload_episode_impl(
 
     // Already preloaded for this exact target — skip.
     {
-        let slot = state.preloaded_stream.lock().await;
-        if let Some(ref p) = *slot {
+        let mut slot = state.preloaded_stream.lock().await;
+        if let Some(p) = slot.as_mut() {
             if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name && p.client == client && p.translation_type == translation_type {
-                if let Some(ref app) = app {
-                    let _ = app.emit("stream_preload_status", serde_json::json!({
-                        "media_id": media_id,
-                        "episode_number": episode_number,
-                        "status": "ready"
-                    }));
-                }
+                // The entry stays, but it inherits the better claim on the
+                // slot: an episode first warmed on a hover and then asked for
+                // as the Continue episode is one the user is about to play, and
+                // leaving it marked speculative would let the next hover evict
+                // exactly the stream that was about to be consumed.
+                p.priority = p.priority.max(priority);
+                emit_preload_status(app.as_ref(), media_id, episode_number, "ready");
                 return Ok(());
             }
         }
@@ -1735,23 +1992,11 @@ pub async fn preload_episode_impl(
             "Preload for media {} ep {} ({}) already in flight; skipping",
             media_id, episode_number, provider_name
         );
-        if let Some(ref app) = app {
-            let _ = app.emit("stream_preload_status", serde_json::json!({
-                "media_id": media_id,
-                "episode_number": episode_number,
-                "status": "fetching"
-            }));
-        }
+        emit_preload_status(app.as_ref(), media_id, episode_number, "fetching");
         return Ok(());
     };
 
-    if let Some(ref app) = app {
-        let _ = app.emit("stream_preload_status", serde_json::json!({
-            "media_id": media_id,
-            "episode_number": episode_number,
-            "status": "fetching"
-        }));
-    }
+    emit_preload_status(app.as_ref(), media_id, episode_number, "fetching");
 
     let state_inner = state.clone();
     let app_handle = app;
@@ -1761,36 +2006,63 @@ pub async fn preload_episode_impl(
         let _guard = guard;
         match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title, client, None).await {
             Ok((raw_url, headers, subtitle_url)) => {
-                let mut slot = state_inner.preloaded_stream.lock().await;
-                *slot = Some(crate::state::PreloadedStream {
-                    media_id,
-                    episode_number,
-                    provider: provider_name.clone(),
-                    client,
-                    translation_type,
-                    raw_url,
-                    headers,
-                    subtitle_url,
-                    at: std::time::Instant::now(),
-                });
-                log::info!("Preloaded stream for media {} ep {} ({})", media_id, episode_number, provider_name);
-                if let Some(ref app) = app_handle {
-                    let _ = app.emit("stream_preload_status", serde_json::json!({
-                        "media_id": media_id,
-                        "episode_number": episode_number,
-                        "status": "ready"
-                    }));
+                // Decided against whatever is already in the slot rather than
+                // written over it. The resolve itself is never wasted even when
+                // the slot is refused: the torrent manager caches the
+                // resolution, so playing the refused episode still takes the
+                // reuse path instead of searching again.
+                let (decision, occupant_is_this_episode) = {
+                    let mut slot = state_inner.preloaded_stream.lock().await;
+                    let decision = crate::state::preload_write_decision(slot.as_ref(), priority);
+                    // A refusal normally means this episode is not held — but a
+                    // competing write during the resolve can have put this very
+                    // episode there, and reporting "idle" for an entry that is
+                    // sitting ready is the same class of lie as the silent
+                    // overwrite this whole path exists to stop.
+                    let occupant_is_this_episode = slot
+                        .as_ref()
+                        .is_some_and(|p| p.media_id == media_id && p.episode_number == episode_number);
+                    if let crate::state::PreloadWrite::Store { .. } = decision {
+                        *slot = Some(crate::state::PreloadedStream {
+                            media_id,
+                            episode_number,
+                            provider: provider_name.clone(),
+                            client,
+                            translation_type,
+                            priority,
+                            raw_url,
+                            headers,
+                            subtitle_url,
+                            at: std::time::Instant::now(),
+                        });
+                    }
+                    (decision, occupant_is_this_episode)
+                };
+                match decision {
+                    crate::state::PreloadWrite::Store { evicted } => {
+                        log::info!("Preloaded stream for media {} ep {} ({})", media_id, episode_number, provider_name);
+                        if let Some((ev_media, ev_ep)) = evicted {
+                            log::info!(
+                                "Preload of media {} ep {} evicted the entry for media {} ep {}",
+                                media_id, episode_number, ev_media, ev_ep
+                            );
+                            emit_preload_status(app_handle.as_ref(), ev_media, ev_ep, "idle");
+                        }
+                        emit_preload_status(app_handle.as_ref(), media_id, episode_number, "ready");
+                    }
+                    crate::state::PreloadWrite::Refused => {
+                        log::info!(
+                            "Speculative preload of media {} ep {} resolved, but the slot holds a preload the user is likelier to play; not storing it",
+                            media_id, episode_number
+                        );
+                        let status = if occupant_is_this_episode { "ready" } else { "idle" };
+                        emit_preload_status(app_handle.as_ref(), media_id, episode_number, status);
+                    }
                 }
             }
             Err(e) => {
                 log::warn!("preload_episode: media {} ep {} ({}) failed: {}", media_id, episode_number, provider_name, e);
-                if let Some(ref app) = app_handle {
-                    let _ = app.emit("stream_preload_status", serde_json::json!({
-                        "media_id": media_id,
-                        "episode_number": episode_number,
-                        "status": "idle"
-                    }));
-                }
+                emit_preload_status(app_handle.as_ref(), media_id, episode_number, "idle");
             }
         }
     });
@@ -1918,6 +2190,481 @@ pub async fn fetch_aniskip_segments(
     }
 }
 
+/// Watches one mpv process for the rest of its life: the runaway-memory
+/// watchdog, the crashed-on-launch report, and the teardown that saves the
+/// final position, clears Discord and pauses the torrent.
+///
+/// Spawned by whichever path put the process on screen -- which, since the
+/// window is raised before the stream resolves, is usually the idle launch and
+/// not the call that hands mpv a file. `spawn_instant` is therefore only the
+/// floor for the crash window; `mpv_launch_reference` prefers the later
+/// handover.
+fn spawn_mpv_exit_monitor(
+    app_handle: AppHandle,
+    app_state_clone: AppState,
+    monitor_media_id: i64,
+    monitor_episode: i64,
+    mpv_gen: u64,
+    spawn_instant: std::time::Instant,
+) {
+    let discord = app_state_clone.discord.clone();
+    tokio::spawn(async move {
+        let mut warned_still_alive = false;
+        let mut ticks: u32 = 0;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            ticks = ticks.wrapping_add(1);
+            #[cfg(target_os = "macos")]
+            if ticks.is_multiple_of(MPV_FOOTPRINT_SAMPLE_TICKS) {
+                // Killed rather than merely reported: by the time a leaking
+                // mpv is noticeable the machine is already swapping, and
+                // there is no message anyone gets to read. It is killed
+                // through the same CURRENT_MPV handle the rest of this loop
+                // uses, so the next tick sees an exited child and runs the
+                // ordinary teardown -- progress is saved, Discord cleared.
+                // Sampled and killed under one lock: releasing it between
+                // the two would let a transition swap in a newer mpv, and the
+                // kill would land on the episode that just started instead of
+                // the leaking one it was measured against.
+                let killed = {
+                    let mut guard = match CURRENT_MPV.lock() {
+                        Ok(g) => g,
+                        Err(e) => e.into_inner(),
+                    };
+                    match guard.as_mut() {
+                        Some(child) => match child.id().and_then(process_footprint_bytes) {
+                            Some(bytes) if bytes > MPV_FOOTPRINT_LIMIT_BYTES => {
+                                let _ = child.start_kill();
+                                Some(bytes)
+                            }
+                            _ => None,
+                        },
+                        None => None,
+                    }
+                };
+                if let Some(bytes) = killed {
+                    log::error!(
+                        "mpv watchdog: footprint {} MB exceeds the {} MB limit for media {} ep {}; killed it before the kernel kills the machine. Its log is at {:?}",
+                        bytes / (1024 * 1024),
+                        MPV_FOOTPRINT_LIMIT_BYTES / (1024 * 1024),
+                        monitor_media_id,
+                        monitor_episode,
+                        mpv_log_path(),
+                    );
+                }
+            }
+            if !mpv_generation_is_current(mpv_gen) {
+                log::info!(
+                    "mpv exit monitor for media {} ep {} superseded by a newer player; stopping without teardown",
+                    monitor_media_id, monitor_episode
+                );
+                return;
+            }
+            // `None` status means "exited, but we never saw how" (monitor lost
+            // the handle, or try_wait itself failed) — not treated as a crash.
+            let (exited, exit_status) = {
+                let mut guard = match CURRENT_MPV.lock() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        log::error!(
+                            "mpv exit monitor: CURRENT_MPV mutex poisoned, stopping monitor for media {} ep {}: {}",
+                            monitor_media_id, monitor_episode, e
+                        );
+                        return;
+                    }
+                };
+                match guard.as_mut() {
+                    Some(child) => match child.try_wait() {
+                        Ok(Some(status)) => {
+                            let _ = guard.take();
+                            (true, Some(status))
+                        }
+                        Ok(None) => (false, None),
+                        Err(e) => {
+                            log::warn!(
+                                "mpv exit monitor: try_wait failed for media {} ep {}, treating as exited: {}",
+                                monitor_media_id, monitor_episode, e
+                            );
+                            let _ = guard.take();
+                            (true, None)
+                        }
+                    },
+                    None => (true, None),
+                }
+            };
+            if exited {
+                let (monitor_media_id, monitor_episode) = {
+                    let guard = app_state_clone.current_playback.lock().await;
+                    if let Some(ref pb) = *guard {
+                        (pb.media_id, pb.episode_number)
+                    } else {
+                        (monitor_media_id, monitor_episode)
+                    }
+                };
+
+                // mpv surviving the initial 500ms grace check only proves the
+                // process didn't crash instantly — it can still die a few
+                // seconds later (bad/expired stream URL, dylib load failure,
+                // Cloudflare hiccup) after the loading modal has already
+                // dismissed itself on the earlier `active:true`. Without this,
+                // that later failure was silent: the modal was long gone and
+                // nothing told the user mpv never actually opened.
+                //
+                // Gate on a non-zero exit code, not just the time window:
+                // quitting mpv within a few seconds (wrong episode, changed
+                // one's mind) is completely normal and exits 0, and reporting
+                // that as a failure would fire constantly.
+                let crashed = exit_status.is_some_and(|s| !s.success());
+                let since_handover = mpv_launch_reference(spawn_instant).elapsed();
+                if crashed && since_handover < std::time::Duration::from_secs(8) {
+                    log::warn!(
+                        "mpv exited with {:?} only {:?} after it was handed the stream (media {} ep {}) — surfacing as a failed launch",
+                        exit_status, since_handover, monitor_media_id, monitor_episode
+                    );
+                    let _ = app_handle.emit("playback_loading_status", serde_json::json!({
+                        "status": "error",
+                        "step": 0,
+                        "message": "Player closed unexpectedly. Try another server or provider.",
+                        "media_id": monitor_media_id,
+                        "episode_number": monitor_episode,
+                    }));
+                }
+
+                // Give the Lua script time to send position via player/stop
+                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                // Re-checked after the sleep as well: a new episode can start
+                // inside that window, and everything below this point (the
+                // progress fallback, `active:false`, `pause_all`, clearing
+                // `current_playback`) would otherwise land on it.
+                if !mpv_generation_is_current(mpv_gen) {
+                    log::info!(
+                        "mpv exit monitor for media {} ep {}: a newer player started during teardown; leaving its session alone",
+                        monitor_media_id, monitor_episode
+                    );
+                    return;
+                }
+                // Last line of defence, and deliberately not covered by the
+                // generation check: the monitor also concludes "exited" from
+                // a `try_wait` error, and this teardown is destructive enough
+                // (it clears `current_playback` and pauses the torrent
+                // underneath a running player) that a wrong conclusion costs
+                // the rest of the session. A live mpv answers its IPC socket;
+                // a dead one has unlinked it, and `kill_current_mpv` removes
+                // it explicitly. Seen in the wild as a torrent stuck paused
+                // at a partial percentage with zero peers while playback ran
+                // on out of the 1GiB demuxer cache, and every later player
+                // callback -- including auto-next -- refused with "No current
+                // playback session found".
+                if try_send_ipc(&get_ipc_path(), vec![]).await.is_ok() {
+                    // Keep watching rather than returning: the player is
+                    // alive now, but whatever it eventually does still needs
+                    // the progress save and the torrent pause below. Warned
+                    // once so an abnormal state doesn't fill the log at the
+                    // poll rate.
+                    if !warned_still_alive {
+                        log::warn!(
+                            "mpv exit monitor for media {} ep {} thought the player exited, but its IPC socket still answers; not tearing the session down",
+                            monitor_media_id, monitor_episode
+                        );
+                        warned_still_alive = true;
+                    }
+                    continue;
+                }
+
+                // If player_stop already saved position, current_playback is None.
+                // If still set, save last known position as a fallback.
+                let should_save = {
+                    let guard = app_state_clone.current_playback.lock().await;
+                    guard.is_some()
+                };
+                if should_save {
+                    let (last_pos, last_dur, total_eps) = {
+                        let guard = app_state_clone.current_playback.lock().await;
+                        if let Some(ref pb) = *guard {
+                            (pb.last_position, pb.last_duration, pb.total_episodes)
+                        } else {
+                            (0, 0, 0)
+                        }
+                    };
+                    if last_pos > 0 {
+                        let _ = crate::commands::playback::record_playback_progress(
+                            &app_state_clone,
+                            0,
+                            monitor_media_id,
+                            monitor_episode,
+                            last_pos,
+                            last_dur,
+                            total_eps,
+                        )
+                        .await;
+                        log::info!("Saved last known playback position: {}s / {}s", last_pos, last_dur);
+                    }
+                }
+
+                // Notify frontend
+                let _ = app_handle.emit("progress_updated", serde_json::json!({
+                    "media_id": monitor_media_id,
+                    "episode_number": monitor_episode,
+                }));
+                // `anicat_playback_state{active:false}` below deliberately does
+                // NOT touch the loading toast (StreamLoadingModal treats a bare
+                // `false` as a normal close, not a signal). That's right for
+                // mpv dying before it ever got this far. It's wrong for mpv
+                // dying *mid a next/prev transition it already reused this same
+                // process for* -- e.g. someone hits the OSC's window-close
+                // button right as auto-next hands off to episode N+1. The
+                // 8-second crashed-launch branch above never sees this case
+                // (this isn't a fresh spawn), so nothing ever told the toast
+                // the transition it was showing "Starting..." for isn't coming.
+                // Confirmed live: the toast sat on "Starting..." indefinitely
+                // after exactly this happened, with mpv already gone and
+                // nothing left running to resolve it. Clear it unconditionally
+                // here too -- a stream that already finished loading dismissed
+                // this itself via `status: "ready"` well before the process
+                // exit reaches this point, so the only toast still up here is
+                // one with no other way to close.
+                let _ = app_handle.emit("playback_loading_status", serde_json::json!({
+                    "status": "done",
+                }));
+                emit_playback_active(&app_handle, false);
+                discord.clear_presence();
+                // Window closed: pause the torrent so it stops using the
+                // network in the background. Auto-next reuses (and unpauses)
+                // the next episode's torrent, so this doesn't disrupt it.
+                app_state_clone.torrent.pause_all().await;
+                {
+                    let mut guard = app_state_clone.current_playback.lock().await;
+                    *guard = None;
+                }
+                log::info!("mpv exited, Discord presence cleared");
+                break;
+            }
+        }
+    });
+}
+
+/// How long the "finding a source" notice stays on the idle player's OSD.
+///
+/// Five minutes, and deliberately far longer than any resolve that finishes:
+/// the notice is meant to be cleared by the episode actually opening (main.lua
+/// runs `mp.osd_message('', 0)` on `file-loaded` for exactly this) rather than
+/// by expiring, and a resolve that fails takes the whole window down instead.
+/// The worst case it has to outlast is a ~85s cold torrent chain sitting
+/// behind the 60s wait on an in-flight preload.
+const IDLE_NOTICE_MS: i64 = 300_000;
+
+/// Puts an mpv window on screen before there is anything to play, and hands it
+/// to the same `loadfile ... replace` path auto-next already uses.
+///
+/// mpv used to be spawned with the stream URL already in its argv, so the
+/// window could not appear until the resolve had finished -- routinely several
+/// seconds on a torrent, sometimes tens of them, with the viewer looking at a
+/// toast the whole time. An idle player costs a few hundred milliseconds, so
+/// the cold play becomes the warm play and the resolve happens behind a window
+/// that is already up.
+///
+/// Only options mpv cannot be told later belong in this argv. The transition
+/// batch re-sends the whole script-opts map and `loadfile` carries its own
+/// per-file options, so everything stream-specific -- the URL, the headers,
+/// `--sub-file`, the torrent cache tuning, `--start` -- is deliberately absent
+/// and would only leak into later episodes if it were here. What is *not*
+/// re-sent, and so has to be set here or is lost for the whole session, is the
+/// config dir, the IPC socket, `--alang`, `--keep-open` and the shader chain.
+#[allow(clippy::too_many_arguments)] // same launch context start_playback carries
+async fn spawn_idle_mpv(
+    app: &AppHandle,
+    state: &AppState,
+    mpv_bin: &str,
+    config_dir: &str,
+    lib_dir: &str,
+    media_id: i64,
+    episode_number: i64,
+    title: &str,
+    total_episodes: i64,
+) -> Result<(), String> {
+    let (autoskip, autoplay, shader_profile) = {
+        let cfg = state.config.read().await;
+        (cfg.general.autoskip, cfg.general.autoplay, cfg.stream.shader_profile.clone())
+    };
+    let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
+    let translation_type = effective_translation_type(state, media_id).await;
+
+    let mut cmd = tokio::process::Command::new(mpv_bin);
+    crate::util::suppress_console_tokio(&mut cmd);
+    cmd.arg(format!("--config-dir={}", config_dir));
+    if let Some(log_path) = mpv_log_path() {
+        // Overwritten each launch; records script + shader load results.
+        rotate_mpv_log(&log_path);
+        cmd.arg(format!("--log-file={}", log_path));
+    }
+    // `once`, not `yes`. Both idle at start, but `yes` also refuses to quit
+    // when the playlist runs out -- which with autoplay off is the end of
+    // every episode, leaving a blank window where mpv used to exit and
+    // stranding the exit monitor's teardown (the final position save, the
+    // Discord clear, the torrent pause) behind a process that never dies.
+    // Verified against the bundled mpv 0.40: with `once` the player idles
+    // before the first loadfile and exits after that file finishes, and
+    // `--keep-open=yes` still holds it open at EOF.
+    cmd.arg("--idle=once");
+    cmd.arg("--force-window=yes");
+    cmd.arg("--ontop");
+    cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));
+
+    // mpv.conf's slang=en,eng,English exists because mpv's own default only
+    // auto-selects a track carrying the container's "default" flag, and a lot
+    // of multi-audio releases flag none of theirs. The same gap exists for the
+    // *audio* track on a dual-audio release, which is how a file silently
+    // played dub audio while set to Subtitled. It is a launch-only option --
+    // the transition batch never re-sends it -- so the preference in force
+    // when the window opens is the one that lasts.
+    if translation_type == "dub" {
+        cmd.arg("--alang=eng,en,English");
+    } else {
+        cmd.arg("--alang=jpn,ja,Japanese");
+    }
+
+    if !title.is_empty() {
+        let media_title = format!("{} - Episode {}", title, episode_number);
+        cmd.arg(format!("--force-media-title={}", media_title));
+        cmd.arg(format!("--title={}", media_title));
+    }
+
+    // No `--start=`: the transition batch always passes an explicit per-file
+    // `start=`, and a global one here would re-apply this episode's resume
+    // position to every later episode of the binge.
+    let script_opts = build_script_opts(
+        proxy_port,
+        media_id,
+        "",
+        autoskip,
+        autoplay,
+        episode_number,
+        total_episodes,
+        &shader_profile,
+    );
+    log::info!("[aniskip] idle mpv script-opts: {}", script_opts);
+    cmd.arg(format!("--script-opts={}", script_opts));
+
+    if autoplay {
+        cmd.arg("--keep-open=yes");
+    }
+    apply_shader_args(&mut cmd, config_dir, &shader_profile);
+    apply_mpv_env(&mut cmd, lib_dir);
+
+    // Check, bump and store under one lock, with nothing awaited inside it, so
+    // two starts racing here cannot put up two windows. The bump comes before
+    // the store for the reason `kill_current_mpv` does it in that order: a
+    // monitor for a previous player still inside its 2s teardown grace would
+    // otherwise take this brand-new window for the process it was watching and
+    // run that teardown against it -- clearing `current_playback`, pausing the
+    // torrent and emitting `active:false` under a player that just opened.
+    let (pid, mpv_gen) = {
+        let mut guard = match CURRENT_MPV.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+        if guard.is_some() {
+            return Err("an mpv is already running".to_string());
+        }
+        MPV_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(unix)]
+        {
+            // A player that died without unlinking its socket leaves a file
+            // mpv's bind then fails on, and every Lua callback and transition
+            // after that goes nowhere. `kill_current_mpv` removes it on the
+            // path it owns; this is the path it doesn't.
+            let _ = std::fs::remove_file(get_ipc_path());
+        }
+        let child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => return Err(format!("Failed to launch mpv: {}", e)),
+        };
+        let pid = child.id().unwrap_or(0);
+        *guard = Some(child);
+        let gen = MPV_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        // Registered under the same lock that created it, so a resolve that
+        // comes back empty can find "the window nobody has fed yet" without
+        // having to be the call that raised it.
+        IDLE_MPV_GENERATION.store(gen, std::sync::atomic::Ordering::SeqCst);
+        (pid, gen)
+    };
+    let spawn_instant = std::time::Instant::now();
+    log::info!(
+        "Launched an idle mpv pid={} for media {} ep {}; the window is up while the stream resolves",
+        pid, media_id, episode_number
+    );
+
+    // No blocking liveness check here, unlike the full launch. The resolve now
+    // runs where that 500ms sleep used to, so waiting it out would hand back
+    // exactly the delay this exists to remove -- and the monitor below polls
+    // at the same 500ms, takes a died-on-launch child out of `CURRENT_MPV`,
+    // and reports it to the frontend. By the time the resolve returns, an mpv
+    // that failed to start is already gone from the slot, so the reuse check
+    // finds no player and falls through to the ordinary launch, which does
+    // still block and still fails the play with a real error.
+    spawn_mpv_exit_monitor(
+        app.clone(),
+        state.clone(),
+        media_id,
+        episode_number,
+        mpv_gen,
+        spawn_instant,
+    );
+
+    // The window is `--ontop`, so it covers the app -- and with it the loading
+    // toast that was until now the only thing saying anything was happening.
+    // Put the same sentence where the viewer is actually looking.
+    let notice = format!("Finding a source for episode {}...", episode_number);
+    let ipc_path = get_ipc_path();
+    tokio::spawn(async move {
+        let cmd = serde_json::json!({ "command": ["show-text", notice, IDLE_NOTICE_MS] });
+        // Retried on the same 5x150ms shape the transition path uses: mpv
+        // creates its IPC socket a moment after the process starts, so the
+        // first attempt lands before there is anything to connect to.
+        for _ in 0..5 {
+            if try_send_ipc(&ipc_path, vec![cmd.clone()]).await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        log::warn!("Could not put the loading notice on the idle player's OSD");
+    });
+
+    Ok(())
+}
+
+/// Takes down an idle window this start put on screen, when the resolve it was
+/// covering found nothing to play.
+///
+/// Without it the viewer is left with a black `--ontop` window over an app
+/// that has already given up, and no way to tell that from a slow stream.
+///
+/// Two guards, because they answer different questions and only one of them is
+/// the obvious one. `IDLE_MPV_GENERATION` says the running player is still an
+/// empty window: a newer start does not kill the window, it *reuses* it, so
+/// the process generation alone is unchanged while the player is busy opening
+/// somebody else's episode, and a resolve that lost thirty seconds to a dead
+/// swarm would come back and take that episode down. `playback_generation`
+/// says this call is still the one the app is waiting on. Both are read here
+/// rather than by the caller, to sit as close to the kill as they can.
+///
+/// Does nothing when there is no idle window -- a transition that fails while
+/// an episode is playing must leave that episode alone.
+async fn close_idle_mpv(app: &AppHandle, state: &AppState, playback_gen: u64) {
+    let idle_gen = IDLE_MPV_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+    if idle_gen == 0 || !mpv_generation_is_current(idle_gen) {
+        return;
+    }
+    if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+        log::info!("A newer start owns the idle window now; leaving it up for it");
+        return;
+    }
+    log::info!("No stream to play; taking the idle mpv window back down");
+    IDLE_MPV_GENERATION.store(0, std::sync::atomic::Ordering::SeqCst);
+    kill_current_mpv().await;
+    emit_playback_active(app, false);
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // playback context is passed field-by-field over IPC
 pub async fn start_playback(
@@ -1933,7 +2680,7 @@ pub async fn start_playback(
     total_episodes: Option<i64>,
     start_over: Option<bool>,
 ) -> Result<PlaybackStart, String> {
-    let mut provider_name = match provider {
+    let provider_name = match provider {
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
@@ -1941,8 +2688,7 @@ pub async fn start_playback(
     let title_str = title.clone().unwrap_or_default();
     let episode_title_str = episode_title.clone().unwrap_or_default();
     let cover_image_str = cover_image.clone().unwrap_or_default();
-    let total_eps = total_episodes.unwrap_or(0);
-
+    let mut total_eps = total_episodes.unwrap_or(0);
     // New playback generation. Background tasks spawned below (the AniSkip
     // resolver) capture this and abort if a later start_playback supersedes
     // them, so a previous episode's slow IPC retry can't overwrite the current
@@ -1951,6 +2697,34 @@ pub async fn start_playback(
         .playback_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
+
+    // A caller with no episode count leaves the player unable to tell a finale
+    // from a middle episode: the Lua script's last-episode branch reads
+    // `total_episodes`, and 0 means "there is always a next one". The downloads
+    // list plays with nothing but a media id and an episode number, and a show
+    // finished from there neither stopped at the end nor completed on AniList.
+    // The catalog knows the count, and the lookup is served from the 1hr
+    // media_detail cache on every path that already opened the detail page.
+    //
+    // Placed after the generation claim, and skipped when this start is already
+    // superseded: a cold cache makes this a live AniList request, and a
+    // superseded start must bail before it spends anything.
+    if total_eps <= 0
+        && crate::media_id::is_anilist(media_id)
+        && state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) == playback_gen
+    {
+        match super::media::fetch_media_detail_cached(state.inner(), media_id, false).await {
+            Ok(d) => {
+                if let Some(n) = d.media.as_ref().and_then(|m| m.episodes) {
+                    total_eps = n as i64;
+                }
+            }
+            Err(e) => log::warn!(
+                "No episode count for media {} and the catalog lookup failed ({}); playing without one",
+                media_id, e
+            ),
+        }
+    }
 
     // `current_playback` is deliberately NOT written here. It used to be, and
     // that made the slot describe an episode that had not started and might
@@ -2033,6 +2807,81 @@ pub async fn start_playback(
         path_found
     };
 
+    // Resolved before the stream rather than after it, because the window now
+    // goes up first: a build with no usable mpv has to fail before anything
+    // spends thirty seconds finding a release it can't play.
+    let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
+    log::info!("mpv binary: {}", mpv_bin);
+    log::info!("mpv config: {}", config_dir);
+    log::info!("mpv lib dir: {}", lib_dir);
+
+    // Self-healing permission setup for mpv binary
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(&mpv_bin) {
+            let mut perms = metadata.permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&mpv_bin, perms);
+                log::info!("Set executable permissions for mpv binary");
+            }
+        }
+    }
+
+    // Raise the window now, and let the resolve below happen behind it. The
+    // stream reaches it through the same `loadfile ... replace` batch
+    // auto-next already uses, so a cold play becomes the warm play; see
+    // `spawn_idle_mpv`. A resolve that comes back with nothing takes the
+    // window back down through `close_idle_mpv`, which keys off
+    // `IDLE_MPV_GENERATION` rather than anything held here.
+    //
+    // Skipped when an mpv is already up (auto-next and every other transition
+    // reuse it further down) and when the episode is a completed download,
+    // which resolves in microseconds and would only get a black window
+    // flashed at it on the way to the same place.
+    let mpv_already_up = {
+        // Scoped so the guard is released before `spawn_idle_mpv` takes the
+        // same lock. The check is advisory anyway -- `spawn_idle_mpv` re-checks
+        // it under the lock it spawns in, which is the one that decides.
+        match CURRENT_MPV.lock() {
+            Ok(guard) => guard.is_some(),
+            Err(e) => e.into_inner().is_some(),
+        }
+    };
+    if local_file_path.is_none()
+        && !mpv_already_up
+        && state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) == playback_gen
+    {
+        match spawn_idle_mpv(
+            &app,
+            &state,
+            &mpv_bin,
+            &config_dir,
+            &lib_dir,
+            media_id,
+            episode_number,
+            &title_str,
+            total_eps,
+        )
+        .await
+        {
+            Ok(()) => {
+                // The window is genuinely on screen from here, which is the
+                // whole question the loading modal was answering -- and it is
+                // `--ontop`, so leaving the modal up would only hide it behind
+                // the player. A resolve that then fails returns Err, and the
+                // frontend's catch reopens the modal with the real reason.
+                emit_playback_active(&app, true);
+            }
+            Err(e) => {
+                // Not fatal: the full launch further down still spawns mpv
+                // with the stream in its argv, exactly as before this existed.
+                log::warn!("Could not raise an idle mpv window: {}", e);
+            }
+        }
+    }
+
     let mut stream_headers = None;
     let mut subtitle_url: Option<String> = None;
     // Kept so the superseded-start bails further down can hand the preloaded
@@ -2045,14 +2894,6 @@ pub async fn start_playback(
         log::info!("Playing offline local download: {}", local_path);
         local_path
     } else {
-        // Try the primary provider; if it can't produce a playable stream
-        // (provider down, no slug match, no servers), fall back to the
-        // configured fallback provider instead of failing the play button.
-        let (fallback_provider, secondary_fallback) = {
-            let cfg = state.config.read().await;
-            (cfg.general.fallback_provider.clone(), cfg.general.secondary_fallback_provider.clone())
-        };
-
         // Instant transition: if the previous episode preloaded this one's
         // stream, use it and skip the scrape entirely. Stale or mismatched
         // entries fall through to a normal resolve.
@@ -2060,10 +2901,10 @@ pub async fn start_playback(
         // The age limit was 15 minutes, which is generous for the signed CDN
         // URLs several of these providers hand out — an auto-next landing on an
         // expired one produced exactly the "next episode doesn't start" symptom,
-        // and worse, taking the preload skips the resolve *and* its
-        // fallback-provider chain, so nothing recovered. Three minutes covers
-        // the case this exists for (the near-end preload, which fires at 85% of
-        // an episode), and the probe below covers the rest.
+        // and worse, taking the preload skips the resolve entirely, so nothing
+        // recovered. Three minutes covers the case this exists for (the
+        // near-end preload, which fires at 85% of an episode), and the probe
+        // below covers the rest.
         const PRELOAD_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3 * 60);
 
         // Auto-next routinely arrives while the near-end preload for the same
@@ -2170,6 +3011,14 @@ pub async fn start_playback(
                 }
             }
         };
+        // Consuming empties the slot as surely as an eviction does, and the
+        // webview has no other way to learn it: without this the episode just
+        // played stays "ready" in its map forever, and the list then refuses to
+        // warm it again. A start that is superseded and hands the entry back
+        // re-emits "ready" from `restore_preload`.
+        if preloaded.is_some() {
+            emit_preload_status(Some(&app), media_id, episode_number, "idle");
+        }
 
         // Fresh enough is not the same as still working, so confirm the
         // preloaded URL is actually serving before committing mpv to it. A
@@ -2224,61 +3073,27 @@ pub async fn start_playback(
             (p.raw_url, p.headers, p.subtitle_url)
         } else {
             // The probe above is a network round-trip, so the supersede can
-            // land during it. Checked again before the expensive half: the
-            // fallback chain can walk three providers, and on nyaa each is a
-            // full search plus a swarm handshake.
+            // land during it. Checked again before the expensive half: on nyaa
+            // a resolve is a full search plus a swarm handshake.
             if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
                 log::info!(
                     "Superseded by a newer playback start; abandoning the resolve for media {} ep {}",
                     media_id, episode_number
                 );
-                restore_preload(&state, consumed_preload.take()).await;
+                restore_preload(&state, Some(&app), consumed_preload.take()).await;
                 return Ok(PlaybackStart { stream_url: String::new() });
             }
-            let candidates = provider_fallback_chain(media_id, &provider_name, fallback_provider, secondary_fallback);
-            let mut tried = Vec::new();
-            let mut last_err = String::new();
-            let mut resolved = None;
 
-            for prov in candidates {
-                if prov.is_empty() || prov == "none" || tried.contains(&prov) {
-                    continue;
+            match resolve_stream_for_provider(&state, media_id, episode_number, &provider_name, &server, title.clone(), crate::state::StreamClient::Mpv, None).await {
+                Ok(res) => res,
+                Err(e) => {
+                    log::warn!("Provider '{}' failed for media {} ep {}: {}", provider_name, media_id, episode_number, e);
+                    // The one exit between raising the window and handing mpv
+                    // a file. Leaving it up would park a black `--ontop`
+                    // window over an app that has already given up.
+                    close_idle_mpv(&app, &state, playback_gen).await;
+                    return Err(format!("No stream found (last error: {})", e));
                 }
-                tried.push(prov.clone());
-
-                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone(), crate::state::StreamClient::Mpv, None).await {
-                    Ok(res) => {
-                        if prov != provider_name {
-                            // Note: don't write the working provider into
-                            // current_playback here — at this point it still
-                            // holds the *previous* episode's record, and this
-                            // launch overwrites it wholesale further down.
-                            // Reassigning provider_name below is what actually
-                            // makes the fallback stick (and what auto-next and
-                            // the near-end preload later read back).
-                            use tauri::Emitter;
-                            let _ = app.emit("show_notification", serde_json::json!({
-                                "message": format!(
-                                    "Couldn't reach {} — playing from {}",
-                                    provider_label(&provider_name),
-                                    provider_label(&prov),
-                                )
-                            }));
-                            provider_name = prov;
-                        }
-                        resolved = Some(res);
-                        break;
-                    }
-                    Err(e) => {
-                        log::warn!("Provider '{}' failed for media {} ep {}: {}", prov, media_id, episode_number, e);
-                        last_err = e;
-                    }
-                }
-            }
-
-            match resolved {
-                Some(res) => res,
-                None => return Err(format!("No stream found on any provider (last error: {})", last_err)),
             }
         };
 
@@ -2294,6 +3109,16 @@ pub async fn start_playback(
         }
         stream_url
     };
+
+    // This episode, and not the preloads queued behind it, is the one about to
+    // be read. Pinning it exempts its file from the torrent's two-file
+    // selection window, which the episode list's hover guess would otherwise
+    // push it out of mid-play (see `TorrentManager::playing_file`). Done here,
+    // before mpv is handed anything, because the pin also re-selects a file
+    // that has *already* been dropped -- the case a preloaded URL taken
+    // straight out of the slot would otherwise play into, since that path
+    // never re-enters `resolve`. A no-op for every non-torrent provider.
+    state.torrent.set_playing(media_id, episode_number).await;
 
     // Only now that a playable stream exists. Setting presence before the
     // resolve meant a play that failed to find any stream still advertised the
@@ -2394,30 +3219,12 @@ pub async fn start_playback(
     });
     }
 
-    let (mpv_bin, config_dir, lib_dir) = resolve_mpv_path(&app)?;
-    log::info!("mpv binary: {}", mpv_bin);
-    log::info!("mpv config: {}", config_dir);
-    log::info!("mpv lib dir: {}", lib_dir);
-
-    // Self-healing permission setup for mpv binary
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(&mpv_bin) {
-            let mut perms = metadata.permissions();
-            if perms.mode() & 0o111 == 0 {
-                perms.set_mode(0o755);
-                let _ = std::fs::set_permissions(&mpv_bin, perms);
-                log::info!("Set executable permissions for mpv binary");
-            }
-        }
-    }
-
     let mut cmd = tokio::process::Command::new(&mpv_bin);
     crate::util::suppress_console_tokio(&mut cmd);
     cmd.arg(format!("--config-dir={}", config_dir));
     if let Some(log_path) = mpv_log_path() {
         // Overwritten each launch; records script + shader load results.
+        rotate_mpv_log(&log_path);
         cmd.arg(format!("--log-file={}", log_path));
     }
     cmd.arg("--force-window=yes");
@@ -2457,34 +3264,21 @@ pub async fn start_playback(
         let cfg = state.config.read().await;
         (cfg.general.autoskip, cfg.general.autoplay)
     };
-    let mut script_opts = Vec::new();
-    if !skip_times_arg.is_empty() {
-        // Encode commas as %2C to avoid mpv --script-opts comma delimiter issue
-        let encoded = skip_times_arg.replace(",", "%2C");
-        script_opts.push(format!("anicat_ui-skip_times={}", encoded));
-    }
     let shader_profile = {
         let cfg = state.config.read().await;
         cfg.stream.shader_profile.clone()
     };
-    // Where the Lua script sends its callbacks. It used to hardcode 13370, but
-    // the proxy only *prefers* that port -- when something else already holds
-    // it, `proxy::server::start` falls back to an OS-assigned one (and says so
-    // in the log). The stream URL is built from the real port, so video played
-    // perfectly while every callback went to whatever else owned 13370: no
-    // progress, no resume position, no watched detection, no preload, and
-    // next/prev doing nothing at all. Exactly the "playback works but the app
-    // forgets everything" report, and invisible unless you thought to check
-    // `lsof -i :13370`.
     let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-    script_opts.push(format!("anicat_ui-proxy_port={}", proxy_port));
-    script_opts.push(format!("anicat_ui-media_id={}", media_id));
-    script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
-    script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
-    script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
-    script_opts.push(format!("anicat_ui-total_episodes={}", total_eps));
-    script_opts.push(format!("anicat_ui-shader_profile={}", shader_profile));
-    let script_opts_str = script_opts.join(",");
+    let script_opts_str = build_script_opts(
+        proxy_port,
+        media_id,
+        &skip_times_arg,
+        autoskip,
+        autoplay,
+        episode_number,
+        total_eps,
+        &shader_profile,
+    );
     log::info!("[aniskip] mpv script-opts: {}", script_opts_str);
     cmd.arg(format!("--script-opts={}", script_opts_str));
 
@@ -2492,37 +3286,7 @@ pub async fn start_playback(
         cmd.arg("--keep-open=yes");
     }
 
-    if shader_profile != "off" {
-        let shader_dir = std::path::Path::new(&config_dir).join("shaders");
-        // Anime4K official "Mode A (Fast)" — the recommended low-end-GPU preset
-        // (Restore + 2x CNN upscale at M, final S refinement). Mode A is the
-        // most popular general anime mode; tuned for the MacBook's thermals,
-        // where the VL/HQ variants pegged the GPU and overheated it.
-        // Source: github.com/bloc97/Anime4K (Template/GLSL_*_Low-end/input.conf)
-        let shader_names = [
-            "Anime4K_Clamp_Highlights.glsl",
-            "Anime4K_Restore_CNN_M.glsl",
-            "Anime4K_Upscale_CNN_x2_M.glsl",
-            "Anime4K_AutoDownscalePre_x2.glsl",
-            "Anime4K_AutoDownscalePre_x4.glsl",
-            "Anime4K_Upscale_CNN_x2_S.glsl",
-        ];
-        let shader_arg: Vec<String> = shader_names
-            .iter()
-            .map(|n| shader_dir.join(n))
-            // Only pass shaders that are actually present — missing files would
-            // make mpv refuse to start (e.g. a build without the bundled
-            // Anime4K shaders). Absent shaders just mean no upscaling.
-            .filter(|p| p.exists())
-            .filter_map(|p| p.to_str().map(|s| s.to_string()))
-            .collect();
-        if !shader_arg.is_empty() {
-            // mpv uses ";" as path-list separator on Windows (because ":" appears
-            // in drive letters), and ":" on macOS/Linux.
-            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-            cmd.arg(format!("--glsl-shaders={}", shader_arg.join(sep)));
-        }
-    }
+    apply_shader_args(&mut cmd, &config_dir, &shader_profile);
 
     // Torrent streams come off the local proxy from an in-progress download,
     // so reads can block for seconds while a piece arrives. Tune mpv for that:
@@ -2588,20 +3352,7 @@ pub async fn start_playback(
 
     cmd.arg(&stream_url);
 
-    if cfg!(target_os = "macos") && !lib_dir.is_empty() {
-        cmd.env("DYLD_LIBRARY_PATH", &lib_dir);
-        let icd_path = std::path::Path::new(&lib_dir).join("vk_icd.json");
-        cmd.env("VK_ICD_FILENAMES", icd_path);
-    }
-    if cfg!(target_os = "linux") {
-        cmd.env("LD_LIBRARY_PATH", &lib_dir);
-    }
-    if cfg!(target_os = "windows") && !lib_dir.is_empty() {
-        // Windows resolves DLLs via the exe directory and PATH; prepend the
-        // bundled lib dir so any mpv DLLs there are found.
-        let existing = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{};{}", lib_dir, existing));
-    }
+    apply_mpv_env(&mut cmd, &lib_dir);
 
     let has_active_mpv = {
         if let Ok(guard) = CURRENT_MPV.lock() {
@@ -2658,28 +3409,24 @@ pub async fn start_playback(
         };
         let reuse_proxy_port =
             *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
-        let mut script_opts_parts = Vec::new();
-        // Re-sent for the same reason every other key is: this is a
-        // `set_property script-opts`, which replaces the whole map. Omitting it
-        // would *delete* the port the launch path set and drop the script back
-        // to its built-in default mid-binge.
-        script_opts_parts.push(format!("anicat_ui-proxy_port={}", reuse_proxy_port));
-        script_opts_parts.push(format!("anicat_ui-media_id={}", media_id));
-        // Always include skip_times (empty if AniSkip hasn't arrived yet) so
-        // the Lua observer doesn't fall back to the previous episode's stale
-        // launch-time opts.skip_times value.
-        script_opts_parts.push(format!("anicat_ui-skip_times={}", skip_times_arg.replace(",", "%2C")));
-        script_opts_parts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
-        script_opts_parts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
-        script_opts_parts.push(format!("anicat_ui-current_episode={}", episode_number));
-        script_opts_parts.push(format!("anicat_ui-total_episodes={}", total_eps));
-        // Sets the whole script-opts map, so every key the launch path sends
-        // has to be re-sent here or it is *removed* from a reused mpv rather
-        // than left alone. shader_profile was the one that wasn't.
-        script_opts_parts.push(format!("anicat_ui-shader_profile={}", shader_profile));
+        // Sets the whole script-opts map, so every key a launch argv sends has
+        // to be re-sent here or it is *removed* from the reused player rather
+        // than left alone -- shader_profile was the one that wasn't. Built by
+        // the same function both launch paths use, so the three writers cannot
+        // fall out of step.
+        let script_opts_parts = build_script_opts(
+            reuse_proxy_port,
+            media_id,
+            &skip_times_arg,
+            autoskip,
+            autoplay,
+            episode_number,
+            total_eps,
+            &shader_profile,
+        );
 
         commands.push(serde_json::json!({
-            "command": ["set_property", "script-opts", script_opts_parts.join(",")]
+            "command": ["set_property", "script-opts", script_opts_parts]
         }));
 
         // Re-apply the upscaling setting for the new episode, the same way the
@@ -2819,7 +3566,7 @@ pub async fn start_playback(
                 "Superseded by a newer playback start; not sending loadfile for media {} ep {}",
                 media_id, episode_number
             );
-            restore_preload(&state, consumed_preload.take()).await;
+            restore_preload(&state, Some(&app), consumed_preload.take()).await;
             return Ok(PlaybackStart { stream_url });
         }
 
@@ -2839,6 +3586,13 @@ pub async fn start_playback(
         for attempt in 0..5 {
             if try_send_ipc(&ipc_path, commands.clone()).await.is_ok() {
                 log::info!("Sent stream to running MPV via IPC (attempt {})", attempt + 1);
+                // The moment this player was committed to a file. The exit
+                // monitor's crashed-on-launch window is measured from here and
+                // not from the spawn: the window is raised before the resolve,
+                // so by now the process can be a whole binge old, and a stream
+                // mpv dies on would otherwise fall outside the window and be
+                // reported nowhere.
+                record_mpv_file_handover();
                 ipc_ok = true;
                 break;
             }
@@ -2913,7 +3667,7 @@ pub async fn start_playback(
             "Superseded by a newer playback start; not launching mpv for media {} ep {}",
             media_id, episode_number
         );
-        restore_preload(&state, consumed_preload.take()).await;
+        restore_preload(&state, Some(&app), consumed_preload.take()).await;
         return Ok(PlaybackStart { stream_url });
     }
 
@@ -2930,6 +3684,11 @@ pub async fn start_playback(
     let pid = child.id().unwrap_or(0);
     log::info!("Launched mpv pid={} with stream: {}", pid, stream_url);
     let spawn_instant = std::time::Instant::now();
+    // This launch carries the URL in its argv, so spawning it *is* the
+    // handover. Stamped anyway rather than left to the fallback, so the rule
+    // stays "every path that gives mpv a file records it" with no exception to
+    // remember.
+    record_mpv_file_handover();
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     match child.try_wait() {
@@ -2965,202 +3724,14 @@ pub async fn start_playback(
         });
     }
 
-    let discord = state.discord.clone();
-    let monitor_media_id = media_id;
-    let monitor_episode = episode_number;
-    let app_handle = app.clone();
-    let app_state_clone = (*state).clone();
-    tokio::spawn(async move {
-        let mut warned_still_alive = false;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            if !mpv_generation_is_current(mpv_gen) {
-                log::info!(
-                    "mpv exit monitor for media {} ep {} superseded by a newer player; stopping without teardown",
-                    monitor_media_id, monitor_episode
-                );
-                return;
-            }
-            // `None` status means "exited, but we never saw how" (monitor lost
-            // the handle, or try_wait itself failed) — not treated as a crash.
-            let (exited, exit_status) = {
-                let mut guard = match CURRENT_MPV.lock() {
-                    Ok(g) => g,
-                    Err(e) => {
-                        log::error!(
-                            "mpv exit monitor: CURRENT_MPV mutex poisoned, stopping monitor for media {} ep {}: {}",
-                            monitor_media_id, monitor_episode, e
-                        );
-                        return;
-                    }
-                };
-                match guard.as_mut() {
-                    Some(child) => match child.try_wait() {
-                        Ok(Some(status)) => {
-                            let _ = guard.take();
-                            (true, Some(status))
-                        }
-                        Ok(None) => (false, None),
-                        Err(e) => {
-                            log::warn!(
-                                "mpv exit monitor: try_wait failed for media {} ep {}, treating as exited: {}",
-                                monitor_media_id, monitor_episode, e
-                            );
-                            let _ = guard.take();
-                            (true, None)
-                        }
-                    },
-                    None => (true, None),
-                }
-            };
-            if exited {
-                let (monitor_media_id, monitor_episode) = {
-                    let guard = app_state_clone.current_playback.lock().await;
-                    if let Some(ref pb) = *guard {
-                        (pb.media_id, pb.episode_number)
-                    } else {
-                        (monitor_media_id, monitor_episode)
-                    }
-                };
-
-                // mpv surviving the initial 500ms grace check only proves the
-                // process didn't crash instantly — it can still die a few
-                // seconds later (bad/expired stream URL, dylib load failure,
-                // Cloudflare hiccup) after the loading modal has already
-                // dismissed itself on the earlier `active:true`. Without this,
-                // that later failure was silent: the modal was long gone and
-                // nothing told the user mpv never actually opened.
-                //
-                // Gate on a non-zero exit code, not just the time window:
-                // quitting mpv within a few seconds (wrong episode, changed
-                // one's mind) is completely normal and exits 0, and reporting
-                // that as a failure would fire constantly.
-                let crashed = exit_status.is_some_and(|s| !s.success());
-                if crashed && spawn_instant.elapsed() < std::time::Duration::from_secs(8) {
-                    log::warn!(
-                        "mpv exited with {:?} only {:?} after launch (media {} ep {}) — surfacing as a failed launch",
-                        exit_status, spawn_instant.elapsed(), monitor_media_id, monitor_episode
-                    );
-                    let _ = app_handle.emit("playback_loading_status", serde_json::json!({
-                        "status": "error",
-                        "step": 0,
-                        "message": "Player closed unexpectedly. Try another server or provider.",
-                        "media_id": monitor_media_id,
-                        "episode_number": monitor_episode,
-                    }));
-                }
-
-                // Give the Lua script time to send position via player/stop
-                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-                // Re-checked after the sleep as well: a new episode can start
-                // inside that window, and everything below this point (the
-                // progress fallback, `active:false`, `pause_all`, clearing
-                // `current_playback`) would otherwise land on it.
-                if !mpv_generation_is_current(mpv_gen) {
-                    log::info!(
-                        "mpv exit monitor for media {} ep {}: a newer player started during teardown; leaving its session alone",
-                        monitor_media_id, monitor_episode
-                    );
-                    return;
-                }
-                // Last line of defence, and deliberately not covered by the
-                // generation check: the monitor also concludes "exited" from
-                // a `try_wait` error, and this teardown is destructive enough
-                // (it clears `current_playback` and pauses the torrent
-                // underneath a running player) that a wrong conclusion costs
-                // the rest of the session. A live mpv answers its IPC socket;
-                // a dead one has unlinked it, and `kill_current_mpv` removes
-                // it explicitly. Seen in the wild as a torrent stuck paused
-                // at a partial percentage with zero peers while playback ran
-                // on out of the 1GiB demuxer cache, and every later player
-                // callback -- including auto-next -- refused with "No current
-                // playback session found".
-                if try_send_ipc(&get_ipc_path(), vec![]).await.is_ok() {
-                    // Keep watching rather than returning: the player is
-                    // alive now, but whatever it eventually does still needs
-                    // the progress save and the torrent pause below. Warned
-                    // once so an abnormal state doesn't fill the log at the
-                    // poll rate.
-                    if !warned_still_alive {
-                        log::warn!(
-                            "mpv exit monitor for media {} ep {} thought the player exited, but its IPC socket still answers; not tearing the session down",
-                            monitor_media_id, monitor_episode
-                        );
-                        warned_still_alive = true;
-                    }
-                    continue;
-                }
-
-                // If player_stop already saved position, current_playback is None.
-                // If still set, save last known position as a fallback.
-                let should_save = {
-                    let guard = app_state_clone.current_playback.lock().await;
-                    guard.is_some()
-                };
-                if should_save {
-                    let (last_pos, last_dur, total_eps) = {
-                        let guard = app_state_clone.current_playback.lock().await;
-                        if let Some(ref pb) = *guard {
-                            (pb.last_position, pb.last_duration, pb.total_episodes)
-                        } else {
-                            (0, 0, 0)
-                        }
-                    };
-                    if last_pos > 0 {
-                        let _ = crate::commands::playback::record_playback_progress(
-                            &app_state_clone,
-                            0,
-                            monitor_media_id,
-                            monitor_episode,
-                            last_pos,
-                            last_dur,
-                            total_eps,
-                        )
-                        .await;
-                        log::info!("Saved last known playback position: {}s / {}s", last_pos, last_dur);
-                    }
-                }
-
-                // Notify frontend
-                let _ = app_handle.emit("progress_updated", serde_json::json!({
-                    "media_id": monitor_media_id,
-                    "episode_number": monitor_episode,
-                }));
-                // `anicat_playback_state{active:false}` below deliberately does
-                // NOT touch the loading toast (StreamLoadingModal treats a bare
-                // `false` as a normal close, not a signal). That's right for
-                // mpv dying before it ever got this far. It's wrong for mpv
-                // dying *mid a next/prev transition it already reused this same
-                // process for* -- e.g. someone hits the OSC's window-close
-                // button right as auto-next hands off to episode N+1. The
-                // 8-second crashed-launch branch above never sees this case
-                // (this isn't a fresh spawn), so nothing ever told the toast
-                // the transition it was showing "Starting..." for isn't coming.
-                // Confirmed live: the toast sat on "Starting..." indefinitely
-                // after exactly this happened, with mpv already gone and
-                // nothing left running to resolve it. Clear it unconditionally
-                // here too -- a stream that already finished loading dismissed
-                // this itself via `status: "ready"` well before the process
-                // exit reaches this point, so the only toast still up here is
-                // one with no other way to close.
-                let _ = app_handle.emit("playback_loading_status", serde_json::json!({
-                    "status": "done",
-                }));
-                emit_playback_active(&app_handle, false);
-                discord.clear_presence();
-                // Window closed: pause the torrent so it stops using the
-                // network in the background. Auto-next reuses (and unpauses)
-                // the next episode's torrent, so this doesn't disrupt it.
-                app_state_clone.torrent.pause_all().await;
-                {
-                    let mut guard = app_state_clone.current_playback.lock().await;
-                    *guard = None;
-                }
-                log::info!("mpv exited, Discord presence cleared");
-                break;
-            }
-        }
-    });
+    spawn_mpv_exit_monitor(
+        app.clone(),
+        (*state).clone(),
+        media_id,
+        episode_number,
+        mpv_gen,
+        spawn_instant,
+    );
 
     // A torrent-backed stream's `file-loaded` can be minutes away (see
     // wait_for_mpv_window's doc comment) — firing `active:true` right here,
@@ -3303,16 +3874,29 @@ pub async fn record_playback_progress(
             let _lock = state.user_list_lock.lock().await;
 
             // Forward-only guard: never let a stale or out-of-order completion
-            // regress AniList progress. If the cache knows the current progress
-            // and it already covers this episode, skip the write entirely.
-            if let Some(current) = state.cache.get_user_list_progress(media_id) {
-                if episode_number <= current {
-                    log::info!(
-                        "Skipping progress write for media {} ep {}: AniList already at {}",
-                        media_id, episode_number, current
-                    );
-                    return Ok(());
-                }
+            // regress AniList progress. It bounds the number written and, when
+            // there is provably nothing left to say, skips the write -- but it
+            // is deliberately not a plain "progress already covers this episode"
+            // early return any more. A rewatch reaches its finale with progress
+            // already sitting at N (start_playback puts the entry back to
+            // CURRENT the moment you replay it), so that return made the second
+            // completion unreachable and left the show in Watching permanently.
+            // Only an entry that is *also* already COMPLETED has nothing left to
+            // write; the status half is re-checked once the finale test below
+            // has run.
+            let cached_progress = state.cache.get_user_list_progress(media_id);
+            let already_covered = cached_progress.map(|c| episode_number <= c).unwrap_or(false);
+            let already_completed = state
+                .cache
+                .get_user_list_status(media_id)
+                .map(|s| s.eq_ignore_ascii_case("COMPLETED"))
+                .unwrap_or(false);
+            if already_covered && already_completed {
+                log::info!(
+                    "Skipping progress write for media {} ep {}: AniList already at {:?} and COMPLETED",
+                    media_id, episode_number, cached_progress
+                );
+                return Ok(());
             }
 
             // The frontend's total_episodes falls back to the *aired-so-far*
@@ -3324,8 +3908,18 @@ pub async fn record_playback_progress(
             // is a one-click fix, a wrong COMPLETED silently drops the show
             // from Watching).
             let mut status = "CURRENT";
-            let mut write_progress = episode_number;
-            if total_episodes > 0 && episode_number >= total_episodes {
+            // Never below what AniList already has: a COMPLETED write for an
+            // episode the entry has passed must not walk the number back. This
+            // is safe only because of the `already_covered` skip further down:
+            // that is what keeps an ordinary mid-series write from writing back
+            // a number higher than the episode just watched.
+            let mut write_progress = episode_number.max(cached_progress.unwrap_or(0));
+            // A caller that passed no count at all (total_episodes == 0 -- the
+            // downloads list plays an episode with nothing else to hand) says
+            // nothing about whether this is the finale, and treating it as
+            // "not the finale" is how a show finished from there stayed in
+            // Watching. An unknown count asks AniList instead of assuming.
+            if total_episodes <= 0 || episode_number >= total_episodes {
                 // Bypass the media_detail cache here: it's a static-metadata
                 // cache with a 1hr TTL, but "episodes" is exactly the field
                 // that flips from null to a real number the instant a show's
@@ -3359,6 +3953,17 @@ pub async fn record_playback_progress(
                         media_id, e
                     ),
                 }
+            }
+
+            // The other half of the forward-only guard: with progress already
+            // covering this episode, a non-completion write would only rewrite
+            // the same number.
+            if already_covered && status != "COMPLETED" {
+                log::info!(
+                    "Skipping progress write for media {} ep {}: AniList already at {:?} and this is not a completion",
+                    media_id, episode_number, cached_progress
+                );
+                return Ok(());
             }
 
             let mut vars = HashMap::new();
@@ -3616,6 +4221,7 @@ async fn remux_torrent_stream(
 /// `<video>` element can load directly, the same way the HTTP endpoint did.
 #[tauri::command]
 pub async fn resolve_builtin_player_stream(
+    app: AppHandle,
     state: State<'_, AppState>,
     media_id: i64,
     episode_number: i64,
@@ -3631,11 +4237,6 @@ pub async fn resolve_builtin_player_stream(
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
-    let (fallback_provider, secondary_fallback) = {
-        let cfg = state.config.read().await;
-        (cfg.general.fallback_provider.clone(), cfg.general.secondary_fallback_provider.clone())
-    };
-
     let title_str = title.clone().unwrap_or_default();
     let episode_title_str = episode_title.clone().unwrap_or_default();
     let cover_image_str = cover_image.clone().unwrap_or_default();
@@ -3650,7 +4251,7 @@ pub async fn resolve_builtin_player_stream(
             Some(p)
                 if p.media_id == media_id
                     && p.episode_number == episode_number
-                    && (p.provider == provider_name || p.provider == fallback_provider)
+                    && p.provider == provider_name
                     && p.client == crate::state::StreamClient::Browser
                     && p.translation_type == translation_type
                     && p.at.elapsed() < PRELOAD_MAX_AGE =>
@@ -3663,6 +4264,11 @@ pub async fn resolve_builtin_player_stream(
             }
         }
     };
+    // Same reason as the mpv path: the slot is now empty for this episode, and
+    // the store only ever learns that from this event.
+    if preloaded.is_some() {
+        emit_preload_status(Some(&app), media_id, episode_number, "idle");
+    }
 
     let (raw_url, stream_headers, raw_subtitle_url, resolved_provider) = if let Some(p) = preloaded {
         log::info!(
@@ -3671,43 +4277,23 @@ pub async fn resolve_builtin_player_stream(
         );
         (p.raw_url, p.headers, p.subtitle_url, p.provider)
     } else {
-        let candidates = provider_fallback_chain(media_id, &provider_name, fallback_provider, secondary_fallback);
-        let mut tried = Vec::new();
-        let mut last_err = String::new();
-        let mut resolved = None;
-
-        for prov in candidates {
-            if prov.is_empty() || prov == "none" || tried.contains(&prov) {
-                continue;
+        match resolve_stream_for_provider(
+            state,
+            media_id,
+            episode_number,
+            &provider_name,
+            &None,
+            title.clone(),
+            crate::state::StreamClient::Browser,
+            exclude_urls.as_deref(),
+        )
+        .await
+        {
+            Ok((url, headers, subtitle_url)) => (url, headers, subtitle_url, provider_name.clone()),
+            Err(e) => {
+                log::warn!("Builtin player provider '{}' failed for media {} ep {}: {}", provider_name, media_id, episode_number, e);
+                return Err(format!("No playable stream found (last error: {})", e));
             }
-            tried.push(prov.clone());
-
-            match resolve_stream_for_provider(
-                state,
-                media_id,
-                episode_number,
-                &prov,
-                &None,
-                title.clone(),
-                crate::state::StreamClient::Browser,
-                exclude_urls.as_deref(),
-            )
-            .await
-            {
-                Ok((url, headers, subtitle_url)) => {
-                    resolved = Some((url, headers, subtitle_url, prov));
-                    break;
-                }
-                Err(e) => {
-                    log::warn!("Builtin player provider '{}' failed for media {} ep {}: {}", prov, media_id, episode_number, e);
-                    last_err = e;
-                }
-            }
-        }
-
-        match resolved {
-            Some(res) => res,
-            None => return Err(format!("No playable stream found on any provider (last error: {})", last_err)),
         }
     };
 
@@ -3734,6 +4320,11 @@ pub async fn resolve_builtin_player_stream(
             stream_url.push_str(&format!("&referer={}", percent_encode(referer)));
         }
     }
+
+    // Same pin as the mpv path: the builtin player (and the remux feeding it)
+    // reads the torrent file just as mpv does, so a preload resolving into the
+    // same pack must not be able to deselect it.
+    state.torrent.set_playing(media_id, episode_number).await;
 
     {
         let mut guard = state.current_playback.lock().await;
@@ -3969,6 +4560,77 @@ pub async fn play_trailer(app: AppHandle, trailer_id: String) -> Result<(), Stri
 
 #[cfg(test)]
 mod tests {
+    /// The backend and the player script are two halves of one contract:
+    /// `set_property script-opts` replaces the whole map, so a key the backend
+    /// stops sending is *deleted* from the running player rather than left
+    /// alone (this is how a reused mpv once lost its shader profile for the
+    /// rest of a binge), and a key it sends that the script never declares is
+    /// read by nothing. Asserted against the script that actually ships, so
+    /// the two cannot drift silently in either direction.
+    #[test]
+    fn every_script_opt_sent_is_one_the_player_declares() {
+        let sent: std::collections::BTreeSet<String> =
+            super::build_script_opts(13370, 1, "op,0,90", true, false, 3, 12, "on")
+                .split(',')
+                .map(|part| {
+                    part.split('=')
+                        .next()
+                        .unwrap()
+                        .trim_start_matches("anicat_ui-")
+                        .to_string()
+                })
+                .collect();
+
+        let lua = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources/mpv_config/scripts/anicat_ui/main.lua"),
+        )
+        .expect("the player script ships in-tree");
+        let table = lua
+            .split_once("local opts = {")
+            .expect("main.lua declares an opts table")
+            .1
+            .split_once("\n}")
+            .expect("the opts table is closed")
+            .0;
+        let declared: std::collections::BTreeSet<String> = table
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("--"))
+            .filter_map(|line| line.split_once('=').map(|(key, _)| key.trim().to_string()))
+            .filter(|key| !key.is_empty())
+            .collect();
+
+        assert_eq!(sent, declared);
+    }
+
+    /// Commas are mpv's own `--script-opts` delimiter, so an unencoded skip
+    /// list is parsed as several truncated keys instead of one value -- which
+    /// is why the count above would still pass while every skip segment after
+    /// the first was lost.
+    #[test]
+    fn a_multi_segment_skip_list_survives_the_delimiter() {
+        let opts = super::build_script_opts(13370, 1, "op,0,90;ed,1300,1390", true, true, 3, 12, "on");
+        assert!(opts.contains("anicat_ui-skip_times=op%2C0%2C90;ed%2C1300%2C1390"));
+        assert_eq!(opts.split(',').count(), 8, "one part per declared key: {}", opts);
+    }
+
+    /// Guards the `rusage_info_v2` layout and the double-pointer argument of
+    /// `proc_pid_rusage`: get either wrong and the call still returns 0 while
+    /// `ri_phys_footprint` reads back as garbage or zero, so the watchdog
+    /// would silently never fire.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn footprint_of_this_process_is_plausible() {
+        let bytes = super::process_footprint_bytes(std::process::id())
+            .expect("proc_pid_rusage failed for our own pid");
+        assert!(
+            bytes > 1024 * 1024 && bytes < 64 * 1024 * 1024 * 1024,
+            "implausible footprint: {} bytes",
+            bytes
+        );
+    }
+
     /// The exit monitor of a replaced mpv must not run its teardown: doing so
     /// clears the `current_playback` of the episode that replaced it and
     /// pauses its torrent, which is how auto-next intermittently ended with
@@ -3988,8 +4650,8 @@ mod tests {
         assert!(super::mpv_generation_is_current(second));
     }
     use super::{
-        candidate_order, is_torrent_backed, is_watched, looks_like_playlist, parse_playlist,
-        probe_status_is_dead, probe_status_is_permanent, provider_fallback_chain, resume_position,
+        candidate_order, is_watched, looks_like_playlist, parse_playlist,
+        probe_status_is_dead, probe_status_is_permanent, resume_position,
         sample_indices, transition_failure_message, PlaylistStep,
     };
     use crate::scraper::client::StreamServer;
@@ -4046,7 +4708,7 @@ mod tests {
     #[test]
     fn a_failed_transition_never_reads_as_the_end_of_the_show() {
         let cases = [
-            "No stream found on any provider (last error: No HD torrent found for 'X' episode 6)",
+            "No stream found (last error: No HD torrent found for 'X' episode 6)",
             "All torrent candidates failed (last error: no seeders (pre-buffer timed out))",
             "mpv exited immediately: ExitStatus(unix_wait_status(256))",
             "something nobody has seen before",
@@ -4290,43 +4952,6 @@ mod tests {
         // Unknown duration is never "watched".
         assert!(!is_watched(9999, 0));
         assert!(!is_watched(50, -1));
-    }
-
-    #[test]
-    fn a_cinema_play_counts_as_torrent_backed_whatever_the_anime_provider_is() {
-        let film = crate::media_id::encode(crate::media_id::MediaSource::TmdbMovie, 693134).unwrap();
-        let series = crate::media_id::encode(crate::media_id::MediaSource::TmdbTv, 94997).unwrap();
-
-        // The guards this feeds (Low Data Mode, on both the detail-page
-        // preload and the auto-next preload) used to ask only whether the
-        // provider was nyaa. `general.provider` describes the anime world, so
-        // with anineko configured a film would start a real torrent download
-        // with Low Data Mode on -- the exact thing the guard exists to stop.
-        assert!(is_torrent_backed("anineko", film));
-        assert!(is_torrent_backed("anineko", series));
-        assert!(is_torrent_backed("nyaa", film));
-
-        // Anime is unchanged: still decided by the provider alone.
-        assert!(is_torrent_backed("nyaa", 21202));
-        assert!(!is_torrent_backed("anineko", 21202));
-        assert!(!is_torrent_backed("mangakatana", 21202));
-    }
-
-    #[test]
-    fn a_cinema_id_never_retries_under_a_second_anime_provider_label() {
-        // Observed live: a film failed once under "nyaa", then the loop tried
-        // it again under "anineko" -- same is_cinema() branch, same apibay
-        // search, same failure, a second full timeout, and a log line
-        // claiming anineko had an opinion about a TMDB id it has never seen.
-        let film = crate::media_id::encode(crate::media_id::MediaSource::TmdbMovie, 693134).unwrap();
-        let chain = provider_fallback_chain(film, "nyaa", "anineko".into(), "none".into());
-        assert_eq!(chain, vec!["nyaa".to_string()]);
-    }
-
-    #[test]
-    fn an_anime_id_still_gets_the_full_fallback_chain() {
-        let chain = provider_fallback_chain(21202, "nyaa", "anineko".into(), "none".into());
-        assert_eq!(chain, vec!["nyaa".to_string(), "anineko".to_string(), "none".to_string()]);
     }
 
     #[test]

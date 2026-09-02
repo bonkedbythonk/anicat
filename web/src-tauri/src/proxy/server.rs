@@ -620,9 +620,14 @@ async fn player_preload_handler(
     // different provider is a different stream, and `start_playback` won't
     // consume it anyway.
     {
-        let slot = scoped.preloaded_stream.lock().await;
-        if let Some(ref p) = *slot {
+        let mut slot = scoped.preloaded_stream.lock().await;
+        if let Some(p) = slot.as_mut() {
             if p.media_id == pb.media_id && p.episode_number == next_ep && p.provider == pb.provider && p.client == crate::state::StreamClient::Mpv && p.translation_type == translation_type {
+                // Warmed by a hover earlier, wanted by auto-next now. Promoting
+                // it is the point: left marked speculative, the next hover in
+                // the episode list would evict the stream the player is about
+                // to ask for.
+                p.priority = crate::state::PreloadPriority::Primary;
                 return Ok("ok");
             }
         }
@@ -632,7 +637,7 @@ async fn player_preload_handler(
     // same bandwidth and stall the episode being watched. If the current
     // download already finished, the preload goes through and auto-next stays
     // instant; otherwise the next episode resolves at play time instead.
-    if crate::commands::playback::is_torrent_backed(&pb.provider, pb.media_id)
+    if crate::source::StreamSource::resolve(pb.media_id, &pb.provider).is_torrent()
         && scoped.config.read().await.stream.data_saver
         && scoped.torrent.any_download_active().await
     {
@@ -654,6 +659,7 @@ async fn player_preload_handler(
         return Ok("ok");
     };
     let app_state = scoped.clone();
+    let app_handle = state.app_handle.clone();
     tokio::spawn(async move {
         let _guard = guard;
         match crate::commands::playback::resolve_stream_for_provider(
@@ -671,21 +677,43 @@ async fn player_preload_handler(
         .await
         {
             Ok((raw_url, headers, subtitle_url)) => {
-                let mut slot = app_state.preloaded_stream.lock().await;
-                *slot = Some(crate::state::PreloadedStream {
-                    media_id: pb.media_id,
-                    episode_number: next_ep,
-                    provider: pb.provider.clone(),
-                    client: crate::state::StreamClient::Mpv,
-                    translation_type,
-                    raw_url,
-                    headers,
-                    subtitle_url,
-                    at: std::time::Instant::now(),
-                });
+                // Primary: auto-next is about to consume this. It therefore
+                // outranks the episode list's hover guesses, and displaces
+                // whatever they left in the slot -- reporting the displacement,
+                // since the webview's per-episode map is push-fed and a silent
+                // overwrite leaves it calling a cold episode "ready".
+                let decision = {
+                    let mut slot = app_state.preloaded_stream.lock().await;
+                    let decision = crate::state::preload_write_decision(
+                        slot.as_ref(),
+                        crate::state::PreloadPriority::Primary,
+                    );
+                    if let crate::state::PreloadWrite::Store { .. } = decision {
+                        *slot = Some(crate::state::PreloadedStream {
+                            media_id: pb.media_id,
+                            episode_number: next_ep,
+                            provider: pb.provider.clone(),
+                            client: crate::state::StreamClient::Mpv,
+                            translation_type,
+                            priority: crate::state::PreloadPriority::Primary,
+                            raw_url,
+                            headers,
+                            subtitle_url,
+                            at: std::time::Instant::now(),
+                        });
+                    }
+                    decision
+                };
+                if let crate::state::PreloadWrite::Store { evicted: Some((ev_media, ev_ep)) } = decision {
+                    crate::commands::playback::emit_preload_status(app_handle.as_ref(), ev_media, ev_ep, "idle");
+                }
+                crate::commands::playback::emit_preload_status(app_handle.as_ref(), pb.media_id, next_ep, "ready");
                 log::info!("Preloaded next episode stream: media {} ep {}", pb.media_id, next_ep);
             }
-            Err(e) => log::warn!("Preload of media {} ep {} failed: {}", pb.media_id, next_ep, e),
+            Err(e) => {
+                log::warn!("Preload of media {} ep {} failed: {}", pb.media_id, next_ep, e);
+                crate::commands::playback::emit_preload_status(app_handle.as_ref(), pb.media_id, next_ep, "idle");
+            }
         }
     });
     Ok("ok")

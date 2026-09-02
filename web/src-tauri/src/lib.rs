@@ -6,6 +6,7 @@ pub mod media_id;
 pub mod proxy;
 pub mod registry;
 pub mod scraper;
+pub mod source;
 pub mod state;
 pub mod tmdb;
 pub mod torrent;

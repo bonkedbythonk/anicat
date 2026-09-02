@@ -99,6 +99,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "http",
+ "libc",
  "librqbit",
  "log",
  "open",

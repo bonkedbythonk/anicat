@@ -10,6 +10,7 @@ use crate::anilist::queries;
 use crate::anilist::responses::{MediaResponse, PageResponse};
 use crate::cache::AniListCache;
 use crate::registry;
+use crate::source::{StreamSource, TorrentIndex};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -394,10 +395,9 @@ pub async fn get_episodes(
     get_episodes_impl(state.inner(), media_id, provider, title, episode_count, &notify).await
 }
 
-/// `notify` surfaces non-fatal scrape hiccups (auth-error toast, "loaded from
-/// fallback provider" notice) to whatever's watching — the desktop wrapper
-/// above emits a Tauri event for the webview to show as a toast; the
-/// headless mobile-api route just logs, since there's no toast surface there.
+/// `notify` surfaces non-fatal scrape hiccups (the auth-error toast) to
+/// whatever's watching — the desktop wrapper above emits a Tauri event for the
+/// webview to show as a toast.
 pub async fn get_episodes_impl(
     state: &AppState,
     media_id: i64,
@@ -410,17 +410,13 @@ pub async fn get_episodes_impl(
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
-    let fallback = {
-        let cfg = state.config.read().await;
-        cfg.general.fallback_provider.clone()
-    };
     let is_manga = provider_name == "mangakatana";
 
     // Torrents have no scrapeable episode list: synthesize one from the count
     // the frontend already knows, or from AniList (aired-so-far for airing
     // shows). Whether each episode actually has a torrent is decided at play
-    // time, with the regular provider fallback if it doesn't.
-    if provider_name == "nyaa" && !is_manga {
+    // time.
+    if StreamSource::resolve(media_id, &provider_name).is_torrent() {
         let count = match episode_count.filter(|&n| n > 0) {
             Some(n) => Some(n),
             None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.episode_count,
@@ -437,26 +433,18 @@ pub async fn get_episodes_impl(
     }
 
     let db = state.open_db().map_err(|e| e.to_string())?;
-    // A saved slug is only meaningful on the provider it was resolved for.
-    let (slug, slug_provider) = match registry::service::get_provider_slug(&db, media_id, &provider_name) {
-        Some(s) => (Some(s), provider_name.clone()),
-        None if fallback != provider_name => {
-            log::info!("get_episodes: no slug for '{}', trying fallback '{}'", provider_name, fallback);
-            (registry::service::get_provider_slug(&db, media_id, &fallback), fallback.clone())
-        }
-        None => (None, provider_name.clone()),
-    };
+    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name);
 
     let mut episodes = if let Some(ref slug) = slug {
         let res = if is_manga {
             state.scraper_manager.get_manga(slug).await.map(|info| info.episodes)
         } else {
-            state.scraper_manager.get_anime(slug, &slug_provider).await.map(|info| info.episodes)
+            state.scraper_manager.get_anime(slug, &provider_name).await.map(|info| info.episodes)
         };
         match res {
             Ok(eps) => eps,
             Err(e) => {
-                log::error!("Scraper auto-search error for media_id={}, provider={}, title={}: {}", media_id, slug_provider, title.as_deref().unwrap_or(""), e);
+                log::error!("Scraper auto-search error for media_id={}, provider={}, title={}: {}", media_id, provider_name, title.as_deref().unwrap_or(""), e);
                 let _ = registry::service::clear_provider_cache(&db, media_id);
                 notify(&format!("Failed to load episodes: {}", e));
                 vec![]
@@ -507,12 +495,12 @@ pub async fn get_episodes_impl(
             if suspect && media_is_finished(state, media_id).await {
                 log::warn!(
                     "get_episodes: saved '{}' slug '{}' has {} episodes but AniList expects {}; re-resolving",
-                    slug_provider, slug.as_deref().unwrap_or(""), got, expected
+                    provider_name, slug.as_deref().unwrap_or(""), got, expected
                 );
-                let _ = registry::service::clear_provider_slug(&db, media_id, &slug_provider);
-                match resolve_and_save_provider_slug(state, media_id, &slug_provider, false, None).await {
+                let _ = registry::service::clear_provider_slug(&db, media_id, &provider_name);
+                match resolve_and_save_provider_slug(state, media_id, &provider_name, false, None).await {
                     Ok(Some(new_slug)) if Some(&new_slug) != slug.as_ref() => {
-                        if let Ok(info) = state.scraper_manager.get_anime(&new_slug, &slug_provider).await {
+                        if let Ok(info) = state.scraper_manager.get_anime(&new_slug, &provider_name).await {
                             if !info.episodes.is_empty() {
                                 episodes = info.episodes;
                             }
@@ -522,21 +510,21 @@ pub async fn get_episodes_impl(
                     // count; resolve_and_save already restored the mapping.
                     Ok(Some(_)) => {}
                     // No confident match anymore: leave the mapping cleared and
-                    // let the synthesis/fallback below take over.
+                    // let the synthesis below take over.
                     _ => episodes = vec![],
                 }
             }
         }
     }
 
-    // Active fallback: if the primary provider yielded nothing (down, no match,
-    // or an empty list), resolve and scrape the fallback provider instead of
-    // showing a dead episode list. Only for anime — manga has one provider.
+    // Synthesise from the AniList episode count the frontend already knows if
+    // the provider yielded nothing (down, no match, or an empty list), rather
+    // than showing a dead episode list. This covers cases where the scraper's
+    // show() query returns empty availableEpisodesDetail/availableEpisodes even
+    // though streams resolve correctly (the stream query uses a different
+    // endpoint). Only for anime — a manga chapter list has no count to fall
+    // back on.
     if episodes.is_empty() && !is_manga {
-        // First try: synthesise from the AniList episode count the frontend
-        // already knows. This covers cases where the scraper's show() query
-        // returns empty availableEpisodesDetail/availableEpisodes even though
-        // streams resolve correctly (the stream query uses a different endpoint).
         if let Some(count) = episode_count.filter(|&n| n > 0) {
             log::info!(
                 "get_episodes: '{}' returned no episodes but AniList count is {}; synthesising list",
@@ -550,44 +538,6 @@ pub async fn get_episodes_impl(
                     download_status: None,
                 })
                 .collect();
-        }
-
-        // Second try: ask the fallback provider if we still have nothing.
-        if episodes.is_empty() {
-            let has_fallback = !fallback.is_empty() && fallback != "none" && fallback != provider_name;
-            if has_fallback {
-                log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
-                if fallback == "nyaa" {
-                    let count = match episode_count.filter(|&n| n > 0) {
-                        Some(n) => Some(n),
-                        None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.episode_count,
-                    };
-                    episodes = (1..=count.unwrap_or(0))
-                        .map(|n| crate::scraper::client::Episode {
-                            number: n as i32,
-                            title: None,
-                            image: None,
-                            download_status: None,
-                        })
-                        .collect();
-                    if !episodes.is_empty() {
-                        notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
-                    }
-                } else {
-                    let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
-                        .or(resolve_and_save_provider_slug(state, media_id, &fallback, false, None).await.ok().flatten());
-                    if let Some(slug) = fb_slug {
-                        match state.scraper_manager.get_anime(&slug, &fallback).await {
-                            Ok(info) if !info.episodes.is_empty() => {
-                                notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
-                                episodes = info.episodes;
-                            }
-                            Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
-                            Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -633,151 +583,138 @@ pub async fn resolve_stream_impl(
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
-    let fallback = {
-        let cfg = state.config.read().await;
-        cfg.general.fallback_provider.clone()
-    };
 
-    // A film or series never goes to an anime provider, whatever
-    // `general.provider` says -- see the same branch in
-    // `resolve_stream_for_provider`. Without this the picker searched nyaa
-    // with titles gathered from AniList, which has never heard of these ids.
-    if crate::media_id::source_of(media_id).is_cinema() {
-        // The picker's spinner has nothing else telling it apart from a
-        // genuine hang -- one line here is the difference between "the log
-        // shows this never started" and "it's stuck after the title lookup".
-        log::info!("cinema: resolving releases for media {} ep {}", media_id, episode_number);
-        let (titles, year) =
-            super::playback::gather_movie_info_pub(state, media_id, title.clone()).await;
-        if titles.is_empty() {
-            log::warn!("cinema: no title available for media {}, cannot search", media_id);
-            return Ok(serde_json::json!({ "streams": [] }));
-        }
+    // One decision for the whole function, the same one `start_playback` makes
+    // through `resolve_stream_for_provider`: a film or series never goes to an
+    // anime provider, whatever `general.provider` says. Without it the picker
+    // searched nyaa with titles gathered from AniList, which has never heard
+    // of these ids. Every arm returns, so what follows is the scraper path.
+    if let StreamSource::Torrent(index) = StreamSource::resolve(media_id, &provider_name) {
+        let choices = match index {
+            TorrentIndex::Series | TorrentIndex::Movie => {
+                // The picker's spinner has nothing else telling it apart from
+                // a genuine hang -- one line here is the difference between
+                // "the log shows this never started" and "it's stuck after the
+                // title lookup".
+                log::info!("cinema: resolving releases for media {} ep {}", media_id, episode_number);
+                let (titles, year) =
+                    super::playback::gather_movie_info_pub(state, media_id, title.clone()).await;
+                if titles.is_empty() {
+                    log::warn!("cinema: no title available for media {}, cannot search", media_id);
+                    return Ok(serde_json::json!({ "streams": [] }));
+                }
 
-        let choices = if crate::media_id::source_of(media_id) == crate::media_id::MediaSource::TmdbTv
-        {
-            let seasons = super::cinema::season_map_for(state, media_id).await?;
-            let Some((season, episode)) = crate::torrent::series::absolute_to_season_episode(
-                episode_number as i64,
-                &seasons,
-            ) else {
-                return Ok(serde_json::json!({ "streams": [] }));
-            };
-            state
-                .torrent
-                .list_candidates(
-                    &state.http_client,
-                    crate::torrent::ResolveTarget {
-                        media_id,
-                        episode: episode_number as i64,
-                        titles: &titles,
-                        allow_episodeless: false,
-                        episode_count: None,
-                        prefer_dub: false,
-                        browser_client: client.is_browser(),
-                        chosen_name: None,
-                        movie: None,
-                        series: Some(crate::torrent::series::EpisodeCriteria {
-                            season,
-                            episode,
+                if index == TorrentIndex::Series {
+                    let seasons = super::cinema::season_map_for(state, media_id).await?;
+                    let Some((season, episode)) = crate::torrent::series::absolute_to_season_episode(
+                        episode_number as i64,
+                        &seasons,
+                    ) else {
+                        return Ok(serde_json::json!({ "streams": [] }));
+                    };
+                    state
+                        .torrent
+                        .list_candidates(
+                            &state.http_client,
+                            crate::torrent::ResolveTarget {
+                                media_id,
+                                episode: episode_number as i64,
+                                titles: &titles,
+                                allow_episodeless: false,
+                                episode_count: None,
+                                prefer_dub: false,
+                                browser_client: client.is_browser(),
+                                chosen_name: None,
+                                movie: None,
+                                series: Some(crate::torrent::series::EpisodeCriteria {
+                                    season,
+                                    episode,
+                                    browser_client: client.is_browser(),
+                                }),
+                                entry: Default::default(),
+                                sibling_titles: &[],
+                            },
+                        )
+                        .await
+                } else {
+                    state
+                        .torrent
+                        .list_candidates(
+                            &state.http_client,
+                            crate::torrent::ResolveTarget {
+                                media_id,
+                                episode: 1,
+                                titles: &titles,
+                                allow_episodeless: true,
+                                episode_count: Some(1),
+                                prefer_dub: false,
+                                browser_client: client.is_browser(),
+                                chosen_name: None,
+                                movie: Some(crate::torrent::cinema::MovieCriteria {
+                                    year,
+                                    browser_client: client.is_browser(),
+                                }),
+                                series: None,
+                                entry: crate::torrent::layout::EntryHint {
+                                    kind: crate::torrent::layout::EntryKind::Movie,
+                                    ..Default::default()
+                                },
+                                sibling_titles: &[],
+                            },
+                        )
+                        .await
+                }
+            }
+            // List the available releases (search only, no download) so the
+            // picker can offer each as a selectable server. The `url` below is
+            // a sentinel: torrents resolve lazily at play time (start_playback
+            // -> resolve_stream_for_provider), keyed by the chosen release
+            // name, so we never download every candidate just to populate the
+            // list.
+            TorrentIndex::Anime => {
+                let prefer_dub =
+                    super::playback::effective_translation_type(state, media_id).await == "dub";
+                let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
+                    crate::torrent::gather_media_info(state, media_id, None).await;
+                let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
+                state
+                    .torrent
+                    .list_candidates(
+                        &state.http_client,
+                        crate::torrent::ResolveTarget {
+                            media_id,
+                            episode: episode_number as i64,
+                            titles: &titles,
+                            allow_episodeless,
+                            episode_count,
+                            prefer_dub,
                             browser_client: client.is_browser(),
-                        }),
-                        entry: Default::default(),
-                        sibling_titles: &[],
-                    },
-                )
-                .await
-        } else {
-            state
-                .torrent
-                .list_candidates(
-                    &state.http_client,
-                    crate::torrent::ResolveTarget {
-                        media_id,
-                        episode: 1,
-                        titles: &titles,
-                        allow_episodeless: true,
-                        episode_count: Some(1),
-                        prefer_dub: false,
-                        browser_client: client.is_browser(),
-                        chosen_name: None,
-                        movie: Some(crate::torrent::cinema::MovieCriteria {
-                            year,
-                            browser_client: client.is_browser(),
-                        }),
-                        series: None,
-                        entry: crate::torrent::layout::EntryHint {
-                            kind: crate::torrent::layout::EntryKind::Movie,
-                            ..Default::default()
+                            chosen_name: None,
+                            movie: None,
+                            series: None,
+                            entry: hint,
+                            sibling_titles: &siblings,
                         },
-                        sibling_titles: &[],
-                    },
-                )
-                .await
+                    )
+                    .await
+            }
         };
 
         let streams: Vec<Value> = choices
             .into_iter()
             .map(|c| {
-                serde_json::json!({
-                    "name": c.name,
-                    // Sentinel, as for nyaa: the torrent is only added to the
-                    // session once this release is actually chosen.
-                    "url": "",
-                    "quality": "1080p",
-                    "seeders": c.seeders,
-                    "isM3U8": false,
-                    "headers": null,
+                let group = match index {
                     // Films and series carry no sub/dub distinction; the group
                     // is what the picker labels a row with.
-                    "group": "soft_sub",
-                })
-            })
-            .collect();
-        return Ok(serde_json::json!({ "streams": streams }));
-    }
-
-    if provider_name == "nyaa" {
-        // List the available releases (search only, no download) so the
-        // picker can offer each as a selectable server. The `url` is a
-        // sentinel: torrents resolve lazily at play time (start_playback ->
-        // resolve_stream_for_provider), keyed by the chosen release name, so
-        // we never download every candidate just to populate the list.
-        let prefer_dub =
-            super::playback::effective_translation_type(state, media_id).await == "dub";
-        let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
-            crate::torrent::gather_media_info(state, media_id, None).await;
-        let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
-        let choices = state
-            .torrent
-            .list_candidates(
-                &state.http_client,
-                crate::torrent::ResolveTarget {
-                    media_id,
-                    episode: episode_number as i64,
-                    titles: &titles,
-                    allow_episodeless,
-                    episode_count,
-                    prefer_dub,
-                    browser_client: client.is_browser(),
-                    chosen_name: None,
-                    movie: None,
-                    series: None,
-                    entry: hint,
-                    sibling_titles: &siblings,
-                },
-            )
-            .await;
-        let streams: Vec<Value> = choices
-            .into_iter()
-            .map(|c| {
-                // Fansub torrent releases mux subtitles as a selectable track,
-                // not burned into the video — "hard_sub" was wrong for every
-                // non-dub release here.
-                let group = if c.is_dub { "dub" } else { "soft_sub" };
+                    TorrentIndex::Movie | TorrentIndex::Series => "soft_sub",
+                    // Fansub torrent releases mux subtitles as a selectable
+                    // track, not burned into the video — "hard_sub" was wrong
+                    // for every non-dub release here.
+                    TorrentIndex::Anime if c.is_dub => "dub",
+                    TorrentIndex::Anime => "soft_sub",
+                };
                 serde_json::json!({
                     "name": c.name,
-                    // Sentinel — resolved lazily when the user picks it.
                     "url": "",
                     "quality": "1080p",
                     "seeders": c.seeders,
@@ -836,91 +773,7 @@ pub async fn resolve_stream_impl(
         return Ok(serde_json::json!({ "streams": servers }));
     }
 
-    // 2. Fallback provider if primary returned 0 streams
-    if !fallback.is_empty() && fallback != "none" && fallback != provider_name {
-        log::info!("resolve_stream: primary provider '{}' failed, trying fallback '{}'", provider_name, fallback);
-        if fallback == "nyaa" {
-            let prefer_dub =
-                super::playback::effective_translation_type(state, media_id).await == "dub";
-            let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
-                crate::torrent::gather_media_info(state, media_id, title).await;
-            let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
-            let choices = state
-                .torrent
-                .list_candidates(
-                    &state.http_client,
-                    crate::torrent::ResolveTarget {
-                        media_id,
-                        episode: episode_number as i64,
-                        titles: &titles,
-                        allow_episodeless,
-                        episode_count,
-                        prefer_dub,
-                        browser_client: client.is_browser(),
-                        chosen_name: None,
-                        movie: None,
-                        series: None,
-                        entry: hint,
-                        sibling_titles: &siblings,
-                    },
-                )
-                .await;
-            let streams: Vec<Value> = choices
-                .into_iter()
-                .map(|c| {
-                    let group = if c.is_dub { "dub" } else { "soft_sub" };
-                    serde_json::json!({
-                        "name": c.name,
-                        "url": "",
-                        "quality": "1080p",
-                        "seeders": c.seeders,
-                        "isM3U8": false,
-                        "headers": null,
-                        "group": group,
-                    })
-                })
-                .collect();
-            if !streams.is_empty() {
-                return Ok(serde_json::json!({ "streams": streams }));
-            }
-        } else {
-            // Same shape as the primary above: probe a saved slug, and only fall
-            // through to a fresh resolve (which returns its own validated streams)
-            // when that produces nothing.
-            let mut fb_servers = Vec::new();
-            if let Some(ref slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
-                if let Ok(res) = state
-                    .scraper_manager
-                    .get_streams(slug, episode_number, &fallback)
-                    .await
-                {
-                    fb_servers = res;
-                }
-            }
-            if fb_servers.is_empty() {
-                if let Ok(Some((_, validated))) = resolve_and_save_provider_slug_for_episode(
-                    state,
-                    media_id,
-                    &fallback,
-                    false,
-                    title.clone(),
-                    Some(episode_number),
-                )
-                .await
-                {
-                    fb_servers = validated;
-                }
-            }
-            if client.is_browser() {
-                fb_servers.retain(|s| s.browser_ok.unwrap_or(true));
-            }
-            if !fb_servers.is_empty() {
-                return Ok(serde_json::json!({ "streams": fb_servers }));
-            }
-        }
-    }
-
-    Err(format!("No stream found for media {} on '{}' or fallback '{}'", media_id, provider_name, fallback))
+    Err(format!("No stream found for media {} on '{}'", media_id, provider_name))
 }
 
 #[tauri::command]
@@ -941,15 +794,15 @@ pub async fn search_provider_impl(
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
-    let fallback = {
-        let cfg = state.config.read().await;
-        cfg.general.fallback_provider.clone()
-    };
 
     // Torrents have no show catalog to search. The re-match UI still works:
     // echo the query back as the one result, and saving it stores the query
     // as a manual search-title override for this media.
-    if provider_name == "nyaa" {
+    //
+    // Asked without a media id: this searches a provider for a *title*, so
+    // there is no id band to consult and the question is only which anime
+    // backend the name means.
+    if StreamSource::for_anime_provider(&provider_name).is_torrent() {
         return Ok(vec![crate::scraper::AnimeRef {
             id: query.clone(),
             title: format!("Search torrents for \"{}\"", query),
@@ -957,13 +810,7 @@ pub async fn search_provider_impl(
         }]);
     }
 
-    let results = state.scraper_manager.search(&query, &provider_name).await?;
-    if !results.is_empty() || fallback == provider_name {
-        return Ok(results);
-    }
-
-    log::info!("search_provider: '{}' returned 0 results for '{}', trying fallback '{}'", provider_name, query, fallback);
-    state.scraper_manager.search(&query, &fallback).await
+    state.scraper_manager.search(&query, &provider_name).await
 }
 
 #[tauri::command]
@@ -2025,7 +1872,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
             // search for real rather than reporting a false miss. It has
             // already released its claim by the time slug_resolve_in_flight
             // went false, so this either claims cleanly or (rare second race)
-            // gives up and lets the caller's own fallback chain handle it.
+            // reports no match and lets the caller handle it.
             match state.claim_slug_resolve(media_id, provider_name) {
                 Some(guard) => guard,
                 None => return Ok(None),

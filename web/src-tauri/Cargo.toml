@@ -56,5 +56,11 @@ tokio-util = { version = "0.7", features = ["io"] }
 # directly — the log crate is entirely tauri-plugin-log's to own.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 
+# proc_pid_rusage, for the mpv memory watchdog in commands/playback.rs. RSS
+# is not enough there: the runaway mpv held 2.2 GB resident and 136.6 GB
+# compressed, and only phys_footprint counts the compressed pages.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [profile.dev]
 opt-level = 1

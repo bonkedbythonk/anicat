@@ -34,10 +34,6 @@ pub struct GeneralConfig {
     pub media_api: String,
     #[serde(default = "default_manga_provider")]
     pub manga_provider: String,
-    #[serde(default = "default_fallback_provider")]
-    pub fallback_provider: String,
-    #[serde(default = "default_secondary_fallback_provider")]
-    pub secondary_fallback_provider: String,
     #[serde(default = "default_novel_provider")]
     pub novel_provider: String,
     #[serde(default = "default_ereader_profile")]
@@ -121,13 +117,6 @@ fn default_media_api() -> String {
 fn default_manga_provider() -> String {
     "mangakatana".into()
 }
-fn default_fallback_provider() -> String {
-    "none".into()
-}
-// nyaa is the sole anime streaming provider; no fallback provider needed.
-fn default_secondary_fallback_provider() -> String {
-    "none".into()
-}
 fn default_novel_provider() -> String {
     "ranobedb".into()
 }
@@ -186,8 +175,18 @@ pub struct AppStateInner {
     /// independent recorders (stop handler, shutdown handler, exit monitor);
     /// this collapses them so only the first does the work.
     pub last_progress_record: Arc<tokio::sync::Mutex<Option<(i64, i64, std::time::Instant)>>>,
-    /// Next episode's stream resolved ahead of time (near the end of the
-    /// current episode) so auto-next is instant instead of waiting on a scrape.
+    /// One stream resolved ahead of time so the play that wants it is instant
+    /// instead of waiting on a resolve. Three callers fill it — the player's
+    /// near-end warm-up of episode+1, the detail page's Continue episode, and
+    /// the episode list's hover/focus guess — and it holds exactly one of them,
+    /// because a second held preload is a second file selected inside the same
+    /// torrent on top of the one playing, which is one more than
+    /// `SELECTED_FILES_KEPT` allows (see `torrent::retain_recent`).
+    ///
+    /// Every write therefore goes through [`preload_write_decision`], which
+    /// keeps a hover from displacing an episode the user is about to play and
+    /// names whatever does leave the slot so the caller can correct the
+    /// webview's own per-episode map.
     pub preloaded_stream: Arc<tokio::sync::Mutex<Option<PreloadedStream>>>,
     /// Preload targets with a resolve currently in flight. `preloaded_stream`
     /// is only filled once a resolve *finishes*, so on its own it can't stop
@@ -305,6 +304,88 @@ impl StreamClient {
     }
 }
 
+/// How much a preload is worth keeping when two of them want the one slot.
+///
+/// `Primary` is a preload the user's next action is *expected* to consume: the
+/// detail page warming the Continue episode, and the player's near-end warming
+/// of episode+1. `Speculative` is a guess made from a hover or a keyboard
+/// focus resting on a row.
+///
+/// Ordered, because that ordering is the whole rule: hovering episode 7 for
+/// 400ms used to overwrite an already-resolved Continue preload, so pressing
+/// Continue right after went cold — the exact case the Continue preload
+/// exists to prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PreloadPriority {
+    Speculative,
+    Primary,
+}
+
+/// Who a preload is being resolved for: which player will consume it, and how
+/// much it is worth keeping. One struct rather than two parameters because
+/// `preload_episode_impl` is already at the `too_many_arguments` limit.
+#[derive(Debug, Clone, Copy)]
+pub struct PreloadOrigin {
+    pub client: StreamClient,
+    pub priority: PreloadPriority,
+}
+
+/// How long a `Primary` entry is protected from being evicted by a
+/// `Speculative` one.
+///
+/// Matches the mpv read path's own `PRELOAD_MAX_AGE` (3 minutes, in
+/// `commands/playback.rs`) on purpose but deliberately does not share the
+/// constant: past that age `start_playback` discards the entry anyway, so
+/// protecting it any longer would trade a usable speculative stream for one
+/// nothing can consume. The browser read path allows an entry ten times older
+/// (30 minutes), so this window is the stricter of the two — every preload
+/// written today is `StreamClient::Mpv`, and a `Browser` entry between the two
+/// windows would lose the slot to a hover, reported rather than dropped
+/// silently.
+pub const PRIMARY_PRELOAD_PROTECTION: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
+/// What a writer should do with the one preload slot, and what the frontend
+/// has to be told as a result.
+///
+/// The slot is a single `Option`, so every write is either a refusal or an
+/// eviction — and both used to be silent. The webview keeps its own
+/// per-episode `preloadStatus` map fed by `stream_preload_status` events, so a
+/// silent overwrite left it reporting "ready" for an episode the backend no
+/// longer held, and its own guard then refused to re-preload an episode that
+/// was actually cold. Returning the evicted key forces the caller to emit the
+/// correction.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PreloadWrite {
+    /// Store the new entry. `evicted` is the `(media_id, episode_number)` that
+    /// leaves the slot, if any.
+    Store { evicted: Option<(i64, i64)> },
+    /// Leave the slot alone: what is in it is worth more than the incoming
+    /// entry. The caller still has to report its own target as no longer held.
+    Refused,
+}
+
+/// Decides a write against the current occupant of the preload slot.
+///
+/// Pure so the rule can be tested without a resolve, an `AppHandle` or a
+/// runtime: what broke was not the resolving, it was what the slot did with
+/// two results.
+pub fn preload_write_decision(
+    occupant: Option<&PreloadedStream>,
+    incoming: PreloadPriority,
+) -> PreloadWrite {
+    match occupant {
+        Some(held)
+            if incoming < held.priority && held.at.elapsed() < PRIMARY_PRELOAD_PROTECTION =>
+        {
+            PreloadWrite::Refused
+        }
+        Some(held) => PreloadWrite::Store {
+            evicted: Some((held.media_id, held.episode_number)),
+        },
+        None => PreloadWrite::Store { evicted: None },
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PreloadedStream {
     pub media_id: i64,
@@ -320,6 +401,9 @@ pub struct PreloadedStream {
     /// episode, provider, client — so without this a toggle's restart could
     /// silently reuse the stale-translation stream instead of re-resolving.
     pub translation_type: String,
+    /// Whether losing the slot to a competing preload is acceptable; see
+    /// [`preload_write_decision`].
+    pub priority: PreloadPriority,
     pub raw_url: String,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub subtitle_url: Option<String>,
@@ -467,7 +551,7 @@ impl AppState {
             }
         };
         // Providers that no longer exist as a selectable option collapse onto
-        // nyaa / none. Every name that was ever selectable has to stay in this
+        // nyaa. Every name that was ever selectable has to stay in this
         // list even once its code is gone -- mkissa's was deleted outright and
         // it is still here, because the list's job is to recognise what an old
         // `config.toml` might say, not what the binary can still do. Dropping a
@@ -476,12 +560,6 @@ impl AppState {
             &["gogoanime", "anizone", "animepahe", "allanime", "mkissa", "anineko"];
         if RETIRED_PROVIDERS.contains(&config.general.provider.as_str()) {
             config.general.provider = "nyaa".into();
-        }
-        if RETIRED_PROVIDERS.contains(&config.general.fallback_provider.as_str()) {
-            config.general.fallback_provider = "none".into();
-        }
-        if RETIRED_PROVIDERS.contains(&config.general.secondary_fallback_provider.as_str()) {
-            config.general.secondary_fallback_provider = "none".into();
         }
         // `shader_profile` is "on" | "off". Everything that decides whether to
         // actually load the shaders asks `!= "off"`, so the older "balanced"
@@ -591,17 +669,13 @@ impl AppState {
 }
 
 /// Which providers are worth warming in the scraper sidecar at startup: the
-/// configured anime provider and its fallbacks, plus the manga provider, in
-/// the order the play path would reach them. `ScraperManager::prewarm` drops
-/// the ones the sidecar doesn't implement (`nyaa`, `none`) and de-duplicates.
+/// configured anime provider and the manga provider.
+/// `ScraperManager::prewarm` drops the ones the sidecar doesn't implement
+/// (`nyaa`, `none`) and de-duplicates, so the anime entry costs nothing while
+/// nyaa is the only anime source.
 pub async fn scraper_providers_to_warm(state: &AppState) -> Vec<String> {
     let config = state.config.read().await;
-    vec![
-        config.general.provider.clone(),
-        config.general.fallback_provider.clone(),
-        config.general.secondary_fallback_provider.clone(),
-        config.general.manga_provider.clone(),
-    ]
+    vec![config.general.provider.clone(), config.general.manga_provider.clone()]
 }
 
 impl std::ops::Deref for AppState {
@@ -779,5 +853,114 @@ mod tests {
         // Same episode via another provider: also a different stream, and
         // start_playback only consumes a preload whose provider matches.
         assert!(state.claim_preload(42, 7, "nyaa").is_some());
+    }
+
+    /// One entry in the slot, aged `age` and worth `priority`.
+    fn held(
+        episode_number: i64,
+        priority: PreloadPriority,
+        age: std::time::Duration,
+    ) -> PreloadedStream {
+        PreloadedStream {
+            media_id: 42,
+            episode_number,
+            provider: "nyaa".into(),
+            client: StreamClient::Mpv,
+            translation_type: "sub".into(),
+            priority,
+            raw_url: "http://127.0.0.1:13370/torrent-stream?t=1&f=0".into(),
+            headers: None,
+            subtitle_url: None,
+            at: std::time::Instant::now()
+                .checked_sub(age)
+                .expect("an Instant that far back exists on every supported platform"),
+        }
+    }
+
+    const FRESH: std::time::Duration = std::time::Duration::from_secs(1);
+
+    #[test]
+    fn a_hover_guess_does_not_displace_the_episode_the_user_is_about_to_play() {
+        // The regression this exists for: the detail page warms the Continue
+        // episode on open, then a 400ms hover on episode 7 resolved and wrote
+        // straight over it, so pressing Continue immediately afterwards ran a
+        // full cold resolve -- the exact thing the Continue preload prevents.
+        let occupant = held(3, PreloadPriority::Primary, FRESH);
+        assert_eq!(
+            preload_write_decision(Some(&occupant), PreloadPriority::Speculative),
+            PreloadWrite::Refused
+        );
+    }
+
+    #[test]
+    fn every_displacement_names_what_left_the_slot() {
+        // The webview's per-episode preloadStatus map is fed only by
+        // stream_preload_status events. A displacement that reported nothing
+        // left it calling episode 7 "ready" after episode 3 had taken the slot,
+        // and its own guard then refused to re-preload 7 -- a stuck wrong
+        // state, not just a missed preload. Every write that displaces has to
+        // hand the caller the key to correct.
+        let speculative = held(7, PreloadPriority::Speculative, FRESH);
+        assert_eq!(
+            preload_write_decision(Some(&speculative), PreloadPriority::Primary),
+            PreloadWrite::Store { evicted: Some((42, 7)) }
+        );
+        // Two preloads of equal worth: the newer one wins, and the older is
+        // still reported.
+        let primary = held(3, PreloadPriority::Primary, FRESH);
+        assert_eq!(
+            preload_write_decision(Some(&primary), PreloadPriority::Primary),
+            PreloadWrite::Store { evicted: Some((42, 3)) }
+        );
+        // As does a speculative write over a speculative occupant: walking down
+        // the episode list must not leave the row it started on marked ready.
+        assert_eq!(
+            preload_write_decision(Some(&speculative), PreloadPriority::Speculative),
+            PreloadWrite::Store { evicted: Some((42, 7)) }
+        );
+    }
+
+    #[test]
+    fn an_empty_slot_takes_the_write_and_evicts_nothing() {
+        assert_eq!(
+            preload_write_decision(None, PreloadPriority::Speculative),
+            PreloadWrite::Store { evicted: None }
+        );
+    }
+
+    #[test]
+    fn a_primary_past_its_consume_window_no_longer_holds_the_slot() {
+        // start_playback discards an entry older than its own three-minute
+        // PRELOAD_MAX_AGE, so protecting one past that would keep an
+        // unusable stream and refuse a usable one.
+        let stale = held(3, PreloadPriority::Primary, PRIMARY_PRELOAD_PROTECTION + FRESH);
+        assert_eq!(
+            preload_write_decision(Some(&stale), PreloadPriority::Speculative),
+            PreloadWrite::Store { evicted: Some((42, 3)) }
+        );
+    }
+
+    /// A config.toml written before the anime fallback chain was deleted still
+    /// carries `fallback_provider` / `secondary_fallback_provider`. There is no
+    /// `deny_unknown_fields` on these structs, so those keys are ignored rather
+    /// than failing the whole parse -- if that ever changed, every existing
+    /// install would silently reset to defaults on the next launch, losing the
+    /// AniList and TMDB tokens stored alongside them.
+    #[test]
+    fn a_config_naming_the_removed_fallback_keys_still_parses() {
+        let stored = r#"
+[general]
+provider = "nyaa"
+fallback_provider = "none"
+secondary_fallback_provider = "none"
+manga_provider = "mangakatana"
+
+[api]
+anilist_token = "token"
+"#;
+        let config: AppConfig = toml::from_str(stored).expect("an old config.toml must still load");
+        assert_eq!(config.general.provider, "nyaa");
+        assert_eq!(config.general.manga_provider, "mangakatana");
+        assert_eq!(config.api.anilist_token.as_deref(), Some("token"));
     }
 }

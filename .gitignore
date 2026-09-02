@@ -143,3 +143,6 @@ mpv-shot*.jpg
 # Editor/tooling artifacts
 .kilocode/
 skills-lock.json
+
+# Local impeccable config and hook cache
+.impeccable/

@@ -546,13 +546,16 @@ export function SettingsView({ health }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField label="Light Novel Provider" description="Primary index and source for light novels.">
+                <SettingField label="Light Novel Provider" description="Primary index and source for light novels. RanobeDB carries the richest metadata and published volumes; the rest are web-novel sources.">
                   <select
                     value={String(config.general?.novel_provider || "ranobedb")}
                     onChange={(e) => updateField("general", "novel_provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
+                    /* max-w + truncate, unlike its neighbours: this is the only
+                       select whose options are long enough to outgrow the
+                       column, and sm:w-auto sizes to the widest one. */
+                    className="w-full sm:w-auto sm:min-w-[160px] sm:max-w-[200px] truncate bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
-                    <option value="ranobedb">RanobeDB (Rich Metadata & Books)</option>
+                    <option value="ranobedb">RanobeDB</option>
                     <option value="lnori">Lnori</option>
                     <option value="syosetu">Syosetu (小説家になろう)</option>
                     <option value="kakuyomu">Kakuyomu (カクヨム)</option>

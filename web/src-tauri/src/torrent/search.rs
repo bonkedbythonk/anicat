@@ -1073,13 +1073,19 @@ pub struct SiblingTitles<'a> {
 /// What a release is being scored against. Bundled rather than passed as a
 /// fourth and fifth positional `bool`, which had already made call sites read
 /// as `(name, q, 13, false, false)`.
-#[derive(Debug, Clone, Copy)]
+///
+/// `Eq`/`Hash` exist so `TorrentManager`'s candidate cache can key on the
+/// whole struct: copying the fields out into a key of its own means a scoring
+/// input added here later escapes the key silently, and the cache starts
+/// answering with a pool scored for a different request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReleaseCriteria {
     pub episode: i64,
     pub allow_episodeless: bool,
     pub prefer_dub: bool,
     /// The stream is bound for a browser `<video>` element rather than mpv.
-    /// mpv plays everything here, so this is only ever set for the mobile PWA.
+    /// mpv plays everything here, so this is only ever set for the builtin
+    /// player (`AniCatPlayer`), never for an mpv launch.
     pub browser_client: bool,
     /// This AniList entry is an OVA or a specials collection rather than a
     /// TV run. Two things follow: the entry's title carries a kind marker

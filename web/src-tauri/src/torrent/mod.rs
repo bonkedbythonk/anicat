@@ -160,6 +160,33 @@ impl CandidateStages {
     }
 }
 
+/// Everything the indexer search reads, so a hit can never be a pool scored
+/// for a different request. `media_id` covers anything derived from it, but
+/// `titles` and `sibling_titles` are here because they are handed to
+/// `search::find_candidates` directly: a manual search-title override changes
+/// the titles without changing `media_id`, and for an extras entry the
+/// sibling list is what *rejects* releases of the franchise's other entries,
+/// so a pool built while relations were still unknown holds candidates a
+/// later call must not be given.
+///
+/// `chosen_name` is deliberately absent: it only reorders an existing pool
+/// after the fact, so keying on it would split the cache for no gain.
+#[derive(PartialEq, Eq, Hash)]
+struct CandidateKey {
+    media_id: i64,
+    titles: Vec<String>,
+    sibling_titles: Vec<String>,
+    /// Holds `episode` too, so nothing about the wanted episode is spelled
+    /// out twice here.
+    criteria: search::ReleaseCriteria,
+}
+
+/// How long a cached candidate pool stays usable. Long enough to cover the
+/// burst this exists for — a retry, a fallback, a preload overlapping a manual
+/// play — and short enough that a release published (or a swarm that died)
+/// mid-session is picked up on the next play rather than sat on.
+const CANDIDATE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// One selectable torrent release, surfaced to the stream-server picker.
 pub struct TorrentChoice {
     pub name: String,
@@ -177,6 +204,18 @@ pub struct TorrentManager {
     /// SeaDex's parsed release list per AniList `media_id` — see
     /// `seadex::find_candidates`'s doc comment for why this is cached at all.
     seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
+    /// The merged, sorted indexer pool of a recent search, with the instant it
+    /// was produced. Nyaa answers four concurrent queries and starts returning
+    /// 429s at eight, and a throttled query doesn't fail — it just yields a
+    /// smaller pool. A retry, a fallback attempt and a preload racing a manual
+    /// play all re-ran the whole wave against that host within seconds of each
+    /// other, so the second search was the one likely to come back thin.
+    ///
+    /// Only ever written from `resolve`, which searches at `Breadth::Fast`.
+    /// `list_candidates` asks for `Breadth::Full` under what would be the same
+    /// key, so sharing this map with the picker would show the user a pool
+    /// truncated to what the play path stops at.
+    candidate_cache: tokio::sync::Mutex<HashMap<CandidateKey, (std::time::Instant, Vec<search::Candidate>)>>,
     /// Ceiling on download speed in bytes per second, or zero for none. Set
     /// from config before the session is created; see
     /// `StreamConfig::torrent_download_limit_mbps`.
@@ -185,6 +224,22 @@ pub struct TorrentManager {
     /// first. librqbit's own `only_files()` is an unordered set, so the
     /// recency this needs to bound the selection is tracked here instead.
     selected_files: tokio::sync::Mutex<HashMap<usize, Vec<usize>>>,
+    /// The `(torrent, file)` a player is currently reading, exempt from
+    /// `retain_recent`'s eviction. Recency alone picked the wrong victim: with
+    /// the playing episode selected and the next one preloaded behind it, the
+    /// selection is already at `SELECTED_FILES_KEPT`, so any *third* resolve
+    /// into the same pack — the episode-list hover guess is one, and it
+    /// resolves for real the first time it fires — dropped the oldest entry,
+    /// which is the file mpv is reading. librqbit then cancels its pieces and
+    /// playback stalls as soon as the reader passes what it had buffered.
+    ///
+    /// One slot, not a map keyed by torrent: the tuple carries the torrent id,
+    /// so a pin on one pack can never protect the same file *index* in
+    /// another, and moving to a different torrent invalidates it by
+    /// overwriting. A map would instead accumulate a stale pin per torrent
+    /// across a binge, each one a permanent extra selected file — the exact
+    /// bandwidth leak `SELECTED_FILES_KEPT` exists to stop.
+    playing_file: std::sync::Mutex<Option<(usize, usize)>>,
 }
 
 /// How many files stay selected inside one torrent: the one playing, and the
@@ -193,11 +248,24 @@ const SELECTED_FILES_KEPT: usize = 2;
 
 /// Record `file_id` as the most recently wanted file of a torrent, dropping
 /// whatever fell out of the window. Most recent last.
-fn retain_recent(recent: &mut Vec<usize>, file_id: usize) {
+///
+/// `pinned` is the file a player is reading right now, if it lives in this
+/// torrent. It is skipped when choosing what to drop — never kept *extra*, so
+/// the window stays `SELECTED_FILES_KEPT` wide whether or not one is set.
+fn retain_recent(recent: &mut Vec<usize>, file_id: usize, pinned: Option<usize>) {
     recent.retain(|f| *f != file_id);
     recent.push(file_id);
-    if recent.len() > SELECTED_FILES_KEPT {
-        recent.drain(..recent.len() - SELECTED_FILES_KEPT);
+    while recent.len() > SELECTED_FILES_KEPT {
+        // Oldest first, as before, but stepping over the pin. Only one file is
+        // ever pinned, so with more than one entry to choose from this always
+        // finds a victim; the `break` is for the impossible case rather than a
+        // silent overshoot of the window.
+        match recent.iter().position(|f| Some(*f) != pinned) {
+            Some(i) => {
+                recent.remove(i);
+            }
+            None => break,
+        }
     }
 }
 
@@ -233,7 +301,9 @@ impl TorrentManager {
             resolved: tokio::sync::Mutex::new(HashMap::new()),
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
+            candidate_cache: tokio::sync::Mutex::new(HashMap::new()),
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
+            playing_file: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
         }
     }
@@ -326,6 +396,112 @@ impl TorrentManager {
             .cloned()
     }
 
+    /// A candidate pool from the last `CANDIDATE_CACHE_TTL`, if one was
+    /// searched for exactly this request.
+    async fn cached_candidates(&self, key: &CandidateKey) -> Option<Vec<search::Candidate>> {
+        let cache = self.candidate_cache.lock().await;
+        cache
+            .get(key)
+            .filter(|(at, _)| at.elapsed() < CANDIDATE_CACHE_TTL)
+            .map(|(_, candidates)| candidates.clone())
+    }
+
+    /// Remember a candidate pool for `CANDIDATE_CACHE_TTL`.
+    ///
+    /// An empty pool is not stored: that is the one result a retry exists to
+    /// re-ask, and it is also what a rate-limited Nyaa returns, so caching it
+    /// would pin the failure for a minute.
+    async fn store_candidates(&self, key: CandidateKey, candidates: &[search::Candidate]) {
+        if candidates.is_empty() {
+            return;
+        }
+        let mut cache = self.candidate_cache.lock().await;
+        // Swept here rather than on a timer: nothing else ever removes an
+        // entry, and a long binge inserts one per episode per criteria, so the
+        // map would grow for the life of the process.
+        cache.retain(|_, (at, _)| at.elapsed() < CANDIDATE_CACHE_TTL);
+        cache.insert(key, (std::time::Instant::now(), candidates.to_vec()));
+    }
+
+    /// The file pinned inside `torrent_id`, or `None` when the player is
+    /// reading somewhere else entirely.
+    fn pinned_file_in(&self, torrent_id: usize) -> Option<usize> {
+        self.playing_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .filter(|(t, _)| *t == torrent_id)
+            .map(|(_, f)| f)
+    }
+
+    /// Record the file behind `(media_id, episode)` as the one a player is now
+    /// reading, and make sure it is still selected inside its torrent.
+    ///
+    /// Called by the playback layer at the point a stream is committed to a
+    /// player, which is the only place that can tell a real play from a
+    /// speculative preload — `resolve` cannot, since it serves both.
+    ///
+    /// The re-selection is not belt-and-braces. A play served out of
+    /// `preloaded_stream` hands mpv the cached URL without going through
+    /// `resolve` at all, so the reuse path's own re-assert never runs for it —
+    /// and that file may well have been deselected in the meantime by a
+    /// hover-preload resolve that landed between the preload and the click.
+    /// Pin first, then re-select, so the re-select's own `retain_recent` can
+    /// see the pin and drop something else.
+    ///
+    /// Cleared by `clear_playing`, and overwritten by the next play.
+    pub async fn set_playing(&self, media_id: i64, episode: i64) {
+        let resolved = self.resolved.lock().await.get(&(media_id, episode)).copied();
+        let Some(r) = resolved else {
+            // Nothing in the session backs this episode (a scraper provider,
+            // a direct URL): whatever was pinned before is not being read any
+            // more, and keeping it would hold a file selected for nobody.
+            self.clear_playing();
+            return;
+        };
+        *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((r.torrent_id, r.file_id));
+        let Some(session) = self.session.get().cloned() else { return };
+        self.ensure_selected(&session, r.torrent_id, r.file_id).await;
+    }
+
+    /// Release the pin. Playback has ended, so the file it protected is just
+    /// another recently-watched one — left pinned it would be a permanent
+    /// third selected file for the rest of the binge.
+    pub fn clear_playing(&self) {
+        *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Select `file_id` inside `torrent_id` if this process hasn't already,
+    /// recording it as the most recently wanted file.
+    ///
+    /// The check reads `selected_files`, our own record of what librqbit was
+    /// last asked for, so the ordinary case — the file is still selected —
+    /// costs one mutex and no round trip. That is what lets this sit on the
+    /// instant-play path: `update_only_files` is reached only when the
+    /// selection genuinely has to change.
+    async fn ensure_selected(&self, session: &Arc<Session>, torrent_id: usize, file_id: usize) {
+        let Some(handle) = session.get(torrent_id.into()) else { return };
+        let wanted: std::collections::HashSet<usize> = {
+            let mut selected = self.selected_files.lock().await;
+            let recent = selected.entry(torrent_id).or_default();
+            if recent.contains(&file_id) {
+                return;
+            }
+            retain_recent(recent, file_id, self.pinned_file_in(torrent_id));
+            recent.iter().copied().collect()
+        };
+        log::info!(
+            "torrent: re-selecting file {} of torrent {} (it had been deselected)",
+            file_id, torrent_id
+        );
+        if let Err(e) = session.update_only_files(&handle, &wanted).await {
+            log::warn!(
+                "torrent: could not re-select file {} of torrent {}: {}",
+                file_id, torrent_id, e
+            );
+        }
+    }
+
     /// Resolve (search + start downloading) a stream URL for an episode.
     /// `titles` are search candidates, best first (AniList romaji, english,
     /// synonyms — or the user's manual override).
@@ -355,19 +531,31 @@ impl TorrentManager {
         // Reuse a previous resolution if the torrent is still in the session.
         // It may have been paused when the last playback stopped, so unpause
         // before handing back the URL.
-        {
+        let reusable = {
             let resolved = self.resolved.lock().await;
-            if let Some(r) = resolved.get(&(media_id, episode)).filter(|r| r.browser_playable || !browser_client) {
-                if let Some(handle) = session.get(r.torrent_id.into()) {
-                    let _ = session.unpause(&handle).await;
-                    // Says why a play was instant, so a fast one isn't
-                    // mistaken for evidence about the cold path.
-                    log::info!(
-                        "[resolve] torrent reused torrent {} file {} for media={} ep={} (session={}ms)",
-                        r.torrent_id, r.file_id, media_id, episode, session_ms
-                    );
-                    return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
-                }
+            resolved
+                .get(&(media_id, episode))
+                .filter(|r| r.browser_playable || !browser_client)
+                .copied()
+        };
+        if let Some(r) = reusable {
+            if let Some(handle) = session.get(r.torrent_id.into()) {
+                let _ = session.unpause(&handle).await;
+                // Being in the session is not the same as still being
+                // selected: another episode of the same pack resolving in the
+                // meantime narrows `only_files` down to its own window, and
+                // this early return used to hand back the URL of a file
+                // librqbit had stopped fetching, which reads as a stream that
+                // opens and then never advances. Costs nothing when the file
+                // is selected, which is the usual case.
+                self.ensure_selected(&session, r.torrent_id, r.file_id).await;
+                // Says why a play was instant, so a fast one isn't
+                // mistaken for evidence about the cold path.
+                log::info!(
+                    "[resolve] torrent reused torrent {} file {} for media={} ep={} (session={}ms)",
+                    r.torrent_id, r.file_id, media_id, episode, session_ms
+                );
+                return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
             }
         }
 
@@ -403,15 +591,42 @@ impl TorrentManager {
                 (_, Some(episode_criteria)) => {
                     series::find_episode_candidates(client, titles, episode_criteria).await
                 }
+                // Cached for the plain-anime path only. A film and a series
+                // episode take an entirely different search whose inputs
+                // (`MovieCriteria`, `EpisodeCriteria`) are not in the key, so
+                // a cinema pool would have to either widen the key or be
+                // handed back for the wrong request.
                 _ => {
-                    search::find_candidates(
-                        client,
-                        titles,
-                        sibling_titles,
+                    let key = CandidateKey {
+                        media_id,
+                        titles: titles.to_vec(),
+                        sibling_titles: sibling_titles.to_vec(),
                         criteria,
-                        search::Breadth::Fast,
-                    )
-                    .await
+                    };
+                    match self.cached_candidates(&key).await {
+                        Some(cached) => {
+                            // Says why a play was fast, so it isn't mistaken
+                            // for evidence about what the indexers are
+                            // answering with right now.
+                            log::info!(
+                                "[resolve] torrent reused candidate pool ({} candidates) for media={} ep={}",
+                                cached.len(), media_id, episode
+                            );
+                            cached
+                        }
+                        None => {
+                            let found = search::find_candidates(
+                                client,
+                                titles,
+                                sibling_titles,
+                                criteria,
+                                search::Breadth::Fast,
+                            )
+                            .await;
+                            self.store_candidates(key, &found).await;
+                            found
+                        }
+                    }
                 }
             }
         };
@@ -675,6 +890,9 @@ impl TorrentManager {
     /// the next resolve() (which only happens once the user picks something
     /// new — during a long binge that could be many episodes away).
     pub async fn pause_all(&self) {
+        // Every caller of this is a real teardown (mpv stopped, mpv exited),
+        // so nothing is reading a file here any more.
+        self.clear_playing();
         let Some(session) = self.session.get().cloned() else { return };
         let handles = std::sync::Mutex::new(Vec::new());
         session.with_torrents(|it| {
@@ -1333,16 +1551,25 @@ impl TorrentManager {
         // watching something else entirely.
         //
         // Two is the whole requirement: whatever is playing, and whatever was
-        // preloaded next. A resolve only ever happens for one or the other.
+        // preloaded next. A resolve only ever happens for one or the other —
+        // except that a *speculative* one (the episode list's hover guess) can
+        // arrive while both slots are full, which is why the playing file is
+        // pinned out of the eviction rather than left to lose on age.
         let wanted: std::collections::HashSet<usize> = {
+            // A freshly added torrent shares nothing with whatever held this
+            // id before it — a pin included, since librqbit hands ids out
+            // again and a stale one would protect an unrelated file index in
+            // the new torrent.
+            if !already_managed && self.pinned_file_in(torrent_id).is_some() {
+                self.clear_playing();
+            }
+            let pinned = self.pinned_file_in(torrent_id);
             let mut selected = self.selected_files.lock().await;
             let recent = selected.entry(torrent_id).or_default();
-            // A freshly added torrent shares nothing with whatever held this
-            // id before it.
             if !already_managed {
                 recent.clear();
             }
-            retain_recent(recent, file_id);
+            retain_recent(recent, file_id, pinned);
             recent.iter().copied().collect()
         };
         session
@@ -1686,6 +1913,63 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_cached_candidate_pool_answers_only_the_request_it_was_searched_for() {
+        let manager =
+            TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-candidate-cache-test"));
+        let key = |prefer_dub| CandidateKey {
+            media_id: 1,
+            titles: vec!["Some Show".to_string()],
+            sibling_titles: vec![],
+            criteria: search::ReleaseCriteria {
+                episode: 3,
+                allow_episodeless: false,
+                prefer_dub,
+                browser_client: false,
+                extras: false,
+                episode_count: Some(12),
+            },
+        };
+        let pool = vec![search::Candidate {
+            name: "[Group] Some Show - 03 [1080p]".to_string(),
+            magnet: None,
+            torrent_url: None,
+            seeders: 40,
+            score: 1000,
+            assume_batch: false,
+        }];
+
+        manager.store_candidates(key(false), &pool).await;
+        assert_eq!(
+            manager.cached_candidates(&key(false)).await.map(|c| c.len()),
+            Some(1)
+        );
+        // A dub preference penalizes every non-dub release, so it reorders the
+        // pool rather than filtering it -- handing this one back for a dub
+        // request would play a sub with no sign anything was wrong.
+        assert!(manager.cached_candidates(&key(true)).await.is_none());
+
+        // An empty pool is what a throttled Nyaa answers with; caching it
+        // would hold the failure for the whole TTL.
+        manager.store_candidates(key(true), &[]).await;
+        assert!(manager.cached_candidates(&key(true)).await.is_none());
+
+        {
+            let mut cache = manager.candidate_cache.lock().await;
+            let stale = std::time::Instant::now()
+                .checked_sub(CANDIDATE_CACHE_TTL + std::time::Duration::from_secs(1))
+                .expect("machine booted long enough ago to age an entry past the TTL");
+            cache.get_mut(&key(false)).expect("pool stored above").0 = stale;
+        }
+        assert!(manager.cached_candidates(&key(false)).await.is_none());
+        manager.store_candidates(key(true), &pool).await;
+        assert_eq!(
+            manager.candidate_cache.lock().await.len(),
+            1,
+            "an expired entry must be dropped on insert, or the map grows for the whole session"
+        );
+    }
+
     /// The two safety rails on tearing down a losing racer. Both exist because
     /// deleting the wrong torrent kills the stream mpv is reading.
     #[test]
@@ -1720,21 +2004,58 @@ mod tests {
     fn the_selection_keeps_what_plays_and_what_was_preloaded() {
         // Watching straight through a season pack: each episode is resolved,
         // then the next is preloaded behind it. Only ever two files stay
-        // selected, and the one playing is never the one dropped.
+        // selected, and in this order age alone is enough to drop the right
+        // one -- what plays is always newer than what it replaced.
         let mut recent = vec![];
-        retain_recent(&mut recent, 0); // play episode 1
+        retain_recent(&mut recent, 0, None); // play episode 1
         assert_eq!(recent, vec![0]);
-        retain_recent(&mut recent, 1); // preload episode 2
+        retain_recent(&mut recent, 1, None); // preload episode 2
         assert_eq!(recent, vec![0, 1]);
-        retain_recent(&mut recent, 2); // episode 2 plays, preload episode 3
+        retain_recent(&mut recent, 2, None); // episode 2 plays, preload episode 3
         assert_eq!(recent, vec![1, 2], "episode 1 dropped, episode 2 still playing");
-        retain_recent(&mut recent, 3);
+        retain_recent(&mut recent, 3, None);
         assert_eq!(recent, vec![2, 3]);
         // Re-resolving a file already selected re-dates it rather than
         // selecting it twice -- jumping back to the previous episode must not
         // evict the one it is jumping from.
-        retain_recent(&mut recent, 2);
+        retain_recent(&mut recent, 2, None);
         assert_eq!(recent, vec![3, 2]);
+    }
+
+    /// Regression: a hover-preload deselected the file mpv was reading, and
+    /// the stream froze the moment playback passed the buffered bytes.
+    #[test]
+    fn a_speculative_resolve_evicts_the_preload_not_what_is_playing() {
+        // Episode 5 playing, episode 6 preloaded behind it at the ceiling.
+        let playing = 5;
+        let mut recent = vec![];
+        retain_recent(&mut recent, playing, Some(playing));
+        retain_recent(&mut recent, 6, Some(playing));
+        assert_eq!(recent, vec![5, 6]);
+
+        // The user hovers episode 7 in the list. Its first-time resolve lands
+        // in the same pack and needs a slot; by age that slot is episode 5's,
+        // which is the one being read.
+        retain_recent(&mut recent, 7, Some(playing));
+        assert_eq!(recent, vec![5, 7], "the preload goes, never the playing file");
+        assert!(recent.contains(&playing));
+        assert_eq!(recent.len(), SELECTED_FILES_KEPT);
+
+        // Hovering along the whole list never widens the selection either --
+        // the pin changes which entry is dropped, not how many are kept.
+        for file in 8..20 {
+            retain_recent(&mut recent, file, Some(playing));
+            assert!(recent.contains(&playing), "file {} evicted the playing one", file);
+            assert_eq!(recent.len(), SELECTED_FILES_KEPT);
+        }
+
+        // Playback moves on: the pin follows it, and the file that was pinned
+        // is now ordinary and evictable.
+        retain_recent(&mut recent, 6, Some(6));
+        retain_recent(&mut recent, 7, Some(6));
+        assert_eq!(recent, vec![6, 7]);
+        retain_recent(&mut recent, 8, Some(6));
+        assert_eq!(recent, vec![6, 8], "episode 5 is no longer protected");
     }
 
     /// Regression: a 20GB pack whose files are laid down up front, holding

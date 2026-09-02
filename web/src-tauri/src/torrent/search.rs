@@ -100,7 +100,37 @@ pub(crate) fn short_title(title: &str) -> Option<String> {
 /// candidates so a sub-only release never gets tagged "dub" just because
 /// dub was the requested preference.
 pub fn is_dub_release(name_norm: &str) -> bool {
-    name_norm.contains("dual audio") || name_norm.contains("english dub")
+    name_norm.contains("dual audio")
+        || name_norm.contains("english dub")
+        || name_norm.contains(" eng dub")
+        || name_norm.contains(" dub ")
+        || name_norm.ends_with(" dub")
+        || name_norm.contains("dubbed")
+}
+
+/// How far a dub outranks the same show's subs when a dub was asked for.
+const DUB_BONUS: i64 = 350;
+/// How far every non-dub release sinks when a dub was asked for *and one
+/// exists* -- see `find_candidates`, which refunds this when none does.
+const NON_DUB_PENALTY: i64 = 500;
+/// How far an English-audio-only release sinks when subs were asked for.
+/// Larger than the pair above because this one is not a preference between
+/// two ways of watching: the wrong one is unwatchable for the viewer who
+/// picked subs, so it should surface only when nothing else matched at all.
+const DUB_ONLY_PENALTY: i64 = 1000;
+
+/// A release carrying an English audio track and *nothing else* -- dual-audio
+/// and multi-audio releases are excluded, since they still contain the
+/// Japanese track a sub viewer wants.
+pub fn is_dub_only_release(name_norm: &str) -> bool {
+    (name_norm.contains("english dub")
+        || name_norm.contains(" eng dub")
+        || name_norm.contains(" dub ")
+        || name_norm.ends_with(" dub")
+        || name_norm.contains("dubbed"))
+        && !name_norm.contains("dual audio")
+        && !name_norm.contains("multi audio")
+        && !name_norm.contains("multiple subtitle")
 }
 
 pub fn normalize(s: &str) -> String {
@@ -1150,8 +1180,24 @@ fn score_release(
     if looks_like_film && !allow_episodeless && exact.is_none() {
         score -= FILM_MISMATCH_PENALTY;
     }
-    if prefer_dub && is_dub_release(&name_norm) {
-        score += 250;
+    if prefer_dub {
+        if is_dub_release(&name_norm) {
+            score += DUB_BONUS;
+        } else {
+            // Decisive rather than a nudge: the old +250 bonus was routinely
+            // outweighed by a sub-only release with a healthier swarm or a
+            // tighter title match, so asking for a dub got one only when the
+            // dub happened to be the best release anyway. `find_candidates`
+            // gives this back when no dub exists at all, so a dub-less show
+            // is ranked as if the preference had never been expressed.
+            score -= NON_DUB_PENALTY;
+        }
+    } else if is_dub_only_release(&name_norm) {
+        // The mirror of the above, and the more common complaint: a release
+        // that is English-audio-only is not a substitute for the sub that was
+        // asked for -- unlike a dual-audio release, which satisfies either
+        // preference and is deliberately not penalized here.
+        score -= DUB_ONLY_PENALTY;
     }
     if browser_client && browser_incompatible_codec(&name_norm) {
         score -= BROWSER_INCOMPATIBLE_PENALTY;
@@ -1209,8 +1255,14 @@ async fn search_subsplease(
             score += 100;
         }
         if prefer_dub {
-            // SubsPlease is sub-only; leave the score as-is, Nyaa dual-audio
-            // results can outrank it via their own bonus.
+            // SubsPlease is sub-only, so it takes the same penalty
+            // `score_release` applies to every non-dub release -- and it has
+            // to take it here rather than being left alone, because
+            // `find_candidates` refunds that penalty across the whole pool
+            // when no dub exists anywhere. A candidate that never paid it
+            // would collect the refund anyway and end up ranked above the
+            // Nyaa releases it was previously tied with.
+            score -= NON_DUB_PENALTY;
         }
         let Some(downloads) = item.get("downloads").and_then(|v| v.as_array()) else { continue };
         for d in downloads {
@@ -1229,6 +1281,170 @@ async fn search_subsplease(
                 }
             }
         }
+    }
+    out
+}
+
+/// AnimeTosho's `title` is its own rewritten, metadata-enriched name
+/// ("[EMBER] Frieren: Beyond Journey's End S02E05 [1080p] ..."), while
+/// `torrent_name` is the release's real name, which is what Nyaa lists and
+/// what the in-torrent layout matcher expects. Neither is strictly better:
+/// the rewritten title often carries the English series name that the raw
+/// release name never does (so it matches an AniList `english` title the
+/// Nyaa listing would miss), while the raw name is the one that dedupes
+/// against Nyaa and that `layout::select` reasons about. Score both and keep
+/// whichever wins, so `name`, `score` and `assume_batch` always describe the
+/// same string.
+fn better_scored_name(
+    title: &str,
+    torrent_name: &str,
+    query_title_norm: &str,
+    alts: &[String],
+    siblings: &SiblingTitles<'_>,
+    criteria: ReleaseCriteria,
+) -> Option<(String, i64, bool)> {
+    let mut best: Option<(String, i64, bool)> = None;
+    for cand in [torrent_name, title] {
+        if cand.is_empty() {
+            continue;
+        }
+        if let Some((score, assume_batch)) =
+            score_release(cand, query_title_norm, alts, siblings, criteria)
+        {
+            if best.as_ref().is_none_or(|(_, best_score, _)| score > *best_score) {
+                best = Some((cand.to_string(), score, assume_batch));
+            }
+        }
+    }
+    best
+}
+
+/// Drop a trailing container extension from a release name. AnimeTosho's
+/// `torrent_name` for a single-file torrent is the file itself
+/// ("[ASW] Show - 05.mkv"); Nyaa lists the same release without it, and an
+/// unstripped "mkv" token survives `normalize` and defeats the dedupe that
+/// merges the two listings of one release.
+fn strip_container_ext(name: &str) -> &str {
+    for ext in [".mkv", ".mp4", ".avi", ".webm", ".ts", ".m4v", ".mov"] {
+        if let Some(stripped) = name.strip_suffix(ext) {
+            return stripped;
+        }
+    }
+    name
+}
+
+/// AnimeTosho mirrors Nyaa (and AniDex/Tosho's own uploads) behind a plain
+/// JSON feed with no rate limiting, and every entry carries a direct
+/// `.torrent` URL — so a hit here skips both the RSS parse and the DHT
+/// metadata round-trip a magnet would cost. It answers a whole query in one
+/// request where Nyaa needs a throttled round of three, which is why it runs
+/// ahead of Nyaa rather than alongside it.
+async fn search_animetosho(
+    client: &reqwest::Client,
+    query: &str,
+    query_title_norm: &str,
+    alts: &[String],
+    siblings: &SiblingTitles<'_>,
+    criteria: ReleaseCriteria,
+) -> Vec<Candidate> {
+    let mut out = vec![];
+    let url = format!(
+        "https://feed.animetosho.org/json?q={}&only_tor=1",
+        urlencoding_encode(query)
+    );
+    let mut items: Vec<Value> = Vec::new();
+    for attempt in 0..=1 {
+        // Tightly bounded, and deliberately tighter than a request timeout
+        // usually is. AnimeTosho serves one query at a time per client, so two
+        // fired together queue: the second cannot start until the first
+        // finishes, and a fruitful query takes ~2.4s against the live feed.
+        // Everything here runs concurrently with a Nyaa round that answers in
+        // about a second and covers the same releases, so a query still
+        // waiting at three seconds has already stopped being the fast index
+        // and become the reason the play is slow. Dropping it costs the extra
+        // candidates it would have added; keeping it costs the whole wave.
+        const TOSHO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+        let request = client
+            .get(&url)
+            .header("User-Agent", "AniCat/5.8.0")
+            .timeout(TOSHO_TIMEOUT);
+        match request.send().await {
+            Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                continue;
+            }
+            Ok(r) if !r.status().is_success() => {
+                log::warn!("torrent: animetosho returned HTTP {} for '{}'", r.status(), query);
+                return out;
+            }
+            Ok(r) => {
+                match r.json::<Vec<Value>>().await {
+                    Ok(j) => items = j,
+                    // Distinguished from an empty feed on purpose: both reach
+                    // the caller as "no candidates", and only one of them is
+                    // a reason to look at this function.
+                    Err(e) => log::warn!(
+                        "torrent: animetosho response for '{}' did not parse as a list: {}",
+                        query, e
+                    ),
+                }
+                break;
+            }
+            Err(e) if e.is_timeout() => {
+                // Expected often enough not to be a warning: the budget below
+                // is deliberately shorter than this feed's slow path, and a
+                // dropped query costs extra candidates, never the play.
+                log::info!("torrent: animetosho gave up on '{}' at its timeout", query);
+                return out;
+            }
+            Err(e) => {
+                log::warn!("torrent: animetosho search failed for '{}': {}", query, e);
+                return out;
+            }
+        }
+    }
+    for item in items {
+        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or_default();
+        let torrent_name = item
+            .get("torrent_name")
+            .and_then(|v| v.as_str())
+            .map(strip_container_ext)
+            .unwrap_or_default();
+        if title.is_empty() && torrent_name.is_empty() {
+            continue;
+        }
+        // `seeders` is null for entries AnimeTosho has not managed to scrape a
+        // tracker for yet -- which says nothing about the swarm. Treating that
+        // as zero dropped the entry outright (the `< 2` gate below); treat it
+        // as unknown instead and let it in at the dead-swarm penalty, which is
+        // where an unverifiable swarm belongs.
+        let seeders_known = item.get("seeders").and_then(|v| v.as_u64());
+        let seeders = seeders_known.unwrap_or(0);
+        if seeders_known.is_some() && seeders < 2 {
+            continue;
+        }
+        let Some((name, mut score, assume_batch)) = better_scored_name(
+            title, torrent_name, query_title_norm, alts, siblings, criteria,
+        ) else {
+            continue;
+        };
+        score += seeder_score(seeders);
+        if seeders < LOW_SEEDER_THRESHOLD {
+            score -= DEAD_SWARM_PENALTY;
+        }
+        let torrent_url = item.get("torrent_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let magnet_uri = item.get("magnet_uri").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let info_hash = item.get("info_hash").and_then(|v| v.as_str());
+        let magnet = magnet_uri.or_else(|| info_hash.map(magnet_from_infohash));
+
+        out.push(Candidate {
+            name,
+            magnet,
+            torrent_url,
+            seeders,
+            score,
+            assume_batch,
+        });
     }
     out
 }
@@ -1355,10 +1571,14 @@ fn is_strong(c: &Candidate) -> bool {
     !c.assume_batch && c.seeders >= LOW_SEEDER_THRESHOLD && c.score >= 600
 }
 
-/// How many strong candidates are enough to stop. `resolve` races the top two
-/// and keeps two more as sequential fallbacks, so this is the size of the pool
-/// it can actually reach before it gives up on the provider entirely.
-const ENOUGH_STRONG_CANDIDATES: usize = 4;
+/// How many of the pool's candidates `resolve` will ever touch: it slices the
+/// top four, races two of them and keeps the other two as sequential
+/// fallbacks. Everything past this is a longer list nothing reads.
+const SHORTLIST_SIZE: usize = 4;
+/// How many *strong* candidates are enough to stop querying. Only the raced
+/// pair needs to clear that bar -- see `enough_candidates`, which requires the
+/// rest of the shortlist to be merely viable.
+const ENOUGH_STRONG_CANDIDATES: usize = 2;
 
 pub async fn find_candidates(
     client: &reqwest::Client,
@@ -1397,61 +1617,174 @@ pub async fn find_candidates(
     let alts: Vec<String> = titles.iter().map(|t| normalize(t)).collect();
     let siblings = SiblingTitles { own: titles, related: related_titles };
 
-    let subsplease_started = std::time::Instant::now();
-    for title in &expanded {
-        all.extend(search_subsplease(client, title, &alts, episode, prefer_dub).await);
-    }
-    let subsplease_ms = subsplease_started.elapsed().as_millis();
-
-    // The per-episode queries can never legitimately match an untagged release,
-    // so they always score with allow_episodeless off regardless of what the
-    // caller asked for; only the batch query honours it.
+    // The per-episode queries can never legitimately match an untagged
+    // release, so they always score with allow_episodeless off regardless of
+    // what the caller asked for; only the batch query honours it.
     let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
-    // Grouped by title variant rather than flat, because a *round* is now the
-    // unit of work that can be skipped: the variants are ordered worst-last
-    // (a manual override first, then AniList romaji/english, then short
-    // forms), so once a round has produced enough playable releases the
-    // remaining rounds are querying progressively less likely spellings of a
-    // title that already worked.
+    // Nyaa queries grouped by title variant rather than flat, because a
+    // *round* is the unit of work that can be skipped: the variants are
+    // ordered worst-last (a manual override first, then AniList
+    // romaji/english, then short forms), so once a round has produced enough
+    // playable releases the remaining rounds are querying progressively less
+    // likely spellings of a title that already worked.
     let mut rounds: Vec<Vec<(String, String, ReleaseCriteria)>> = vec![];
     for title in &expanded {
         let norm = normalize(title);
-        let mut queries: Vec<(String, String, ReleaseCriteria)> = vec![];
         // Nyaa's own full-text search takes the query literally, so title
-        // punctuation narrows it. AniList's romaji is the canonical, punctuated
-        // form ("Toradora!"), and searching that verbatim returned roughly half
-        // the results that the bare word did — releases are named without it.
-        // Matching is unaffected either way: `norm` still governs what counts
-        // as a hit, and normalize() already discards punctuation.
+        // punctuation narrows it. AniList's romaji is the canonical,
+        // punctuated form ("Toradora!"), and searching that verbatim returned
+        // roughly half the results that the bare word did -- releases are
+        // named without it. Matching is unaffected either way: `norm` still
+        // governs what counts as a hit, and normalize() already discards
+        // punctuation.
         let q_title = search_query_form(title);
-        queries.push((format!("{} - {:02}", q_title, episode), norm.clone(), single));
-        // Nyaa's search is an AND over terms, so the episode has to be spelled
-        // the way the release spells it or the query returns nothing at all.
-        // "Rich Girl Caretaker - 06" returned 0 items while "Rich Girl
-        // Caretaker S01E06" returned 5: every group on that show uses the
-        // SxxEyy convention and none uses " - NN".
-        queries.push((
-            format!("{} S{:02}E{:02}", q_title, season_of(&norm), episode),
-            norm.clone(),
-            single,
-        ));
-        queries.push((format!("{} 1080p", q_title), norm, criteria));
-        rounds.push(queries);
+        rounds.push(vec![
+            (format!("{} - {:02}", q_title, episode), norm.clone(), single),
+            // Nyaa's search is an AND over terms, so the episode has to be
+            // spelled the way the release spells it or the query returns
+            // nothing at all. "Rich Girl Caretaker - 06" returned 0 items
+            // while "Rich Girl Caretaker S01E06" returned 5: every group on
+            // that show uses the SxxEyy convention and none uses " - NN".
+            (
+                format!("{} S{:02}E{:02}", q_title, season_of(&norm), episode),
+                norm.clone(),
+                single,
+            ),
+            (format!("{} 1080p", q_title), norm, criteria),
+        ]);
     }
-
-    // Concurrent, but only so far. This is on the play path and a sequential
-    // walk would spend a round-trip on each of a dozen queries — except that
-    // firing all twelve at once is what made Nyaa throttle them: measured
-    // against the live site, four concurrent requests all answer 200 while
-    // eight return two 429s and twelve return six. Every throttled query is a
-    // silently smaller candidate pool. A round is three queries, so it fits
-    // inside that budget whole and no round is ever split across two waves.
+    // Concurrent, but only so far. Measured against the live site, four
+    // concurrent Nyaa requests all answer 200 while eight return two 429s and
+    // twelve return six. Every throttled query is a silently smaller candidate
+    // pool. A round is three queries, so it fits inside that budget whole and
+    // no round is ever split across two waves.
     const MAX_CONCURRENT_NYAA_QUERIES: usize = 4;
     debug_assert!(rounds.iter().all(|r| r.len() <= MAX_CONCURRENT_NYAA_QUERIES));
-    let nyaa_started = std::time::Instant::now();
-    let mut query_count = 0usize;
-    let total_rounds = rounds.len();
-    for (round, queries) in rounds.iter().enumerate() {
+
+    // The first two title variants only. `expanded` lists each variant
+    // immediately followed by its own short form, so two entries already cover
+    // both the long AniList spelling and the short one releases actually use
+    // -- which is the pair that matters, since a show whose romaji is a
+    // 130-character light-novel sentence is indexed under the short form
+    // alone.
+    //
+    // Kept to two because AnimeTosho serves one query at a time per client:
+    // measured against the live feed, four fired together answered at 0.04s,
+    // 2.5s, 4.9s and 7.3s -- a clean ~2.4s queue, not parallelism. Two is what
+    // fits inside the Nyaa round running alongside it.
+    let tosho_queries: Vec<(String, String)> = expanded
+        .iter()
+        .take(2)
+        .map(|title| {
+            let norm = normalize(title);
+            let q_title = search_query_form(title);
+            let q = if criteria.allow_episodeless {
+                format!("{} 1080p", q_title)
+            } else {
+                // One episode spelling, unlike Nyaa's two: AnimeTosho
+                // tokenizes "S02E05" so a bare "05" matches it as well as a
+                // "- 05" release (verified against the live feed), and its
+                // one-at-a-time serving makes a second query cost a full
+                // round-trip for releases the first already returned.
+                format!("{} {:02}", q_title, episode)
+            };
+            (q, norm)
+        })
+        .collect();
+
+    // One wave across three independent hosts rather than three phases. These
+    // were run one after another -- SubsPlease, then AnimeTosho, then Nyaa --
+    // with each phase's result deciding whether the next ran, which on a cold
+    // play meant paying all three round-trips end to end before the first
+    // candidate could be tried. Nothing about SubsPlease's answer changes what
+    // to ask Nyaa, and the throttling that forces Nyaa into rounds is
+    // per-host, so the first round of each belongs in the same wave. Only the
+    // *later* Nyaa rounds are conditional, and those are the ones worth
+    // skipping: they re-ask progressively less likely spellings of a title the
+    // first round already answered.
+    let first_wave = std::time::Instant::now();
+    let subs_all = futures_util::future::join_all(
+        expanded
+            .iter()
+            .map(|title| search_subsplease(client, title, &alts, episode, prefer_dub)),
+    );
+    let tosho_all = futures_util::future::join_all(
+        tosho_queries
+            .iter()
+            .map(|(q, norm)| search_animetosho(client, q, norm, &alts, &siblings, criteria)),
+    );
+    let nyaa_first = async {
+        match rounds.first() {
+            Some(queries) => {
+                futures_util::future::join_all(
+                    queries
+                        .iter()
+                        .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
+                )
+                .await
+            }
+            None => vec![],
+        }
+    };
+    // AnimeTosho enriches the pool but is never allowed to be the reason a
+    // play is slow, so it is raced against the other two hosts rather than
+    // joined with them: once SubsPlease and the first Nyaa round are in, it
+    // gets a short grace period and is then abandoned mid-flight. It serves
+    // one query at a time per client and throttles hard under repeated use --
+    // measured against the live feed, the same query answered in 0.04s cold
+    // and still hadn't answered three seconds later once the feed had decided
+    // to queue us. Joining it would have handed that queue straight to the
+    // user as startup latency, for an index the other two already cover.
+    const TOSHO_GRACE: std::time::Duration = std::time::Duration::from_millis(600);
+    let others = async { tokio::join!(subs_all, nyaa_first) };
+    tokio::pin!(others);
+    tokio::pin!(tosho_all);
+    let mut tosho_batches: Vec<Vec<Candidate>> = Vec::new();
+    let mut tosho_pending = true;
+    let (subs_batches, nyaa_batches) = loop {
+        tokio::select! {
+            done = &mut others => break done,
+            batches = &mut tosho_all, if tosho_pending => {
+                tosho_batches = batches;
+                tosho_pending = false;
+            }
+        }
+    };
+    if tosho_pending {
+        match tokio::time::timeout(TOSHO_GRACE, tosho_all).await {
+            Ok(batches) => tosho_batches = batches,
+            Err(_) => log::info!(
+                "[resolve] animetosho abandoned after {:?} of grace; using the other indexes",
+                TOSHO_GRACE
+            ),
+        }
+    }
+    for batch in subs_batches
+        .into_iter()
+        .chain(tosho_batches)
+        .chain(nyaa_batches)
+    {
+        all.extend(batch);
+    }
+    let first_wave_ms = first_wave.elapsed().as_millis();
+    // Merged before counting, not after: the same release listed by both Nyaa
+    // and AnimeTosho is one candidate, and counting it twice is how a pool
+    // holding a single usable release satisfies a threshold that exists to
+    // guarantee fallbacks.
+    all = merge_duplicates(all);
+
+    let mut query_count = rounds.first().map(|r| r.len()).unwrap_or(0);
+    let later_rounds = std::time::Instant::now();
+    for (round, queries) in rounds.iter().enumerate().skip(1) {
+        if breadth == Breadth::Fast && enough_candidates(&all) {
+            log::info!(
+                "[resolve] torrent search stopping before round {}/{}: {} strong candidates",
+                round + 1,
+                rounds.len(),
+                all.iter().filter(|c| is_strong(c)).count()
+            );
+            break;
+        }
         query_count += queries.len();
         for batch in futures_util::future::join_all(
             queries
@@ -1462,45 +1795,109 @@ pub async fn find_candidates(
         {
             all.extend(batch);
         }
-        // Measured before this existed: four title variants meant twelve
-        // queries in three throttled waves, 5.7s of a play spent searching —
-        // and for the overwhelming majority of shows the first variant is the
-        // one the releases are actually named after, so waves two and three
-        // were re-asking a question already answered. Never checked before a
-        // full Nyaa round has run, so the pool always holds Nyaa releases to
-        // fall back on and not just SubsPlease's optimistic ones.
-        if breadth == Breadth::Fast && round + 1 < total_rounds {
-            let strong = all.iter().filter(|c| is_strong(c)).count();
-            if strong >= ENOUGH_STRONG_CANDIDATES {
-                log::info!(
-                    "[resolve] torrent search stopping after round {}/{}: {} strong candidates",
-                    round + 1, total_rounds, strong
-                );
-                break;
-            }
+        all = merge_duplicates(all);
+    }
+    // The two halves cost very different things: the first wave is one
+    // round-trip against three hosts at once, while the rest is Nyaa alone,
+    // throttled into chunks of four. Separated because the fix for a slow one
+    // is not the fix for a slow other -- fewer title variants versus a
+    // different concurrency cap.
+    log::info!(
+        "[resolve] torrent search titles={} wave1={}ms later_nyaa={}ms queries={} candidates={} strong={}",
+        expanded.len(),
+        first_wave_ms,
+        later_rounds.elapsed().as_millis(),
+        query_count,
+        all.len(),
+        all.iter().filter(|c| is_strong(c)).count()
+    );
+
+    // A dub preference is a preference between releases that exist, not a
+    // filter. `score_release` sinks every non-dub release by
+    // NON_DUB_PENALTY so a dub always wins when there is one -- but on a show
+    // with no dub at all that penalty lands on every candidate equally, which
+    // changes no ordering and pushes the whole pool under `is_strong`'s
+    // absolute bar. Give it back when nothing was preferred over anything.
+    if prefer_dub && !all.iter().any(|c| is_dub_release(&normalize(&c.name))) {
+        for c in all.iter_mut() {
+            c.score += NON_DUB_PENALTY;
         }
     }
 
-    // The two halves of the search cost very different things: SubsPlease is
-    // one sequential API call per title variant, while Nyaa is `query_count`
-    // RSS queries throttled into chunks of four precisely because firing them
-    // all at once gets them 429'd. Separated because the fix for a slow one is
-    // not the fix for a slow other -- fewer title variants versus a different
-    // concurrency cap.
-    log::info!(
-        "[resolve] torrent search titles={} subsplease={}ms nyaa={}ms queries={} raw_hits={}",
-        expanded.len(),
-        subsplease_ms,
-        nyaa_started.elapsed().as_millis(),
-        query_count,
-        all.len()
-    );
-
-    // Dedupe by name, best score wins.
-    all.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
-    let mut seen = std::collections::HashSet::new();
-    all.retain(|c| seen.insert(normalize(&c.name)));
+    all.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(b.torrent_url.is_some().cmp(&a.torrent_url.is_some()))
+            .then(b.seeders.cmp(&a.seeders))
+    });
     all
+}
+
+/// Collapse the several listings of one release into one candidate.
+///
+/// AnimeTosho mirrors most of Nyaa, so the same release routinely arrives
+/// from both -- and the two listings are not interchangeable. Their seeder
+/// counts come from separate tracker scrapes, and Nyaa's own `trusted` flag
+/// adds a bonus AnimeTosho's copy never gets, so the scores differ and a
+/// score-ordered `retain` would keep whichever copy happened to win and throw
+/// away whatever the other one knew. Keep the best score, the best-known
+/// swarm, and any direct `.torrent` URL either of them had -- that last one
+/// is the whole reason to prefer a mirrored listing, since it skips the DHT
+/// metadata round-trip a magnet costs on the play path.
+fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
+    let mut out: Vec<Candidate> = Vec::with_capacity(candidates.len());
+    let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for c in candidates {
+        match index.get(&normalize(&c.name)) {
+            Some(&i) => {
+                let kept: &mut Candidate = &mut out[i];
+                kept.score = kept.score.max(c.score);
+                kept.seeders = kept.seeders.max(c.seeders);
+                if kept.torrent_url.is_none() {
+                    kept.torrent_url = c.torrent_url;
+                }
+                if kept.magnet.is_none() {
+                    kept.magnet = c.magnet;
+                }
+                // Only one of the two listings needs to have named the episode
+                // for the pair to stop being a guess.
+                kept.assume_batch = kept.assume_batch && c.assume_batch;
+            }
+            None => {
+                index.insert(normalize(&c.name), out.len());
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// A candidate `resolve` would actually be willing to spend startup budget
+/// on: its swarm is above the probably-dead line and it scored well enough to
+/// be a plausible match, without the stricter "names its own episode" bar
+/// `is_strong` sets.
+fn is_viable(c: &Candidate) -> bool {
+    c.seeders >= LOW_SEEDER_THRESHOLD && c.score >= 400
+}
+
+/// Whether the pool already holds everything `resolve` can reach, so further
+/// querying would only lengthen a list nothing will read.
+///
+/// Two bars, because `resolve` needs two different things. It races the top
+/// two candidates, so at least that many have to be *strong* -- a pair of
+/// near-dead guesses racing each other is not a head start. And it keeps two
+/// more as sequential fallbacks, so the shortlist it slices has to be full;
+/// those two only ever get tried after the raced pair failed, which is
+/// exactly when being picky about them stops being worth another round-trip
+/// to Nyaa.
+///
+/// Counting distinct releases matters here: before `merge_duplicates` existed
+/// the same release listed by two indexes counted twice, so a pool that could
+/// only ever race one thing satisfied a threshold meant to guarantee three
+/// more behind it.
+fn enough_candidates(all: &[Candidate]) -> bool {
+    all.iter().filter(|c| is_strong(c)).count() >= ENOUGH_STRONG_CANDIDATES
+        && all.iter().filter(|c| is_viable(c)).count() >= SHORTLIST_SIZE
 }
 
 pub(crate) fn urlencoding_encode(s: &str) -> String {
@@ -1533,6 +1930,131 @@ mod tests {
             score,
             assume_batch,
         }
+    }
+
+    /// The exact shape that made this necessary: AnimeTosho and Nyaa both
+    /// list one release, their tracker scrapes disagree about the swarm, and
+    /// only one of the two listings knows a direct `.torrent` URL.
+    #[test]
+    fn one_release_listed_by_two_indexes_keeps_what_each_of_them_knew() {
+        let from_tosho = Candidate {
+            name: "[ASW] Some Show - 05 [1080p]".into(),
+            magnet: Some("magnet:?xt=urn:btih:abc".into()),
+            torrent_url: Some("https://storage.animetosho.org/torrent/abc.torrent".into()),
+            seeders: 40,
+            score: 700,
+            assume_batch: false,
+        };
+        // Nyaa scores the same release higher (its `trusted` flag is worth
+        // TRUSTED_BONUS, which AnimeTosho's copy never gets) and reports a
+        // different swarm -- so a score-ordered dedupe would keep this one and
+        // throw the `.torrent` URL away with the other.
+        let from_nyaa = Candidate {
+            name: "[ASW] Some Show - 05 [1080p]".into(),
+            magnet: Some("magnet:?xt=urn:btih:abc".into()),
+            torrent_url: None,
+            seeders: 55,
+            score: 800,
+            assume_batch: false,
+        };
+
+        let merged = merge_duplicates(vec![from_tosho, from_nyaa]);
+
+        assert_eq!(merged.len(), 1, "the same release must not be raced twice");
+        assert_eq!(merged[0].score, 800);
+        assert_eq!(merged[0].seeders, 55);
+        assert!(
+            merged[0].torrent_url.is_some(),
+            "the direct .torrent URL is the whole reason to keep the mirrored listing"
+        );
+    }
+
+    /// A batch assumption is a guess about a name; one listing naming its
+    /// episode settles it for the release, not just for that listing.
+    #[test]
+    fn a_listing_that_names_its_episode_settles_the_batch_guess_for_both() {
+        let guessed = Candidate { name: "release".into(), ..candidate(700, 30, true) };
+        let stated = Candidate { name: "release".into(), ..candidate(650, 30, false) };
+        let merged = merge_duplicates(vec![guessed, stated]);
+        assert_eq!(merged.len(), 1);
+        assert!(!merged[0].assume_batch);
+    }
+
+    /// The pool has to hold everything `resolve` can reach -- the two it races
+    /// plus the two it keeps as sequential fallbacks -- before more querying
+    /// is pointless. Stopping earlier trades the fallbacks for a round-trip,
+    /// and a swarm that turns out to be dead then has nothing behind it.
+    #[test]
+    fn the_early_stop_leaves_resolve_its_fallbacks() {
+        let strong = || candidate(700, 30, false);
+        // Merely viable: reachable as a fallback, not worth racing.
+        let viable = || candidate(450, 30, true);
+        // Two strong ones to race, but nothing behind them if both swarms
+        // turn out to be dead.
+        assert!(!enough_candidates(&[strong(), strong()]));
+        // Four reachable candidates, two of them worth racing: the shortlist
+        // `resolve` slices is full and another Nyaa round would only lengthen
+        // a list it never reads.
+        assert!(enough_candidates(&[strong(), strong(), viable(), viable()]));
+        // A full shortlist of guesses is not a head start.
+        assert!(!enough_candidates(&[strong(), viable(), viable(), viable()]));
+        // A near-dead swarm is reachable but not worth counting on: it is the
+        // case `resolve` pays a whole pre-buffer timeout to discover.
+        assert!(!enough_candidates(&[strong(), strong(), candidate(700, 1, false), candidate(100, 30, false)]));
+    }
+
+    /// Asking for a dub must not sink a show that has none below the bars
+    /// that decide whether the search stops and whether a release is worth
+    /// racing -- the penalty exists to order dubs above subs, and with no dub
+    /// present it lands on every candidate equally and orders nothing.
+    #[test]
+    fn a_dub_preference_costs_nothing_on_a_show_with_no_dub() {
+        let subs_only = "[ASW] Some Show - 05 [1080p]";
+        let siblings = NO_SIBLINGS;
+        let alts: Vec<String> = vec![normalize("some show")];
+        let crit = |prefer_dub: bool| ReleaseCriteria {
+            episode: 5,
+            allow_episodeless: false,
+            prefer_dub,
+            browser_client: false,
+            extras: false,
+            episode_count: None,
+        };
+        let scored = |prefer_dub: bool| {
+            score_release(subs_only, &normalize("some show"), &alts, &siblings, crit(prefer_dub))
+                .expect("the release matches the title either way")
+                .0
+        };
+        assert_eq!(
+            scored(true) + NON_DUB_PENALTY,
+            scored(false),
+            "the whole difference must be the refundable penalty, so find_candidates can undo it"
+        );
+    }
+
+    /// The mirror case, and the one that actually reached a viewer: a
+    /// dub-only release is not a substitute for the sub that was asked for,
+    /// while a dual-audio release satisfies either preference.
+    #[test]
+    fn an_english_only_release_is_not_offered_to_someone_watching_subbed() {
+        assert!(is_dub_only_release(&normalize("[Yameii] Some Show - 05 [English Dub]")));
+        assert!(is_dub_only_release(&normalize("Some.Show.S01E05.DUBBED.1080p")));
+        assert!(!is_dub_only_release(&normalize("[EMBER] Some Show S01E05 [Dual Audio]")));
+        assert!(!is_dub_only_release(&normalize("[ASW] Some Show - 05 [1080p]")));
+        // Still counts as a dub for someone who asked for one.
+        assert!(is_dub_release(&normalize("[Yameii] Some Show - 05 [English Dub]")));
+        assert!(is_dub_release(&normalize("[EMBER] Some Show S01E05 [Dual Audio]")));
+    }
+
+    /// AnimeTosho lists a single-file torrent's `torrent_name` as the file
+    /// itself; Nyaa lists the same release without the extension, and an
+    /// unstripped "mkv" token survives `normalize` and defeats the merge.
+    #[test]
+    fn a_release_and_its_filename_are_the_same_release() {
+        assert_eq!(
+            normalize(strip_container_ext("[ASW] Some Show - 05 [1080p].mkv")),
+            normalize("[ASW] Some Show - 05 [1080p]")
+        );
     }
 
     #[test]

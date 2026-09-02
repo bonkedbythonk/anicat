@@ -33,6 +33,7 @@ const SEADEX_BEST_BONUS: i64 = 500;
 #[derive(Clone)]
 pub(crate) struct SeadexRelease {
     info_hash: String,
+    torrent_url: Option<String>,
     files: Vec<String>,
     group: String,
     is_best: bool,
@@ -83,8 +84,16 @@ async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<S
             if files.is_empty() {
                 continue;
             }
+            let torrent_url = tr["url"].as_str().and_then(|u| {
+                if u.contains("nyaa.si/view/") {
+                    Some(format!("{}.torrent", u.replace("/view/", "/download/")))
+                } else {
+                    None
+                }
+            });
             releases.push(SeadexRelease {
                 info_hash: info_hash.to_string(),
+                torrent_url,
                 files,
                 group: tr["releaseGroup"].as_str().unwrap_or("?").to_string(),
                 is_best: tr["isBest"].as_bool().unwrap_or(false),
@@ -184,7 +193,7 @@ pub(crate) async fn find_candidates(
         out.push(Candidate {
             name: format!("[SeaDex{}] {}", if rel.is_best { " Best" } else { "" }, rel.group),
             magnet: Some(magnet_from_infohash(&rel.info_hash)),
-            torrent_url: None,
+            torrent_url: rel.torrent_url.clone(),
             // Not reported by the API. SeaDex entries are long-lived
             // community picks on a public tracker, not fresh uploads, so
             // treating them as healthy is the same bet already made for

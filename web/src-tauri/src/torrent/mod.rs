@@ -218,7 +218,15 @@ impl TorrentManager {
 
     fn with_cache_dir(cache_dir: PathBuf) -> Self {
         let dir = cache_dir.clone();
-        std::thread::spawn(move || cleanup_cache(&dir));
+        // No session exists yet at construction time, so there's nothing to
+        // reconcile against -- these are leftovers from a previous process,
+        // not anything a live Session is tracking.
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("tokio runtime for startup cache cleanup")
+                .block_on(cleanup_cache(&dir, None));
+        });
         Self {
             session: tokio::sync::OnceCell::new(),
             cache_dir,
@@ -366,29 +374,52 @@ impl TorrentManager {
         if titles.is_empty() {
             return Err("No title to search torrents for".into());
         }
-        let mut candidates = match (movie, series_criteria) {
-            (Some(movie_criteria), _) => cinema::find_movie_candidates(client, titles, movie_criteria).await,
-            (_, Some(episode_criteria)) => {
-                series::find_episode_candidates(client, titles, episode_criteria).await
-            }
-            _ => {
-                search::find_candidates(
-                    client,
-                    titles,
-                    sibling_titles,
-                    criteria,
-                    search::Breadth::Fast,
-                )
-                .await
-            }
-        };
-        let search_ms = stage.elapsed().as_millis();
         // Which number the *files* inside a torrent use. For a series that is
         // the within-season episode, since a season pack names its files
         // SxxEyy — while `episode` stays absolute, because it is the identity
         // the resolved-stream cache and the whole app are keyed by, and
         // within-season numbers collide across seasons.
         let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
+
+        // SeaDex is a different host answering a different question (which
+        // release did a human pick for this AniList entry), so it has no
+        // reason to wait for the indexer search to finish first — which is
+        // what it used to do, adding its whole round-trip to every single
+        // play. Started here and joined below.
+        let seadex_query = seadex::find_candidates(
+            client,
+            &self.seadex_cache,
+            media_id,
+            titles,
+            file_episode,
+            allow_episodeless,
+            episode_count,
+        );
+        let indexer_query = async {
+            match (movie, series_criteria) {
+                (Some(movie_criteria), _) => {
+                    cinema::find_movie_candidates(client, titles, movie_criteria).await
+                }
+                (_, Some(episode_criteria)) => {
+                    series::find_episode_candidates(client, titles, episode_criteria).await
+                }
+                _ => {
+                    search::find_candidates(
+                        client,
+                        titles,
+                        sibling_titles,
+                        criteria,
+                        search::Breadth::Fast,
+                    )
+                    .await
+                }
+            }
+        };
+        let (mut candidates, mut seadex_candidates) =
+            tokio::join!(indexer_query, seadex_query);
+        // One wall-clock number covers both now that they overlap; splitting
+        // them would only report which of the two happened to finish last.
+        let search_ms = stage.elapsed().as_millis();
         // Where this entry sits in its franchise, as `try_candidate` needs it
         // to find the right season's files inside a combined pack. Western TV
         // states its season outright in `EpisodeCriteria`; for anime it comes
@@ -409,11 +440,7 @@ impl TorrentManager {
         // when SeaDex has one it goes in ahead of every regex-matched result —
         // and, unlike the regex search, it can be the *only* candidate for the
         // scattered OVA/special/"Lite" entries a franchise splits into, so this
-        // has to run before the "no candidates" check below, not after it.
-        let stage = std::time::Instant::now();
-        let mut seadex_candidates =
-            seadex::find_candidates(client, &self.seadex_cache, media_id, titles, file_episode, allow_episodeless, episode_count).await;
-        let seadex_ms = stage.elapsed().as_millis();
+        // is merged before the "no candidates" check below, not after it.
         if !seadex_candidates.is_empty() {
             candidates.append(&mut seadex_candidates);
             candidates.sort_by(|a, b| b.score.cmp(&a.score).then(b.seeders.cmp(&a.seeders)));
@@ -428,13 +455,12 @@ impl TorrentManager {
         // first candidate is touched, which on a rate-limited Nyaa is where a
         // surprising amount of a slow play actually goes.
         log::info!(
-            "[resolve] torrent lookup media={} ep={} candidates={} session={}ms search={}ms seadex={}ms (best: {})",
+            "[resolve] torrent lookup media={} ep={} candidates={} session={}ms search+seadex={}ms (best: {})",
             media_id,
             episode,
             candidates.len(),
             session_ms,
             search_ms,
-            seadex_ms,
             candidates.first().map(|c| c.name.as_str()).unwrap_or("-")
         );
         if candidates.is_empty() {
@@ -465,14 +491,16 @@ impl TorrentManager {
         // the first pick takes to fail.
         if let [cand_a, cand_b, ..] = shortlist[..] {
             let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless };
-            let fut_a = self.try_candidate(client, &session, cand_a, &ctx);
-            let fut_b = self.try_candidate(client, &session, cand_b, &ctx);
+            let added_a = std::sync::Mutex::new(None);
+            let added_b = std::sync::Mutex::new(None);
+            let fut_a = self.try_candidate(client, &session, cand_a, &ctx, &added_a);
+            let fut_b = self.try_candidate(client, &session, cand_b, &ctx, &added_b);
             tokio::pin!(fut_a);
             tokio::pin!(fut_b);
 
-            let (result, winner, loser_fut, loser) = tokio::select! {
-                r = &mut fut_a => (r, cand_a, fut_b, cand_b),
-                r = &mut fut_b => (r, cand_b, fut_a, cand_a),
+            let (result, winner, loser_fut, loser, loser_added) = tokio::select! {
+                r = &mut fut_a => (r, cand_a, fut_b, cand_b, &added_b),
+                r = &mut fut_b => (r, cand_b, fut_a, cand_a, &added_a),
             };
 
             let result = match result {
@@ -495,9 +523,38 @@ impl TorrentManager {
             };
 
             if let Ok((r, cand)) = result {
+                // Stop the losing racer before anything else. Winning the
+                // select only stops the loser's *future* being polled -- the
+                // torrent it already added stays in the session and keeps
+                // pulling its selected file at full speed, competing for
+                // bandwidth with the stream mpv is about to read. Nothing tore
+                // it down, because a cancelled future never reaches its own
+                // error-path cleanup: observed as a release that lost the race
+                // still writing chunks to disk at session teardown.
+                //
+                // The id comparison is the safety net for the case where the
+                // winner *is* the erstwhile loser (the raced pick failed and
+                // the loser was awaited into the winner's place), and for two
+                // candidates that resolved to the same torrent.
+                let loser_id = *loser_added.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(id) = loser_id.filter(|id| *id != r.torrent_id) {
+                    log::info!(
+                        "torrent: dropping losing candidate '{}' (torrent {})",
+                        loser.name, id
+                    );
+                    // librqbit logs any chunk that lands after this as
+                    // "FATAL: error writing chunk to disk ... file is None".
+                    // Benign -- writes already queued for a torrent that is
+                    // going away -- and not worth avoiding: pausing first was
+                    // measured and produced exactly the same lines.
+                    let _ = session.delete(id.into(), true).await;
+                    self.selected_files.lock().await.remove(&id);
+                }
+
                 self.resolved.lock().await.insert((media_id, episode), r);
                 let dir = self.cache_dir.clone();
-                tokio::task::spawn_blocking(move || cleanup_cache(&dir));
+                let session_for_cleanup = session.clone();
+                tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
                 log::info!(
                     "torrent: streaming '{}' (torrent {}, file {})",
                     cand.name, r.torrent_id, r.file_id
@@ -513,13 +570,18 @@ impl TorrentManager {
                     &session,
                     cand,
                     &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless },
+                    // Sequential: each attempt is awaited to completion, so its
+                    // own error path cleans up after it and nothing is left for
+                    // the caller to tear down.
+                    &std::sync::Mutex::new(None),
                 )
                 .await
             {
                 Ok(r) => {
                     self.resolved.lock().await.insert((media_id, episode), r);
                     let dir = self.cache_dir.clone();
-                    tokio::task::spawn_blocking(move || cleanup_cache(&dir));
+                    let session_for_cleanup = session.clone();
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
                     log::info!(
                         "torrent: streaming '{}' (torrent {}, file {})",
                         cand.name, r.torrent_id, r.file_id
@@ -625,8 +687,7 @@ impl TorrentManager {
         for h in handles {
             let _ = session.pause(&h).await;
         }
-        let dir = self.cache_dir.clone();
-        tokio::task::spawn_blocking(move || cleanup_cache(&dir));
+        cleanup_cache(&self.cache_dir, Some(&session)).await;
     }
 
     /// True while any torrent in the session is still downloading (live and
@@ -776,12 +837,80 @@ impl TorrentManager {
             .as_ref()
             .map(|l| l.snapshot.fetched_bytes)
             .unwrap_or(0);
+        // What this read is actually waiting for, and why finishing it is not
+        // worth much.
+        //
+        // The read blocks until the *first piece* of the file lands, and a
+        // piece is the unit the swarm delivers however few bytes are asked for
+        // -- lowering PREBUFFER_BYTES cannot speed it up. Measured on the
+        // Chivalry BD remux (1MB pieces): ~3s to satisfy a 1MB read, while the
+        // swarm moved ~32MB torrent-wide in the same window at 9.6MB/s. The
+        // head piece simply isn't raced -- one slow peer holding it stalls the
+        // read while fast peers race ahead through librqbit's 32MB stream
+        // lookahead.
+        //
+        // Both jobs of this gate are already done by then. "The swarm is alive"
+        // is proven by those bytes moving, which is the same evidence the
+        // throughput check below uses. And handing mpv the URL earlier costs
+        // nothing: mpv opens it with --cache-pause-initial and waits for that
+        // identical piece, except the viewer is looking at the player instead
+        // of a loading toast. So once the swarm has demonstrably cleared the
+        // bar, stop waiting for one particular piece and let mpv wait for it.
+        //
+        // Deliberately *not* an unconditional early exit: a candidate whose
+        // swarm never delivers has to keep failing here, or nothing falls
+        // through to the next release and mpv is handed a stream that never
+        // flows.
+        //
+        // Known limit, shared with the throughput check below: `fetched_bytes`
+        // is torrent-wide, so on a season pack where the previous episode is
+        // still selected (`SELECTED_FILES_KEPT` is 2) its bytes count towards
+        // this bar. That can only happen mid-binge, where the swarm has already
+        // proven itself on the file just watched, so the reading is optimistic
+        // rather than wrong -- but it is not per-file evidence and shouldn't be
+        // read as such.
+        //
+        // Measured on the Chivalry BD remux, same candidate, n=3 each:
+        // pre-buffer median 3160ms before, 1129ms after; total candidate time
+        // 3865ms before, 1819ms after. Nothing is dismissed early on the UI
+        // side either -- the loading modal is gated on mpv's own file-loaded,
+        // not on this returning.
+        const HEAD_PIECE_GRACE: std::time::Duration = std::time::Duration::from_millis(1200);
+        // The same bar the throughput check below applies: fast enough to
+        // finish the file inside half an hour.
+        let required_bps = file_len as f64 / NEEDS_TO_FINISH_WITHIN_SECS;
+
         let started = std::time::Instant::now();
         while got < want {
             let Some(remaining) = PREBUFFER_TIMEOUT.checked_sub(started.elapsed()) else {
                 stages.prebuffer_ms = stages.take();
                 return Err("no seeders (pre-buffer timed out)".to_string());
             };
+            let waited = started.elapsed();
+            if waited >= HEAD_PIECE_GRACE {
+                let fetched = handle
+                    .stats()
+                    .live
+                    .as_ref()
+                    .map(|l| l.snapshot.fetched_bytes)
+                    .unwrap_or(0)
+                    .saturating_sub(fetched_at_prebuffer_start);
+                let bps = fetched as f64 / waited.as_secs_f64();
+                if bps >= required_bps {
+                    stages.prebuffer_ms = stages.take();
+                    log::info!(
+                        "torrent: swarm proven at {:.0} KB/s (needs {:.0} KB/s) after {:?}; \
+                         handing off with {} of {} KB read -- mpv waits out the head piece",
+                        bps / 1024.0,
+                        required_bps / 1024.0,
+                        waited,
+                        got / 1024,
+                        want / 1024
+                    );
+                    return Ok(());
+                }
+            }
+            let remaining = remaining.min(std::time::Duration::from_millis(200));
             match tokio::time::timeout(remaining, stream.read(&mut buf)).await {
                 Ok(Ok(0)) => break, // reached EOF (tiny file)
                 Ok(Ok(n)) => got += n,
@@ -789,17 +918,25 @@ impl TorrentManager {
                     stages.prebuffer_ms = stages.take();
                     return Err(format!("pre-buffer read failed: {}", e));
                 }
-                Err(_) => {
-                    stages.prebuffer_ms = stages.take();
-                    return Err("no seeders (pre-buffer timed out)".to_string());
-                }
+                // A poll tick expiring, not the gate expiring: the loop goes
+                // back to re-check the swarm's rate. `PREBUFFER_TIMEOUT` above
+                // is still the only thing that fails a candidate.
+                Err(_) => {}
             }
         }
         stages.prebuffer_ms = stages.take();
         log::info!(
-            "torrent: pre-buffered {} KB in {:?}",
+            // Piece length is the number that explains a slow pre-buffer, and
+            // nothing used to report it: reading byte 0 needs the whole first
+            // piece, so a pack with 16MB pieces cannot pre-buffer faster than
+            // the swarm delivers 16MB however few bytes are asked for.
+            "torrent: pre-buffered {} KB in {:?} (piece length {} KB)",
             got / 1024,
-            started.elapsed()
+            started.elapsed(),
+            handle
+                .with_metadata(|m| m.lengths.default_piece_length())
+                .unwrap_or(0)
+                / 1024
         );
 
         // The read above proves nothing on its own: `cache_dir` (see `new()`)
@@ -823,7 +960,6 @@ impl TorrentManager {
         // "keeps up in real time" — since the real episode duration isn't
         // known this early; a swarm that fails even that bar is failing hard
         // enough that another candidate is worth trying.
-        const THROUGHPUT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(3);
         const NEEDS_TO_FINISH_WITHIN_SECS: f64 = 30.0 * 60.0;
         let required_bps = file_len as f64 / NEEDS_TO_FINISH_WITHIN_SECS;
 
@@ -852,26 +988,31 @@ impl TorrentManager {
         // to the explicit sample below exactly as before.
         const MIN_IMPLICIT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(1);
         let prebuffer_window = started.elapsed();
-        if prebuffer_window >= MIN_IMPLICIT_SAMPLE {
-            let fetched_during_prebuffer = handle
-                .stats()
-                .live
-                .as_ref()
-                .map(|l| l.snapshot.fetched_bytes)
-                .unwrap_or(0)
-                .saturating_sub(fetched_at_prebuffer_start);
-            let prebuffer_bps =
-                fetched_during_prebuffer as f64 / prebuffer_window.as_secs_f64();
-            if prebuffer_bps >= required_bps {
+        let fetched_during_prebuffer = handle
+            .stats()
+            .live
+            .as_ref()
+            .map(|l| l.snapshot.fetched_bytes)
+            .unwrap_or(0)
+            .saturating_sub(fetched_at_prebuffer_start);
+        if fetched_during_prebuffer > 0 {
+            let prebuffer_secs = prebuffer_window.as_secs_f64().max(0.001);
+            let prebuffer_bps = fetched_during_prebuffer as f64 / prebuffer_secs;
+            if (prebuffer_window >= MIN_IMPLICIT_SAMPLE || fetched_during_prebuffer >= want as u64)
+                && prebuffer_bps >= required_bps
+            {
                 stages.throughput_ms = stages.take();
                 log::info!(
-                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) from the pre-buffer window itself",
+                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) from the pre-buffer window itself ({:?})",
                     prebuffer_bps / 1024.0,
-                    required_bps / 1024.0
+                    required_bps / 1024.0,
+                    prebuffer_window
                 );
                 return Ok(());
             }
         }
+
+        const THROUGHPUT_SAMPLE: std::time::Duration = std::time::Duration::from_millis(1500);
 
         let mut last_bps = 0.0f64;
         for attempt in 0..2 {
@@ -888,8 +1029,8 @@ impl TorrentManager {
                 .as_ref()
                 .map(|l| l.snapshot.fetched_bytes)
                 .unwrap_or(0);
-            last_bps =
-                fetched_after.saturating_sub(fetched_before) as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
+            let diff = fetched_after.saturating_sub(fetched_before);
+            last_bps = diff as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
             if last_bps >= required_bps {
                 stages.throughput_ms = stages.take();
                 log::info!(
@@ -900,11 +1041,22 @@ impl TorrentManager {
                 );
                 return Ok(());
             }
+            let live_peers = handle
+                .stats()
+                .live
+                .as_ref()
+                .map(|l| l.snapshot.peer_stats.live)
+                .unwrap_or(0);
+            if diff == 0 && live_peers == 0 {
+                // Completely dead swarm with zero connected peers and zero bytes transferred — fail immediately.
+                break;
+            }
             if attempt == 0 {
                 log::info!(
-                    "torrent: throughput low on first sample ({:.0} KB/s, needs {:.0} KB/s); resampling once before giving up",
+                    "torrent: throughput low on first sample ({:.0} KB/s, needs {:.0} KB/s, {} live peers); resampling once before giving up",
                     last_bps / 1024.0,
-                    required_bps / 1024.0
+                    required_bps / 1024.0,
+                    live_peers
                 );
             }
         }
@@ -919,17 +1071,25 @@ impl TorrentManager {
     /// Times every stage of the attempt and logs one line for it, win or
     /// lose -- a candidate that *fails* slowly is exactly as interesting as
     /// one that succeeds slowly, since the play path waits on both.
+    /// `added` records the torrent this attempt put into the session, and only
+    /// when the session did not already have it. The caller uses it to clean up
+    /// after a *cancelled* attempt: a losing racer's future stops being polled
+    /// the moment the other one wins, so its own error-path cleanup never runs,
+    /// while the torrent it added keeps downloading. `AlreadyManaged` is
+    /// deliberately not recorded -- that torrent belongs to whatever put it
+    /// there, very possibly the episode mpv is reading right now.
     async fn try_candidate(
         &self,
         client: &reqwest::Client,
         session: &Arc<Session>,
         cand: &search::Candidate,
         ctx: &CandidateContext<'_>,
+        added: &std::sync::Mutex<Option<usize>>,
     ) -> Result<Resolved, String> {
         let started = std::time::Instant::now();
         let mut stages = CandidateStages::new();
         let out = self
-            .try_candidate_inner(client, session, cand, ctx, &mut stages)
+            .try_candidate_inner(client, session, cand, ctx, &mut stages, added)
             .await;
         stages.log(
             &cand.name,
@@ -939,6 +1099,7 @@ impl TorrentManager {
         out
     }
 
+    #[allow(clippy::too_many_arguments)] // resolve context, passed field-by-field
     async fn try_candidate_inner(
         &self,
         client: &reqwest::Client,
@@ -946,10 +1107,11 @@ impl TorrentManager {
         cand: &search::Candidate,
         ctx: &CandidateContext<'_>,
         stages: &mut CandidateStages,
+        added: &std::sync::Mutex<Option<usize>>,
     ) -> Result<Resolved, String> {
         // Prefer the .torrent file (instant metadata) over the magnet.
-        let add = if let Some(ref url) = cand.torrent_url {
-            let bytes = client
+        let torrent_bytes: Option<bytes::Bytes> = if let Some(ref url) = cand.torrent_url {
+            let b = client
                 .get(url)
                 .send()
                 .await
@@ -958,17 +1120,104 @@ impl TorrentManager {
                 .bytes()
                 .await
                 .map_err(|e| e.to_string())?;
-            AddTorrent::from_bytes(bytes.to_vec())
-        } else if let Some(ref magnet) = cand.magnet {
-            AddTorrent::from_url(magnet)
+            Some(b)
         } else {
-            return Err("candidate has neither torrent url nor magnet".into());
+            None
+        };
+
+        let make_add = |tb: &Option<bytes::Bytes>| -> Result<AddTorrent<'_>, String> {
+            if let Some(ref b) = tb {
+                Ok(AddTorrent::from_bytes(b.to_vec()))
+            } else if let Some(ref magnet) = cand.magnet {
+                Ok(AddTorrent::from_url(magnet))
+            } else {
+                Err("candidate has neither torrent url nor magnet".into())
+            }
         };
 
         stages.fetch_ms = stages.take();
 
+        // Read the file list before adding the torrent for real, so the wanted
+        // episode can be named in `only_files` from the start. Without it
+        // librqbit briefly adopts *every* file in a complete-series pack --
+        // allocating and checking all of them on disk -- before
+        // `update_only_files` narrows it back down, which on a 12-file BD pack
+        // is the single largest chunk of a cold play.
+        //
+        // Only ever for a candidate that came with a `.torrent`: parsing those
+        // bytes is local and instant, while a magnet has to fetch its metadata
+        // over DHT. Doing that here would pay that fetch twice, serially, on
+        // the play path -- and this probe has no timeout of its own, so a
+        // magnet whose metadata never arrives would hang the whole resolve
+        // past the player's own ceiling. A magnet keeps the original path:
+        // add, wait out INIT_TIMEOUT, then narrow.
+        let mut pre_selected_file_id = None;
+        if torrent_bytes.is_some() {
+            let list_opts = AddTorrentOptions {
+                list_only: true,
+                ..Default::default()
+            };
+            let add_lo = make_add(&torrent_bytes)?;
+            if let Ok(AddTorrentResponse::ListOnly(lo)) = session.add_torrent(add_lo, Some(list_opts)).await {
+                if let Ok(iter) = lo.info.iter_file_details() {
+                    let files: Vec<(usize, String, u64)> = iter
+                        .enumerate()
+                        .map(|(i, f)| {
+                            let fname = f
+                                .filename
+                                .to_pathbuf()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|_| f.filename.to_string().unwrap_or_default());
+                            (i, fname, f.len)
+                        })
+                        .collect();
+                    let videos: Vec<(usize, String, u64)> = files
+                        .into_iter()
+                        .filter(|(_, name, _)| {
+                            let lower = name.to_lowercase();
+                            VIDEO_EXTS.iter().any(|e| lower.ends_with(&format!(".{}", e)))
+                        })
+                        .collect();
+                    if videos.len() == 1 && !cand.assume_batch {
+                        pre_selected_file_id = Some(videos[0].0);
+                    } else {
+                        let req = layout::SelectRequest {
+                            titles: ctx.titles,
+                            alts: ctx.alts,
+                            hint: ctx.hint,
+                            episode: ctx.episode,
+                            episode_count: ctx.episode_count,
+                            release_name: &cand.name,
+                            allow_episodeless: ctx.allow_episodeless,
+                        };
+                        match layout::select(&videos, &req) {
+                            Ok(index) => pre_selected_file_id = Some(index),
+                            // The post-add check below runs the identical
+                            // `layout::select` over the identical file list, so
+                            // this rejection is the one it would reach anyway --
+                            // just without first adding the torrent, waiting out
+                            // its initialization and deleting it again. Falling
+                            // through would spend that on a pack already known
+                            // not to contain the episode, delaying the next
+                            // candidate by the whole of it.
+                            Err(e) => {
+                                log::info!("torrent: '{}' rejected before add: {}", cand.name, e);
+                                return Err(format!(
+                                    "episode {} not found inside torrent",
+                                    ctx.episode
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let add = make_add(&torrent_bytes)?;
+
         let opts = AddTorrentOptions {
             overwrite: true,
+            only_files: pre_selected_file_id.map(|id| vec![id]),
             ..Default::default()
         };
         let resp = session
@@ -981,6 +1230,9 @@ impl TorrentManager {
             AddTorrentResponse::ListOnly(_) => return Err("unexpected list-only response".into()),
         };
         let torrent_id = handle.id();
+        if !already_managed {
+            *added.lock().unwrap_or_else(|e| e.into_inner()) = Some(torrent_id);
+        }
         stages.add_ms = stages.take();
 
         if tokio::time::timeout(INIT_TIMEOUT, handle.wait_until_initialized())
@@ -1031,7 +1283,9 @@ impl TorrentManager {
         // through to the layout check, which rejects it and moves on to the
         // next candidate rather than playing episode 1 when episode 13 was
         // asked for.
-        let file_id = if videos.len() == 1 && !cand.assume_batch {
+        let file_id = if let Some(fid) = pre_selected_file_id {
+            Some(fid)
+        } else if videos.len() == 1 && !cand.assume_batch {
             Some(videos[0].0)
         } else {
             // Everything else — which season's folder this entry is, whether
@@ -1095,6 +1349,7 @@ impl TorrentManager {
             .update_only_files(&handle, &wanted)
             .await
             .map_err(|e| format!("file selection failed: {}", e))?;
+
         // Errors if the torrent isn't paused — that's the normal case.
         let _ = session.unpause(&handle).await;
         stages.select_ms = stages.take();
@@ -1267,14 +1522,40 @@ fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
 
 /// Evict least-recently-touched entries until the cache is under the cap.
 /// Anything written to in the last hour is considered in use and skipped.
-fn cleanup_cache(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    let mut items: Vec<(PathBuf, std::time::SystemTime, u64)> = vec![];
-    for e in entries.flatten() {
-        let path = e.path();
-        let (size, mtime) = dir_size_and_mtime(&path);
-        items.push((path, mtime, size));
-    }
+/// Evicts old cached torrent-stream files once the cache exceeds its cap.
+///
+/// When `session` is given, this also tells librqbit to drop any live
+/// torrent whose output folder is being evicted, via `session.delete`.
+/// Without that, deleting the files out from under the Session doesn't tell
+/// it the torrent is gone -- it keeps the `ManagedTorrent` (peer
+/// connections, piece bitfield, stats) resident for the rest of the
+/// process's life. This function used to always go straight to
+/// `std::fs::remove_*`, so *every* torrent ever streamed in a session's
+/// lifetime stayed fully live in memory even after its file was deleted —
+/// across a long session watching many episodes, that's how memory grew
+/// large enough to trigger the OS's own out-of-memory prompt.
+async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>) {
+    // The scan walks every torrent directory in the cache and stats every file
+    // in it, which on a multi-GB cache is real, uninterruptible disk work.
+    // This function became async so it could tell the Session about what it
+    // evicts, and that moved the scan onto a runtime worker thread — where a
+    // slow disk stalls whatever else that worker was driving, including the
+    // resolve this cleanup was spawned from. Keep the blocking half blocking.
+    let scan_dir = dir.to_path_buf();
+    let Ok(mut items) = tokio::task::spawn_blocking(move || {
+        let mut items: Vec<(PathBuf, std::time::SystemTime, u64)> = vec![];
+        let Ok(entries) = std::fs::read_dir(&scan_dir) else { return items };
+        for e in entries.flatten() {
+            let path = e.path();
+            let (size, mtime) = dir_size_and_mtime(&path);
+            items.push((path, mtime, size));
+        }
+        items
+    })
+    .await
+    else {
+        return;
+    };
     let mut total: u64 = items.iter().map(|(_, _, s)| s).sum();
     if total <= CACHE_CAP_BYTES {
         return;
@@ -1287,6 +1568,19 @@ fn cleanup_cache(dir: &std::path::Path) {
     // in practice. 10 minutes is enough to cover the current episode without
     // giving a whole session immunity.
     let grace_cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+
+    // librqbit's default per-torrent output folder (or, for a single-file
+    // torrent, the file itself) is named after `handle.name()` directly —
+    // confirmed against what's actually on disk here, since the private
+    // field that holds the real output path isn't part of librqbit's public
+    // API. `name()` is.
+    let id_by_name: HashMap<String, usize> = match session {
+        Some(session) => session.with_torrents(|it| {
+            it.filter_map(|(id, h)| h.name().map(|name| (name, id))).collect()
+        }),
+        None => HashMap::new(),
+    };
+
     for (path, mtime, size) in items {
         if total <= CACHE_CAP_BYTES {
             break;
@@ -1294,10 +1588,21 @@ fn cleanup_cache(dir: &std::path::Path) {
         if mtime > grace_cutoff {
             continue;
         }
+        let matched_id = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|name| id_by_name.get(name));
+        if let (Some(session), Some(&id)) = (session, matched_id) {
+            if session.delete(id.into(), true).await.is_ok() {
+                log::info!("torrent: evicted {} (session id {}, {} MB)", path.display(), id, size / (1024 * 1024));
+                total = total.saturating_sub(size);
+                continue;
+            }
+        }
         let ok = if path.is_dir() {
-            std::fs::remove_dir_all(&path).is_ok()
+            tokio::fs::remove_dir_all(&path).await.is_ok()
         } else {
-            std::fs::remove_file(&path).is_ok()
+            tokio::fs::remove_file(&path).await.is_ok()
         };
         if ok {
             log::info!("torrent: evicted {} ({} MB)", path.display(), size / (1024 * 1024));
@@ -1379,6 +1684,36 @@ mod tests {
             manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed),
             u32::MAX
         );
+    }
+
+    /// The two safety rails on tearing down a losing racer. Both exist because
+    /// deleting the wrong torrent kills the stream mpv is reading.
+    #[test]
+    fn a_losing_racer_is_only_torn_down_when_it_is_safe_to() {
+        // What `try_candidate` records: a torrent it actually added, never one
+        // the session already had (that one belongs to whoever put it there --
+        // very possibly the episode currently playing).
+        let record = |already_managed: bool, id: usize| -> Option<usize> {
+            let slot = std::sync::Mutex::new(None);
+            if !already_managed {
+                *slot.lock().unwrap() = Some(id);
+            }
+            let held = *slot.lock().unwrap();
+            held
+        };
+        assert_eq!(record(false, 7), Some(7), "a freshly added torrent is ours to drop");
+        assert_eq!(record(true, 7), None, "an already-managed torrent is not");
+
+        // What `resolve` does with it: never delete the torrent that won,
+        // which is what the id comparison guards. That case is real -- the
+        // raced pick can fail and the loser gets awaited into the winner's
+        // place, so the "loser" slot then holds the winner's id.
+        let should_delete = |loser: Option<usize>, winner_id: usize| -> Option<usize> {
+            loser.filter(|id| *id != winner_id)
+        };
+        assert_eq!(should_delete(Some(3), 9), Some(3));
+        assert_eq!(should_delete(Some(9), 9), None, "the loser became the winner");
+        assert_eq!(should_delete(None, 9), None, "it never got as far as adding one");
     }
 
     #[test]
@@ -2188,7 +2523,7 @@ mod tests {
                 allow_episodeless: false,
             };
             let resolved = mgr
-                .try_candidate(&http, &session, batch, &ctx)
+                .try_candidate(&http, &session, batch, &ctx, &std::sync::Mutex::new(None))
                 .await
                 .unwrap_or_else(|e| panic!("episode {} failed: {}", episode, e));
             torrent_id = resolved.torrent_id;
@@ -2405,6 +2740,100 @@ mod tests {
         let mkv = buf[..4] == [0x1A, 0x45, 0xDF, 0xA3];
         let mp4 = &buf[4..8] == b"ftyp";
         assert!(mkv || mp4, "not an mkv or mp4 header: {:02X?}", &buf[..12]);
+
+        let _ = session.stop().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live. `cargo test --lib torrent::tests::live_chivalry -- --ignored --nocapture`
+    ///
+    /// A stopwatch on the whole nyaa path for one ordinary, finished,
+    /// single-cour show — the common case, not the pathological one the other
+    /// live tests are built from. `live_resolve_and_stream` proves Frieren
+    /// *works*; this one asks how long an average play actually takes, from a
+    /// cold cache, with the stage log printing what the time was spent on.
+    /// The second `resolve` is the warm in-app path (the `resolved` map hit),
+    /// which is what a rewatch or a next-episode press really costs.
+    #[tokio::test]
+    #[ignore]
+    async fn live_chivalry_of_a_failed_knight_resolves_quickly() {
+        // These tests are the only way to see the `[resolve]` stage timings
+        // without running the whole app; nothing else here initializes a
+        // logger, so `--nocapture` would otherwise print none of them.
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
+        let dir = std::env::temp_dir().join("anicat-torrent-chivalry-test");
+        // Wipe up front as well as at the end: a panic or timeout in an
+        // earlier run skips the teardown, and pieces left on disk would make
+        // the next "cold" measurement quietly warm.
+        let _ = std::fs::remove_dir_all(&dir);
+        let mgr = TorrentManager::with_cache_dir(dir.clone());
+        let titles = vec![
+            "Rakudai Kishi no Cavalry".to_string(),
+            "Chivalry of a Failed Knight".to_string(),
+        ];
+        const EPISODE: i64 = 4;
+        let target = || ResolveTarget {
+            media_id: 20977,
+            episode: EPISODE,
+            titles: &titles,
+            allow_episodeless: false,
+            episode_count: Some(12),
+            browser_client: false,
+            prefer_dub: false,
+            chosen_name: None,
+            movie: None,
+            series: None,
+            sibling_titles: &[],
+            entry: layout::EntryHint {
+                kind: layout::EntryKind::Tv,
+                season: Some(1),
+                season_at_least: None,
+            },
+        };
+
+        let cold_started = std::time::Instant::now();
+        let url = tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            mgr.resolve(&client(), target(), 13370),
+        )
+        .await
+        .expect("resolve timed out after 300s")
+        .expect("resolve failed");
+        let cold_ms = cold_started.elapsed().as_millis();
+
+        // The warm path: same episode again, served out of `resolved`.
+        let warm_started = std::time::Instant::now();
+        let warm_url = mgr
+            .resolve(&client(), target(), 13370)
+            .await
+            .expect("warm resolve failed");
+        let warm_ms = warm_started.elapsed().as_millis();
+        assert_eq!(url, warm_url, "the warm resolve returned a different stream");
+
+        println!(
+            "chivalry ep{}: cold resolve {}ms, warm resolve {}ms -> {}",
+            EPISODE, cold_ms, warm_ms, url
+        );
+
+        // The file behind the url has to be this episode, not merely something
+        // that played — a fast resolve onto the wrong file is not a win.
+        let resolved = *mgr.resolved.lock().await.get(&(20977, EPISODE)).unwrap();
+        let session = mgr.session().await.unwrap();
+        let handle = session.get(resolved.torrent_id.into()).unwrap();
+        let picked = handle
+            .metadata
+            .load()
+            .as_ref()
+            .and_then(|m| m.file_infos.get(resolved.file_id).map(|f| f.relative_filename.display().to_string()))
+            .unwrap_or_default();
+        println!("chivalry ep{}: picked file '{}'", EPISODE, picked);
+        assert!(
+            search::filename_matches_episode(&picked, EPISODE),
+            "picked file is not episode {}: {}",
+            EPISODE,
+            picked
+        );
 
         let _ = session.stop().await;
         let _ = std::fs::remove_dir_all(&dir);

@@ -549,7 +549,22 @@ notify_backend = function(action, sync, manual)
   -- backend, so keep this on the simple, reliable curl path everywhere.
   local cmd = {
     name = "subprocess",
-    args = { "curl", "-s", url },
+    -- mpv kills a `playback_only` subprocess the moment playback stops, and
+    -- the callbacks that matter most are sent at exactly that moment. On the
+    -- last episode the finale's `stop` curl was killed 32ms in ("Subprocess
+    -- failed: killed", curl exited -2), so the final position and the
+    -- COMPLETED write never reached the backend and the show sat in Watching
+    -- until the app was quit hours later and the shutdown recorder sent it.
+    -- The 30s progress tick had already stored pos=duration locally, which is
+    -- why the local history looked finished while AniList did not.
+    playback_only = false,
+    -- With mpv no longer killing it, a curl that never returns would hang the
+    -- sync callers (`stop`, and a manual `next`) on mpv's main thread, since
+    -- those run through blocking `mp.command_native`. Every handler on the
+    -- other end answers immediately -- `/player/next` spawns the resolve and
+    -- returns -- so 5s is far past any real loopback answer and short enough
+    -- not to read as a freeze if the backend is gone.
+    args = { "curl", "-s", "--max-time", "5", url },
     capture_stdout = false,
     capture_stderr = false
   }
@@ -1093,6 +1108,15 @@ end)
 -- window (which can sit for a long time) would otherwise ping the backend
 -- with the same stale pos/duration every 30s indefinitely.
 local progress_timer = mp.add_periodic_timer(30, function()
+  -- A window with nothing loaded has no position to report, and the backend
+  -- takes the report at face value: the tick would write pos=0/duration=0 over
+  -- whatever `current_playback` still held, and the exit monitor's fallback
+  -- save is gated on last_position > 0, so a previous episode's unsaved
+  -- position could be zeroed and then skipped. Reachable since the player is
+  -- launched idle and sits there for as long as the stream takes to resolve.
+  if not state.file_loaded then
+    return
+  end
   if mp.get_property_native("pause") then
     return
   end

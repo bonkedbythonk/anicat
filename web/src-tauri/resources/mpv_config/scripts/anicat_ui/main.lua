@@ -750,6 +750,18 @@ end
 -- one reached by seeking.
 local MIN_PLAYED_FRACTION = 0.5
 
+-- How near the end a stalled position has to be before it counts as "the
+-- viewer skipped to the end" rather than "this is buffering". Seconds rather
+-- than a fraction on purpose: what matters is how much content would be lost
+-- by advancing, and that is an absolute quantity. As a fraction it would mean
+-- the last 72s of a 24-minute episode but the last 3s of a 60s clip, which is
+-- backwards -- the short case is where a skip is most likely to land outside
+-- it.
+local END_STALL_WINDOW_SECS = 30
+-- Consecutive 1s polls with no movement. Long enough that an ordinary
+-- rebuffer right after a seek rides it out.
+local END_STALL_TICKS = 5
+
 local function check_near_end_auto_next()
   if state.is_shutting_down or not state.file_loaded or state.next_triggered then
     return
@@ -775,6 +787,50 @@ local function check_near_end_auto_next()
     return
   end
   if eof or (dur - pos) < 1.5 then
+    play_next(nil, false)
+    return
+  end
+
+  -- The seek landed near the end but not inside that window, and the stream
+  -- cannot carry it the rest of the way.
+  --
+  -- Skipping through an episode lands wherever the seek increment lands --
+  -- with mpv's 5s arrow-key seek, typically a few seconds short of the end,
+  -- not inside 1.5s of it. On a torrent whose tail pieces have not been
+  -- downloaded, those few seconds never play: the position freezes, eof-reached
+  -- stays false, and the episode sits there. Reproduced against a source
+  -- serving 60% of a file: seeking to 56.0s of 60.0s produced no transition at
+  -- all fourteen seconds later, while seeking to 59.6s advanced immediately.
+  --
+  -- Deliberately narrow, because firing this wrongly cuts the end off an
+  -- episode the viewer was still watching. All three have to hold: past
+  -- END_STALL_FRACTION (so at most a few percent remains), the position frozen
+  -- across consecutive polls, and a seek since the last file loaded -- a
+  -- viewer who never skipped is watching normally and a rebuffer there is
+  -- something to wait out, not to skip.
+  local stalled = state.last_poll_pos ~= nil and math.abs(pos - state.last_poll_pos) < 0.05
+  local advanced = state.last_poll_pos ~= nil and not stalled
+  state.last_poll_pos = pos
+  -- `seeked` has to mean "a seek is the last thing that moved the position",
+  -- not "a seek happened at some point". Auto-skipping the OP is a seek, and
+  -- it fires on nearly every episode -- without this, twenty minutes of normal
+  -- watching later, an ordinary rebuffer inside the last 30 seconds would look
+  -- like a stranded skip and cut the ending off. Playing on clears it.
+  if advanced then
+    state.advancing_ticks = (state.advancing_ticks or 0) + 1
+    if state.advancing_ticks >= 3 then
+      state.seeked = false
+    end
+  end
+  if not stalled or not state.seeked or (dur - pos) > END_STALL_WINDOW_SECS then
+    state.end_stall_ticks = 0
+    return
+  end
+  state.end_stall_ticks = (state.end_stall_ticks or 0) + 1
+  if state.end_stall_ticks >= END_STALL_TICKS then
+    msg.info(string.format(
+      'position stuck at %.1fs of %.1fs for %ds after a seek; treating the episode as finished',
+      pos, dur, state.end_stall_ticks))
     play_next(nil, false)
   end
 end
@@ -935,6 +991,10 @@ mp.register_event('file-loaded', function()
   -- the handover has to re-arm per file rather than once per process.
   state.rebuffer_wait_restored = false
   state.rebuffer_baseline = nil
+  state.seeked = false
+  state.last_poll_pos = nil
+  state.end_stall_ticks = 0
+  state.advancing_ticks = 0
   state.duration = mp.get_property_number('duration') or 0
   -- Tell the backend the file really opened. Sending the loadfile only proves
   -- the bytes reached mpv's socket; this is the half that proves mpv acted on
@@ -1064,6 +1124,15 @@ end)
 -- advances where the events cannot. The check's own guards (not loaded,
 -- already triggered, auto-next off, unknown duration) make a tick with
 -- nothing to do free.
+-- Records that the viewer moved the position themselves, which is what
+-- separates "skipped to the end" from "watching and buffering" above.
+mp.register_event('seek', function()
+  state.seeked = true
+  state.end_stall_ticks = 0
+  state.advancing_ticks = 0
+  state.last_poll_pos = nil
+end)
+
 local near_end_timer = mp.add_periodic_timer(1, check_near_end_auto_next)
 
 mp.register_event('shutdown', function()

@@ -87,7 +87,7 @@ Cinema mode is the one exception: films and TV are catalogued by TMDB, so it sta
 - **Cinema** — Films and TV matched against TMDB and streamed the same way, with a release picker when you want to choose yourself. Needs a TMDB read token.
 - **Trailers** — View a title's trailer directly from the detail page.
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, vertical sidebars for unobstructive desktop reading, and AniList progress sync.
-- **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
+- **AniList Sync** — Full library sync: progress, scores, list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85% — closing the player is not required. Inline editing from the detail page.
 - **Download Queue** — Background episode downloader via yt-dlp with real-time progress. Downloaded episodes play directly from the app.
 - **Schedule** — 7-day airing calendar filtered to your watching list.
 - **Discovery** — Customizable home layout (show/hide rows: trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.

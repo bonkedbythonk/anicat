@@ -17,7 +17,7 @@ interface StaffProfileProps {
 /**
  * A voice actor's profile and filmography, sorted most-popular-first so the
  * roles they are known for lead. Rendered inside the desktop character modal
- * and the mobile character sheet alike.
+ * and the character sheet alike.
  */
 export function StaffProfile({ staffId, onSelectMedia, onBack, compact = false }: StaffProfileProps) {
   const [roleSearch, setRoleSearch] = useState("");

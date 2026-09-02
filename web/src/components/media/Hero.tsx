@@ -77,7 +77,6 @@ const Hero = memo(function Hero({
   const [refreshTick, setRefreshTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const desktopQueueRef = useRef<HTMLDivElement>(null);
-  const mobileQueueRef = useRef<HTMLDivElement>(null);
 
   // Periodically recompute queue to reflect aired episodes
   useEffect(() => {
@@ -267,7 +266,7 @@ const Hero = memo(function Hero({
     };
   }, []);
 
-  // Scroll the focused item in the desktop/mobile queue into view when
+  // Scroll the focused item in the queue into view when
   // activeIndex changes.
   useEffect(() => {
     if (desktopQueueRef.current) {
@@ -276,16 +275,6 @@ const Hero = memo(function Hero({
         activeEl.scrollIntoView({
           behavior: "smooth",
           block: "nearest",
-        });
-      }
-    }
-    if (mobileQueueRef.current) {
-      const activeEl = mobileQueueRef.current.querySelector('[data-active="true"]');
-      if (activeEl) {
-        activeEl.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "nearest",
         });
       }
     }
@@ -534,37 +523,6 @@ const Hero = memo(function Hero({
         </div>
       </div>
 
-      {/* Mobile Queue Shelf */}
-      {queue.length > 1 && (
-        <div 
-          ref={mobileQueueRef}
-          className="flex md:hidden overflow-x-auto w-full gap-2 px-6 pb-4 pt-1 scrollbar-hide select-none"
-        >
-          {queue.map((ccItem, index) => {
-            const isFocused = index === activeIndex;
-            const ccTitle = ccItem.item.title.english || ccItem.item.title.romaji || "Unknown";
-            return (
-              <button
-                key={`${ccItem.item.id}-m${index}`}
-                onClick={() => setFocusedIndex(index)}
-                data-active={isFocused ? "true" : "false"}
-                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-[background-color,border-color] duration-150 ${
-                    isFocused
-                      ? "bg-accent border-accent text-white"
-                      : "bg-white/[0.03] border-white/[0.05] text-gray-400 hover:text-white"
-                }`}
-              >
-                <img
-                  src={ccItem.item.cover_image?.large || ccItem.item.cover_image?.medium}
-                  alt={ccTitle}
-                  className="w-5 h-7 rounded object-cover"
-                />
-                <span className="max-w-[80px] truncate">{ccTitle}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 });

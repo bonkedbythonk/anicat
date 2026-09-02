@@ -37,11 +37,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const [showControls, setShowControls] = useState(true);
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
   const [zoom, setZoom] = useState(1);
-  // Desktop's window enforces an 800px minimum, so this can never be true
-  // there — safe to gate mobile-only behavior on it without a separate
-  // mobile build of this component (double-page mode, the fullscreen
-  // toggle, and touch-swipe page turning all need to differ on a phone).
-  const [isMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the reader put the *app window* into native fullscreen.
@@ -76,12 +71,9 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     const savedMode = (localStorage.getItem(`anicat_manga_mode_${mediaId}`) ||
       localStorage.getItem("anicat_manga_reading_mode")) as ReadingMode | null;
     if (savedMode === "single" || savedMode === "double" || savedMode === "vertical") {
-      // A "double" preference saved from a desktop session isn't offered (or
-      // usable) on a phone — fall back to single rather than rendering an
-      // illegible squished two-page spread.
-      setReadingMode(isMobile && savedMode === "double" ? "single" : savedMode);
+      setReadingMode(savedMode);
     }
-  }, [isMobile, mediaId]);
+  }, [mediaId]);
 
   // Persist mode both globally (the default for new series) and per series.
   const changeMode = (mode: ReadingMode) => {
@@ -320,40 +312,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     setZoom(1);
   }, [currentPage, readingMode, chapterNumber]);
 
-  // Touch swipe → flip pages (single/double mode only). The trackpad wheel
-  // handler above has no touch equivalent at all, so on a phone the only way
-  // to turn pages was tapping the small left/right zones — this is the
-  // primary interaction most manga reader apps rely on.
-  useEffect(() => {
-    if (!isMobile) return;
-    const container = containerRef.current;
-    if (!container || readingMode === "vertical") return;
-    let startX = 0;
-    let startY = 0;
-
-    const onTouchStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - startX;
-      const dy = Math.abs(e.changedTouches[0].clientY - startY);
-      if (Math.abs(dx) < 50 || Math.abs(dx) < dy * 1.5) return;
-      const direction = dx < 0 ? "forward" : "back";
-      if (readingDirection === "rtl") {
-        if (direction === "forward") handlePrev(); else handleNext();
-      } else {
-        if (direction === "forward") handleNext(); else handlePrev();
-      }
-    };
-
-    container.addEventListener("touchstart", onTouchStart, { passive: true });
-    container.addEventListener("touchend", onTouchEnd, { passive: true });
-    return () => {
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [isMobile, readingMode, readingDirection, handleNext, handlePrev]);
 
   const toggleFullscreen = async () => {
     try {
@@ -407,7 +365,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isMobile) return;
     // Prevent scroll wheel from triggering mousemove events by checking actual movement
     if (Math.abs(e.movementX) < 2 && Math.abs(e.movementY) < 2) return;
     
@@ -473,13 +430,12 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     );
   }
 
-  // Portaled to document.body: MediaDetail (both desktop and mobile) mounts
-  // this inside an animated motion.div, whose `transform` creates a new
-  // containing block for `position: fixed` descendants and a new stacking
-  // context for z-index — without the portal this reader gets trapped inside
-  // that wrapper's box instead of the true viewport, so sibling chrome
-  // (mobile's bottom tab bar, or the phone's own status bar) paints on top of
-  // it regardless of z-index.
+  // Portaled to document.body: MediaDetail mounts this inside an animated
+  // motion.div, whose `transform` creates a new containing block for
+  // `position: fixed` descendants and a new stacking context for z-index —
+  // without the portal this reader gets trapped inside that wrapper's box
+  // instead of the true viewport, so sibling chrome paints on top of it
+  // regardless of z-index.
   return createPortal(
     <div
       ref={containerRef}
@@ -487,57 +443,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
       className="fixed inset-0 z-[200] bg-[#050505] flex flex-col items-center select-none overflow-hidden transform-gpu will-change-[transform,opacity] forced-dark-container"
     >
       {/* Header Controls */}
-      {isMobile ? (
-        <div
-          className={`fixed top-0 inset-x-0 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
-          style={{ paddingTop: "env(safe-area-inset-top)" }}
-        >
-          <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-            <button onClick={onClose} className="p-2 rounded-full bg-surface border border-border text-foreground shrink-0">
-              <X size={19} />
-            </button>
-
-            <div className="flex items-center gap-1.5 min-w-0">
-              {onNavigateChapter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onNavigateChapter("prev"); }}
-                  disabled={!hasPrevChapter}
-                  className="p-1.5 rounded-lg bg-surface border border-border text-foreground disabled:opacity-20"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-              )}
-              <p className="text-sm font-semibold text-foreground whitespace-nowrap">Ch. {chapterNumber}</p>
-              {onNavigateChapter && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onNavigateChapter("next"); }}
-                  disabled={!hasNextChapter}
-                  className="p-1.5 rounded-lg bg-surface border border-border text-foreground disabled:opacity-20"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1 bg-surface p-1 rounded-xl border border-border shrink-0">
-              {readingMode !== "vertical" && (
-                <button
-                  onClick={() => {
-                    const newDir = readingDirection === "ltr" ? "rtl" : "ltr";
-                    setReadingDirection(newDir);
-                    localStorage.setItem("anicat_manga_reading_direction", newDir);
-                  }}
-                  className="px-2 py-2 rounded-lg text-[10px] font-semibold tracking-wide text-accent uppercase"
-                >
-                  {readingDirection === "rtl" ? "RTL" : "LTR"}
-                </button>
-              )}
-              <button onClick={() => changeMode("single")} className={`p-2 rounded-lg transition-all ${readingMode === "single" ? "bg-accent text-white" : "text-muted-foreground"}`}><FileText size={16} /></button>
-              <button onClick={() => changeMode("vertical")} className={`p-2 rounded-lg transition-all ${readingMode === "vertical" ? "bg-accent text-white" : "text-muted-foreground"}`}><ScrollText size={16} /></button>
-            </div>
-          </div>
-        </div>
-      ) : (
         <>
           {/* Left Vertical Bar */}
           <div className={`fixed left-6 top-1/2 -translate-y-1/2 z-50 transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
@@ -631,7 +536,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
             </div>
           </div>
         </>
-      )}
 
       {/* Content Area */}
       <div 
@@ -790,53 +694,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
           </div>
         )}
       </div>
-      {/* Mobile Footer */}
-      {isMobile && readingMode !== "vertical" && (
-        <div className={`fixed bottom-6 inset-x-0 z-50 flex justify-center transition-opacity duration-300 ${showControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
-          <div className="w-[calc(100%-2rem)] max-w-md bg-surface border border-border p-4 rounded-2xl flex flex-col space-y-4">
-            {/* Page Slider */}
-            {pages.length <= 60 ? (
-              <div className="flex w-full gap-[2px]" style={{ direction: readingDirection === "rtl" ? "rtl" : "ltr" }}>
-                {pages.map((_, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setCurrentPage(idx)}
-                    className={`h-[4px] flex-1 rounded-full ${idx < currentPage ? "bg-accent" : idx === currentPage ? "bg-foreground" : "bg-foreground/20"}`}
-                  />
-                ))}
-              </div>
-            ) : (
-              <input
-                type="range"
-                min="0"
-                max={pages.length - 1}
-                value={currentPage}
-                onChange={(e) => setCurrentPage(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-foreground/10 rounded-full appearance-none accent-accent"
-                style={{ direction: readingDirection === "rtl" ? "rtl" : "ltr" }}
-              />
-            )}
-            
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-muted-foreground">
-                {currentPage + 1} / {pages.length}
-              </span>
-              
-              {/* Finish/Next Chapter Action */}
-              {((readingMode === "single" && currentPage === pages.length - 1) ||
-                (readingMode === "double" && currentPage >= pages.length - 2)) && (
-                hasNextChapter ? (
-                  <button onClick={handleNextChapter} className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg font-bold text-xs animate-fade-in">
-                    Next <ChevronRight size={16} />
-                  </button>
-                ) : (
-                  <button onClick={handleFinish} className="px-4 py-2 bg-accent text-white rounded-lg font-bold text-xs animate-fade-in">Finish</button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>,
     document.body,
   );

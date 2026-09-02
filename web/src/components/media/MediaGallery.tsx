@@ -15,7 +15,7 @@ export interface GalleryImage {
 
 /**
  * Series artwork first (never a spoiler), then episode stills in number
- * order. Shared by the desktop and mobile detail pages.
+ * order. Shared by every detail page that shows one.
  */
 export function buildGalleryImages(
   anizip: AniZipMeta | undefined,

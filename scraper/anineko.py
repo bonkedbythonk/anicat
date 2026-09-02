@@ -352,14 +352,24 @@ class AniNekoProvider:
         Tries curl_cffi first. Only opens Chrome to solve the challenge if
         Cloudflare is actually blocking (403). When CF isn't challenging,
         no browser is needed at all.
+
+        `session.get` is curl_cffi's *synchronous* call, same as `warmup`'s --
+        run directly it parks the uvicorn event loop for the whole timeout, so
+        `search`'s `asyncio.gather` over several `_cf_get` calls executed them
+        one after another instead of concurrently: observed live, a dead
+        anineko turned a 15s timeout into ~30s per search query (two title
+        attempts serialized) and up to a full minute across the loop in
+        commands/media.rs that tries several title candidates. Executor thread
+        lets `gather` actually overlap the requests.
         """
         kwargs.setdefault("timeout", 20)
+        loop = asyncio.get_running_loop()
         if self._solver.is_valid:
             pass  # cookies already in session from last solve
-        resp = self.session.get(url, **kwargs)
+        resp = await loop.run_in_executor(None, lambda: self.session.get(url, **kwargs))
         if self._handle_cf_block(resp):
             await self._ensure_clearance()
-            resp = self.session.get(url, **kwargs)
+            resp = await loop.run_in_executor(None, lambda: self.session.get(url, **kwargs))
         return resp
 
     async def warmup(self) -> None:
@@ -403,7 +413,13 @@ class AniNekoProvider:
         # results while the truncated "Kaguya-sama wa Kokurasetai" returns the
         # right show. Verified against both endpoints — this is a property of
         # the index, not of the old HTML scrape.
-        async def run_attempt(attempt: str) -> list[AnimeRef]:
+        # `None` (a transport failure) is kept distinct from `[]` (a request
+        # that succeeded and genuinely found nothing) -- collapsing both to
+        # `[]` here used to make a fully-down site indistinguishable from "no
+        # match", which meant the Rust caller (commands/media.rs) saw an `Ok`
+        # with zero results and moved on to its own next title candidate,
+        # paying this same multi-attempt timeout up to 4 more times per play.
+        async def run_attempt(attempt: str) -> list[AnimeRef] | None:
             try:
                 resp = await self._cf_get(
                     f"{BASE_URL}/ajax/search",
@@ -415,16 +431,19 @@ class AniNekoProvider:
                 return self._parse_ajax_search(resp.text)
             except Exception as e:
                 log.warning("Search attempt for '%s' failed: %s", attempt, e)
-                return []
+                return None
 
         tasks = [run_attempt(att) for att in attempts]
         all_results = await asyncio.gather(*tasks)
+
+        if all(r is None for r in all_results):
+            raise RuntimeError(f"all {len(attempts)} search attempts failed (site unreachable)")
 
         # Merge results, preserving priority of attempts and removing duplicates
         merged = []
         seen = set()
         for results in all_results:
-            for ref in results:
+            for ref in results or []:
                 if ref.id not in seen:
                     seen.add(ref.id)
                     merged.append(ref)

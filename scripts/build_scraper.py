@@ -35,10 +35,17 @@ def main():
         "--hidden-import", "selectolax",
         "--collect-all", "curl_cffi",
         "--collect-all", "selectolax",
-        # mkissa.py imports cryptography (AESGCM) lazily via main.py; collect
-        # its OpenSSL backend binaries so the frozen build has them.
-        "--hidden-import", "cryptography",
-        "--collect-all", "cryptography",
+        # The light novel engine is imported lazily inside the /novel/* routes,
+        # so name the package and its parsing stack explicitly.
+        "--hidden-import", "novel",
+        "--collect-submodules", "novel",
+        "--hidden-import", "bs4",
+        "--collect-all", "bs4",
+        "--hidden-import", "lxml",
+        "--hidden-import", "requests",
+        "--hidden-import", "ebooklib",
+        "--collect-all", "ebooklib",
+        "--hidden-import", "PIL",
         "--exclude-module", "setuptools",
         "main.py"
     ]

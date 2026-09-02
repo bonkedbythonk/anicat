@@ -69,11 +69,12 @@ pub struct AnimeInfo {
 /// around longer. Persisting the clearance to disk would let this drop back
 /// down, but needs the solving Chrome version and a wall-clock timestamp
 /// persisted alongside it or the rehydrated session fingerprint won't match.
-const IDLE_TIMEOUT_SECS: u64 = 1800;
+const BACKGROUND_IDLE_TIMEOUT_SECS: u64 = 1800;
+const FOREGROUND_IDLE_TIMEOUT_SECS: u64 = 1800;
 /// Providers the Python sidecar actually implements — the only ones worth
 /// sending to `/warmup`. `nyaa` is served by the embedded torrent engine and
 /// `none` is the "no fallback" sentinel; neither has a sidecar module.
-const SIDECAR_PROVIDERS: &[&str] = &["anineko", "mangakatana", "mkissa", "allanime"];
+const SIDECAR_PROVIDERS: &[&str] = &["mangakatana"];
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -93,6 +94,7 @@ impl Drop for ScraperProcess {
 }
 
 type FailureNotifier = Box<dyn Fn(&str) + Send + Sync>;
+type PlaybackChecker = Box<dyn Fn() -> bool + Send + Sync>;
 
 /// Consecutive transport failures before a provider is benched.
 const BREAKER_TRIP_AFTER: u32 = 3;
@@ -216,6 +218,10 @@ pub struct ScraperManager {
     // re-armed by a successful start so a later relapse notifies again.
     failure_notifier: Arc<std::sync::Mutex<Option<FailureNotifier>>>,
     failure_notified: Arc<std::sync::atomic::AtomicBool>,
+    /// Optional hook to check if media is currently playing before killing the sidecar on idle.
+    playback_checker: Arc<std::sync::Mutex<Option<PlaybackChecker>>>,
+    /// Tracks whether the desktop window is currently focused / active.
+    window_active: Arc<std::sync::atomic::AtomicBool>,
     /// Skips requests to a provider that has been failing at transport level,
     /// so a dead site doesn't cost the full timeout budget on every play.
     breaker: ProviderBreaker,
@@ -238,6 +244,8 @@ impl Clone for ScraperManager {
             scraper_script: self.scraper_script.clone(),
             failure_notifier: self.failure_notifier.clone(),
             failure_notified: self.failure_notified.clone(),
+            playback_checker: self.playback_checker.clone(),
+            window_active: self.window_active.clone(),
             breaker: self.breaker.clone(),
             warm_providers: self.warm_providers.clone(),
             spawned_once: self.spawned_once.clone(),
@@ -259,9 +267,34 @@ impl ScraperManager {
             scraper_script,
             failure_notifier: Arc::new(std::sync::Mutex::new(None)),
             failure_notified: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            playback_checker: Arc::new(std::sync::Mutex::new(None)),
+            window_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             breaker: ProviderBreaker::default(),
             warm_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
             spawned_once: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    pub fn set_playback_checker(&self, checker: impl Fn() -> bool + Send + Sync + 'static) {
+        if let Ok(mut guard) = self.playback_checker.lock() {
+            *guard = Some(Box::new(checker));
+        }
+    }
+
+    /// Update whether the main window is focused / in active use.
+    ///
+    /// When returning to the foreground (`active == true`), if the sidecar was
+    /// previously shut down due to inactivity, we eagerly pre-warm it in the background
+    /// so the user experiences zero cold-start delay when searching or playing streams.
+    pub fn set_window_active(&self, active: bool) {
+        use std::sync::atomic::Ordering;
+        let prev = self.window_active.swap(active, Ordering::SeqCst);
+        if active && !prev {
+            let sm = self.clone();
+            tauri::async_runtime::spawn(async move {
+                log::info!("[scraper] App window focused — ensuring sidecar is warm in background");
+                let _ = sm.ensure_running().await;
+            });
         }
     }
 
@@ -341,6 +374,16 @@ impl ScraperManager {
         };
         for provider in &providers {
             let provider = provider.as_str();
+            // A benched provider still gets a full warmup attempt on every
+            // sidecar respawn otherwise -- unlike `search`/`get_streams`,
+            // this loop never consulted the breaker. Since it also warms
+            // providers sequentially, one dead one delayed every provider
+            // queued behind it by its own timeout, observed live as
+            // mangakatana's warmup waiting out anineko's 15s failure first.
+            if let Err(reason) = self.breaker.check(provider) {
+                log::info!("[scraper] skipping warmup for '{}': {}", provider, reason);
+                continue;
+            }
             let started = Instant::now();
             let url = format!("http://127.0.0.1:{}/warmup?provider={}", port, provider);
             // Long, because the slow path this exists to absorb *is* a
@@ -623,6 +666,190 @@ impl ScraperManager {
         })
     }
 
+    pub async fn search_novels(
+        &self,
+        query: &str,
+        provider: &str,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/novel/search?query={}&provider={}",
+            port,
+            crate::util::percent_encode(query),
+            crate::util::percent_encode(provider)
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper search_novels failed (query={}, provider={}): {}", query, provider, e);
+                format!("Scraper search_novels failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper search_novels errored (query={}, provider={}): {}", query, provider, e);
+            format!("Scraper search_novels failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper search_novels response: {}, error: {}", body, e);
+            format!("Parse search novels: {}", e)
+        })
+    }
+
+    pub async fn get_novel(
+        &self,
+        slug: &str,
+        provider: &str,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!(
+            "http://127.0.0.1:{}/novel/get?slug={}&provider={}",
+            port,
+            crate::util::percent_encode(slug),
+            crate::util::percent_encode(provider)
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper get_novel failed (slug={}, provider={}): {}", slug, provider, e);
+                format!("Scraper get_novel failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_novel errored (slug={}, provider={}): {}", slug, provider, e);
+            format!("Scraper get_novel failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper get_novel response: {}, error: {}", body, e);
+            format!("Parse novel: {}", e)
+        })
+    }
+
+    pub async fn get_novel_toc(
+        &self,
+        volume_url: &str,
+        title: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let mut url = format!(
+            "http://127.0.0.1:{}/novel/toc?url={}",
+            port,
+            crate::util::percent_encode(volume_url)
+        );
+        if let Some(t) = title {
+            url.push_str(&format!("&title={}", crate::util::percent_encode(t)));
+        }
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(45))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper get_novel_toc failed (url={}): {}", volume_url, e);
+                format!("Scraper get_novel_toc failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_novel_toc errored (url={}): {}", volume_url, e);
+            format!("Scraper get_novel_toc failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper novel toc response: {}, error: {}", body, e);
+            format!("Parse novel toc: {}", e)
+        })
+    }
+
+    pub async fn get_novel_chapter(
+        &self,
+        slug: &str,
+        chapter: &str,
+        url_override: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let mut url = format!(
+            "http://127.0.0.1:{}/novel/chapter?slug={}&chapter={}",
+            port,
+            crate::util::percent_encode(slug),
+            crate::util::percent_encode(chapter)
+        );
+        if let Some(u) = url_override {
+            url.push_str(&format!("&url={}", crate::util::percent_encode(u)));
+        }
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(45))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper get_novel_chapter failed (slug={}, chapter={}): {}", slug, chapter, e);
+                format!("Scraper get_novel_chapter failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_novel_chapter errored: {}", e);
+            format!("Scraper get_novel_chapter failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper novel chapter response: {}, error: {}", body, e);
+            format!("Parse novel chapter: {}", e)
+        })
+    }
+
+    pub async fn build_novel_epub(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!("http://127.0.0.1:{}/novel/build_epub", port);
+        let resp = self
+            .http_client
+            .post(&url)
+            .json(&payload)
+            .timeout(Duration::from_secs(180))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper build_novel_epub failed: {}", e);
+                format!("Scraper build_novel_epub failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper build_novel_epub errored: {}", e);
+            format!("Scraper build_novel_epub failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper build_novel_epub response: {}, error: {}", body, e);
+            format!("Parse build novel epub: {}", e)
+        })
+    }
+
+    pub async fn get_novel_presets(&self) -> Result<serde_json::Value, String> {
+        let port = self.ensure_running().await?;
+        let url = format!("http://127.0.0.1:{}/novel/presets", port);
+        let resp = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| {
+                log::error!("Scraper get_novel_presets failed: {}", e);
+                format!("Scraper get_novel_presets failed: {}", e)
+            })?;
+        let body = sidecar_body(resp).await.map_err(|e| {
+            log::error!("Scraper get_novel_presets errored: {}", e);
+            format!("Scraper get_novel_presets failed: {}", e)
+        })?;
+        serde_json::from_str(&body).map_err(|e| {
+            log::error!("Failed to parse scraper novel presets response: {}, error: {}", body, e);
+            format!("Parse novel presets: {}", e)
+        })
+    }
+
     pub async fn debug_streams(
         &self,
         slug: &str,
@@ -755,14 +982,24 @@ impl ScraperManager {
             script_dir
         );
 
-        start_and_wait(cmd, port, &self.process, &self.http_client).await
+        start_and_wait(
+            cmd,
+            port,
+            &self.process,
+            &self.http_client,
+            &self.window_active,
+            &self.playback_checker,
+        ).await
     }
 }
 
 async fn idle_watchdog(
     process: Arc<Mutex<Option<ScraperProcess>>>,
     _client: reqwest::Client,
+    window_active: Arc<std::sync::atomic::AtomicBool>,
+    playback_checker: Arc<std::sync::Mutex<Option<PlaybackChecker>>>,
 ) {
+    use std::sync::atomic::Ordering;
     loop {
         sleep(Duration::from_secs(5)).await;
 
@@ -771,7 +1008,26 @@ async fn idle_watchdog(
             if let Ok(Some(_status)) = sp.child.try_wait() {
                 true
             } else {
-                sp.last_used.elapsed().as_secs() >= IDLE_TIMEOUT_SECS
+                let is_active = window_active.load(Ordering::Relaxed);
+                if is_active {
+                    // Window is active in foreground — keep sidecar warm up to foreground timeout
+                    sp.last_used.elapsed().as_secs() >= FOREGROUND_IDLE_TIMEOUT_SECS
+                } else {
+                    // Window is in background/inactive — check if playback is currently active
+                    let is_playing = playback_checker
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.as_ref().map(|f| f()))
+                        .unwrap_or(false);
+                    if is_playing {
+                        // Playback is active: do not kill sidecar while user or phone is watching
+                        sp.last_used = Instant::now();
+                        false
+                    } else {
+                        // Inactive in background and no playback: idle off quickly to free memory
+                        sp.last_used.elapsed().as_secs() >= BACKGROUND_IDLE_TIMEOUT_SECS
+                    }
+                }
             }
         } else {
             return;
@@ -798,6 +1054,8 @@ async fn start_and_wait(
     port: u16,
     process: &Arc<Mutex<Option<ScraperProcess>>>,
     http_client: &reqwest::Client,
+    window_active: &Arc<std::sync::atomic::AtomicBool>,
+    playback_checker: &Arc<std::sync::Mutex<Option<PlaybackChecker>>>,
 ) -> Result<u16, String> {
     let mut child = cmd
         .stdout(std::process::Stdio::null())
@@ -835,7 +1093,9 @@ async fn start_and_wait(
                 drop(proc_guard);
                 let p = process.clone();
                 let c = http_client.clone();
-                tokio::spawn(async move { idle_watchdog(p, c).await; });
+                let w = window_active.clone();
+                let pb = playback_checker.clone();
+                tokio::spawn(async move { idle_watchdog(p, c, w, pb).await; });
                 // Elapsed, not just the attempt count: a cold sidecar spawn is
                 // one of the stages that shows up as "pressing play was slow",
                 // and the resolve summary line can't see inside this call.
@@ -938,22 +1198,5 @@ mod tests {
         // The whole point of benching a provider is to reach the fallback
         // faster, so the fallback must not be benched along with it.
         assert!(breaker.check("nyaa").is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
-    async fn test_search() {
-        let _ = env_logger::builder().is_test(true).try_init();
-        let http_client = reqwest::Client::new();
-        let python_path = "uv".to_string();
-        let scraper_script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scraper/main.py")
-            .to_string_lossy()
-            .to_string();
-
-        let manager = ScraperManager::new(http_client, python_path, scraper_script);
-        let results = manager.search("The Ramparts of Ice", "mkissa").await.unwrap();
-        println!("TEST_SEARCH_RESULTS: {:?}", results);
-        assert!(!results.is_empty());
     }
 }

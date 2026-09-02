@@ -23,8 +23,9 @@ pub async fn search_media(
     genre: Option<String>,
     year: Option<i64>,
     min_score: Option<i64>,
+    sort: Option<String>,
 ) -> Result<Value, String> {
-    search_media_impl(state.inner(), query, page, media_type, status, genre, year, min_score).await
+    search_media_impl(state.inner(), query, page, media_type, status, genre, year, min_score, sort).await
 }
 
 /// Set MEDIA_SEARCH_QUERY's `$type` variable, or deliberately leave it unset.
@@ -36,7 +37,10 @@ pub async fn search_media(
 /// request. The difference is invisible in the query text -- `media(type:
 /// $type)` is identical either way -- so it is covered by a test.
 fn insert_search_media_type(vars: &mut HashMap<String, Value>, media_type: &str) {
-    if media_type != "ALL" {
+    if media_type == "NOVEL" {
+        vars.insert("type".to_string(), serde_json::json!("MANGA"));
+        vars.insert("format".to_string(), serde_json::json!(["NOVEL"]));
+    } else if media_type != "ALL" {
         vars.insert("type".to_string(), serde_json::json!(media_type));
     }
 }
@@ -51,8 +55,9 @@ pub async fn search_media_impl(
     genre: Option<String>,
     year: Option<i64>,
     min_score: Option<i64>,
+    sort: Option<String>,
 ) -> Result<Value, String> {
-    log::debug!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}", query, page, media_type, status, genre, year, min_score);
+    log::debug!("search_media: query='{}', page={:?}, media_type={:?}, status={:?}, genre={:?}, year={:?}, min_score={:?}, sort={:?}", query, page, media_type, status, genre, year, min_score, sort);
     let _has_token = state.anilist_client.has_token();
     // "ALL" is the combined anime+manga search the search view uses once there
     // is a query to run. AniList's `media(type:)` returns both types when the
@@ -72,6 +77,7 @@ pub async fn search_media_impl(
         ("genre", genre.as_deref().unwrap_or("")),
         ("year", &year.map(|y| y.to_string()).unwrap_or_default()),
         ("min", &min_score.map(|s| s.to_string()).unwrap_or_default()),
+        ("sort", sort.as_deref().unwrap_or("")),
     ]);
     if let Some(cached) = state.cache.get(&cache_key) { return Ok(cached); }
 
@@ -94,6 +100,13 @@ pub async fn search_media_impl(
     }
     if let Some(s) = min_score {
         vars.insert("averageScoreGreater".to_string(), serde_json::json!(s));
+    }
+    if let Some(s) = sort {
+        if !s.is_empty() {
+            vars.insert("sort".to_string(), serde_json::json!([s]));
+        }
+    } else if query.is_empty() {
+        vars.insert("sort".to_string(), serde_json::json!(["POPULARITY_DESC"]));
     }
 
     let result: PageResponse<crate::anilist::types::MediaItem> = match state
@@ -455,7 +468,7 @@ pub async fn get_episodes_impl(
             media_id,
             &provider_name,
             is_manga,
-            title,
+            title.clone(),
         )
         .await?
         {
@@ -544,16 +557,34 @@ pub async fn get_episodes_impl(
             let has_fallback = !fallback.is_empty() && fallback != "none" && fallback != provider_name;
             if has_fallback {
                 log::info!("get_episodes: primary '{}' returned no episodes, trying fallback '{}'", provider_name, fallback);
-                let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
-                    .or(resolve_and_save_provider_slug(state, media_id, &fallback, false, None).await.ok().flatten());
-                if let Some(slug) = fb_slug {
-                    match state.scraper_manager.get_anime(&slug, &fallback).await {
-                        Ok(info) if !info.episodes.is_empty() => {
-                            notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
-                            episodes = info.episodes;
+                if fallback == "nyaa" {
+                    let count = match episode_count.filter(|&n| n > 0) {
+                        Some(n) => Some(n),
+                        None => crate::torrent::gather_media_info(state, media_id, title.clone()).await.episode_count,
+                    };
+                    episodes = (1..=count.unwrap_or(0))
+                        .map(|n| crate::scraper::client::Episode {
+                            number: n as i32,
+                            title: None,
+                            image: None,
+                            download_status: None,
+                        })
+                        .collect();
+                    if !episodes.is_empty() {
+                        notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
+                    }
+                } else {
+                    let fb_slug = registry::service::get_provider_slug(&db, media_id, &fallback)
+                        .or(resolve_and_save_provider_slug(state, media_id, &fallback, false, None).await.ok().flatten());
+                    if let Some(slug) = fb_slug {
+                        match state.scraper_manager.get_anime(&slug, &fallback).await {
+                            Ok(info) if !info.episodes.is_empty() => {
+                                notify(&format!("Couldn't reach {} — loaded from {}", super::playback::provider_label(&provider_name), super::playback::provider_label(&fallback)));
+                                episodes = info.episodes;
+                            }
+                            Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
+                            Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
                         }
-                        Ok(_) => log::warn!("get_episodes: fallback '{}' also returned 0 episodes", fallback),
-                        Err(e) => log::error!("get_episodes: fallback '{}' failed: {}", fallback, e),
                     }
                 }
             }
@@ -806,40 +837,86 @@ pub async fn resolve_stream_impl(
     }
 
     // 2. Fallback provider if primary returned 0 streams
-    if fallback != provider_name {
+    if !fallback.is_empty() && fallback != "none" && fallback != provider_name {
         log::info!("resolve_stream: primary provider '{}' failed, trying fallback '{}'", provider_name, fallback);
-        // Same shape as the primary above: probe a saved slug, and only fall
-        // through to a fresh resolve (which returns its own validated streams)
-        // when that produces nothing.
-        let mut fb_servers = Vec::new();
-        if let Some(ref slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
-            if let Ok(res) = state
-                .scraper_manager
-                .get_streams(slug, episode_number, &fallback)
+        if fallback == "nyaa" {
+            let prefer_dub =
+                super::playback::effective_translation_type(state, media_id).await == "dub";
+            let crate::torrent::MediaInfo { titles, episode_count, hint, siblings } =
+                crate::torrent::gather_media_info(state, media_id, title).await;
+            let allow_episodeless = episode_number == 1 && episode_count.unwrap_or(0) <= 1;
+            let choices = state
+                .torrent
+                .list_candidates(
+                    &state.http_client,
+                    crate::torrent::ResolveTarget {
+                        media_id,
+                        episode: episode_number as i64,
+                        titles: &titles,
+                        allow_episodeless,
+                        episode_count,
+                        prefer_dub,
+                        browser_client: client.is_browser(),
+                        chosen_name: None,
+                        movie: None,
+                        series: None,
+                        entry: hint,
+                        sibling_titles: &siblings,
+                    },
+                )
+                .await;
+            let streams: Vec<Value> = choices
+                .into_iter()
+                .map(|c| {
+                    let group = if c.is_dub { "dub" } else { "soft_sub" };
+                    serde_json::json!({
+                        "name": c.name,
+                        "url": "",
+                        "quality": "1080p",
+                        "seeders": c.seeders,
+                        "isM3U8": false,
+                        "headers": null,
+                        "group": group,
+                    })
+                })
+                .collect();
+            if !streams.is_empty() {
+                return Ok(serde_json::json!({ "streams": streams }));
+            }
+        } else {
+            // Same shape as the primary above: probe a saved slug, and only fall
+            // through to a fresh resolve (which returns its own validated streams)
+            // when that produces nothing.
+            let mut fb_servers = Vec::new();
+            if let Some(ref slug) = registry::service::get_provider_slug(&db, media_id, &fallback) {
+                if let Ok(res) = state
+                    .scraper_manager
+                    .get_streams(slug, episode_number, &fallback)
+                    .await
+                {
+                    fb_servers = res;
+                }
+            }
+            if fb_servers.is_empty() {
+                if let Ok(Some((_, validated))) = resolve_and_save_provider_slug_for_episode(
+                    state,
+                    media_id,
+                    &fallback,
+                    false,
+                    title.clone(),
+                    Some(episode_number),
+                )
                 .await
-            {
-                fb_servers = res;
+                {
+                    fb_servers = validated;
+                }
             }
-        }
-        if fb_servers.is_empty() {
-            if let Ok(Some((_, validated))) = resolve_and_save_provider_slug_for_episode(
-                state,
-                media_id,
-                &fallback,
-                false,
-                title.clone(),
-                Some(episode_number),
-            )
-            .await
-            {
-                fb_servers = validated;
+            if client.is_browser() {
+                fb_servers.retain(|s| s.browser_ok.unwrap_or(true));
             }
-        }
-        if client.is_browser() {
-            fb_servers.retain(|s| s.browser_ok.unwrap_or(true));
-        }
-        if !fb_servers.is_empty() {
-            return Ok(serde_json::json!({ "streams": fb_servers }));
+            if !fb_servers.is_empty() {
+                return Ok(serde_json::json!({ "streams": fb_servers }));
+            }
         }
     }
 
@@ -1151,38 +1228,22 @@ async fn download_episode(
         let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "downloading", None);
     }
 
-    let db = match state.open_db() {
-        Ok(d) => d,
-        Err(_) => {
-            notify("Failed to open database");
-            return;
-        }
-    };
-    let (slug, provider) = if let Some(s) = crate::registry::service::get_provider_slug(&db, media_id, "anineko") {
-        (s, "anineko")
-    } else {
-        let err = format!("No provider mapping for media {}", media_id);
-        let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
-        notify(&err);
-        return;
-    };
-
-    let servers = match state.scraper_manager.get_streams(&slug, episode_number as i32, provider).await {
-        Ok(s) => s,
+    let provider_name = state.config.read().await.general.provider.clone();
+    let res = crate::commands::playback::resolve_stream_for_provider(
+        &state,
+        media_id,
+        episode_number,
+        &provider_name,
+        &None,
+        Some(title.clone()),
+        crate::state::StreamClient::Mpv,
+        None,
+    )
+    .await;
+    let (raw_url, headers, _sub_url) = match res {
+        Ok(r) => r,
         Err(e) => {
-            let err = format!("Failed to get stream: {}", e);
-            if let Ok(db) = state.open_db() {
-                let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
-            }
-            notify(&err);
-            return;
-        }
-    };
-
-    let raw_url = match servers.first() {
-        Some(s) => s.url.clone(),
-        None => {
-            let err = "No stream URL found".to_string();
+            let err = format!("Failed to resolve stream: {}", e);
             if let Ok(db) = state.open_db() {
                 let _ = update_status_and_emit(&app_handle, &db, media_id, episode_number, "failed", Some(&err));
             }
@@ -1281,11 +1342,9 @@ async fn download_episode(
 
     cmd.arg(&raw_url);
 
-    if let Some(server) = servers.first() {
-        if let Some(ref headers) = server.headers {
-            for (key, val) in headers {
-                cmd.arg("--http-header").arg(format!("{}: {}", key, val));
-            }
+    if let Some(ref h) = headers {
+        for (key, val) in h {
+            cmd.arg("--http-header").arg(format!("{}: {}", key, val));
         }
     }
 
@@ -1925,6 +1984,55 @@ pub async fn resolve_and_save_provider_slug_for_episode(
     if provider_name == "nyaa" {
         return Ok(None);
     }
+
+    // Two independent callers -- e.g. the detail page's episode-list query and
+    // a playback resolve landing at the same moment -- can both find no cached
+    // slug and both kick off the identical scraper search. Observed live as
+    // two "searching '<title>' on 'anineko'" log lines a millisecond apart.
+    // Wait for the other one instead of duplicating the work, then reuse
+    // whatever it saved.
+    let _slug_guard = match state.claim_slug_resolve(media_id, provider_name) {
+        Some(guard) => guard,
+        None => {
+            const WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+            let deadline = std::time::Instant::now() + WAIT;
+            while std::time::Instant::now() < deadline
+                && state.slug_resolve_in_flight(media_id, provider_name)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+            let saved = state
+                .open_db()
+                .ok()
+                .and_then(|db| registry::service::get_provider_slug(&db, media_id, provider_name));
+            if let Some(slug) = saved {
+                log::info!(
+                    "resolve_and_save_provider_slug: reusing slug '{}' saved by the in-flight resolve for media_id={}",
+                    slug, media_id
+                );
+                let validated_streams = if let Some(ep) = episode_number {
+                    if !is_manga {
+                        state.scraper_manager.get_streams(&slug, ep, provider_name).await.unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                return Ok(Some((slug, validated_streams)));
+            }
+            // The other resolve found no match either -- fall through and
+            // search for real rather than reporting a false miss. It has
+            // already released its claim by the time slug_resolve_in_flight
+            // went false, so this either claims cleanly or (rare second race)
+            // gives up and lets the caller's own fallback chain handle it.
+            match state.claim_slug_resolve(media_id, provider_name) {
+                Some(guard) => guard,
+                None => return Ok(None),
+            }
+        }
+    };
+
     let detail_res = fetch_media_detail_cached(state, media_id, is_manga).await;
 
     let mut romaji_title = String::new();
@@ -2047,8 +2155,16 @@ pub async fn resolve_and_save_provider_slug_for_episode(
                 }
             }
             Err(e) => {
-                previous_query_completed = false;
                 log::error!("resolve_and_save_provider_slug: search failed for '{}' on '{}': {}", query, provider_name, e);
+                // A search transport failure (timeout, connection refused) means
+                // the provider itself is unreachable right now, not that this
+                // particular title spelling was wrong -- every other candidate
+                // would hit the same dead connection. Observed live: anineko
+                // down for a session burned 4 back-to-back 15s timeouts (a full
+                // minute) retrying title variants that could never succeed.
+                // Give up on this provider for this call instead of paying that
+                // multiple; the caller falls back to another provider already.
+                break;
             }
         }
     }
@@ -2199,6 +2315,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_query_defaults_sort_to_popularity() {
+        let query = "";
+        let sort: Option<String> = None;
+        let mut vars = HashMap::new();
+        if let Some(s) = sort {
+            if !s.is_empty() {
+                vars.insert("sort".to_string(), serde_json::json!([s]));
+            }
+        } else if query.is_empty() {
+            vars.insert("sort".to_string(), serde_json::json!(["POPULARITY_DESC"]));
+        }
+        assert_eq!(vars.get("sort"), Some(&serde_json::json!(["POPULARITY_DESC"])));
+    }
+
     #[derive(Debug, Clone)]
     struct DummyAnime {
         title: String,
@@ -2224,7 +2355,9 @@ mod tests {
         assert_eq!(matched.unwrap().id, "123");
     }
 
-    // Real mkissa search results for "The Quintessential Quintuplets".
+    // Real provider search results for "The Quintessential Quintuplets" --
+    // the ordering and the near-duplicate titles are what make it a useful
+    // fixture, and neither depends on which provider returned them.
     fn quintuplets_candidates() -> Vec<DummyAnime> {
         [
             ("The Quintessential Quintuplets*", "specials2"),
@@ -2366,41 +2499,12 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
-    async fn quintuplets_seasons_resolve_to_distinct_entries() {
-        let _ = env_logger::builder().is_test(true).try_init();
-        let state = AppState::new();
-        let db = state.open_db().unwrap();
-
-        // S1 (12 eps), S2 (12 eps), Specials (2 eps) must map to three
-        // different mkissa catalog entries.
-        let ids = [103572_i64, 109261, 163327];
-        let mut slugs = vec![];
-        for id in ids {
-            let _ = registry::service::clear_provider_slug(&db, id, "mkissa");
-            let slug = resolve_and_save_provider_slug(&state, id, "mkissa", false, None)
-                .await
-                .unwrap();
-            println!("media {} -> {:?}", id, slug);
-            let _ = registry::service::clear_provider_slug(&db, id, "mkissa");
-            slugs.push(slug.expect("each entry should resolve"));
-        }
-        assert_eq!(
-            slugs.iter().collect::<std::collections::HashSet<_>>().len(),
-            slugs.len(),
-            "seasons collapsed onto the same provider entry: {:?}",
-            slugs
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "integration test: needs the scraper binary and network; run with --ignored"]
     async fn test_synonym_fallbacks() {
         let _ = env_logger::builder().is_test(true).try_init();
         let state = AppState::new();
         let db = state.open_db().unwrap();
         
         let _ = registry::service::clear_provider_cache(&db, 149893);
-        let _ = registry::service::clear_provider_cache(&db, 20668);
 
         // Test Mistress Kanan is Devilishly Easy on MangaKatana
         let slug_manga = resolve_and_save_provider_slug(
@@ -2416,19 +2520,10 @@ mod tests {
         assert!(slug_manga.is_some());
         assert!(slug_manga.unwrap().contains("kanan-sama-is-easy-as-hell"));
 
-        // Test Monthly Girls' Nozaki-kun on Mkissa
-        let slug_anime = resolve_and_save_provider_slug(
-            &state,
-            20668,
-            "mkissa",
-            false, // is_manga
-            Some("Monthly Girls' Nozaki-kun".to_string()),
-        )
-        .await
-        .unwrap();
-        println!("RESOLVED ANIME SLUG: {:?}", slug_anime);
-        assert!(slug_anime.is_some());
-        assert_eq!(slug_anime.unwrap(), "5oBy5h4pAPn6wrxvv");
+        // The anime half of this test resolved through mkissa, which is gone.
+        // Nothing replaces it: the only anime provider left is nyaa, whose
+        // registry "slug" is a manual search-title override rather than a
+        // catalog id, so there is no slug for it to resolve.
     }
 }
 

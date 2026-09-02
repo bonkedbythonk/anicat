@@ -72,9 +72,11 @@ pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
-    // Migration (v3): rename provider key allanime → mkissa. Mkissa hits the
-    // same allanime.day GraphQL backend, so a show's cached _id slug is
-    // identical — reuse it instead of forcing every existing user to re-match.
+    // Migration (v3): rename provider key allanime → mkissa. Both providers are
+    // gone now, so this renames one dead key to another and changes nothing a
+    // user can see — kept because a shipped migration has to keep running: it
+    // is what moves a v2 database to v3, and deleting it would leave old
+    // databases stuck below the version every later migration checks against.
     // Runs for both fresh installs (no-op) and existing v2 databases, which
     // the if/else-if above leaves untouched. Idempotent: once the "allanime"
     // key is gone the LIKE filter matches nothing.
@@ -615,94 +617,6 @@ pub fn retry_queue(conn: &rusqlite::Connection) -> Result<(), String> {
     Ok(())
 }
 
-// ── multi-user (Stage 2: headless server, Tailscale-invited friends) ──────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct User {
-    pub id: i64,
-    pub display_name: String,
-    #[serde(skip_serializing)]
-    pub pin: String,
-    pub anilist_token: Option<String>,
-    pub anilist_username: Option<String>,
-    pub created_at: String,
-}
-
-/// `pin` is stored and compared in plaintext — same trust model as the
-/// existing single-user `MobileConfig.pin`: Tailscale is the actual
-/// security boundary here (only devices on the host's tailnet can reach
-/// this server at all), not this PIN, so hashing a short PIN wouldn't
-/// meaningfully raise the bar.
-pub fn create_user(conn: &rusqlite::Connection, display_name: &str, pin: &str) -> Result<i64, String> {
-    conn.execute(
-        "INSERT INTO users (display_name, pin) VALUES (?1, ?2)",
-        params![display_name, pin],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
-}
-
-fn row_to_user(row: &rusqlite::Row) -> rusqlite::Result<User> {
-    Ok(User {
-        id: row.get(0)?,
-        display_name: row.get(1)?,
-        pin: row.get(2)?,
-        anilist_token: row.get(3)?,
-        anilist_username: row.get(4)?,
-        created_at: row.get(5)?,
-    })
-}
-
-const USER_COLUMNS: &str = "id, display_name, pin, anilist_token, anilist_username, created_at";
-
-pub fn get_user_by_id(conn: &rusqlite::Connection, user_id: i64) -> Result<Option<User>, String> {
-    conn.query_row(
-        &format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?1"),
-        [user_id],
-        row_to_user,
-    )
-    .optional()
-    .map_err(|e| e.to_string())
-}
-
-pub fn get_user_by_name(conn: &rusqlite::Connection, display_name: &str) -> Result<Option<User>, String> {
-    conn.query_row(
-        &format!("SELECT {USER_COLUMNS} FROM users WHERE display_name = ?1"),
-        [display_name],
-        row_to_user,
-    )
-    .optional()
-    .map_err(|e| e.to_string())
-}
-
-/// Every registered user, most-recently-created first. Fine to load in full
-/// at friend-group scale — there is no pagination need here.
-pub fn list_users(conn: &rusqlite::Connection) -> Result<Vec<User>, String> {
-    let mut stmt = conn
-        .prepare(&format!("SELECT {USER_COLUMNS} FROM users ORDER BY id DESC"))
-        .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], row_to_user).map_err(|e| e.to_string())?;
-    let mut users = Vec::new();
-    for row in rows {
-        users.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(users)
-}
-
-pub fn set_user_anilist_token(
-    conn: &rusqlite::Connection,
-    user_id: i64,
-    token: Option<&str>,
-    username: Option<&str>,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE users SET anilist_token = ?2, anilist_username = ?3 WHERE id = ?1",
-        params![user_id, token, username],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,32 +673,16 @@ mod tests {
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
     }
 
-    #[test]
-    fn create_and_fetch_user_roundtrips() {
-        let conn = migrated_conn();
-        let id = create_user(&conn, "Sam", "4821").unwrap();
-        let by_id = get_user_by_id(&conn, id).unwrap().unwrap();
-        assert_eq!(by_id.display_name, "Sam");
-        assert_eq!(by_id.pin, "4821");
-        let by_name = get_user_by_name(&conn, "Sam").unwrap().unwrap();
-        assert_eq!(by_name.id, id);
-        assert!(get_user_by_name(&conn, "Nobody").unwrap().is_none());
-    }
-
-    #[test]
-    fn duplicate_display_name_is_rejected() {
-        let conn = migrated_conn();
-        create_user(&conn, "Sam", "1111").unwrap();
-        assert!(create_user(&conn, "Sam", "2222").is_err());
-    }
-
     /// The whole point of the user_id column: two people's progress on the
     /// same episode must not collide, and the desktop sentinel (0) must not
-    /// collide with a real registered user either.
+    /// collide with a real registered user either. `friend_id` is just a
+    /// distinct literal id -- these tables have no foreign key onto a users
+    /// table, so isolation only ever depended on the column, not on a
+    /// registered account existing.
     #[test]
     fn watch_history_is_isolated_per_user() {
         let conn = migrated_conn();
-        let friend_id = create_user(&conn, "Alex", "0000").unwrap();
+        let friend_id = 42;
 
         record_watched_episode(&conn, 0, 999, 1, 50, 200).unwrap();
         record_watched_episode(&conn, friend_id, 999, 1, 150, 200).unwrap();
@@ -805,7 +703,7 @@ mod tests {
     #[test]
     fn library_entries_are_isolated_per_user() {
         let conn = migrated_conn();
-        let friend_id = create_user(&conn, "Jo", "0000").unwrap();
+        let friend_id = 42;
 
         upsert_library_entry(&conn, 0, 555, "ANIME", Some("WATCHING"), None, Some(3), None).unwrap();
         upsert_library_entry(&conn, friend_id, 555, "ANIME", Some("COMPLETED"), None, Some(12), None).unwrap();

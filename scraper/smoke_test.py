@@ -7,9 +7,6 @@ noticed before anyone tries to watch something:
                  resolution + proof that a *mobile-playable* server actually
                  serves segments. Search alone stayed green through a complete
                  mobile outage, so all three are asserted.
-  - mkissa:      search + get + episode stream resolution (exercises the
-                 AES-GCM/aaReq handshake and the response decrypt — the
-                 part that silently breaks when the site rotates its build)
   - mangakatana: search
   - nyaa:        SubsPlease API + Nyaa RSS reachability (the Rust side owns
                  the real logic; this just proves the upstreams answer)
@@ -139,31 +136,6 @@ async def check_anineko() -> str:
     )
 
 
-async def check_mkissa() -> str:
-    from mkissa import MkissaProvider
-
-    prov = MkissaProvider()
-    refs = await prov.search(SEARCH_QUERY)
-    if not refs:
-        raise RuntimeError(f"search '{SEARCH_QUERY}' returned 0 results")
-    info = await prov.get(refs[0].id)
-    if info is None or not info.episodes:
-        raise RuntimeError(f"get('{refs[0].id}') returned no episodes")
-    # Stream resolution exercises the aaReq crypto token AND the response
-    # decrypt — the July 2026 build rotation broke exactly this while search
-    # and get kept working, so the old smoke test stayed green through it.
-    servers, _ = await prov.streams(refs[0].id, 1)
-    if not servers:
-        raise RuntimeError(
-            f"streams('{refs[0].id}', ep 1) resolved 0 servers "
-            "(stale aaReq crypto constants? check bundle buildId/mask)"
-        )
-    return (
-        f"{len(refs)} results, {info.title}: {len(info.episodes)} episodes, "
-        f"{len(servers)} stream servers"
-    )
-
-
 async def check_mangakatana() -> str:
     from mangakatana import MangaKatanaProvider
 
@@ -203,11 +175,6 @@ async def main() -> int:
     # anineko may spin up headless Chromium for Cloudflare clearance, so it
     # gets a much larger timeout than the plain-HTTP checks.
     await run_check("anineko", check_anineko(), timeout=300)
-    # streams resolution + a possible crypto-constant re-extraction crawl
-    # push mkissa well past the old search+get budget. Non-fatal: mkissa is in
-    # RETIRED_PROVIDERS and cannot be selected, so its aaReq rotations are
-    # information, not an outage.
-    await run_check("mkissa (retired)", check_mkissa(), timeout=180, fatal=False)
     await run_check("mangakatana", check_mangakatana(), timeout=60)
     await run_check("subsplease", check_subsplease(), timeout=45)
     await run_check("nyaa-rss", check_nyaa_rss(), timeout=45)

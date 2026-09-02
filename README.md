@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/branding/logo.png" alt="Anicat" width="140">
   <h1>Anicat</h1>
-  <p><strong>Stream, track, and organize anime and manga — a native desktop app powered by AniList.</strong></p>
+  <p><strong>Watch, read, and track anime, manga, light novels and film — a native desktop app powered by AniList.</strong></p>
 
   <p>
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
@@ -14,9 +14,18 @@
 
 ---
 
-Anicat is a native desktop app for AniList users who want to watch, read, and track anime and manga without touching a browser. It wraps a React/Tauri frontend around mpv for video playback, a Python scraper sidecar for episode sourcing, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
+Anicat is a native desktop app for AniList users who want to watch, read, and track without touching a browser. It wraps a React/Tauri frontend around a bundled mpv for video playback, an embedded torrent engine for anime and film, a Python sidecar that scrapes manga and light novels, and a full two-way AniList sync — so your library, progress, and scores stay current automatically.
 
-> **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from them, similar to a browser. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
+It covers four kinds of media, and they do not share a backend:
+
+| Mode | Catalog | Source |
+|---|---|---|
+| Anime | AniList | Torrents, streamed while they download |
+| Manga | AniList | MangaKatana |
+| Light novels | RanobeDB and friends | Web-novel sources, exportable as EPUB |
+| Film and TV | TMDB | Torrents, streamed while they download |
+
+> **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
 ---
 
@@ -66,12 +75,16 @@ On first launch, Anicat walks you through setup automatically:
 
 AniList is only used for tracking. Playback and the episode list do not require an account.
 
+Cinema mode is the one exception: films and TV are catalogued by TMDB, so it stays empty until you paste a TMDB read access token into Settings.
+
 ---
 
 ## Features
 
 - **Up Next** — A single "continue where you left off" queue across every show in progress, plus a "Pick for me" random-episode button for when you can't decide.
-- **Stream & Playback** — External mpv player with Anime4K upscaling and AniSkip (intro/outro skip). AniNeko scraper provider, plus a torrent-backed provider (SubsPlease API + Nyaa RSS) that streams straight from the swarm while it downloads, with automatic fallback between them — no waiting for the file to finish. Sub/dub selection, resume position, auto-next into the following episode.
+- **Stream & Playback** — A bundled mpv with Anime4K upscaling and AniSkip (intro/outro skip), plus a builtin `<video>` player for when you would rather stay in the app. Anime and film stream straight from the swarm while they download — no waiting for the file to finish — with candidates gathered from SubsPlease, AnimeTosho, Nyaa and SeaDex in one pass and the best two raced against each other. Sub/dub selection, resume position, auto-next into the following episode.
+- **Light Novels** — Read in-app, or export a volume as an EPUB tuned for your e-reader: page size, grayscale, image quality and spread splitting are all configurable.
+- **Cinema** — Films and TV matched against TMDB and streamed the same way, with a release picker when you want to choose yourself. Needs a TMDB read token.
 - **Trailers** — View a title's trailer directly from the detail page.
 - **Manga Reader** — Three viewing modes (single page, double page, vertical scroll), RTL/LTR support, trackpad swipe navigation, vertical sidebars for unobstructive desktop reading, and AniList progress sync.
 - **AniList Sync** — Full library sync: progress, scores, list status. Watched episodes register automatically when mpv closes. Inline editing from the detail page.
@@ -79,7 +92,7 @@ AniList is only used for tracking. Playback and the episode list do not require 
 - **Schedule** — 7-day airing calendar filtered to your watching list.
 - **Discovery** — Customizable home layout (show/hide rows: trending, seasonal, airing today, continue watching, smart picks). Search with genre, year, and score filters.
 - **Discord Rich Presence** — Shows what you are watching in your Discord status.
-- **Themes** — Three UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga.
+- **Themes** — Four UI styles: Neon Abyss (default), Sakura Zen (serif), Retro Manga, and Ink & Index.
 - **Keyboard-driven** — Shortcuts for navigating every view, with a built-in cheat sheet (`?`).
 - **Self-updating** — Checks for new releases and installs updates in place, no manual reinstall.
 
@@ -104,20 +117,33 @@ AniList is only used for tracking. Playback and the episode list do not require 
 - [Rust](https://rustup.rs/) stable toolchain
 - [Node.js](https://nodejs.org/) 18+
 - [uv](https://docs.astral.sh/uv/) — Python environment manager for the scraper sidecar
-- `mpv` — `brew install mpv` (macOS) or download from [mpv.io](https://mpv.io) (Windows)
+- [ffmpeg](https://ffmpeg.org) — used to remux releases for the builtin player
 - Tauri v2 system dependencies — see [Prerequisites](https://v2.tauri.app/start/prerequisites/)
+
+mpv is **bundled** rather than installed system-wide, but its binaries are not in the repository. `scripts/setup_bundled_player.sh` fetches and configures the portable build into `web/src-tauri/resources/`; run it once after cloning.
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
 cd anicat
 
-# Install Python scraper dependencies
-uv sync --dev --all-extras
+# Fetch and configure the bundled mpv (once)
+bash scripts/setup_bundled_player.sh
+
+# The scraper is its own project, with its own pyproject.toml
+cd scraper && uv sync && cd ..
 
 # Install frontend dependencies and run in dev mode
 cd web
 npm install
 npm run tauri dev
+```
+
+Useful while working on it:
+
+```bash
+cd web && npx tsc --noEmit && npm test        # frontend
+cd web/src-tauri && cargo test --lib && cargo clippy --lib --tests
+cd scraper && uv run python -m pytest tests/ -q
 ```
 
 The dev build uses the Python scraper source files directly. The production build (`npm run tauri build`) freezes them into a standalone binary via PyInstaller.
@@ -128,8 +154,11 @@ The dev build uses the Python scraper source files directly. The production buil
 
 | Dependency | Purpose |
 |---|---|
-| [AniList](https://anilist.co) | Library, tracking, search, profile data |
-| [mpv](https://mpv.io) | External media player |
+| [AniList](https://anilist.co) | Library, tracking, search, profile data for anime, manga and novels |
+| [TMDB](https://themoviedb.org) | Catalog for film and TV |
+| [mpv](https://mpv.io) | Media player, bundled with the app |
+| [librqbit](https://github.com/ikatson/rqbit) | Embedded torrent engine |
+| [ffmpeg](https://ffmpeg.org) | Remuxing releases for the builtin player |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Episode downloading |
 | [Python 3](https://python.org) | Scraper sidecar runtime (build only) |
 

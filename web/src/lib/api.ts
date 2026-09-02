@@ -414,8 +414,13 @@ export async function preloadEpisode(
   episodeNumber: number,
   provider?: string,
   title?: string,
+  /** A guess made from a hover or a keyboard focus, rather than an episode the
+   *  user is expected to play. The backend holds one preloaded stream at a
+   *  time, and a speculative one is refused rather than allowed to displace a
+   *  Continue or near-end preload. Omitted means "expected to be played". */
+  speculative?: boolean,
 ): Promise<void> {
-  return invoke("preload_episode", { mediaId, episodeNumber, provider, title });
+  return invoke("preload_episode", { mediaId, episodeNumber, provider, title, speculative });
 }
 
 export async function getPreloadStatus(

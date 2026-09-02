@@ -514,28 +514,6 @@ export function SettingsView({ health }: SettingsViewProps) {
                   </select>
                 </SettingField>
 
-                <SettingField label="Fallback Provider 1" description="First fallback when primary provider fails.">
-                  <select
-                    value={String(config.general?.fallback_provider || "none")}
-                    onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
-                  >
-                    <option value="none">None</option>
-                    <option value="nyaa">Torrents (Nyaa)</option>
-                  </select>
-                </SettingField>
-
-                <SettingField label="Fallback Provider 2" description="Second fallback when primary and fallback 1 fail.">
-                  <select
-                    value={String(config.general?.secondary_fallback_provider || "none")}
-                    onChange={(e) => updateField("general", "secondary_fallback_provider", e.target.value)}
-                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
-                  >
-                    <option value="none">None</option>
-                    <option value="nyaa">Torrents (Nyaa)</option>
-                  </select>
-                </SettingField>
-
                 <SettingField label="Manga Provider" description="Source for manga chapters.">
                   <select
                     value={String(config.general?.manga_provider || "mangakatana")}

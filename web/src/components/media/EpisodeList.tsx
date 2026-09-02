@@ -6,7 +6,25 @@ import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
 import { useSettingsStore, useAppStore } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
 import { formatTime, formatEpisodeAirDate } from "@/lib/date";
+import { isCinemaId } from "@/lib/mediaId";
 import { FocusScope, ScopeNav, useFocusable } from "@/focus";
+
+/** How long a row has to hold the pointer or the keyboard focus before it is
+ *  worth speculatively preloading. Each preload is a real indexer search plus
+ *  a swarm handshake, and nyaa throttles hard: four concurrent queries answer
+ *  200, eight return two 429s, twelve return six. A throttled query silently
+ *  comes back with a smaller candidate pool, which degrades the pick for every
+ *  later play — so without the delay a mouse sweeping down a 12-episode list
+ *  fires twelve resolves and makes the app slower rather than faster. */
+const SPECULATIVE_PRELOAD_DELAY_MS = 400;
+
+/** How long an unanswered speculative preload keeps the single-flight latch
+ *  shut. The latch is normally released by the backend's
+ *  `stream_preload_status` event landing in the store, but Low Data Mode drops
+ *  a torrent preload with an early `Ok` and emits nothing at all — with no
+ *  expiry the first hover in that mode would wedge speculation off for the
+ *  rest of the session. */
+const SPECULATIVE_PRELOAD_MAX_WAIT_MS = 30_000;
 
 function FocusableButton({ disabled, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>({ disabled });
@@ -356,6 +374,76 @@ export function EpisodeList({
     }
   };
 
+  // MediaDetail already preloads the Continue episode when the page opens.
+  // This covers the other half: picking any *other* row, which is otherwise a
+  // fully cold resolve at click time. Intent is read from hover and from
+  // keyboard focus — spatial navigation moves by calling `.focus()` on the
+  // target (`useSpatialNavigation`), so a focusin listener on the row catches
+  // both without the row having to reach into the focus scope.
+  const preloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speculativePreload = useRef<{ key: string; at: number } | null>(null);
+
+  const cancelSpeculativePreload = () => {
+    if (preloadTimer.current !== null) {
+      clearTimeout(preloadTimer.current);
+      preloadTimer.current = null;
+    }
+  };
+
+  // A pending timer closes over the mediaId it was armed with, and the detail
+  // page swaps entries in place when a related title is opened. Without this,
+  // a hover that was still settling when the user jumped to a sequel fires a
+  // resolve against the show they just left.
+  useEffect(() => cancelSpeculativePreload, [mediaId]);
+
+  const scheduleSpeculativePreload = (epNum: string) => {
+    // Manga reads through its own path and never resolves a stream. Cinema ids
+    // must not reach this at all: a torrent resolve aimed at a film starts real
+    // provider work for a title the anime indexes will never have (see the
+    // header comment on CinemaDetail). Cinema renders its own episode list
+    // today, so this is a belt on top of that separation, not the only one.
+    if (isManga || !selectedProvider || isCinemaId(mediaId)) return;
+
+    const episodeNumber = parseInt(epNum, 10);
+    if (!Number.isFinite(episodeNumber)) return;
+
+    cancelSpeculativePreload();
+    preloadTimer.current = setTimeout(() => {
+      preloadTimer.current = null;
+
+      const statuses = useAppStore.getState().preloadStatus;
+      const key = `${mediaId}-${episodeNumber}`;
+      if (statuses[key] === "fetching" || statuses[key] === "ready") return;
+
+      // One speculative resolve outstanding at a time, so a walk down the list
+      // cannot stack queries against the throttle. `undefined` counts as still
+      // outstanding rather than as finished: the backend answers through the
+      // `stream_preload_status` event, which has not arrived yet in the moment
+      // right after the request goes out.
+      const outstanding = speculativePreload.current;
+      if (
+        outstanding &&
+        Date.now() - outstanding.at < SPECULATIVE_PRELOAD_MAX_WAIT_MS &&
+        statuses[outstanding.key] !== "ready" &&
+        statuses[outstanding.key] !== "idle"
+      ) {
+        return;
+      }
+
+      speculativePreload.current = { key, at: Date.now() };
+      // Flagged speculative: the backend holds one preloaded stream, and a
+      // hover must not take it from the Continue episode the detail page
+      // warmed on open. A refused one still leaves the show warm -- the
+      // torrent manager caches the resolution either way -- and the refusal
+      // comes back as an `idle` event, which is what releases the latch above.
+      mediaApi
+        .preloadEpisode(mediaId, episodeNumber, selectedProvider, mediaTitle, true)
+        .catch(() => {
+          speculativePreload.current = null;
+        });
+    }, SPECULATIVE_PRELOAD_DELAY_MS);
+  };
+
   const handlePlay = async (epNum: string) => {
     if (isManga && onRead) {
       onRead(epNum);
@@ -621,6 +709,10 @@ export function EpisodeList({
                 >
                 <ScopeNav />
                 <div
+                  onMouseEnter={() => { if (!isUnaired) scheduleSpeculativePreload(epNum); }}
+                  onMouseLeave={cancelSpeculativePreload}
+                  onFocus={() => { if (!isUnaired) scheduleSpeculativePreload(epNum); }}
+                  onBlur={cancelSpeculativePreload}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setContextMenu({

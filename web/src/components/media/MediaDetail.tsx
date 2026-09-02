@@ -511,9 +511,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   useEffect(() => {
     if (isManga || !selectedProvider) return;
     const continueEpisode = actualProgress + 1;
+    // Written whatever the answer is, "idle" included. Skipping the idle case
+    // let a stale "ready" left over from an earlier visit survive a mount where
+    // the backend said it holds nothing -- and the episode list refuses to
+    // re-preload anything the store still calls ready, so that episode stayed
+    // cold and unwarmable. This poll is the one place a status the push events
+    // missed can still be corrected.
     mediaApi.getPreloadStatus(item.id, continueEpisode, selectedProvider).then((status) => {
-      if (status && (status === "ready" || status === "fetching")) {
-        useAppStore.getState().setPreloadStatus(item.id, continueEpisode, status as any);
+      if (status === "ready" || status === "fetching" || status === "idle") {
+        useAppStore.getState().setPreloadStatus(item.id, continueEpisode, status);
       }
     }).catch(() => {});
 

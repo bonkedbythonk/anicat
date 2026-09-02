@@ -4,6 +4,7 @@ const LABELS: Record<MediaSearchType, string> = {
   ALL: "All",
   ANIME: "Anime",
   MANGA: "Manga",
+  NOVEL: "Novels",
 };
 
 /** Generic over the option set so each caller keeps its own narrow type:

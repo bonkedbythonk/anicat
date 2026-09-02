@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile, Search } from "lucide-react";
+import { X, Play, Loader2, Star, Users, Calendar, Clock, Building2, Monitor, CheckCircle2, Bookmark, Pause, XCircle, Download, BookOpen, RotateCcw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Trash2, Edit2, Check, SkipForward, Sparkles, PlayCircle, Film, Heart, Frown, Meh, Smile, Search, Zap } from "lucide-react";
 import { mediaApi, flattenCharacterEdges, type MediaItem, type Episode, type Character, type Review } from "@/lib/api";
 import { sanitizeHtml, stripSpoilers } from "@/lib/sanitize";
 import { proxyImage } from "@/lib/proxy";
@@ -17,9 +17,15 @@ import { VoiceActorList } from "./VoiceActorList";
 import { StaffProfile } from "./StaffProfile";
 import { WatchGrid } from "./WatchGrid";
 import MangaReader from "./MangaReader";
+import { NovelReader } from "./NovelReader";
+import { EreaderDownloadModal } from "./EreaderDownloadModal";
+import { novelApi } from "@/lib/api";
+import type { NovelDetailItem, NovelVolume } from "@/lib/types";
+import { MediaDiscussions } from "./MediaDiscussions";
+import { AnimeThemeList } from "./AnimeThemeList";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 
-type DetailTabKey = "episodes" | "characters" | "seasons" | "more";
+type DetailTabKey = "episodes" | "characters" | "seasons" | "discussions" | "more";
 
 function FocusableButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
@@ -34,8 +40,8 @@ function FocusableSelect({ children, ...props }: React.SelectHTMLAttributes<HTML
 // Focusable tab button — a child component so useFocusable runs per-tab inside
 // the tabs FocusScope (hooks can't be called in a .map).
 function DetailTab({
-  tab, label, active, onSelect,
-}: { tab: DetailTabKey; label: string; active: boolean; onSelect: (t: DetailTabKey) => void }) {
+  tab, label, active, onSelect, count,
+}: { tab: DetailTabKey; label: string; active: boolean; onSelect: (t: DetailTabKey) => void; count?: number | string }) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
   return (
     <button
@@ -44,9 +50,10 @@ function DetailTab({
       aria-selected={active}
       tabIndex={tabIndex}
       onClick={() => onSelect(tab)}
-      className={`px-4 py-2.5 text-sm font-semibold relative transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+      className={`px-4 pb-3 text-xs font-mono uppercase tracking-wider relative transition-colors font-semibold ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
     >
-      {label}
+      <span>{label}</span>
+      {count != null && <span className="ml-1.5 opacity-60 text-[10.5px]">({count})</span>}
       {active && (
         <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full" />
       )}
@@ -67,7 +74,7 @@ const SCORE_FORMAT_MAX: Record<string, number> = {
 
 // Sources that are no longer selectable, so a stale saved per-show override
 // pointing at one gets ignored rather than silently pinning the show to it.
-const RETIRED_PROVIDERS = ["mkissa", "allanime", "gogoanime", "anizone", "animepahe"];
+const RETIRED_PROVIDERS = ["mkissa", "allanime", "gogoanime", "anizone", "animepahe", "anineko"];
 
 interface MediaDetailProps {
   item: MediaItem;
@@ -87,10 +94,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   const [synopsisOverflows, setSynopsisOverflows] = useState(false);
   const synopsisRef = useRef<HTMLParagraphElement>(null);
   const [isPlayingNext, setIsPlayingNext] = useState(false);
-  const [activeTab, setActiveTab] = useState<"episodes" | "characters" | "seasons" | "more">("episodes");
+  const [activeTab, setActiveTab] = useState<DetailTabKey>("episodes");
   // Two-step delete confirm (replaces window.confirm which is broken in Tauri WebView)
   const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string | null>(null);
+  const [showEreaderModal, setShowEreaderModal] = useState(false);
+  const [activeNovelVolume, setActiveNovelVolume] = useState<NovelVolume | null>(null);
+  const [selectedNovelVolumeId, setSelectedNovelVolumeId] = useState<number | string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   
   // The voice actor whose filmography is showing, if any. It replaces the
@@ -118,6 +128,23 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   const initialPlayEpisode = useAppStore((s) => s.initialPlayEpisode);
   const setNotification = useAppStore((s) => s.setNotification);
   const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleDismissMenus = (e: MouseEvent) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+        setShowStatusMenu(false);
+      }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleDismissMenus);
+    return () => document.removeEventListener("mousedown", handleDismissMenus);
+  }, []);
 
   useEffect(() => {
     // When MediaDetail mounts (e.g. user clicked a card and navigated here),
@@ -142,7 +169,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     },
   });
 
-  const [selectedProvider, setSelectedProvider] = useState<string>("anineko");
+  const [selectedProvider, setSelectedProvider] = useState<string>("nyaa");
 
   // Per-show overrides (registry media_prefs): a saved provider or audio
   // choice for this show wins over the global config defaults.
@@ -174,7 +201,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     setSelectedProvider(provider);
     // Remember the choice for this show: picking the global default clears
     // the override, anything else saves it.
-    const globalProvider = (config?.general?.provider as string) || "anineko";
+    const globalProvider = (config?.general?.provider as string) || "nyaa";
     try {
       await mediaApi.setMediaPrefs(item.id, {
         provider: provider === globalProvider ? null : provider,
@@ -199,7 +226,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   };
 
   // Derived values (computed from state/props, must precede hooks that consume them)
-  const isManga = item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format));
+  const isNovel = item.format === "NOVEL" || (item.format && item.format.toUpperCase() === "NOVEL");
+  const isManga = (item.type === "MANGA" || !!(item.format && ["MANGA", "ONE_SHOT", "NOVEL"].includes(item.format))) && !isNovel;
 
   const {
     data: fullItemData,
@@ -208,7 +236,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   } = useQuery({
     queryKey: ["media-detail", item.id],
     queryFn: async () => {
-      const details = await mediaApi.getDetails(item.id, isManga ? "MANGA" : "ANIME");
+      const details = await mediaApi.getDetails(item.id, isManga || isNovel ? "MANGA" : "ANIME");
       return details;
     },
     // Always revalidate on mount instead of inheriting the global 5min
@@ -216,9 +244,52 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     // into an episode number, and the persisted cache can be a day old.
     staleTime: 0,
   });
+
+  const { data: novelData } = useQuery<NovelDetailItem | null>({
+    queryKey: ["novel-detail-ranobedb", item.id],
+    queryFn: async () => {
+      const q = item.title?.english || item.title?.romaji || item.title?.native || String(item.id);
+      try {
+        return await novelApi.getNovelDetails(q);
+      } catch {
+        const search = await novelApi.searchNovels(q);
+        if (search && search.length > 0) {
+          return await novelApi.getNovelDetails(search[0].id);
+        }
+        return null;
+      }
+    },
+    enabled: Boolean(isNovel),
+  });
+
   // Fall back to the always-present `item` prop so downstream code never
   // has to null-check the detail (the query data can be null).
   const fullItem = fullItemData ?? item;
+
+  const effectiveNovelBooks: NovelVolume[] = useMemo(() => {
+    if (novelData?.books && novelData.books.length > 0) {
+      return novelData.books;
+    }
+    const count = fullItem?.volumes || fullItem?.chapters || 1;
+    const volCount = Math.min(Math.max(count, 1), 60);
+    return Array.from({ length: volCount }, (_, i) => ({
+      id: i + 1,
+      title: `Volume ${i + 1}`,
+      cover_url: fullItem?.cover_image?.large || fullItem?.coverImage?.large,
+      description:
+        i === 0 && fullItem?.description
+          ? fullItem.description
+          : `Volume ${i + 1} of ${fullItem?.title?.english || fullItem?.title?.romaji || "the series"}.`,
+      sort_order: i + 1,
+    }));
+  }, [novelData, fullItem]);
+
+  // Only volumes carrying a source URL have text behind them; the rest are
+  // metadata-only rows from AniList/RanobeDB.
+  const readableNovelVolume: NovelVolume | null = useMemo(
+    () => effectiveNovelBooks.find((v) => Boolean(v.url)) ?? null,
+    [effectiveNovelBooks],
+  );
 
   const banner = fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large;
 
@@ -371,6 +442,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     return map;
   }, [fullItem, anizip]);
 
+  const episodeOverviewMap = useMemo(() => anizip?.overviews ?? {}, [anizip]);
+  const episodeAirDateMap = useMemo(() => anizip?.airdates ?? {}, [anizip]);
+  const episodeRuntimeMap = useMemo(() => anizip?.runtimes ?? {}, [anizip]);
+
   const galleryImages = useMemo(
     () => buildGalleryImages(anizip, fullItem?.banner_image, episodeThumbMap),
     [anizip, fullItem, episodeThumbMap],
@@ -413,6 +488,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
       !hasTriggeredInitial
     ) {
       setHasTriggeredInitial(true);
+      useAppStore.setState({ initialAction: null, initialPlayEpisode: null });
       handlePlayNext(
         initialPlayEpisode ? Number(initialPlayEpisode) : undefined,
         effectiveProvider ?? selectedProvider,
@@ -426,12 +502,21 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     setSynopsisOverflows(synopsisRef.current.scrollHeight > 60);
   }, [fullItem.description]);
 
-  // Resolve the Continue/Start episode's stream as soon as we know which one
+  const preloadStatus = useAppStore((s) => s.preloadStatus);
+
+  // Preload the Continue episode as soon as the detail page opens. It's
+  // background work: the user is reading the synopsis or looking at cast while
   // it is, so by the time the user presses play, mpv has nothing left to wait
   // on — start_playback finds it already sitting in the preload slot.
   useEffect(() => {
     if (isManga || !selectedProvider) return;
     const continueEpisode = actualProgress + 1;
+    mediaApi.getPreloadStatus(item.id, continueEpisode, selectedProvider).then((status) => {
+      if (status && (status === "ready" || status === "fetching")) {
+        useAppStore.getState().setPreloadStatus(item.id, continueEpisode, status as any);
+      }
+    }).catch(() => {});
+
     mediaApi.preloadEpisode(
       item.id,
       continueEpisode,
@@ -490,6 +575,20 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         const totalEps = fullItem?.episodes || episodes?.length || 0;
         const activeProvider = providerOverride || selectedProvider;
 
+        const playerType = useSettingsStore.getState().playerType;
+        if (playerType === "builtin") {
+          useAppStore.getState().openPlayer({
+            mediaId: item.id,
+            episodeNumber: nextEpNum,
+            provider: activeProvider,
+            title: title,
+            episodeTitle: nextEpTitle,
+            coverImage: coverImg,
+            totalEpisodes: totalEps,
+          });
+          return;
+        }
+
         useAppStore.getState().setPlaybackLoading({
           isLoading: true,
           mediaId: item.id,
@@ -519,6 +618,15 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   };
 
   const globalTranslationType = useSettingsStore((s) => s.translationType);
+  const setTranslationType = useSettingsStore((s) => s.setTranslationType);
+  const [viewMode, setViewMode] = useState<"cards" | "compact">(() => {
+    if (typeof window === "undefined") return "cards";
+    return (localStorage.getItem("anicat_episode_view_mode") as "cards" | "compact") || "cards";
+  });
+  const handleSetViewMode = (mode: "cards" | "compact") => {
+    setViewMode(mode);
+    localStorage.setItem("anicat_episode_view_mode", mode);
+  };
   // Dub viewers want the English cast, everyone else the Japanese one. The
   // per-show override wins over the global setting, same as playback.
   const preferredVaLanguage =
@@ -563,7 +671,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   };
 
   const handleToggleUpscaling = async () => {
-    const newVal = shaderProfile === "off" ? "balanced" : "off";
+    const newVal = shaderProfile === "off" ? "on" : "off";
     setShaderProfile(newVal);
     try {
       await mediaApi.updateConfig({ stream: { shader_profile: newVal } });
@@ -727,29 +835,60 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
     return entry.stop_time;
   }, [isManga, watchHistory, actualProgress]);
 
+  const totalMediaEpisodes = fullItem.episodes || fullItem.chapters || 0;
+  const nextAiringEpisode = fullItem.next_airing?.episode;
+  const filteredEpisodeNums = episodes
+    .filter(e => !nextAiringEpisode || Number(e.number) < nextAiringEpisode)
+    .map(e => Number(e.number));
+  const latestAvailableEpisode = episodes.length > 0 && filteredEpisodeNums.length > 0 ? Math.max(...filteredEpisodeNums) : totalMediaEpisodes;
+  const isFinishedMedia = totalMediaEpisodes > 0 && actualProgress >= totalMediaEpisodes && fullItem.status !== 'RELEASING';
+  const isCaughtUpMedia = !isFinishedMedia && latestAvailableEpisode > 0 && actualProgress >= latestAvailableEpisode;
+  const showResume = resumeSeconds > 0 && !isFinishedMedia && !isCaughtUpMedia && !isManga;
+
   const primaryActionButton = (() => {
+    if (isNovel) {
+      return (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setActiveNovelVolume(readableNovelVolume)}
+            disabled={!readableNovelVolume}
+            title={readableNovelVolume ? "Read online" : "No readable text source for this series"}
+            className="flex items-center gap-2 px-5 py-3 max-w-[280px] bg-accent hover:bg-accent-light text-background font-bold text-[13.5px] rounded-lg shadow-lg shadow-accent/10 transition-all active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:active:scale-100"
+          >
+            <BookOpen size={18} className="shrink-0" />
+            <span>Read Light Novel</span>
+          </button>
+          <button
+            onClick={() => {
+              setSelectedNovelVolumeId(null);
+              setShowEreaderModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-3 bg-foreground/[0.08] hover:bg-foreground/[0.15] text-foreground font-semibold text-[13.5px] rounded-lg border border-border transition-all cursor-pointer"
+            title="Download CrossPoint EPUB for E-Reader"
+          >
+            <Download size={18} className="text-accent" />
+            <span>Download for E-Reader</span>
+          </button>
+        </div>
+      );
+    }
+
     const currentProgress = actualProgress;
-    const total = fullItem.episodes || fullItem.chapters || 0;
-    const nextAiringEp = fullItem.next_airing?.episode;
-    const filteredEps = episodes
-      .filter(e => !nextAiringEp || Number(e.number) < nextAiringEp)
-      .map(e => Number(e.number));
-    const latestAvailable = episodes.length > 0 && filteredEps.length > 0 ? Math.max(...filteredEps) : total;
     const nextEpisode = actualProgress + 1;
-    const isFinished = total > 0 && currentProgress >= total && fullItem.status !== 'RELEASING';
-    const isCaughtUp = !isFinished && latestAvailable > 0 && currentProgress >= latestAvailable;
-    const showResume = resumeSeconds > 0 && !isFinished && !isCaughtUp && !isManga;
+    const isFinished = isFinishedMedia;
+    const isCaughtUp = isCaughtUpMedia;
     // Sequel handoff: a finished season's primary button flows straight into
     // the next one instead of dead-ending at "Completed".
     const handoffSequel = isFinished && !isManga ? sequel : null;
     const sequelTitle = handoffSequel?.title?.english || handoffSequel?.title?.romaji || '';
+    const epPreloadStatus = !isManga ? preloadStatus[`${item.id}-${nextEpisode}`] : undefined;
     return (
       <div className="flex items-center gap-2">
         <button
           onClick={() => handoffSequel ? selectItem(handoffSequel, "play") : handlePlayNext()}
           disabled={isPlayingNext || isCaughtUp || (isFinished && !handoffSequel)}
           title={handoffSequel ? `Start ${sequelTitle}` : undefined}
-          className="flex items-center gap-2 px-5 py-3 max-w-[280px] bg-accent hover:bg-accent-light text-background font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
+          className="flex items-center gap-2 px-5 py-3 max-w-[280px] bg-accent hover:bg-accent-light text-background font-bold text-[13.5px] rounded-lg shadow-lg shadow-accent/10 transition-all active:scale-95 disabled:opacity-50 disabled:bg-foreground/[0.05] disabled:text-muted-foreground"
         >
           {isPlayingNext ? (
             <Loader2 className="animate-spin" size={18} />
@@ -765,20 +904,12 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     : `${isManga ? 'Read' : actualProgress > 0 ? 'Continue' : 'Start'} ${isManga ? 'Chapter' : 'Episode'} ${nextEpisode}`}
                 </span>
               )}
+              {!isFinished && !isCaughtUp && !isManga && epPreloadStatus === "ready" && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-950 ml-1 shrink-0" title="Stream Ready" />
+              )}
             </>
           )}
         </button>
-        {showResume && (
-          <button
-            onClick={() => handlePlayNext(undefined, undefined, true)}
-            disabled={isPlayingNext}
-            title="Start this episode from the beginning"
-            className="flex items-center gap-1.5 px-4 py-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground font-medium text-sm rounded-md transition-all active:scale-95 disabled:opacity-50"
-          >
-            <RotateCcw size={16} />
-            <span>Start over</span>
-          </button>
-        )}
       </div>
     );
   })();
@@ -812,142 +943,47 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
         <div className="relative z-10 px-4 sm:px-8 lg:px-14 -mt-24 sm:-mt-28 pb-16 max-w-[1150px] mx-auto">
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-8">
             {/* Cover art — left column */}
-            <div className="shrink-0 flex flex-col items-center sm:items-start gap-4">
-              <img
-                src={proxyImage(fullItem?.cover_image?.large || item?.cover_image?.large || '')}
-                alt={title}
-                className="w-36 h-52 sm:w-44 sm:h-64 lg:w-48 lg:h-[272px] rounded-lg object-cover border border-border shadow-2xl"
-              />
-              {/* Compact stats under cover */}
-              <FocusScope name="detail-stats" orientation="vertical" className="w-36 sm:w-44 lg:w-48 space-y-3">
-                <ScopeNav />
-                <div className="group/progress">
-                  <div className="meta-mono text-muted-foreground mb-1">Progress</div>
-                  {progressEditor.isEditing ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        autoFocus
-                        type="number"
-                        value={progressEditor.editValue}
-                        onChange={(e) => progressEditor.setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleUpdateProgress(parseInt(progressEditor.editValue) || 0);
-                          if (e.key === 'Escape') progressEditor.cancelEditing();
-                        }}
-                        className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
-                      />
-                      <FocusableButton onClick={() => handleUpdateProgress(parseInt(progressEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></FocusableButton>
-                      <FocusableButton onClick={() => progressEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></FocusableButton>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <p className="text-lg font-semibold text-foreground tabular-nums">
-                        {actualProgress}
-                        <span className="text-muted-foreground/45 mx-1 font-medium">/</span>
-                        <span className="text-muted-foreground">{isManga ? (fullItem.chapters || '?') : (fullItem.episodes || '?')}</span>
-                      </p>
-                      <FocusableButton onClick={() => progressEditor.startEditing(actualProgress)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-focus-within/progress:opacity-100 group-hover/progress:opacity-100">
-                        <Edit2 size={11} />
-                      </FocusableButton>
-                    </div>
-                  )}
-                  {isManga && actualProgressVolumes != null && actualProgressVolumes > 0 && (
-                    <p className="text-[11px] text-muted-foreground/60 tabular-nums mt-0.5">
-                      Vol. {actualProgressVolumes}{fullItem.volumes ? <><span className="text-muted-foreground/45 mx-1 font-medium">/</span>{fullItem.volumes}</> : ''}
-                    </p>
-                  )}
-                </div>
-
-                <div className="h-px bg-border" />
-
-                <div className="group/score">
-                  <span className="meta-mono text-muted-foreground">Your Score</span>
-                  {scoreFormat === 'POINT_5' || scoreFormat === 'POINT_3' ? (
-                    <div className="flex items-center gap-0.5 mt-1">
-                      {Array.from({ length: SCORE_FORMAT_MAX[scoreFormat] }, (_, i) => i + 1).map((n) => {
-                        if (scoreFormat === 'POINT_5') {
-                          const active = (actualScore || 0) >= n;
-                          return (
-                            <FocusableButton key={n} onClick={() => handleUpdateScore(n)} aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`} className="transition-transform hover:scale-110 active:scale-95">
-                              <Star size={16} className={active ? 'text-accent' : 'text-muted-foreground/30'} fill={active ? 'currentColor' : 'none'} />
-                            </FocusableButton>
-                          );
-                        }
-                        const Icon = n === 1 ? Frown : n === 2 ? Meh : Smile;
-                        const selected = (actualScore || 0) === n;
-                        return (
-                          <FocusableButton key={n} onClick={() => handleUpdateScore(n)} aria-label={n === 1 ? 'Rate sad' : n === 2 ? 'Rate neutral' : 'Rate happy'} className="transition-transform hover:scale-110 active:scale-95">
-                            <Icon size={18} className={selected ? 'text-accent' : 'text-muted-foreground/30'} />
-                          </FocusableButton>
-                        );
-                      })}
-                    </div>
-                  ) : scoreEditor.isEditing ? (
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <input
-                        autoFocus
-                        type="number"
-                        min={0}
-                        max={SCORE_FORMAT_MAX[scoreFormat] ?? 100}
-                        step={scoreFormat === 'POINT_10_DECIMAL' ? 0.1 : 1}
-                        value={scoreEditor.editValue}
-                        onChange={(e) => scoreEditor.setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleUpdateScore(parseFloat(scoreEditor.editValue) || 0);
-                          if (e.key === 'Escape') scoreEditor.cancelEditing();
-                        }}
-                        className="w-14 bg-foreground/5 border border-border rounded-md px-2 py-1 text-sm font-bold text-foreground focus:outline-none focus:border-accent"
-                      />
-                      <FocusableButton onClick={() => handleUpdateScore(parseFloat(scoreEditor.editValue) || 0)} className="p-1 bg-accent text-background rounded-md hover:bg-accent-light transition-colors"><Check size={12} /></FocusableButton>
-                      <FocusableButton onClick={() => scoreEditor.cancelEditing()} className="p-1 bg-foreground/5 text-muted-foreground rounded-md hover:bg-foreground/10 transition-colors"><X size={12} /></FocusableButton>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-lg font-semibold text-foreground tabular-nums">
-                        {actualScore != null && actualScore > 0
-                          ? <>{actualScore} <span className="text-muted-foreground/45 font-medium text-xs">/ {SCORE_FORMAT_MAX[scoreFormat] ?? 100}</span></>
-                          : <span className="text-muted-foreground/60">—</span>}
-                      </span>
-                      <FocusableButton onClick={() => scoreEditor.startEditing(actualScore || 0)} className="p-1 bg-foreground/5 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-md transition-all opacity-0 group-focus-within/score:opacity-100 group-hover/score:opacity-100">
-                        <Edit2 size={11} />
-                      </FocusableButton>
-                    </div>
-                  )}
-                </div>
-              </FocusScope>
+            <div className="shrink-0 flex flex-col items-center sm:items-start gap-3">
+              <div className="w-36 sm:w-44 lg:w-48 aspect-[2/3] rounded-xl overflow-hidden border border-border shadow-2xl bg-surface relative group">
+                <img
+                  src={proxyImage(fullItem?.cover_image?.large || item?.cover_image?.large || '')}
+                  alt={title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
             </div>
 
             {/* Info — right column */}
-            <div className="flex-1 min-w-0 pt-0 sm:pt-6 space-y-5">
+            <div className="flex-1 min-w-0 pt-0 sm:pt-6 space-y-4">
               {/* Meta tags */}
-              <div className="meta-mono flex items-center flex-wrap gap-x-3 gap-y-1 text-foreground/70">
-                {fullItem.format && <span>{fullItem.format}</span>}
-                {fullItem.status === 'RELEASING' && <span className="text-accent">Airing</span>}
-                {fullItem.status === 'FINISHED' && <span>Finished</span>}
-                {!isManga && fullItem.episodes ? <span>{fullItem.episodes} EP</span> : null}
-                {isManga && fullItem.chapters ? <span>{fullItem.chapters} CH</span> : null}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground">
+                {fullItem.format && <span className="text-foreground font-semibold">{fullItem.format}</span>}
+                {fullItem.status === 'RELEASING' && <span className="text-accent font-semibold">AIRING</span>}
+                {fullItem.status === 'FINISHED' && <span className="text-emerald-400 font-semibold">FINISHED</span>}
+                {!isManga && fullItem.episodes ? <span className="text-accent font-semibold">{fullItem.episodes} EP</span> : null}
+                {isManga && fullItem.chapters ? <span className="text-accent font-semibold">{fullItem.chapters} CH</span> : null}
                 {(fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year) && (
                   <span>{fullItem.season_year || fullItem.seasonYear || fullItem.startDate?.year}</span>
                 )}
                 {fullItem.studios?.nodes?.[0]?.name && <span>{fullItem.studios.nodes[0].name}</span>}
-                {fullItem.average_score ? <span>Score {fullItem.average_score}</span> : null}
+                {fullItem.average_score ? <span className="text-accent font-semibold">SCORE {fullItem.average_score}%</span> : null}
                 {!isManga && fullItem.next_airing?.episode && (
-                  <span className="text-accent">
+                  <span className="text-accent font-semibold">
                     EP {fullItem.next_airing.episode} {formatAiringCountdown(fullItem.next_airing.airing_at) || ""}
                   </span>
                 )}
               </div>
 
-              {/* Genres — AniList's `tags` field is also fetched but can
-                  contain plot-relevant/spoiler tags (our query doesn't pull
-                  the isMediaSpoiler flag needed to filter those out), so only
-                  the always-safe, high-level genres show here. */}
+              {/* Title */}
+              <h1 className="text-2xl sm:text-4xl font-bold text-foreground tracking-tight leading-tight">{title}</h1>
+
+              {/* Genres */}
               {fullItem.genres && fullItem.genres.length > 0 && (
-                <div className="flex items-center flex-wrap gap-1.5">
+                <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
                   {fullItem.genres.map((genre) => (
                     <span
                       key={genre}
-                      className="meta-mono text-[10px] px-2 py-1 rounded-full border border-border text-foreground/70"
+                      className="px-2.5 py-0.5 rounded-full bg-foreground/[0.05] border border-border text-[11px] text-muted-foreground"
                     >
                       {genre}
                     </span>
@@ -955,104 +991,199 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 </div>
               )}
 
-              {/* Title */}
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-foreground leading-tight tracking-tight">{title}</h1>
-
-              {/* Action bar */}
-              <FocusScope name="detail-actions" orientation="horizontal" className="flex items-center gap-3 flex-wrap">
+              {/* Clean Action Bar: Primary Play + Status Pill + Favorite + More */}
+              <FocusScope name="detail-actions" orientation="horizontal" className="flex items-center gap-2.5 flex-wrap pt-1 relative z-30">
                 <ScopeNav />
                 {primaryActionButton}
 
-                {hasTrailer && (
+                {/* Status Dropdown Pill */}
+                <div ref={statusMenuRef} className="relative">
                   <FocusableButton
-                    onClick={handlePlayTrailer}
-                    disabled={isResolvingTrailer}
-                    className="flex items-center gap-2 px-5 py-3 bg-surface border border-border text-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] rounded-md text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
+                    onClick={() => {
+                      setShowStatusMenu(!showStatusMenu);
+                      setShowMoreMenu(false);
+                    }}
+                    disabled={isUpdatingStatus}
+                    className="glass-button px-4 py-3 rounded-md text-xs font-semibold text-foreground flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
                   >
-                    {isResolvingTrailer ? <Loader2 size={18} className="animate-spin" /> : <Film size={18} />}
-                    <span>Trailer</span>
+                    {isUpdatingStatus ? <Loader2 size={13} className="animate-spin text-accent" /> : null}
+                    <span>
+                      {(() => {
+                        const s = fullItem.user_status?.status?.toLowerCase();
+                        const st = s === 'current' ? 'watching' : (s || 'none');
+                        switch (st) {
+                          case "watching": return isManga ? "Reading" : "Watching";
+                          case "planning": return "Planning";
+                          case "completed": return "Completed";
+                          case "paused": return "Paused";
+                          case "dropped": return "Dropped";
+                          case "repeating": return isManga ? "Rereading" : "Rewatching";
+                          default: return "+ Add to List";
+                        }
+                      })()}
+                    </span>
+                    <ChevronDown size={14} className="text-muted-foreground transition-transform" />
                   </FocusableButton>
-                )}
 
+                  {showStatusMenu && (
+                    <div className="absolute left-0 top-full mt-1.5 w-40 bg-surface border border-border rounded-xl p-1.5 shadow-2xl z-50 text-xs font-mono animate-fade-in space-y-0.5">
+                      {[
+                        { key: "watching", label: isManga ? "Reading" : "Watching" },
+                        { key: "planning", label: "Planning" },
+                        { key: "completed", label: "Completed" },
+                        { key: "paused", label: "Paused" },
+                        { key: "dropped", label: "Dropped" },
+                        { key: "repeating", label: isManga ? "Rereading" : "Rewatching" },
+                      ].map(({ key, label }) => {
+                        const currentSt = (() => {
+                          const s = fullItem.user_status?.status?.toLowerCase();
+                          return s === 'current' ? 'watching' : (s || 'none');
+                        })();
+                        const isSelected = currentSt === key;
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setShowStatusMenu(false);
+                              setIsUpdatingStatus(true);
+                              const anilistStatus = key === "watching" ? "CURRENT" : key.toUpperCase();
+                              const updates: Record<string, unknown> = { status: anilistStatus };
+                              let newProgress = actualProgress;
+                              if (key === "repeating") {
+                                updates.progress = 0;
+                                newProgress = 0;
+                              }
+                              mediaApi.saveMediaListEntry(item.id, updates)
+                                .then(() => {
+                                  updateProgressInQueries(queryClient, item.id, newProgress, key);
+                                  queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
+                                  queryClient.invalidateQueries({ queryKey: ['lists'] });
+                                  queryClient.invalidateQueries({ queryKey: ['home-watching'], refetchType: 'all' });
+                                  queryClient.invalidateQueries({ queryKey: ['home-repeating'], refetchType: 'all' });
+                                  dispatchRefresh();
+                                })
+                                .catch((err) => {
+                                  console.error('Failed to update status:', err);
+                                  notifyError("Couldn't update your list status on AniList.");
+                                })
+                                .finally(() => setIsUpdatingStatus(false));
+                            }}
+                            className={`w-full text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${
+                              isSelected ? "bg-accent/15 text-accent font-semibold" : "text-foreground/80 hover:bg-foreground/5 hover:text-foreground"
+                            }`}
+                          >
+                            <span>{label}</span>
+                            {isSelected && <Check size={13} className="text-accent" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Favorite Heart Button */}
                 <FocusableButton
                   onClick={handleToggleFavourite}
                   disabled={isTogglingFavourite}
                   title={fullItem?.is_favourite ? "Remove from AniList favourites" : "Add to AniList favourites"}
                   className={`p-3 rounded-md border transition-all active:scale-95 disabled:opacity-50 ${
                     fullItem?.is_favourite
-                      ? "bg-pink-500/15 hover:bg-pink-500/25 text-pink-500 border-pink-500/25"
-                      : "glass-button"
+                      ? "bg-pink-500/15 hover:bg-pink-500/25 text-pink-500 border-pink-500/30"
+                      : "glass-button text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Heart size={18} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
+                  <Heart size={16} fill={fullItem?.is_favourite ? "currentColor" : "none"} />
                 </FocusableButton>
 
-                <div className="relative">
-                  <FocusableSelect
-                    value={(() => { const s = fullItem.user_status?.status?.toLowerCase(); return s === 'current' ? 'watching' : (s || 'none'); })()}
-                    onChange={(e) => {
-                      const newStatus = e.target.value;
-                      if (newStatus === 'none') {
-                        handleRemoveFromList(true);
-                      } else {
-                        setIsUpdatingStatus(true);
-                        // AniList's enum is CURRENT, not WATCHING — the dropdown's
-                        // "watching" value is a display-only label (see the reverse
-                        // current->watching mapping on `value` above); every other
-                        // option's UI value already matches the enum uppercased.
-                        const anilistStatus = newStatus === 'watching' ? 'CURRENT' : newStatus.toUpperCase();
-                        const updates: Record<string, unknown> = { status: anilistStatus };
-                        let newProgress = actualProgress;
-                        if (newStatus === 'repeating') {
-                          updates.progress = 0;
-                          newProgress = 0;
-                        }
-                        mediaApi.saveMediaListEntry(item.id, updates)
-                          .then(() => {
-                            updateProgressInQueries(queryClient, item.id, newProgress, newStatus);
-                            queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });
-                            queryClient.invalidateQueries({ queryKey: ['lists'] });
-                            queryClient.invalidateQueries({ queryKey: ['home-watching'], refetchType: 'all' });
-                            queryClient.invalidateQueries({ queryKey: ['home-repeating'], refetchType: 'all' });
-                            dispatchRefresh();
-                          })
-                          .catch((err) => { console.error('Failed to update status:', err); notifyError("Couldn't update your list status on AniList."); })
-                          .finally(() => setIsUpdatingStatus(false));
-                      }
-                    }}
-                    disabled={isUpdatingStatus}
-                    className="bg-surface border border-border text-foreground/80 hover:text-foreground rounded-md pl-4 pr-10 py-3 text-sm font-medium focus:outline-none focus:border-accent transition-all cursor-pointer appearance-none"
-                  >
-                    <option value="none" className="text-muted-foreground">Add to list</option>
-                    <option value="planning">Planning</option>
-                    <option value="watching">{isManga ? 'Reading' : 'Watching'}</option>
-                    <option value="repeating">{isManga ? 'Rereading' : 'Rewatching'}</option>
-                    <option value="completed">Completed</option>
-                    <option value="paused">Paused</option>
-                    <option value="dropped">Dropped</option>
-                  </FocusableSelect>
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                    <ChevronDown size={16} />
-                  </div>
-                </div>
-
-                {/* Destructive, so it sits apart from the primary actions
-                    behind a divider and stays quiet until hovered or armed.
-                    aria-label, not just title: an icon-only button with only a
-                    title attribute reads as an unnamed button. */}
-                <div className="ml-1 pl-3 border-l border-border">
+                {/* "···" More Options Menu */}
+                <div ref={moreMenuRef} className="relative">
                   <FocusableButton
-                    onClick={handleRemoveFromList}
-                    aria-label={deleteConfirmPending ? 'Confirm removal from your list' : 'Remove from your list'}
-                    title={deleteConfirmPending ? 'Click again to confirm removal' : 'Remove from List'}
-                    className={`p-3 rounded-md transition-all border active:scale-95 ${
-                      deleteConfirmPending
-                        ? 'bg-danger/80 text-background border-danger scale-105 animate-pulse'
-                        : 'bg-transparent border-border text-muted-foreground hover:bg-danger/15 hover:text-danger hover:border-danger/25'
-                    }`}
+                    onClick={() => {
+                      setShowMoreMenu(!showMoreMenu);
+                      setShowStatusMenu(false);
+                    }}
+                    title="More options"
+                    className="glass-button p-3 rounded-md text-muted-foreground hover:text-foreground transition-all active:scale-95"
                   >
-                    <Trash2 size={20} />
+                    <MoreHorizontal size={16} />
                   </FocusableButton>
+
+                  {showMoreMenu && (
+                    <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-52 bg-surface border border-border rounded-xl p-1.5 shadow-2xl z-50 text-xs animate-fade-in space-y-0.5">
+                      {showResume && (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            handlePlayNext(undefined, undefined, true);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-foreground/5 flex items-center gap-2.5 text-foreground transition-colors"
+                        >
+                          <RotateCcw size={14} className="text-muted-foreground" />
+                          <span>Start over (from 0:00)</span>
+                        </button>
+                      )}
+
+                      {hasTrailer && (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            handlePlayTrailer();
+                          }}
+                          disabled={isResolvingTrailer}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-foreground/5 flex items-center gap-2.5 text-foreground transition-colors disabled:opacity-50"
+                        >
+                          <Film size={14} className="text-muted-foreground" />
+                          <span>Watch trailer</span>
+                        </button>
+                      )}
+
+                      {!isManga && episodes.length > 0 && (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            handleDownloadAll();
+                          }}
+                          disabled={queueingAll}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-foreground/5 flex items-center gap-2.5 text-foreground transition-colors disabled:opacity-50"
+                        >
+                          <Download size={14} className="text-muted-foreground" />
+                          <span>Download all episodes</span>
+                        </button>
+                      )}
+
+                      {!isManga && (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            const defaultQuery = fullItem.title?.english || fullItem.title?.romaji || title || "";
+                            setMatchQuery(defaultQuery);
+                            setMatchResults([]);
+                            setShowMatchModal(true);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-foreground/5 flex items-center gap-2.5 text-foreground transition-colors"
+                        >
+                          <Search size={14} className="text-muted-foreground" />
+                          <span>Source & match settings</span>
+                        </button>
+                      )}
+
+                      {fullItem.user_status?.status && (
+                        <>
+                          <div className="h-px bg-border my-1" />
+                          <button
+                            onClick={() => {
+                              setShowMoreMenu(false);
+                              handleRemoveFromList();
+                            }}
+                            className="w-full text-left px-3 py-2 rounded-lg hover:bg-danger/10 flex items-center gap-2.5 text-danger-light transition-colors"
+                          >
+                            <Trash2 size={14} className="text-danger-light" />
+                            <span>Remove from AniList</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </FocusScope>
 
@@ -1128,133 +1259,211 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
             </div>
           </div>
 
-          {/* Stills strip — art style at a glance, without committing to the
-              trailer. Artwork is always safe to show; stills past what you've
-              watched sit behind the reveal. */}
-          {!isManga && galleryImages.length > 0 && (
-            <div className="mt-8">
-              <MediaGallery images={galleryImages} stillsAllowed={Math.max(3, actualProgress)} />
-            </div>
-          )}
-
           {/* Tabs */}
           <div className="mt-8 space-y-6">
-            <FocusScope
-              name="detail-tabs"
-              orientation="horizontal"
-              role="tablist"
-              className="flex border-b border-border pb-0 relative"
-            >
-              <ScopeNav />
-              {(['episodes', 'characters', 'seasons', 'more'] as const).map((tab) => (
-                <DetailTab
-                  key={tab}
-                  tab={tab}
-                  active={activeTab === tab}
-                  onSelect={setActiveTab}
-                  label={tab === 'episodes' ? (isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                />
-              ))}
-            </FocusScope>
+            <div className="flex items-center justify-between border-b border-border pb-0 relative">
+              <FocusScope
+                name="detail-tabs"
+                orientation="horizontal"
+                role="tablist"
+                className="flex"
+              >
+                <ScopeNav />
+                {(['episodes', 'characters', 'seasons', 'discussions', 'more'] as const).map((tab) => {
+                  const totalEps = isNovel
+                    ? (novelData?.books?.length || fullItem.volumes || fullItem.chapters || 0)
+                    : isManga
+                    ? (fullItem.chapters || episodes.length || 0)
+                    : (fullItem.episodes || episodes.length || 0);
+                  const charactersCount = fullItem.characters?.edges?.length || 0;
+                  const relationsCount = (fullItem.relations?.edges?.length || 0) + (sequel ? 1 : 0);
+                  const count = tab === 'episodes' ? (totalEps > 0 ? totalEps : undefined)
+                    : tab === 'characters' ? (charactersCount > 0 ? charactersCount : undefined)
+                    : tab === 'seasons' ? (relationsCount > 0 ? relationsCount : undefined)
+                    : undefined;
+                  return (
+                    <DetailTab
+                      key={tab}
+                      tab={tab}
+                      active={activeTab === tab}
+                      onSelect={setActiveTab}
+                      count={count}
+                      label={tab === 'episodes' ? (isNovel ? 'Volumes & Books' : isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab === 'characters' ? 'Cast & Staff' : tab === 'discussions' ? 'Discussions' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    />
+                  );
+                })}
+              </FocusScope>
+
+              {activeTab === 'episodes' && !isManga && !isNovel && episodes.length > 0 && (
+                <div className="flex items-center gap-2.5 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">Audio:</span>
+                    <div className="flex bg-surface p-0.5 rounded-md border border-border text-[10.5px] font-mono">
+                      <button
+                        onClick={async () => {
+                          setTranslationType("sub");
+                          await handleSelectAudio("sub");
+                        }}
+                        className={`px-2.5 py-0.5 rounded transition-all cursor-pointer ${
+                          (mediaPrefs?.translation_type ?? globalTranslationType) !== "dub"
+                            ? "bg-accent/20 text-accent font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Sub (JP)
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setTranslationType("dub");
+                          await handleSelectAudio("dub");
+                        }}
+                        className={`px-2.5 py-0.5 rounded transition-all cursor-pointer ${
+                          (mediaPrefs?.translation_type ?? globalTranslationType) === "dub"
+                            ? "bg-accent/20 text-accent font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Dub (EN)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center bg-surface p-0.5 rounded-md border border-border text-[10.5px] font-mono">
+                    <button
+                      onClick={() => handleSetViewMode("cards")}
+                      className={`px-2.5 py-0.5 rounded transition-all ${
+                        viewMode === "cards"
+                          ? "bg-foreground/10 text-foreground font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Cards
+                    </button>
+                    <button
+                      onClick={() => handleSetViewMode("compact")}
+                      className={`px-2.5 py-0.5 rounded transition-all ${
+                        viewMode === "compact"
+                          ? "bg-foreground/10 text-foreground font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Compact
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="min-h-[300px]">
               <AnimatePresence mode="popLayout">
-                {activeTab === 'episodes' && (
-                  <motion.div key="episodes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
-                    {!isManga && (
-                      <FocusScope name="detail-episode-options" orientation="horizontal" className="glass-panel p-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <ScopeNav />
-                        <div className="flex flex-wrap gap-2">
-                          <FocusableButton
-                            onClick={handleToggleAutoskip}
-                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoskip ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
+                {activeTab === 'episodes' && isNovel && (
+                  <motion.div key="novel-volumes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full space-y-6">
+                    <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                      <div>
+                        <h3 className="text-sm font-bold text-foreground">Light Novel Volumes & Compilations</h3>
+                        <p className="meta-mono text-xs text-muted-foreground mt-0.5">
+                          {effectiveNovelBooks.length} volumes indexed ·{" "}
+                          {readableNovelVolume ? "text source linked" : "metadata only, no text source"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedNovelVolumeId(null);
+                          setShowEreaderModal(true);
+                        }}
+                        className="flex items-center gap-1.5 rounded-md bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+                      >
+                        <Download size={13} />
+                        <span>Download Full Series Guide</span>
+                      </button>
+                    </div>
+
+                    {effectiveNovelBooks.length > 0 ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        {effectiveNovelBooks.map((vol: NovelVolume, idx: number) => (
+                          <div
+                            key={String(vol.id || idx)}
+                            onClick={() => vol.url && setActiveNovelVolume(vol)}
+                            className={`group rounded-lg border border-border bg-card/60 p-3 transition-all flex flex-col justify-between ${
+                              vol.url
+                                ? "hover:border-accent/60 hover:bg-card cursor-pointer active:scale-[0.99]"
+                                : "cursor-default"
+                            }`}
                           >
-                            <SkipForward size={14} fill={autoskip ? 'currentColor' : 'none'} />
-                            <span>Auto Skip Intro</span>
-                          </FocusableButton>
-                          <FocusableButton
-                            onClick={handleToggleUpscaling}
-                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${shaderProfile !== 'off' ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
-                          >
-                            <Sparkles size={14} className={shaderProfile !== 'off' ? 'text-accent' : ''} />
-                            <span>Upscaling</span>
-                          </FocusableButton>
-                          <FocusableButton
-                            onClick={handleToggleAutoNext}
-                            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${autoplay ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-surface text-muted-foreground border border-border hover:bg-foreground/[0.03]'}`}
-                          >
-                            <PlayCircle size={14} className={autoplay ? 'text-accent' : ''} />
-                            <span>Auto Next</span>
-                          </FocusableButton>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {(!isManga && episodes.length > 0) && (
-                            <FocusableButton
-                              onClick={handleDownloadAll}
-                              disabled={queueingAll}
-                              className="p-1.5 rounded-lg glass-button transition-all active:scale-95 text-accent disabled:opacity-50"
-                              title="Download All Episodes"
-                            >
-                              {queueingAll ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                            </FocusableButton>
-                          )}
-                          <FocusableSelect
-                            value={mediaPrefs?.translation_type ?? "default"}
-                            onChange={(e) => handleSelectAudio(e.target.value)}
-                            title="Audio for this show (overrides the global setting)"
-                            className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none"
-                          >
-                            <option value="default">Default</option>
-                            <option value="sub">Sub</option>
-                            <option value="dub">Dub</option>
-                          </FocusableSelect>
-                          <FocusableSelect value={selectedProvider} onChange={(e) => handleSelectProvider(e.target.value)} className="text-xs bg-surface border border-border rounded-lg px-3 py-1.5 text-foreground outline-none">
-                            <option value="anineko">AniNeko</option>
-                            <option value="nyaa">Torrents</option>
-                          </FocusableSelect>
-                          <FocusableButton
-                            onClick={async () => {
-                              await mediaApi.clearProviderCache(item.id).catch(() => {});
-                              queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id] });
-                              queryClient.invalidateQueries({ queryKey: ['media-detail', item.id] });
-                            }}
-                            className="p-1.5 rounded-lg glass-button transition-all active:scale-95"
-                            title="Re-match source"
-                          >
-                            <RotateCcw size={14} />
-                          </FocusableButton>
-                          <FocusableButton
-                            onClick={() => {
-                              const defaultQuery = fullItem.title?.english || fullItem.title?.romaji || title || "";
-                              setMatchQuery(defaultQuery);
-                              setMatchResults([]);
-                              setShowMatchModal(true);
-                            }}
-                            className="p-1.5 rounded-lg glass-button transition-all active:scale-95"
-                            title="Fix source match"
-                          >
-                            <Search size={14} />
-                          </FocusableButton>
-                        </div>
-                      </FocusScope>
+                            <div>
+                              <div className="aspect-[2/3] w-full overflow-hidden rounded-md bg-muted mb-2 relative">
+                                {vol.cover_url ? (
+                                  <img src={vol.cover_url} alt={vol.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                                    <BookOpen size={24} />
+                                  </div>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-semibold text-foreground line-clamp-2 leading-tight group-hover:text-accent transition-colors">
+                                {vol.title || `Volume ${idx + 1}`}
+                              </h4>
+                              {vol.release_date && (
+                                <p className="meta-mono text-[10px] text-muted-foreground mt-1">
+                                  {vol.release_date}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-3 pt-2 border-t border-border/50 flex items-center gap-1.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedNovelVolumeId(vol.id);
+                                  setShowEreaderModal(true);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-1 rounded bg-accent/15 py-1 text-[11px] font-semibold text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+                                title="Download EPUB for E-Reader"
+                              >
+                                <Download size={11} />
+                                <span>EPUB</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveNovelVolume(vol);
+                                }}
+                                disabled={!vol.url}
+                                className="flex-1 flex items-center justify-center gap-1 rounded border border-border py-1 text-[11px] font-medium text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                title={vol.url ? "Read Online" : "No readable text source for this volume"}
+                              >
+                                <BookOpen size={11} />
+                                <span>Read</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-16 border border-dashed border-border rounded-xl">
+                        <BookOpen size={32} className="mx-auto text-muted-foreground/60 mb-2" />
+                        <h4 className="text-xs font-bold text-foreground">No volume breakdown indexed</h4>
+                        <p className="meta-mono text-[11px] text-muted-foreground mt-1 max-w-sm mx-auto">
+                          You can still download the full light novel compendium or read online with CrossPoint optimization.
+                        </p>
+                        <button
+                          onClick={() => setShowEreaderModal(true)}
+                          className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground hover:opacity-90 transition-opacity cursor-pointer"
+                        >
+                          <Download size={14} />
+                          <span>Generate E-Reader EPUB</span>
+                        </button>
+                      </div>
                     )}
-                    {(() => {
-                      const total = isManga
-                        ? (fullItem.chapters || episodes.length || 0)
-                        : (fullItem.episodes || episodes.length || 0);
-                      const nextAiringEp = fullItem.next_airing?.episode;
-                      const latestAvailable = !isManga && nextAiringEp ? nextAiringEp - 1 : undefined;
-                      return (
-                        <WatchGrid
-                          total={total}
-                          progress={actualProgress}
-                          latestAvailable={latestAvailable}
-                          isManga={isManga}
-                          onPlay={(n) => handlePlayNext(n)}
-                        />
-                      );
-                    })()}
+                  </motion.div>
+                )}
+
+                {activeTab === 'episodes' && !isNovel && (
+                  <motion.div key="episodes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
                     <EpisodeList
+                      translationType={(mediaPrefs?.translation_type ?? globalTranslationType) as "sub" | "dub"}
+                      viewMode={viewMode}
+                      onViewModeChange={handleSetViewMode}
                       mediaId={item.id}
                       episodes={episodes}
                       loading={loadingEps}
@@ -1266,6 +1475,10 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                       coverImage={fullItem?.banner_image || fullItem?.cover_image?.large || item?.banner_image || item?.cover_image?.large || ''}
                       episodeTitleMap={episodeTitleMap}
                       episodeThumbMap={episodeThumbMap}
+                      episodeOverviewMap={episodeOverviewMap}
+                      episodeAirDateMap={episodeAirDateMap}
+                      episodeRuntimeMap={episodeRuntimeMap}
+                      resumeSeconds={resumeSeconds}
                       fillerEpisodes={fillerEpisodes}
                       onUnwatch={(num) => handleUpdateProgress(Number(num) - 1)}
                       onWatch={(num) => handleUpdateProgress(Number(num))}
@@ -1311,7 +1524,29 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                               </div>
                               <div className="p-2 space-y-0.5">
                                 <div className="text-[12px] font-bold text-foreground group-hover:text-accent transition-colors truncate">{char.name.full}</div>
-                                {va && <div className="text-[10px] text-muted-foreground truncate">{va.name.full}</div>}
+                                {va && (
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedCharacter(char);
+                                      setSelectedStaffId(va.id);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setSelectedCharacter(char);
+                                        setSelectedStaffId(va.id);
+                                      }
+                                    }}
+                                    className="text-[10px] text-muted-foreground hover:text-accent transition-colors truncate cursor-pointer"
+                                    title={`View ${va.name.full}'s filmography`}
+                                  >
+                                    <span className="truncate hover:underline">{va.name.full}</span>
+                                  </div>
+                                )}
                               </div>
                             </FocusableButton>
                           );
@@ -1378,8 +1613,18 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     })()}
                   </motion.div>
                 )}
+                {activeTab === 'discussions' && (
+                  <motion.div key="discussions" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
+                    <MediaDiscussions
+                      mediaId={item.id}
+                      mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
+                      isManga={isManga}
+                    />
+                  </motion.div>
+                )}
                 {activeTab === 'more' && (
-                  <motion.div key="more" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
+                  <motion.div key="more" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full space-y-8">
+                    {!isManga && <AnimeThemeList mediaId={item.id} />}
                     {recommendations.length > 0 ? (
                       <div className="space-y-4">
                         <p className="text-xs font-semibold text-foreground">Recommendations</p>
@@ -1400,7 +1645,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                         </FocusScope>
                       </div>
                     ) : (
-                      <div className="py-20 text-center text-muted-foreground text-xs font-bold">No additional content.</div>
+                      isManga && <div className="py-20 text-center text-muted-foreground text-xs font-bold">No additional content.</div>
                     )}
                   </motion.div>
                 )}
@@ -1493,17 +1738,44 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           onClick={closeMatchModal}
           role="dialog"
           aria-modal="true"
-          aria-label="Fix source match"
+          aria-label="Source & Match Settings"
           tabIndex={-1}
         >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative max-w-md w-[90%] max-h-[80vh] overflow-y-auto bg-background border border-border rounded-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={closeMatchModal} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors z-10"><X size={16} /></button>
-            <div className="text-sm font-bold text-foreground mb-1">Fix source match</div>
-            <div className="text-[11px] text-muted-foreground mb-4">
-              {selectedProvider === "nyaa"
-                ? "Type the exact search title to use for torrent matching (useful for OVAs, specials, and seasons that share a title with other entries)."
-                : "Search AniNeko and pick the correct entry for this show."}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative max-w-md w-[90%] max-h-[80vh] overflow-y-auto bg-background border border-border rounded-xl p-6 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeMatchModal} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors z-10"><X size={16} /></button>
+            <div>
+              <div className="text-base font-bold text-foreground">Source & Match Settings</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Configure stream provider source or search to fix unmatched titles.
+              </div>
+            </div>
+
+            {/* Provider Switcher Tabs */}
+            <div className="flex bg-surface p-1 rounded-lg border border-border text-xs font-mono">
+              <button
+                onClick={() => handleSelectProvider("nyaa")}
+                className="flex-1 py-1.5 rounded-md font-semibold transition-all bg-accent/20 text-accent"
+              >
+                Torrents (Nyaa)
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-xs font-semibold text-foreground">Fix title mapping</span>
+              <button
+                onClick={async () => {
+                  await mediaApi.clearProviderCache(item.id).catch(() => {});
+                  queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id] });
+                  queryClient.invalidateQueries({ queryKey: ['media-detail', item.id] });
+                  closeMatchModal();
+                }}
+                className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-accent transition-colors"
+                title="Clears cached episode list and forces a fresh query"
+              >
+                <RotateCcw size={11} />
+                <span>Re-match source</span>
+              </button>
             </div>
             <form
               className="flex gap-2 mb-4"
@@ -1586,6 +1858,29 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
           }}
           hasPrevChapter={episodes.findIndex((ep) => String(ep.number) === activeChapter) > 0}
           hasNextChapter={episodes.findIndex((ep) => String(ep.number) === activeChapter) < episodes.length - 1}
+        />
+      )}
+
+      {/* Light Novel Reader */}
+      {activeNovelVolume && (
+        <NovelReader
+          title={fullItem.title?.english || fullItem.title?.romaji || novelData?.title || item.title?.english || item.title?.romaji || "Light Novel"}
+          author={novelData?.author}
+          slug={fullItem.title?.english || fullItem.title?.romaji || String(item.id)}
+          volumeUrl={activeNovelVolume.url}
+          volumeTitle={activeNovelVolume.title}
+          onClose={() => setActiveNovelVolume(null)}
+        />
+      )}
+
+      {/* E-Reader EPUB Downloader Modal */}
+      {showEreaderModal && (
+        <EreaderDownloadModal
+          isOpen={showEreaderModal}
+          onClose={() => setShowEreaderModal(false)}
+          media={fullItem}
+          volumes={effectiveNovelBooks}
+          selectedVolumeId={selectedNovelVolumeId}
         />
       )}
     </>

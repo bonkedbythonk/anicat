@@ -23,10 +23,12 @@ import { CinemaLibraryView } from "@/components/views/CinemaLibraryView";
 import { isCinemaId } from "@/lib/mediaId";
 
 const MangaView = lazy(() => import("@/components/views/MangaView").then(m => ({ default: m.MangaView })));
+const NovelsView = lazy(() => import("@/components/views/NovelsView").then(m => ({ default: m.NovelsView })));
 const SettingsView = lazy(() => import("@/components/views/SettingsView").then(m => ({ default: m.SettingsView })));
 const DownloadsView = lazy(() => import("@/components/views/DownloadsView").then(m => ({ default: m.DownloadsView })));
 import { MediaDetail } from "@/components/media/MediaDetail";
 import { StreamLoadingModal } from "@/components/media/StreamLoadingModal";
+import { AniCatPlayer } from "@/components/player/AniCatPlayer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
 import { Onboarding } from "@/components/layout/Onboarding";
@@ -52,6 +54,8 @@ export default function App() {
   const setConnectionState = useAppStore((s) => s.setConnectionState);
   const openDetail = useAppStore((s) => s.openDetail);
   const closeDetail = useAppStore((s) => s.closeDetail);
+  const activePlayer = useAppStore((s) => s.activePlayer);
+  const closePlayer = useAppStore((s) => s.closePlayer);
   const sidebarW = 200;
 
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -218,6 +222,7 @@ export default function App() {
     switch (currentView) {
       case "home": return <HomeView onSelect={onSelect} />;
       case "manga": return <MangaView onSelect={onSelect} />;
+      case "novels": return <NovelsView onSelect={onSelect} />;
       case "search": return <SearchView onSelect={onSelect} />;
       case "lists": return <ListsView onSelect={onSelect} />;
       case "schedule": return <ScheduleView onSelect={onSelect} />;
@@ -278,11 +283,17 @@ export default function App() {
     const unlistenPlayback = listen<{ active: boolean }>("anicat_playback_state", (event) => {
       useAppStore.getState().setPlayerActive(Boolean(event.payload.active));
     });
+    // Backend emits this when an episode stream begins fetching or completes preloading
+    const unlistenPreload = listen<{ media_id: number; episode_number: number; status: "fetching" | "ready" | "idle" }>("stream_preload_status", (event) => {
+      const { media_id, episode_number, status } = event.payload;
+      useAppStore.getState().setPreloadStatus(media_id, episode_number, status);
+    });
     return () => {
       unlisten.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
       unlistenSetting.then((fn) => fn());
       unlistenPlayback.then((fn) => fn());
+      unlistenPreload.then((fn) => fn());
     };
   }, [setNotification]);
 
@@ -398,6 +409,7 @@ export default function App() {
       <CommandPalette />
       <Picker />
       <StreamLoadingModal />
+      {activePlayer && <AniCatPlayer {...activePlayer} onClose={closePlayer} />}
     </div>
   );
 }

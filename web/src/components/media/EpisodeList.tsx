@@ -1,10 +1,11 @@
 
-import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Play, Download, Loader2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check, HardDriveDownload } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { Play, Download, Loader2, Clock, AlertCircle, BookOpen, XCircle, RefreshCw, Video, Check, HardDriveDownload, Zap, Search, X, Copy, CheckCheck } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { mediaApi, type Episode, type StreamServer } from "@/lib/api";
 import { useSettingsStore, useAppStore } from "@/stores/app";
 import { dispatchRefresh } from "@/lib/events";
+import { formatTime, formatEpisodeAirDate } from "@/lib/date";
 import { FocusScope, ScopeNav, useFocusable } from "@/focus";
 
 function FocusableButton({ disabled, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
@@ -29,7 +30,14 @@ interface EpisodeListProps {
   coverImage?: string;
   episodeTitleMap?: Record<number, string>;
   episodeThumbMap?: Record<number, string>;
+  episodeOverviewMap?: Record<number, string>;
+  episodeAirDateMap?: Record<number, string>;
+  episodeRuntimeMap?: Record<number, number>;
+  resumeSeconds?: number;
   fillerEpisodes?: number[] | Set<number>;
+  translationType?: "sub" | "dub";
+  viewMode?: "cards" | "compact";
+  onViewModeChange?: (mode: "cards" | "compact") => void;
 }
 
 export function EpisodeList({
@@ -49,9 +57,80 @@ export function EpisodeList({
   coverImage,
   episodeTitleMap,
   episodeThumbMap,
+  episodeOverviewMap,
+  episodeAirDateMap,
+  episodeRuntimeMap,
+  resumeSeconds,
   fillerEpisodes,
+  translationType: propTranslationType,
+  viewMode: propViewMode,
+  onViewModeChange,
 }: EpisodeListProps) {
-  const translationType = useSettingsStore((s) => s.translationType);
+  const globalTranslationType = useSettingsStore((s) => s.translationType);
+  const translationType = propTranslationType || globalTranslationType;
+  const dataSaver = useSettingsStore((s) => s.dataSaver);
+  const preloadStatus = useAppStore((s) => s.preloadStatus);
+
+  const [internalViewMode, setInternalViewMode] = useState<"cards" | "compact">(() => {
+    if (typeof window === "undefined") return "cards";
+    return (localStorage.getItem("anicat_episode_view_mode") as "cards" | "compact") || "cards";
+  });
+  const viewMode = propViewMode || internalViewMode;
+  const handleSetViewMode = (mode: "cards" | "compact") => {
+    if (onViewModeChange) {
+      onViewModeChange(mode);
+    } else {
+      setInternalViewMode(mode);
+      localStorage.setItem("anicat_episode_view_mode", mode);
+    }
+  };
+
+  const CHUNK_SIZE = 50;
+  const showChunks = episodes.length > 35;
+
+  const chunks = useMemo(() => {
+    if (!showChunks) return [];
+    const list: { start: number; end: number; label: string }[] = [];
+    const maxEp = Math.max(...episodes.map((e) => Number(e.number) || 0), episodes.length);
+    for (let i = 1; i <= maxEp; i += CHUNK_SIZE) {
+      const end = Math.min(i + CHUNK_SIZE - 1, maxEp);
+      list.push({ start: i, end, label: `${i}–${end}` });
+    }
+    return list;
+  }, [episodes, showChunks]);
+
+  const defaultChunkIndex = useMemo(() => {
+    if (!showChunks || chunks.length === 0) return 0;
+    const target = progress + 1;
+    const idx = chunks.findIndex((c) => target >= c.start && target <= c.end);
+    return idx >= 0 ? idx : 0;
+  }, [chunks, progress, showChunks]);
+
+  const [selectedChunkIndex, setSelectedChunkIndex] = useState<number>(defaultChunkIndex);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSelectedChunkIndex(defaultChunkIndex);
+  }, [defaultChunkIndex]);
+
+  const displayedEpisodes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      return episodes.filter((ep) => {
+        const num = String(ep.number);
+        const title = (ep.title || episodeTitleMap?.[Number(ep.number)] || "").toLowerCase();
+        return num === q || num.includes(q) || title.includes(q);
+      });
+    }
+    if (!showChunks || chunks.length === 0) return episodes;
+    const currentChunk = chunks[selectedChunkIndex] || chunks[0];
+    return episodes.filter((ep) => {
+      const num = Number(ep.number);
+      return num >= currentChunk.start && num <= currentChunk.end;
+    });
+  }, [episodes, searchQuery, showChunks, chunks, selectedChunkIndex, episodeTitleMap]);
+
   const [playingEp, setPlayingEp] = useState<string | null>(null);
   const [queueingEp, setQueueingEp] = useState<string | null>(null);
   const [localDownloadStatus, setLocalDownloadStatus] = useState<Record<string, string>>({});
@@ -67,6 +146,31 @@ export function EpisodeList({
     translationType === "dub" ? "dub" : null
   );
   const [loadingServer, setLoadingServer] = useState<string | null>(null);
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    epNum: string;
+    isWatched: boolean;
+    isUnaired: boolean;
+    epTitle: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClose = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", handleClose);
+    window.addEventListener("contextmenu", handleClose);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("contextmenu", handleClose);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     setStreamFilter(translationType === "dub" ? "dub" : null);
@@ -193,7 +297,6 @@ export function EpisodeList({
     return 4;
   };
 
-  const dataSaver = useSettingsStore((s) => s.dataSaver);
   const getSortedStreams = (streams: StreamServer[]) => {
     if (!streams) return [];
     
@@ -259,9 +362,24 @@ export function EpisodeList({
       return;
     }
 
-    setPlayingEp(epNum);
     const ep = episodes.find((e) => String(e.number) === epNum);
     const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+    const playerType = useSettingsStore.getState().playerType;
+
+    if (playerType === "builtin") {
+      useAppStore.getState().openPlayer({
+        mediaId,
+        episodeNumber: parseInt(epNum, 10),
+        provider: selectedProvider,
+        title: mediaTitle,
+        episodeTitle: epTitle,
+        coverImage,
+        totalEpisodes: episodes.length,
+      });
+      return;
+    }
+
+    setPlayingEp(epNum);
 
     useAppStore.getState().setPlaybackLoading({
       isLoading: true,
@@ -297,12 +415,27 @@ export function EpisodeList({
   };
 
   const handlePlaySpecificStream = async (epNum: string, serverName: string) => {
+    const ep = episodes.find((e) => String(e.number) === epNum);
+    const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
+    const playerType = useSettingsStore.getState().playerType;
+
+    if (playerType === "builtin") {
+      useAppStore.getState().openPlayer({
+        mediaId,
+        episodeNumber: parseInt(epNum, 10),
+        provider: selectedProvider,
+        server: serverName,
+        title: mediaTitle,
+        episodeTitle: epTitle,
+        coverImage,
+        totalEpisodes: episodes.length,
+      });
+      return;
+    }
+
     const serverKey = `${epNum}-${serverName}`;
     setLoadingServer(serverKey);
     setPlayingEp(epNum);
-
-    const ep = episodes.find((e) => String(e.number) === epNum);
-    const epTitle = episodeTitleMap?.[parseInt(epNum)] || ep?.title;
 
     useAppStore.getState().setPlaybackLoading({
       isLoading: true,
@@ -360,7 +493,7 @@ export function EpisodeList({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Episode list */}
       {!Array.isArray(episodes) || episodes.length === 0 ? (
         <div className="text-center py-12 text-gray-600 text-sm space-y-3">
@@ -377,171 +510,336 @@ export function EpisodeList({
           )}
         </div>
       ) : (
-        /* No inner max-height: a scrolling box inside a scrolling page traps
-           the wheel. The page scrolls, the list just grows. */
-        <div className="space-y-1 pr-1">
-          {episodes.map((ep, idx) => {
-            const epNum = String(ep.number);
+        <div className="space-y-3">
+          {/* Range chunk selector & Quick collapsible episode jump/search (only for 35+ episode shows) */}
+          {showChunks && (
+            <div className="flex items-center justify-between gap-2 pb-1.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-0.5 max-w-full">
+                {chunks.map((chunk, idx) => {
+                  const isSelected = selectedChunkIndex === idx && !searchQuery.trim();
+                  const hasNext = (progress + 1) >= chunk.start && (progress + 1) <= chunk.end;
+                  return (
+                    <button
+                      key={chunk.label}
+                      onClick={() => {
+                        setSelectedChunkIndex(idx);
+                        setSearchQuery("");
+                        setIsSearchOpen(false);
+                      }}
+                      className={`font-mono text-[11px] font-semibold px-2.5 py-1 rounded-md border transition-all shrink-0 cursor-pointer ${
+                        isSelected
+                          ? "bg-accent text-background border-accent shadow-xs"
+                          : "bg-surface border-border text-muted-foreground hover:text-foreground hover:border-foreground/20"
+                      }`}
+                    >
+                      <span>{chunk.label}</span>
+                      {hasNext && !isSelected && (
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent ml-1.5 mb-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="shrink-0">
+                {isSearchOpen || searchQuery ? (
+                  <div className="relative flex items-center w-36 sm:w-44 animate-fade-in">
+                    <Search size={12} className="absolute left-2.5 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={isManga ? "Jump to ch..." : "Jump to ep..."}
+                      className="w-full pl-7 pr-6 py-1 rounded-md bg-surface border border-border text-xs text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-accent/60 transition-colors"
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setSearchQuery("");
+                          setIsSearchOpen(false);
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        setSearchQuery("");
+                        setIsSearchOpen(false);
+                      }}
+                      className="absolute right-1 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                      title="Close search"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsSearchOpen(true)}
+                    title={isManga ? "Jump to chapter" : "Jump to episode"}
+                    className="px-2 py-1 rounded-md border border-border bg-surface text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-all flex items-center gap-1.5 text-[11px] font-medium cursor-pointer"
+                  >
+                    <Search size={11} />
+                    <span className="font-mono text-[10.5px]">Jump</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* When searching and no matches found */}
+          {searchQuery.trim() && displayedEpisodes.length === 0 ? (
+            <div className="py-16 text-center text-sm text-muted-foreground space-y-2">
+              <p>No {isManga ? "chapters" : "episodes"} matching &ldquo;{searchQuery}&rdquo;.</p>
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setIsSearchOpen(false);
+                }}
+                className="text-xs text-accent font-semibold hover:underline"
+              >
+                Clear search
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {displayedEpisodes.map((ep, idx) => {
+            const epNum = ep.number.toString();
             const isWatched = Number(ep.number) <= progress;
-            const isNext = Number(ep.number) === progress + 1;
-            const nextAiringSecs = typeof nextAiringTime === "string" 
-              ? new Date(nextAiringTime).getTime() / 1000 
-              : Number(nextAiringTime);
-            const hasAired = !isNaN(nextAiringSecs) && (Date.now() / 1000) > nextAiringSecs;
-            const isUnaired = !isManga && nextAiringEpisode !== undefined && Number(ep.number) >= nextAiringEpisode && !hasAired;
-            
+            const isNext = epNum === (progress + 1).toString();
+            const isUnaired = !isManga && nextAiringEpisode !== undefined && Number(ep.number) >= nextAiringEpisode;
+            const epTitle = isManga
+              ? (ep.title && !/^(episode|chapter)\s+\d+$/i.test(ep.title) ? ep.title : `Chapter ${epNum}`)
+              : (episodeTitleMap?.[Number(ep.number)] || ep.title || `Episode ${epNum}`);
+            const airDate = isManga ? undefined : episodeAirDateMap?.[Number(ep.number)];
+            const overview = isManga ? undefined : episodeOverviewMap?.[Number(ep.number)];
+            const runtimeMin = isManga ? 0 : (episodeRuntimeMap?.[Number(ep.number)] || 24);
+
             return (
               <div key={`${epNum}-${idx}`} className="space-y-1.5">
                 <FocusScope
                   name={`ep-${epNum}`}
-                orientation="horizontal"
-                key={`${epNum}-${idx}`}
-                className="space-y-1.5"
-              >
+                  orientation="horizontal"
+                  className="space-y-1.5"
+                >
                 <ScopeNav />
                 <div
-                  className={`flex items-center justify-between px-4 py-2.5 rounded-lg transition-all group episode-row-item ${
-                    isNext && !isUnaired ? 'bg-accent/10 border border-accent/20 shadow-lg shadow-accent/5' :
-                    isWatched ? 'opacity-50 hover:bg-foreground/[0.04] border border-transparent' :
-                    'bg-foreground/[0.02] border border-border hover:bg-foreground/[0.06] hover:border-border/60'
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({
+                      x: Math.min(e.clientX, window.innerWidth - 220),
+                      y: Math.min(e.clientY, window.innerHeight - 260),
+                      epNum,
+                      isWatched,
+                      isUnaired: Boolean(isUnaired),
+                      epTitle,
+                    });
+                  }}
+                  className={`flex items-center justify-between transition-all group episode-row-item ${
+                    isManga ? "p-2.5 rounded-lg" : viewMode === "cards" ? "p-3 rounded-xl" : "p-2 rounded-lg"
+                  } ${
+                    isNext && !isUnaired
+                      ? 'bg-accent/10 border border-accent/40 shadow-md'
+                      : isWatched
+                      ? 'opacity-55 hover:opacity-90 hover:bg-foreground/[0.04] border border-border/40'
+                      : 'bg-foreground/[0.02] border border-border hover:bg-foreground/[0.06] hover:border-border/60'
                   }`}
                 >
                 <FocusableButton
                   disabled={isUnaired}
                   onClick={() => handlePlay(epNum)}
-                  className={`flex items-center space-x-4 min-w-0 flex-1 text-left ${!isUnaired ? 'cursor-pointer' : ''}`}
+                  className={`flex items-center gap-3.5 min-w-0 flex-1 text-left ${!isUnaired ? 'cursor-pointer' : ''}`}
                 >
-                  {/* Still frame, when one is known for this episode. Manga has
-                      no frames, and Low Data Mode skips the extra requests. */}
-                  {!isManga && !dataSaver && episodeThumbMap?.[Number(ep.number)] && !brokenThumbs.has(Number(ep.number)) ? (
-                    <div className={`relative w-24 aspect-video shrink-0 rounded-xl overflow-hidden bg-foreground/5 transition-all ${isWatched ? "opacity-60" : ""}`}>
-                      <img
-                        src={episodeThumbMap[Number(ep.number)]}
-                        alt=""
-                        loading="lazy"
-                        onError={() => setBrokenThumbs((prev) => new Set(prev).add(Number(ep.number)))}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        {playingEp === epNum ? (
-                          <Loader2 size={16} className="animate-spin text-white" />
+                  {isManga ? (
+                    <>
+                      <span className={`w-8 h-8 rounded-md font-mono text-[11px] flex items-center justify-center font-bold shrink-0 transition-colors ${
+                        isNext ? "bg-accent text-background shadow-xs" :
+                        isWatched ? "bg-accent/15 text-accent" :
+                        "bg-foreground/[0.07] text-muted-foreground group-hover:bg-accent group-hover:text-background"
+                      }`}>
+                        {playingEp === epNum ? <Loader2 size={13} className="animate-spin" /> : epNum}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[13px] font-semibold truncate ${
+                            isNext ? "text-foreground font-bold" :
+                            isWatched ? "text-muted-foreground/60" : "text-foreground/90 group-hover:text-foreground"
+                          }`}>
+                            {epTitle}
+                          </span>
+                          {isNext && (
+                            <span className="font-mono text-[9px] uppercase tracking-wider text-accent font-semibold px-1.5 py-0.5 rounded bg-accent/10 shrink-0">
+                              Up Next
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : viewMode === "compact" ? (
+                    <>
+                      <span className={`w-7 h-7 rounded font-mono text-[11px] flex items-center justify-center font-bold shrink-0 ${
+                        isNext && !isUnaired ? "bg-accent text-background shadow-xs" :
+                        isWatched ? "bg-foreground/5 text-muted-foreground/50" :
+                        "bg-foreground/[0.07] text-muted-foreground group-hover:bg-accent group-hover:text-background transition-colors"
+                      }`}>
+                        {playingEp === epNum ? <Loader2 size={12} className="animate-spin" /> : epNum}
+                      </span>
+                      <span className={`text-[12.5px] font-medium truncate flex-1 ${
+                        isNext && !isUnaired ? "text-foreground font-semibold" :
+                        isWatched ? "text-muted-foreground/60" : "text-foreground/90 group-hover:text-foreground"
+                      }`}>
+                        {epTitle}
+                      </span>
+                      {isNext && resumeSeconds && resumeSeconds > 0 ? (
+                        <span className="font-mono text-[10px] text-accent shrink-0 font-medium">
+                          Resume {formatTime(resumeSeconds)}
+                        </span>
+                      ) : null}
+                      {runtimeMin > 0 && (
+                        <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+                          {runtimeMin}m
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="relative w-28 sm:w-32 aspect-video shrink-0 rounded-lg overflow-hidden bg-foreground/5 transition-all border border-border/40">
+                        {!isManga && !dataSaver && episodeThumbMap?.[Number(ep.number)] && !brokenThumbs.has(Number(ep.number)) ? (
+                          <img
+                            src={episodeThumbMap[Number(ep.number)]}
+                            alt=""
+                            loading="lazy"
+                            onError={() => setBrokenThumbs((prev) => new Set(prev).add(Number(ep.number)))}
+                            className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
+                              isWatched ? "opacity-50 group-hover:opacity-75" : ""
+                            }`}
+                          />
                         ) : (
-                          <Play size={16} fill="currentColor" className="text-white" />
+                          <div className="w-full h-full flex items-center justify-center font-mono text-xs font-bold text-muted-foreground/40">
+                            {epNum}
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          {playingEp === epNum ? (
+                            <Loader2 size={16} className="animate-spin text-white" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center pl-0.5 text-background font-bold shadow-md">
+                              <Play size={10} fill="currentColor" />
+                            </div>
+                          )}
+                        </div>
+                        {isWatched && (
+                          <span className="absolute top-1 left-1 w-4 h-4 rounded-full bg-accent flex items-center justify-center text-background font-bold text-[9px] shadow-xs">
+                            ✓
+                          </span>
+                        )}
+                        {runtimeMin > 0 && (
+                          <span className="absolute bottom-1 right-1 px-1 rounded bg-black/80 font-mono text-[9px] text-[#ccc]">
+                            {runtimeMin}m
+                          </span>
+                        )}
+                        {isWatched ? (
+                          <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-accent" />
+                        ) : isNext && resumeSeconds && resumeSeconds > 0 ? (
+                          <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-foreground/20">
+                            <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(10, (resumeSeconds / (runtimeMin * 60)) * 100))}%` }} />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-col min-w-0 pr-4 flex-1">
+                        <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className={isNext && !isUnaired ? "text-accent font-bold" : "text-accent font-semibold"}>
+                            {isManga ? `CH ${epNum}` : `EP ${epNum}`}
+                          </span>
+                          {airDate && (
+                            <>
+                              <span className="text-muted-foreground/40">·</span>
+                              <span>{formatEpisodeAirDate(airDate)}</span>
+                            </>
+                          )}
+                          {isNext && resumeSeconds && resumeSeconds > 0 ? (
+                            <>
+                              <span className="text-muted-foreground/40">·</span>
+                              <span className="text-accent font-medium">Resume {formatTime(resumeSeconds)}</span>
+                            </>
+                          ) : null}
+                        </div>
+
+                        <h4 className={`text-[13.5px] font-semibold truncate transition-colors mt-0.5 ${
+                          isWatched ? "text-muted-foreground" :
+                          isNext ? "text-foreground group-hover:text-accent font-bold" :
+                          "text-foreground/90 group-hover:text-foreground"
+                        }`}>
+                          {epTitle}
+                        </h4>
+
+                        {overview && (
+                          <p className="text-[11.5px] text-muted-foreground/70 line-clamp-1 mt-0.5 font-normal leading-relaxed">
+                            {overview}
+                          </p>
                         )}
                       </div>
-                      <span className="absolute bottom-0.5 left-1.5 text-[10px] font-black text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] group-hover:opacity-0 transition-opacity">
-                        {epNum}
-                      </span>
-                    </div>
-                  ) : (
-                  /* Clean Episode Badge */
-                  <div className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-xl font-bold text-sm transition-all episode-badge-box ${
-                    isWatched ? "bg-foreground/5 text-gray-500" :
-                    isUnaired ? "bg-foreground/5 text-gray-700" :
-                    isNext ? "bg-accent text-white shadow-md shadow-accent/20" :
-                    "bg-foreground/[0.06] text-foreground group-hover:bg-accent group-hover:text-white"
-                  }`}>
-                    {playingEp === epNum ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <div className="relative flex items-center justify-center w-full h-full">
-                        <span className="group-hover:opacity-0 transition-opacity absolute">{epNum}</span>
-                        <Play size={16} fill="currentColor" className="opacity-0 group-hover:opacity-100 transition-opacity absolute" />
-                      </div>
-                    )}
-                  </div>
+                    </>
                   )}
-
-                  <div className="flex flex-col min-w-0 pr-4">
-                    <span className={`text-sm font-medium truncate transition-colors ${
-                      isWatched ? "text-gray-500" : 
-                      isUnaired ? "text-gray-600" : 
-                      "text-gray-200 group-hover:text-white"
-                    }`}>
-                      {ep.title && !/^(episode|watch episode|chapter)\s+\d+$/i.test(ep.title) ? ep.title : episodeTitleMap?.[Number(ep.number)] || (isManga ? `Chapter ${epNum}` : `Episode ${epNum}`)}
-                      {((fillerEpisodes && (
-                        Array.isArray(fillerEpisodes)
-                          ? fillerEpisodes.includes(Number(ep.number))
-                          : typeof fillerEpisodes.has === "function"
-                          ? fillerEpisodes.has(Number(ep.number))
-                          : false
-                      ))) && (
-                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-warning/15 text-warning-light border border-warning/20">Filler</span>
-                      )}
-                    </span>
-                  </div>
-                  {statusIcon(localDownloadStatus[epNum] || ep.download_status)}
+                  {!isManga && statusIcon(localDownloadStatus[epNum] || ep.download_status)}
                 </FocusableButton>
-
+                
                 {!isUnaired ? (
-                  <div className="flex items-center space-x-1.5 shrink-0">
-                    {/* Always visible (not hover-gated like the actions below) —
-                        this is the only way to reach the multi-source picker, and
-                        it being hidden behind hover made it easy to never notice
-                        a provider had more than one stream to choose from. */}
+                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                     {!isManga && (
                       <FocusableButton
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleStreams(epNum);
                         }}
-                        title="Choose Server"
-                        className={`flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90 ${
+                        title="Stream Servers"
+                        className={`p-2 rounded-lg transition-all active:scale-90 cursor-pointer ${
                           expandedEpStreams === epNum
-                            ? "bg-accent/25 text-accent border border-accent/30"
-                            : "bg-foreground/[0.04] text-muted-foreground hover:bg-accent/15 hover:text-accent"
+                            ? "bg-accent/20 text-accent"
+                            : "text-muted-foreground/50 hover:text-foreground hover:bg-foreground/[0.06]"
                         }`}
                       >
                         {loadingStreamsEp === epNum ? (
-                          <Loader2 size={16} className="animate-spin text-accent" />
+                          <Loader2 size={15} className="animate-spin text-accent" />
                         ) : (
-                          <Video size={16} />
+                          <Video size={15} />
                         )}
                       </FocusableButton>
                     )}
-                    <div className="flex items-center space-x-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <FocusableButton
                       onClick={(e) => {
                         e.stopPropagation();
                         handleQueue(epNum);
                       }}
                       disabled={queueingEp === epNum || (localDownloadStatus[epNum] || ep.download_status) === "completed"}
-                      title="Download"
-                      className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-foreground/10 hover:text-foreground transition-all disabled:opacity-30 active:scale-90"
+                      title="Download Episode"
+                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-foreground/[0.06] transition-all disabled:opacity-30 active:scale-90 cursor-pointer"
                     >
                       {queueingEp === epNum ? (
-                        <Loader2 size={16} className="animate-spin" />
+                        <Loader2 size={15} className="animate-spin text-accent" />
                       ) : (
-                        <Download size={16} />
+                        <Download size={15} />
                       )}
                     </FocusableButton>
-                     {isWatched ? (
-                       <FocusableButton
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           if (onUnwatch) onUnwatch(epNum);
-                         }}
-                         title={isManga ? "Mark as unread" : "Mark as unwatched"}
-                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-danger/20 hover:text-danger-light transition-all active:scale-90"
-                       >
-                         <XCircle size={16} />
-                       </FocusableButton>
-                     ) : (
-                       <FocusableButton
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           if (onWatch) onWatch(epNum);
-                         }}
-                         title={isManga ? "Mark as read" : "Mark as watched"}
-                         className="flex items-center justify-center w-9 h-9 bg-foreground/[0.04] text-muted-foreground rounded-xl hover:bg-success/20 hover:text-success-light transition-all active:scale-90"
-                       >
-                         <Check size={16} />
-                       </FocusableButton>
-                     )}
-                    </div>
+                    <FocusableButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isWatched) {
+                          if (onUnwatch) onUnwatch(epNum);
+                        } else {
+                          if (onWatch) onWatch(epNum);
+                        }
+                      }}
+                      title={isWatched ? (isManga ? "Mark as unread" : "Mark as unwatched") : (isManga ? "Mark as read" : "Mark as watched")}
+                      className={`p-2 rounded-lg transition-all active:scale-90 cursor-pointer ${
+                        isWatched
+                          ? "text-muted-foreground/50 hover:text-danger hover:bg-danger/10"
+                          : "text-muted-foreground/50 hover:text-accent hover:bg-accent/10"
+                      }`}
+                    >
+                      {isWatched ? <XCircle size={15} /> : <Check size={15} />}
+                    </FocusableButton>
                   </div>
                 ) : (
-                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-foreground/[0.04] border border-border rounded-md shrink-0">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60 px-2.5 py-1 bg-foreground/[0.03] border border-border/40 rounded-md shrink-0">
                     Airing Soon
                   </span>
                 )}
@@ -637,5 +935,96 @@ export function EpisodeList({
         </div>
       )}
     </div>
-  );
+  )}
+
+  {/* Episode Right-Click Context Menu */}
+  {contextMenu && (
+    <div
+      style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+      className="fixed z-[999] min-w-[210px] bg-surface/95 backdrop-blur-md rounded-xl border border-border shadow-2xl p-1.5 animate-scale-in text-xs font-medium space-y-0.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="px-2.5 py-1 text-[10px] font-mono text-muted-foreground font-semibold border-b border-border/50 pb-1 mb-1 truncate">
+        {isManga ? `Chapter ${contextMenu.epNum}` : `Episode ${contextMenu.epNum}`}
+      </div>
+
+      {!contextMenu.isUnaired && (
+        <button
+          onClick={() => {
+            handlePlay(contextMenu.epNum);
+            setContextMenu(null);
+          }}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-accent hover:text-background transition-colors text-left cursor-pointer"
+        >
+          <Play size={13} fill="currentColor" />
+          <span>{isManga ? "Read Chapter" : "Play Episode"}</span>
+        </button>
+      )}
+
+      {!isManga && !contextMenu.isUnaired && (
+        <button
+          onClick={() => {
+            toggleStreams(contextMenu.epNum);
+            setContextMenu(null);
+          }}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-foreground/10 transition-colors text-left cursor-pointer"
+        >
+          <Video size={13} />
+          <span>Choose Server / Quality</span>
+        </button>
+      )}
+
+      {!contextMenu.isUnaired && (
+        <button
+          onClick={() => {
+            (contextMenu.isWatched ? onUnwatch : onWatch)?.(contextMenu.epNum);
+            setContextMenu(null);
+          }}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-foreground/10 transition-colors text-left cursor-pointer"
+        >
+          <Check size={13} />
+          <span>{contextMenu.isWatched ? "Mark as Unwatched" : "Mark as Watched"}</span>
+        </button>
+      )}
+
+      {Number(contextMenu.epNum) > 1 && !contextMenu.isUnaired && (
+        <button
+          onClick={() => {
+            onWatch?.(contextMenu.epNum);
+            setContextMenu(null);
+          }}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-foreground/10 transition-colors text-left cursor-pointer"
+        >
+          <CheckCheck size={13} />
+          <span>Mark all previous watched</span>
+        </button>
+      )}
+
+      {!isManga && !contextMenu.isUnaired && (
+        <button
+          onClick={() => {
+            handleQueue(contextMenu.epNum);
+            setContextMenu(null);
+          }}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-foreground/10 transition-colors text-left cursor-pointer"
+        >
+          <Download size={13} />
+          <span>Download Episode</span>
+        </button>
+      )}
+
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(contextMenu.epTitle || `Episode ${contextMenu.epNum}`);
+          setContextMenu(null);
+        }}
+        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors text-left cursor-pointer border-t border-border/40 mt-1 pt-1.5"
+      >
+        <Copy size={13} />
+        <span>Copy Title</span>
+      </button>
+    </div>
+  )}
+</div>
+);
 }

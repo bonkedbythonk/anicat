@@ -855,3 +855,47 @@ button .text-white,
   color: #ffffff !important;
 }
 
+/* Light Novel Typography & CrossPoint Styling */
+.novel-content p {
+  margin-bottom: 1.25em;
+  line-height: 1.85;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.novel-content .drop-cap {
+  float: left;
+  font-size: 3.2em;
+  line-height: 0.8;
+  padding-top: 4px;
+  padding-right: 8px;
+  padding-bottom: 2px;
+  font-weight: bold;
+  color: var(--accent-color, inherit);
+}
+
+.novel-content .scene-break {
+  text-align: center;
+  margin: 2em 0;
+  letter-spacing: 0.5em;
+  opacity: 0.6;
+  font-size: 1.1em;
+}
+
+.novel-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 1.5em auto;
+  display: block;
+  border-radius: 6px;
+}
+
+.novel-content blockquote {
+  border-left: 3px solid var(--accent-color, currentColor);
+  padding-left: 1em;
+  margin: 1.5em 0;
+  opacity: 0.85;
+  font-style: italic;
+}
+
+

@@ -3,8 +3,8 @@ import { useAppStore } from "@/stores/app";
 import type { ViewType } from "@/lib/types";
 
 const VIEW_KEYS = [
-  "home", "search", "lists", "schedule",
-  "notifications", "profile", "settings", "downloads",
+  "home", "schedule", "lists", "manga", "novels", "search",
+  "profile", "settings", "downloads",
 ] as const;
 
 /** The views cinema mode actually has. Settings and Downloads are shared. */
@@ -15,7 +15,7 @@ const LETTER_SHORTCUTS: Record<string, ViewType> = {
   "/": "search",
   "l": "lists",
   "d": "downloads",
-  "n": "notifications",
+  "n": "novels",
   "m": "manga",
 };
 

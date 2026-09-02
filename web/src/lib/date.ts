@@ -105,3 +105,10 @@ export function formatRelativeTimeFromUnix(unixSeconds: number | string): string
   if (days < 7) return `in ${days}d`;
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+export function formatEpisodeAirDate(dateStr?: string | null): string | undefined {
+  if (!dateStr) return undefined;
+  const d = new Date(dateStr.includes("T") ? dateStr : `${dateStr}T00:00:00Z`);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

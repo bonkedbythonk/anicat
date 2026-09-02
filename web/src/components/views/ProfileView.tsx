@@ -88,6 +88,13 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
     });
     return map;
   }, [detailQueries, uniqueLogIds]);
+  const pendingIds = useMemo(() => {
+    const set = new Set<number>();
+    detailQueries.forEach((q, i) => {
+      if (q.isLoading) set.add(uniqueLogIds[i]);
+    });
+    return set;
+  }, [detailQueries, uniqueLogIds]);
 
   if (loading) {
     return (
@@ -184,7 +191,13 @@ export function ProfileView({ onSelect }: ProfileViewProps) {
                   className="w-full flex items-center justify-between gap-4 px-4 py-2.5 border-b border-border last:border-b-0 text-left hover:bg-surface/70 cursor-pointer disabled:cursor-default"
                 >
                   <span className="text-[13px] text-foreground/80 truncate">
-                    <span className="font-medium text-foreground">{name || `#${e.media_id}`}</span>
+                    <span className="font-medium text-foreground">
+                      {name || (pendingIds.has(e.media_id) ? (
+                        <span className="inline-block w-24 h-[0.9em] rounded bg-foreground/10 animate-pulse align-middle" />
+                      ) : (
+                        `#${e.media_id}`
+                      ))}
+                    </span>
                     {" — "}
                     {media?.type === "MANGA" ? "CH" : "EP"} {e.episode_number}
                   </span>

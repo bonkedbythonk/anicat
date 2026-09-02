@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@/lib/transport";
 import { Loader2, Check } from "lucide-react";
 import { mediaApi, dispatchRefresh } from "@/lib/api";
-import { useAppStore } from "@/stores/app";
+import { useAppStore, useSettingsStore } from "@/stores/app";
 import { usesOverlayTitlebar } from "@/lib/platform";
 
 interface OnboardingProps {
@@ -47,6 +47,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("24h");
   const [gpuUpscaling, setGpuUpscaling] = useState<"on" | "off">("on");
   const [translationType, setTranslationType] = useState<"sub" | "dub">("sub");
+  const [playerType, setPlayerType] = useState<"builtin" | "mpv">("builtin");
   const cinemaEnabled = useAppStore((s) => s.cinemaEnabled);
   const setCinemaEnabled = useAppStore((s) => s.setCinemaEnabled);
 
@@ -65,6 +66,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     if (savedTheme) {
       setTheme(savedTheme);
     }
+    const savedPlayer = (localStorage.getItem("anicat_player_type") as "builtin" | "mpv" | null) || "builtin";
+    setPlayerType(savedPlayer);
   }, []);
 
   useEffect(() => {
@@ -84,6 +87,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const go = (n: Step) => {
     setStep(n);
     setSeen((s) => ({ ...s, [n]: true }));
+  };
+
+  const handlePlayerTypeChange = (val: "builtin" | "mpv") => {
+    setPlayerType(val);
+    localStorage.setItem("anicat_player_type", val);
+    useSettingsStore.getState().setPlayerType(val);
   };
 
   const handleGpuUpscalingChange = async (val: "on" | "off") => {
@@ -529,6 +538,22 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                       <h2 className="text-[13px] font-semibold">Playback</h2>
                     </div>
                     <div className="px-5 pt-1 pb-3">
+                      <div className={ROW_CLASS}>
+                        <div className="flex-1">
+                          <label htmlFor="pref-player" className="text-[13px] font-medium">Player Engine</label>
+                          <p className="mt-0.5 text-xs text-muted-foreground">Choose between the built-in in-app video player (fast, no upscaling) or the external standalone MPV window (Anime4K upscaling).</p>
+                        </div>
+                        <select
+                          id="pref-player"
+                          value={playerType}
+                          onChange={(e) => handlePlayerTypeChange(e.target.value as "builtin" | "mpv")}
+                          className={SELECT_CLASS}
+                        >
+                          <option value="builtin">Built-in Player</option>
+                          <option value="mpv">External MPV</option>
+                        </select>
+                      </div>
+
                       <div className={ROW_CLASS}>
                         <div className="flex-1">
                           <label htmlFor="pref-translation" className="text-[13px] font-medium">Preferred translation</label>

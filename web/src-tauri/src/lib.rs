@@ -60,11 +60,26 @@ pub fn run() {
             .build())
         .plugin(tauri_plugin_global_shortcut::Builder::default().build())
         .manage(app_state.clone())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                window.state::<AppState>().scraper_manager.set_window_active(*focused);
+            }
+        })
         .setup(move |app| {
             let state = app.state::<AppState>();
             let client = state.http_client.clone();
             let app_handle = app.handle().clone();
             let app_state_clone = app_state.clone();
+
+            // Hook playback checker so the sidecar knows not to shut down if media is playing
+            let current_pb = state.current_playback.clone();
+            state.scraper_manager.set_playback_checker(move || {
+                if let Ok(guard) = current_pb.try_lock() {
+                    guard.is_some()
+                } else {
+                    true // If locked, assume active to avoid premature kill
+                }
+            });
 
             // Surface a broken scraper sidecar (spawn/health failure) as a
             // visible toast instead of only a buried log line.
@@ -175,8 +190,12 @@ pub fn run() {
             commands::user::get_airing_schedule,
             commands::playback::start_playback,
             commands::playback::stop_playback,
+            commands::playback::resolve_builtin_player_stream,
+            commands::playback::report_builtin_player_state,
+            commands::playback::mpv_ipc_command,
             commands::playback::play_trailer,
             commands::playback::preload_episode,
+            commands::playback::get_preload_status,
             commands::playback::get_watched_episodes,
             commands::playback::get_all_last_watched,
             commands::playback::get_watch_history,
@@ -191,6 +210,13 @@ pub fn run() {
             commands::health::relaunch_app,
             commands::health::get_proxy_port,
             commands::auth::start_anilist_auth,
+            commands::novel::search_novels,
+            commands::novel::get_novel_details,
+            commands::novel::get_novel_toc,
+            commands::novel::get_novel_chapter,
+            commands::novel::download_novel_epub,
+            commands::novel::get_ereader_presets,
+            commands::novel::open_novel_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

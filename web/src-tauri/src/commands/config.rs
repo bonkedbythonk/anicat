@@ -65,6 +65,27 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                         if let Some(v) = gen.get("secondary_fallback_provider").and_then(|v| v.as_str()) {
                             config.general.secondary_fallback_provider = v.to_string();
                         }
+                        if let Some(v) = gen.get("novel_provider").and_then(|v| v.as_str()) {
+                            config.general.novel_provider = v.to_string();
+                        }
+                        if let Some(v) = gen.get("ereader_profile").and_then(|v| v.as_str()) {
+                            config.general.ereader_profile = v.to_string();
+                        }
+                        if let Some(v) = gen.get("ereader_width").and_then(|v| v.as_u64()) {
+                            config.general.ereader_width = v as u32;
+                        }
+                        if let Some(v) = gen.get("ereader_height").and_then(|v| v.as_u64()) {
+                            config.general.ereader_height = v as u32;
+                        }
+                        if let Some(v) = gen.get("ereader_grayscale").and_then(|v| v.as_bool()) {
+                            config.general.ereader_grayscale = v;
+                        }
+                        if let Some(v) = gen.get("ereader_quality").and_then(|v| v.as_u64()) {
+                            config.general.ereader_quality = v as u32;
+                        }
+                        if let Some(v) = gen.get("ereader_split_spreads").and_then(|v| v.as_bool()) {
+                            config.general.ereader_split_spreads = v;
+                        }
                         if let Some(v) = gen.get("downloads_path").and_then(|v| v.as_str()) {
                             config.general.downloads_path = v.to_string();
                         }
@@ -118,16 +139,6 @@ pub async fn update_config_impl(state: &AppState, updates: serde_json::Value) ->
                             let t = if token.is_empty() { None } else { Some(token.to_string()) };
                             config.api.anilist_token = t.clone();
                             state.anilist_client.set_token(t);
-                        }
-                    }
-                }
-                "mobile" => {
-                    if let Some(mobile) = value.as_object() {
-                        if let Some(v) = mobile.get("pin").and_then(|v| v.as_str()) {
-                            config.mobile.pin = if v.is_empty() { None } else { Some(v.to_string()) };
-                        }
-                        if let Some(v) = mobile.get("lan_access_enabled").and_then(|v| v.as_bool()) {
-                            config.mobile.lan_access_enabled = v;
                         }
                     }
                 }

@@ -89,11 +89,12 @@ export function SearchView({ onSelect }: SearchViewProps) {
   // per-type -- "Seasonal" has no manga meaning, and AniList's trending
   // endpoints take a concrete type. "ALL" only ever applies to an actual
   // query, so those surfaces fall back to anime.
-  const discoveryType: "ANIME" | "MANGA" = type === "MANGA" ? "MANGA" : "ANIME";
+  const discoveryType: "ANIME" | "MANGA" | "NOVEL" = type === "ALL" ? "ANIME" : type;
   const combined = type === "ALL";
 
   const [debouncedQuery, setDebouncedQuery] = useState(() => query.trim().length >= 2 ? query.trim() : "");
   const [showFilters, setShowFilters] = useState(() => Object.keys(filters).length > 0);
+  const [browseSort, setBrowseSort] = useState<string>("POPULARITY_DESC");
   const queryClient = useQueryClient();
 
   // Cached discovery feed — refetches silently every 5 min, not on every mount
@@ -104,6 +105,18 @@ export function SearchView({ onSelect }: SearchViewProps) {
   } = useQuery({
     queryKey: ["search-discovery", discoveryType],
     queryFn: async () => {
+      if (discoveryType === "NOVEL") {
+        const [trending, popular, recent] = await Promise.all([
+          mediaApi.search("", "NOVEL", 1, { sort: "TRENDING_DESC" }),
+          mediaApi.search("", "NOVEL", 1, { sort: "POPULARITY_DESC" }),
+          mediaApi.search("", "NOVEL", 1, { sort: "UPDATED_AT_DESC" }),
+        ]);
+        return {
+          trending: trending.media || [],
+          seasonal: popular.media || [],
+          recent: recent.media || [],
+        };
+      }
       const [trending, seasonal, recent] = await Promise.all([
         mediaApi.getTrending(discoveryType),
         mediaApi.getSeasonal(discoveryType),
@@ -121,7 +134,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
   } = useQuery({
     queryKey: ["search-random", discoveryType],
     queryFn: async () => {
-      const randomPage = Math.floor(Math.random() * 100) + 1;
+      const randomPage = Math.floor(Math.random() * (discoveryType === "NOVEL" ? 20 : 100)) + 1;
       const data = await mediaApi.search("", discoveryType, randomPage);
       return data.media || [];
     },
@@ -129,9 +142,10 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
   const randomList = useMemo(() => randomListRaw, [randomListRaw]);
 
-  const [shuffledPools, setShuffledPools] = useState<Record<"ANIME" | "MANGA", MediaItem[]>>({
+  const [shuffledPools, setShuffledPools] = useState<Record<"ANIME" | "MANGA" | "NOVEL", MediaItem[]>>({
     ANIME: [],
     MANGA: [],
+    NOVEL: [],
   });
 
   useEffect(() => {
@@ -171,6 +185,9 @@ export function SearchView({ onSelect }: SearchViewProps) {
     }));
   };
 
+  const hasFilters = Object.values(filters).some(Boolean);
+  const isSearching = Boolean(debouncedQuery) || hasFilters;
+
   // Paginated search results — active when query or filters are present
   const {
     items: results,
@@ -187,7 +204,25 @@ export function SearchView({ onSelect }: SearchViewProps) {
       };
     },
     queryKey: ["search", debouncedQuery, type, filters],
-    enabled: Boolean(debouncedQuery) || Object.values(filters).some(Boolean),
+    enabled: isSearching,
+  });
+
+  // Endless browse catalog for exploring covers when no specific query or custom filters are typed
+  const {
+    items: catalogItems,
+    loadingMore: loadingMoreCatalog,
+    hasMore: hasMoreCatalog,
+    loadMore: loadMoreCatalog,
+  } = usePaginatedList<MediaItem>({
+    fetchFn: async (page) => {
+      const data = await mediaApi.search("", type === "ALL" ? "ANIME" : type, page, { sort: browseSort });
+      return {
+        items: data.media || [],
+        hasNextPage: data.page_info?.hasNextPage || false,
+      };
+    },
+    queryKey: ["browse-catalog", type, browseSort],
+    enabled: !isSearching,
   });
 
   // Debounce the search query (400ms) so usePaginatedList only fires after
@@ -219,8 +254,8 @@ export function SearchView({ onSelect }: SearchViewProps) {
       {/* Search header */}
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Search</h1>
-          <MediaTypeToggle value={type} onChange={handleTypeChange} options={["ALL", "ANIME", "MANGA"] as const} />
+          <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Search & Browse</h1>
+          <MediaTypeToggle value={type} onChange={handleTypeChange} options={["ALL", "ANIME", "MANGA", "NOVEL"] as const} />
         </div>
 
         <div className="relative group">
@@ -230,7 +265,13 @@ export function SearchView({ onSelect }: SearchViewProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={combined ? "Search anime and manga..." : `Search for ${type.toLowerCase()}...`}
+            placeholder={
+              combined
+                ? "Search anime, manga, and novels..."
+                : type === "NOVEL"
+                ? "Search for light novels..."
+                : `Search for ${type.toLowerCase()}...`
+            }
             className="w-full bg-transparent border border-border rounded-lg py-3 pl-12 pr-6 text-[15px] focus:outline-none transition-colors placeholder:text-muted-foreground/60"
           />
           {loading && (
@@ -265,7 +306,7 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
         {/* Filter panel */}
         {showFilters && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 border border-border rounded-lg animate-fade-in">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 p-4 border border-border rounded-lg animate-fade-in">
             <div className="space-y-1.5">
               <label className="meta-mono text-muted-foreground">Genre</label>
               <select
@@ -320,15 +361,28 @@ export function SearchView({ onSelect }: SearchViewProps) {
                 <option value="NOT_YET_RELEASED">Not Yet Released</option>
               </select>
             </div>
+            <div className="space-y-1.5">
+              <label className="meta-mono text-muted-foreground">Sort</label>
+              <select
+                value={filters.sort || "POPULARITY_DESC"}
+                onChange={(e) => setFilters({ ...filters, sort: e.target.value || undefined })}
+                className="w-full bg-transparent border border-border rounded-md p-2.5 text-xs focus:border-accent outline-none transition-colors appearance-none cursor-pointer"
+              >
+                <option value="POPULARITY_DESC">Most Popular</option>
+                <option value="TRENDING_DESC">Trending</option>
+                <option value="SCORE_DESC">Top Rated</option>
+                <option value="FAVOURITES_DESC">Most Favorites</option>
+                <option value="START_DATE_DESC">Release Date</option>
+                <option value="UPDATED_AT_DESC">Recently Updated</option>
+              </select>
+            </div>
           </div>
         )}
       </div>
 
       {/* Results */}
       {(() => {
-        const hasFilters = Object.values(filters).some(Boolean);
-        
-        if (query.trim().length === 0 && !hasFilters) {
+        if (!isSearching) {
           const discovery = shuffledPools[discoveryType];
           const hasDiscovery = discovery.length > 0;
           const showSkeleton = loadingDiscovery && !hasDiscovery;
@@ -366,7 +420,15 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     <div className={`space-y-4 transition-opacity duration-200 ${loadingDiscovery ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{combined ? "Discover" : discoveryType === "ANIME" ? "Discover Anime" : "Discover Manga"}</h2>
+                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
+                            {combined
+                              ? "Discover"
+                              : discoveryType === "ANIME"
+                              ? "Discover Anime"
+                              : discoveryType === "NOVEL"
+                              ? "Discover Light Novels"
+                              : "Discover Manga"}
+                          </h2>
                           <p className="meta-mono mt-1 text-muted-foreground">Trending · seasonal · recent</p>
                         </div>
                         <button
@@ -404,6 +466,46 @@ export function SearchView({ onSelect }: SearchViewProps) {
                       <FocusScope name="search-random" orientation="grid" columns={6} role="list" className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                         <MediaGrid items={randomList} onSelect={onSelect} />
                       </FocusScope>
+                    </div>
+                  )}
+
+                  {/* Infinite scroll browse catalog */}
+                  {catalogItems.length > 0 && (
+                    <div className="space-y-4 pt-12 border-t border-border">
+                      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3">
+                        <div>
+                          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
+                            Browse {combined ? "All Titles" : discoveryType === "ANIME" ? "All Anime" : "All Manga"}
+                          </h2>
+                          <p className="meta-mono mt-1 text-muted-foreground">
+                            Scroll to explore covers from the catalog
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="meta-mono text-muted-foreground text-xs">Sort:</label>
+                          <select
+                            value={browseSort}
+                            onChange={(e) => setBrowseSort(e.target.value)}
+                            className="bg-surface border border-border rounded-md px-2.5 py-1 text-xs text-foreground focus:border-accent outline-none cursor-pointer"
+                          >
+                            <option value="POPULARITY_DESC">Most Popular</option>
+                            <option value="TRENDING_DESC">Trending Now</option>
+                            <option value="SCORE_DESC">Top Rated</option>
+                            <option value="FAVOURITES_DESC">Most Favorites</option>
+                            <option value="START_DATE_DESC">Release Date</option>
+                            <option value="UPDATED_AT_DESC">Recently Updated</option>
+                          </select>
+                        </div>
+                      </div>
+                      <FocusScope name="search-catalog" orientation="grid" columns={6} role="list" className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                        <MediaGrid items={catalogItems} onSelect={onSelect} />
+                      </FocusScope>
+                      {loadingMoreCatalog && (
+                        <div className="flex justify-center py-6">
+                          <Loader2 className="animate-spin text-accent" size={20} />
+                        </div>
+                      )}
+                      <InfiniteScroll hasMore={hasMoreCatalog} loading={loadingMoreCatalog} onLoadMore={loadMoreCatalog} />
                     </div>
                   )}
 
@@ -449,13 +551,27 @@ export function SearchView({ onSelect }: SearchViewProps) {
                     </FocusScope>
                   </div>
                 ))}
+                {loadingMore && (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="animate-spin text-accent" size={20} />
+                  </div>
+                )}
+                <InfiniteScroll hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
               </div>
             );
           }
           return (
-            <FocusScope name="search-results" orientation="grid" columns={6} role="list" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-              <MediaGrid items={results} onSelect={onSelect} />
-            </FocusScope>
+            <div className="space-y-6">
+              <FocusScope name="search-results" orientation="grid" columns={6} role="list" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                <MediaGrid items={results} onSelect={onSelect} />
+              </FocusScope>
+              {loadingMore && (
+                <div className="flex justify-center py-6">
+                  <Loader2 className="animate-spin text-accent" size={20} />
+                </div>
+              )}
+              <InfiniteScroll hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
+            </div>
           );
         }
 
@@ -479,10 +595,6 @@ export function SearchView({ onSelect }: SearchViewProps) {
 
         return null;
       })()}
-
-      {debouncedQuery && (
-        <InfiniteScroll hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
-      )}
     </div>
   );
 }

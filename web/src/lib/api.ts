@@ -7,6 +7,12 @@ import type {
   Character,
   AiringSchedule,
   Notification,
+  NovelDetailItem,
+  NovelChapterItem,
+  NovelTocResult,
+  EreaderPreset,
+  NovelDownloadOptions,
+  NovelBuildResult,
 } from "./types";
 
 // ── Config ────────────────────────────────────────────────
@@ -160,6 +166,12 @@ export interface AniZipMeta {
   titles: Record<number, string>;
   /** Episode number -> TVDB still frame */
   thumbnails: Record<number, string>;
+  /** Episode number -> episode synopsis overview */
+  overviews: Record<number, string>;
+  /** Episode number -> episode release air date string */
+  airdates: Record<number, string>;
+  /** Episode number -> episode runtime in minutes */
+  runtimes: Record<number, number>;
   /** Series-level artwork, grouped by AniZip's `coverType` */
   artwork: { fanart: string[]; banner: string[] };
 }
@@ -167,6 +179,9 @@ export interface AniZipMeta {
 const EMPTY_ANIZIP_META: AniZipMeta = {
   titles: {},
   thumbnails: {},
+  overviews: {},
+  airdates: {},
+  runtimes: {},
   artwork: { fanart: [], banner: [] },
 };
 
@@ -184,15 +199,31 @@ export async function fetchAniZipMeta(anilistId: number): Promise<AniZipMeta> {
 
     const titles: Record<number, string> = {};
     const thumbnails: Record<number, string> = {};
+    const overviews: Record<number, string> = {};
+    const airdates: Record<number, string> = {};
+    const runtimes: Record<number, number> = {};
+
     for (const [key, ep] of Object.entries(data?.episodes ?? {})) {
       const num = Number(key);
       if (!Number.isInteger(num) || num < 1) continue;
-      const epData = ep as { title?: { en?: string; ja?: string }; image?: string };
-      const title = epData?.title?.en || epData?.title?.ja || "";
+      const epData = ep as {
+        title?: { en?: string; ja?: string; "x-jat"?: string };
+        image?: string;
+        overview?: string;
+        summary?: string;
+        airdate?: string;
+        runtime?: number;
+        length?: number;
+      };
+      const title = epData?.title?.en || epData?.title?.["x-jat"] || epData?.title?.ja || "";
       if (title && !title.startsWith("Episode ") && !title.startsWith("EPISODE ")) {
         titles[num] = title;
       }
       if (epData?.image) thumbnails[num] = epData.image;
+      const desc = epData?.overview || epData?.summary;
+      if (desc) overviews[num] = desc;
+      if (epData?.airdate) airdates[num] = epData.airdate;
+      if (epData?.runtime || epData?.length) runtimes[num] = epData.runtime || epData.length || 0;
     }
 
     const artwork = { fanart: [] as string[], banner: [] as string[] };
@@ -206,7 +237,7 @@ export async function fetchAniZipMeta(anilistId: number): Promise<AniZipMeta> {
       }
     }
 
-    return { titles, thumbnails, artwork };
+    return { titles, thumbnails, overviews, airdates, runtimes, artwork };
   } catch {
     return EMPTY_ANIZIP_META;
   }
@@ -357,7 +388,7 @@ export async function getEpisodes(
   title?: string,
   episodeCount?: number,
 ): Promise<Episode[]> {
-  return invoke("get_episodes", { mediaId, provider: provider || "anineko", title: title || null, episodeCount: episodeCount ?? null });
+  return invoke("get_episodes", { mediaId, provider: provider || "nyaa", title: title || null, episodeCount: episodeCount ?? null });
 }
 
 export async function getChapterPages(
@@ -385,6 +416,20 @@ export async function preloadEpisode(
   title?: string,
 ): Promise<void> {
   return invoke("preload_episode", { mediaId, episodeNumber, provider, title });
+}
+
+export async function getPreloadStatus(
+  mediaId: number,
+  episodeNumber: number,
+  provider?: string,
+): Promise<string> {
+  try {
+    const res = await invoke<any>("get_preload_status", { mediaId, episodeNumber, provider });
+    if (typeof res === "string") return res;
+    return res?.status || "idle";
+  } catch {
+    return "idle";
+  }
 }
 
 export async function searchProvider(
@@ -511,8 +556,27 @@ export async function startPlayback(
   episodeNumber: number,
   provider?: string,
   server?: string,
+  title?: string,
+  episodeTitle?: string,
+  coverImage?: string,
+  totalEpisodes?: number,
+  startOver?: boolean,
 ): Promise<{ stream_url: string; servers: StreamServer[] }> {
-  return invoke("start_playback", { mediaId, episodeNumber, provider, server });
+  return invoke("start_playback", {
+    mediaId,
+    episodeNumber,
+    provider,
+    server,
+    title,
+    episodeTitle,
+    coverImage,
+    totalEpisodes,
+    startOver,
+  });
+}
+
+export async function mpvIpcCommand(command: any[]): Promise<void> {
+  return invoke("mpv_ipc_command", { command });
 }
 
 export async function stopPlayback(
@@ -735,6 +799,7 @@ export const mediaApi = {
   getChapterPages,
   resolveStream,
   preloadEpisode,
+  getPreloadStatus,
   searchProvider,
   mapProviderSlug,
   clearProviderCache,
@@ -1022,6 +1087,9 @@ export const mediaApi = {
   cancelEditing: async () => {},
   fetchAniZipMeta,
   fetchJikanFiller,
+  fetchAnimeThemes,
+  getMediaCommunity,
+  getThreadDetails,
 };
 
 export type { StreamServer, AiringSchedule, Notification };
@@ -1083,9 +1151,268 @@ export type UserProfile = {
 
 export type { MediaItem, Episode, Character } from "./types";
 
-export interface Review {
+export interface AniListUser {
+  id: number;
+  name: string;
+  avatar?: {
+    medium?: string;
+    large?: string;
+  };
+}
+
+export interface AniListThread {
+  id: number;
+  title: string;
+  body?: string;
+  replyCount: number;
+  viewCount: number;
+  repliedAt?: number;
+  createdAt: number;
+  user?: AniListUser;
+}
+
+export interface AniListThreadComment {
+  id: number;
+  comment: string;
+  likeCount: number;
+  createdAt: number;
+  user?: AniListUser;
+}
+
+export interface AniListReview {
   id: number;
   summary: string;
+  body: string;
+  rating: number;
+  ratingAmount: number;
   score: number;
-  user: { id: number; name: string; avatar?: string };
+  createdAt: number;
+  user?: AniListUser;
 }
+
+export type Review = AniListReview;
+
+export interface MediaCommunityData {
+  threads: {
+    pageInfo: PageInfo;
+    threads: AniListThread[];
+  };
+  reviews: {
+    pageInfo: PageInfo;
+    reviews: AniListReview[];
+  };
+}
+
+export async function getMediaCommunity(mediaId: number): Promise<MediaCommunityData> {
+  const query = `
+    query ($id: Int) {
+      threads: Page(page: 1, perPage: 15) {
+        pageInfo {
+          total
+          hasNextPage
+        }
+        threads(mediaCategoryId: $id, sort: [REPLIED_AT_DESC]) {
+          id
+          title
+          replyCount
+          viewCount
+          repliedAt
+          createdAt
+          user {
+            id
+            name
+            avatar {
+              medium
+              large
+            }
+          }
+        }
+      }
+      reviews: Page(page: 1, perPage: 12) {
+        pageInfo {
+          total
+          hasNextPage
+        }
+        reviews(mediaId: $id, sort: [RATING_DESC]) {
+          id
+          summary
+          body
+          rating
+          ratingAmount
+          score
+          createdAt
+          user {
+            id
+            name
+            avatar {
+              medium
+              large
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query, variables: { id: mediaId } }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch community data: ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  return {
+    threads: json.data?.threads ?? { pageInfo: { total: 0, hasNextPage: false }, threads: [] },
+    reviews: json.data?.reviews ?? { pageInfo: { total: 0, hasNextPage: false }, reviews: [] },
+  };
+}
+
+export async function getThreadDetails(threadId: number, page = 1): Promise<{
+  thread: AniListThread & { body?: string };
+  comments: AniListThreadComment[];
+  pageInfo: PageInfo;
+}> {
+  const query = `
+    query ($threadId: Int, $page: Int) {
+      Thread(id: $threadId) {
+        id
+        title
+        body
+        replyCount
+        viewCount
+        createdAt
+        user {
+          id
+          name
+          avatar {
+            medium
+            large
+          }
+        }
+      }
+      Page(page: $page, perPage: 30) {
+        pageInfo {
+          total
+          hasNextPage
+        }
+        threadComments(threadId: $threadId) {
+          id
+          comment
+          likeCount
+          createdAt
+          user {
+            id
+            name
+            avatar {
+              medium
+              large
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query, variables: { threadId, page } }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch thread comments: ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  return {
+    thread: json.data?.Thread,
+    comments: json.data?.Page?.threadComments ?? [],
+    pageInfo: json.data?.Page?.pageInfo ?? { total: 0, hasNextPage: false },
+  };
+}
+
+export interface AnimeTheme {
+  id: string;
+  type: "OP" | "ED";
+  sequence?: number | null;
+  title: string;
+  artists: string[];
+  videoUrl?: string | null;
+}
+
+export async function fetchAnimeThemes(anilistId: number): Promise<AnimeTheme[]> {
+  try {
+    const url = `https://api.animethemes.moe/anime?filter[has]=resources&filter[site]=AniList&filter[external_id]=${anilistId}&include=animethemes.song.artists,animethemes.animethemeentries.videos`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    const anime = json.anime?.[0];
+    if (!anime || !Array.isArray(anime.animethemes)) return [];
+
+    const themes: AnimeTheme[] = [];
+    for (const t of anime.animethemes) {
+      const type = t.type as "OP" | "ED";
+      const sequence = t.sequence;
+      const title = t.song?.title || `Theme ${type}`;
+      const artists = (t.song?.artists || []).map((a: { name: string }) => a.name);
+      const video = t.animethemeentries?.[0]?.videos?.[0]?.link || null;
+      themes.push({
+        id: `${type}-${sequence || 0}-${title}`,
+        type,
+        sequence,
+        title,
+        artists,
+        videoUrl: video,
+      });
+    }
+
+    return themes.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "OP" ? -1 : 1;
+      return (a.sequence || 0) - (b.sequence || 0);
+    });
+  } catch (err) {
+    console.warn("Failed to fetch anime themes:", err);
+    return [];
+  }
+}
+
+// ── Light Novel API ──────────────────────────────────────────
+export const novelApi = {
+  searchNovels: async (query: string, provider?: string): Promise<NovelDetailItem[]> => {
+    return invoke("search_novels", { query, provider });
+  },
+  getNovelDetails: async (slug: string, provider?: string): Promise<NovelDetailItem> => {
+    return invoke("get_novel_details", { slug, provider });
+  },
+  getNovelToc: async (volumeUrl: string, title?: string): Promise<NovelTocResult> => {
+    return invoke("get_novel_toc", { volumeUrl, title });
+  },
+  getNovelChapter: async (slug: string, chapter: string, url?: string): Promise<NovelChapterItem> => {
+    return invoke("get_novel_chapter", { slug, chapter, url });
+  },
+  getEreaderPresets: async (): Promise<EreaderPreset[]> => {
+    return invoke("get_ereader_presets");
+  },
+  downloadNovelEpub: async (options: NovelDownloadOptions): Promise<NovelBuildResult> => {
+    return invoke("download_novel_epub", {
+      slug: options.slug,
+      volumeId: options.volume_id,
+      volumeTitle: options.volume_title,
+      targetWidth: options.target_width,
+      targetHeight: options.target_height,
+      grayscale: options.grayscale,
+      jpegQuality: options.jpeg_quality,
+      splitSpreads: options.split_spreads,
+      outputDir: options.output_dir,
+    });
+  },
+  openNovelFile: async (path: string): Promise<void> => {
+    return invoke("open_novel_file", { path });
+  },
+};
+
+

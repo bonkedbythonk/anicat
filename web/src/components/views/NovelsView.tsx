@@ -7,56 +7,61 @@ import type { MediaItem } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/stores/app";
 
-interface MangaViewProps {
+interface NovelsViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
 }
 
-export function MangaView({ onSelect }: MangaViewProps) {
+export function NovelsView({ onSelect }: NovelsViewProps) {
   const setActiveFocusScope = useAppStore((s) => s.setActiveFocusScope);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setSearchType = useAppStore((s) => s.setSearchType);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
 
   useEffect(() => {
-    setActiveFocusScope("manga-default");
+    setActiveFocusScope("novels-default");
   }, [setActiveFocusScope]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["manga-data"],
+    queryKey: ["novels-data"],
     queryFn: async () => {
-      const [trending, reading] = await Promise.all([
-        mediaApi.getTrending("MANGA"),
+      const [trendingNovels, reading, planning] = await Promise.all([
+        mediaApi.search("", "NOVEL", 1, { sort: "TRENDING_DESC" }),
         mediaApi.getUserList("reading", "MANGA"),
+        mediaApi.getUserList("planning", "MANGA").catch(() => ({ media: [] })),
       ]);
 
-      let planning: { media: MediaItem[] } = { media: [] };
-      try {
-        const result = await mediaApi.getUserList("planning", "MANGA");
-        planning = result;
-      } catch {}
+      const filterNovels = (items: MediaItem[]) =>
+        (items || []).filter(
+          (m) =>
+            m.format === "NOVEL" ||
+            (m.tags && m.tags.some((t) => t.name.toLowerCase().includes("light novel")))
+        );
+
+      const readingNovels = filterNovels(reading.media || []);
+      const planningNovels = filterNovels(planning.media || []);
 
       return {
-        trendingList: trending.media || [],
-        readingList: reading.media || [],
-        planningList: planning.media || [],
+        trendingList: trendingNovels.media || [],
+        readingList: readingNovels,
+        planningList: planningNovels,
       };
     },
   });
 
   const handleBrowseCatalog = () => {
-    setSearchType("MANGA");
+    setSearchType("NOVEL");
     setSearchQuery("");
     setCurrentView("search");
   };
 
-  // Continue-reading queue: reading entries with unread chapters, most
-  // recently updated first — the manga equivalent of Up Next.
+  // Continue-reading queue: reading entries with unread chapters/volumes, most
+  // recently updated first — the novel equivalent of Up Next.
   const continueReading = useMemo(() => {
     const reading = data?.readingList || [];
     return reading
       .filter((item) => {
         const progress = item.user_status?.progress || 0;
-        const total = item.chapters || 0;
+        const total = item.chapters || item.volumes || 0;
         return total > 0 ? progress < total : true;
       })
       .sort((a, b) => {
@@ -81,7 +86,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
       <div>
         <div className="flex items-end justify-between mb-4 px-1">
           <div>
-            <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Manga</h1>
+            <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Light Novels</h1>
             <p className="meta-mono mt-1 text-muted-foreground">
               {continueReading.length} in progress · {data.readingList.length} reading
             </p>
@@ -90,7 +95,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
             onClick={handleBrowseCatalog}
             className="flex items-center gap-1.5 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
           >
-            <span>Browse all manga</span>
+            <span>Browse all light novels</span>
             <ArrowRight size={13} />
           </button>
         </div>
@@ -115,7 +120,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
         <MediaRow title="Want to Read" items={data.planningList} onSelect={onSelect} />
       )}
 
-      <MediaRow title="Trending Manga" items={data.trendingList} onSelect={onSelect} />
+      <MediaRow title="Trending Light Novels" items={data.trendingList} onSelect={onSelect} />
     </div>
   );
 }

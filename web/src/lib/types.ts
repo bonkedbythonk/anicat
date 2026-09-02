@@ -1,6 +1,7 @@
 export type ViewType =
   | "home"
   | "manga"
+  | "novels"
   | "search"
   | "lists"
   | "schedule"
@@ -14,7 +15,7 @@ export type ViewType =
  *  null, so a combined search costs no more than a scoped one. Surfaces that
  *  are inherently per-type (library lists, the discovery rows) use the
  *  narrower "ANIME" | "MANGA" instead. */
-export type MediaSearchType = "ALL" | "ANIME" | "MANGA";
+export type MediaSearchType = "ALL" | "ANIME" | "MANGA" | "NOVEL";
 
 export interface MediaTitle {
   romaji?: string;
@@ -256,3 +257,84 @@ export interface ListEntry {
   score: number;
   progress: number;
 }
+
+export interface EreaderPreset {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  grayscale: boolean;
+  quality: number;
+  split_spreads: boolean;
+  description: string;
+}
+
+export interface NovelVolume {
+  id: number | string;
+  title: string;
+  romaji?: string;
+  cover_url?: string;
+  pages?: number;
+  release_date?: number | string;
+  description?: string;
+  sort_order?: number;
+  volume_name?: string;
+  url?: string;
+}
+
+export interface NovelChapterItem {
+  index: number;
+  title: string;
+  volume_name?: string;
+  url?: string;
+  content_html?: string;
+  content_text?: string;
+}
+
+export interface NovelDetailItem {
+  id: string;
+  title: string;
+  title_orig?: string;
+  romaji?: string;
+  author: string;
+  artists?: string[];
+  translators?: string[];
+  publishers?: string[];
+  description?: string;
+  cover_url?: string;
+  books: NovelVolume[];
+  books_count?: number;
+  chapters?: NovelChapterItem[];
+  tags?: string[];
+  rating?: number;
+  source_url?: string;
+  /** Where the actual prose comes from, absent when no source carries it. */
+  text_source_url?: string;
+}
+
+export interface NovelTocResult {
+  url: string;
+  chapters: NovelChapterItem[];
+}
+
+export interface NovelDownloadOptions {
+  slug: string;
+  volume_id?: number | null;
+  volume_title?: string | null;
+  target_width?: number;
+  target_height?: number;
+  grayscale?: boolean;
+  jpeg_quality?: number;
+  split_spreads?: boolean;
+  output_dir?: string;
+}
+
+export interface NovelBuildResult {
+  status: string;
+  file_path: string;
+  filename: string;
+  file_size: number;
+  title: string;
+  error?: string;
+}
+

@@ -21,7 +21,23 @@ interface AppConfig {
   };
 }
 
+export interface ActivePlayerState {
+  mediaId: number;
+  episodeNumber: number;
+  provider?: string;
+  server?: string;
+  title?: string;
+  episodeTitle?: string;
+  coverImage?: string;
+  totalEpisodes?: number;
+}
+
 interface AppState {
+  // In-app video player overlay
+  activePlayer: ActivePlayerState | null;
+  openPlayer: (p: ActivePlayerState) => void;
+  closePlayer: () => void;
+
   // Navigation
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
@@ -91,6 +107,10 @@ interface AppState {
   // Notifications
   notification: { message: string; type: "info" | "error" } | null;
   setNotification: (n: { message: string; type: "info" | "error" } | null) => void;
+
+  // Preload stream tracking
+  preloadStatus: Record<string, "fetching" | "ready" | "idle">;
+  setPreloadStatus: (mediaId: number, episodeNumber: number, status: "fetching" | "ready" | "idle") => void;
 
   // Stream loading overlay
   playbackLoading: {
@@ -270,6 +290,15 @@ export const useAppStore = create<AppState>((set) => ({
   notification: null,
   setNotification: (notification) => set({ notification }),
 
+  preloadStatus: {},
+  setPreloadStatus: (mediaId, episodeNumber, status) =>
+    set((state) => ({
+      preloadStatus: {
+        ...state.preloadStatus,
+        [`${mediaId}-${episodeNumber}`]: status,
+      },
+    })),
+
   playbackLoading: {
     isLoading: false,
     statusText: "",
@@ -287,9 +316,14 @@ export const useAppStore = create<AppState>((set) => ({
 
   playerActive: false,
   setPlayerActive: (playerActive) => set({ playerActive }),
+
+  activePlayer: null,
+  openPlayer: (activePlayer) => set({ activePlayer }),
+  closePlayer: () => set({ activePlayer: null }),
 }));
 
 interface SettingsState {
+  playerType: "builtin" | "mpv";
   defaultProvider: string;
   autoplay: boolean;
   autoskip: boolean;
@@ -301,6 +335,7 @@ interface SettingsState {
   notifications: boolean;
   translationType: "sub" | "dub";
   shaderProfile: string;
+  setPlayerType: (t: "builtin" | "mpv") => void;
   setDefaultProvider: (p: string) => void;
   setAutoplay: (v: boolean) => void;
   setAutoskip: (v: boolean) => void;
@@ -315,7 +350,8 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  defaultProvider: "anineko",
+  playerType: (typeof window !== "undefined" && (localStorage.getItem("anicat_player_type") as "builtin" | "mpv")) || "builtin",
+  defaultProvider: "nyaa",
   autoplay: true,
   autoskip: false,
   animePreview: true,
@@ -325,7 +361,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   dataSaver: false,
   notifications: true,
   translationType: "sub",
-  shaderProfile: "balanced",
+  shaderProfile: "on",
+  setPlayerType: (playerType) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("anicat_player_type", playerType);
+    }
+    set({ playerType });
+  },
   setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
   setAutoplay: (autoplay) => set({ autoplay }),
   setAutoskip: (autoskip) => set({ autoskip }),
@@ -339,7 +381,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShaderProfile: (shaderProfile) => set({ shaderProfile }),
   loadFromConfig: (config) =>
     set({
-      defaultProvider: config?.general?.provider || "anineko",
+      defaultProvider: config?.general?.provider || "nyaa",
       autoplay: config?.general?.autoplay ?? true,
       autoskip: config?.general?.autoskip ?? false,
       animePreview: config?.general?.anime_preview ?? true,
@@ -349,6 +391,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       notifications: config?.general?.notifications ?? true,
       anilistToken: config?.api?.anilist_token || null,
       translationType: (config?.stream?.translation_type as "sub" | "dub") || "sub",
-      shaderProfile: config?.stream?.shader_profile || "balanced",
+      shaderProfile: config?.stream?.shader_profile || "on",
     }),
 }));

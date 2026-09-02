@@ -14,6 +14,7 @@ const libraryItems: NavItem[] = [
   { label: "Schedule", view: "schedule" },
   { label: "Library", view: "lists", shortcut: "L" },
   { label: "Manga", view: "manga", shortcut: "M" },
+  { label: "Light Novels", view: "novels", shortcut: "N" },
   { label: "Search", view: "search", shortcut: "/" },
   { label: "History", view: "profile" },
 ];

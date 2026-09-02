@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Search, X } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
 import { proxyImage } from "@/lib/proxy";
 import { sanitizeHtml, stripSpoilers } from "@/lib/sanitize";
@@ -20,6 +20,7 @@ interface StaffProfileProps {
  * and the mobile character sheet alike.
  */
 export function StaffProfile({ staffId, onSelectMedia, onBack, compact = false }: StaffProfileProps) {
+  const [roleSearch, setRoleSearch] = useState("");
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, isError } = useInfiniteQuery({
     queryKey: ["staff", staffId],
     queryFn: ({ pageParam }) => mediaApi.getStaff(staffId, pageParam),
@@ -30,6 +31,16 @@ export function StaffProfile({ staffId, onSelectMedia, onBack, compact = false }
 
   const staff = data?.pages?.[0] ?? null;
   const roles = useMemo(() => (data?.pages ?? []).flatMap((p) => p?.roles ?? []), [data]);
+
+  const filteredRoles = useMemo(() => {
+    const q = roleSearch.trim().toLowerCase();
+    if (!q) return roles;
+    return roles.filter((r) => {
+      const title = (r.media?.title?.english || r.media?.title?.romaji || "").toLowerCase();
+      const charName = (r.characters?.[0]?.name?.full || "").toLowerCase();
+      return title.includes(q) || charName.includes(q);
+    });
+  }, [roles, roleSearch]);
 
   if (isLoading) {
     return (
@@ -113,21 +124,47 @@ export function StaffProfile({ staffId, onSelectMedia, onBack, compact = false }
         </div>
       )}
 
-      <div className="border-t border-border pt-3 space-y-2">
-        <div className="flex items-baseline justify-between">
-          <div className="meta-mono text-muted-foreground">Roles</div>
-          {staff.totalRoles > 0 && (
-            <div className="text-[10px] text-muted-foreground">
-              {roles.length} of {staff.totalRoles}
+      <div className="border-t border-border pt-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="meta-mono text-muted-foreground flex items-center gap-1.5">
+            <span>Roles</span>
+            {staff.totalRoles > 0 && (
+              <span className="text-[10px] text-muted-foreground/70 font-normal">
+                ({roles.length} of {staff.totalRoles})
+              </span>
+            )}
+          </div>
+
+          {roles.length > 6 && (
+            <div className="relative flex items-center min-w-[130px]">
+              <Search size={11} className="absolute left-2 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+                placeholder="Filter roles..."
+                className="w-full pl-6 pr-6 py-1 rounded-md bg-foreground/[0.04] border border-border text-[11px] text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-accent/60"
+              />
+              {roleSearch && (
+                <button
+                  onClick={() => setRoleSearch("")}
+                  className="absolute right-1.5 text-muted-foreground p-0.5"
+                  title="Clear filter"
+                >
+                  <X size={10} />
+                </button>
+              )}
             </div>
           )}
         </div>
 
-        {roles.length === 0 ? (
-          <p className="py-6 text-center text-xs font-bold text-muted-foreground">No roles listed.</p>
+        {filteredRoles.length === 0 ? (
+          <p className="py-6 text-center text-xs font-bold text-muted-foreground">
+            {roleSearch ? `No roles matching "${roleSearch}".` : "No roles listed."}
+          </p>
         ) : (
           <div className={`grid gap-2.5 ${compact ? "grid-cols-3" : "grid-cols-4"}`}>
-            {roles.map((role, idx) => {
+            {filteredRoles.map((role, idx) => {
               const media = role.media;
               const character = role.characters[0];
               return (

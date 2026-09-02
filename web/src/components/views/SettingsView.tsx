@@ -138,18 +138,6 @@ export function SettingsView({ health }: SettingsViewProps) {
 
   }, []);
 
-  // /mobile-api/lan-info is a plain HTTP endpoint (not a Tauri command), and
-  // it's unauthenticated by design — it just tells the desktop app what LAN
-  // IP to show the user, needed before any phone has a PIN token at all.
-  const [lanInfo, setLanInfo] = useState<{ lan_ip: string; port: number } | null>(null);
-  const [lanInfoFailed, setLanInfoFailed] = useState(false);
-  useEffect(() => {
-    fetch(`${apiOrigin()}/mobile-api/lan-info`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((data) => setLanInfo(data))
-      .catch(() => setLanInfoFailed(true));
-  }, []);
-
   // The ctrl+1 (upscaling) / ctrl+2 (auto-skip) mpv shortcuts persist their
   // flip on the backend, but this page's own `config` snapshot was fetched
   // once on mount — patch it live so the toggles here don't show stale state
@@ -522,32 +510,29 @@ export function SettingsView({ health }: SettingsViewProps) {
                     onChange={(e) => updateField("general", "provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
-                    <option value="nyaa">Torrents</option>
-                    <option value="anineko">AniNeko</option>
+                    <option value="nyaa">Torrents (Nyaa)</option>
                   </select>
                 </SettingField>
 
                 <SettingField label="Fallback Provider 1" description="First fallback when primary provider fails.">
                   <select
-                    value={String(config.general?.fallback_provider || "anineko")}
+                    value={String(config.general?.fallback_provider || "none")}
                     onChange={(e) => updateField("general", "fallback_provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="none">None</option>
-                    <option value="nyaa">Torrents</option>
-                    <option value="anineko">AniNeko</option>
+                    <option value="nyaa">Torrents (Nyaa)</option>
                   </select>
                 </SettingField>
 
                 <SettingField label="Fallback Provider 2" description="Second fallback when primary and fallback 1 fail.">
                   <select
-                    value={String(config.general?.secondary_fallback_provider || "anineko")}
+                    value={String(config.general?.secondary_fallback_provider || "none")}
                     onChange={(e) => updateField("general", "secondary_fallback_provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="none">None</option>
-                    <option value="nyaa">Torrents</option>
-                    <option value="anineko">AniNeko</option>
+                    <option value="nyaa">Torrents (Nyaa)</option>
                   </select>
                 </SettingField>
 
@@ -558,6 +543,22 @@ export function SettingsView({ health }: SettingsViewProps) {
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
                     <option value="mangakatana">MangaKatana</option>
+                  </select>
+                </SettingField>
+
+                <SettingField label="Light Novel Provider" description="Primary index and source for light novels.">
+                  <select
+                    value={String(config.general?.novel_provider || "ranobedb")}
+                    onChange={(e) => updateField("general", "novel_provider", e.target.value)}
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
+                  >
+                    <option value="ranobedb">RanobeDB (Rich Metadata & Books)</option>
+                    <option value="lnori">Lnori</option>
+                    <option value="syosetu">Syosetu (小説家になろう)</option>
+                    <option value="kakuyomu">Kakuyomu (カクヨム)</option>
+                    <option value="hameln">Hameln (ハーメルン)</option>
+                    <option value="royalroad">Royal Road</option>
+                    <option value="bakatsuki">Baka-Tsuki</option>
                   </select>
                 </SettingField>
 
@@ -573,41 +574,74 @@ export function SettingsView({ health }: SettingsViewProps) {
                 </SettingField>
               </CardSection>
 
-              <CardSection
-                title="Phone Access"
-                description="Watch anicat from your phone over the same Wi-Fi while this Mac is running. This is a light PIN gate to keep it from being entered by accident — not meant to withstand someone who isn't on your home network."
-              >
-                <SettingField label="Enable" description="Lets other devices on this Wi-Fi reach anicat. Off by default.">
-                  <SettingToggle
-                    on={Boolean(config.mobile?.lan_access_enabled)}
-                    onChange={(v) => updateField("mobile", "lan_access_enabled", v)}
-                  />
+              <CardSection title="CrossPoint E-Reader Optimization">
+                <SettingField
+                  label="Default E-Reader Device"
+                  description="Pre-configures image dimensions and screen layout for your e-reader hardware."
+                >
+                  <select
+                    value={String(config.general?.ereader_profile || "xteink_x3")}
+                    onChange={(e) => {
+                      const prof = e.target.value;
+                      updateField("general", "ereader_profile", prof);
+                      if (prof === "xteink_x3") {
+                        updateField("general", "ereader_width", 528);
+                        updateField("general", "ereader_height", 792);
+                      } else if (prof === "xteink_x4") {
+                        updateField("general", "ereader_width", 480);
+                        updateField("general", "ereader_height", 800);
+                      } else if (prof === "kindle_pw" || prof === "kobo_clara") {
+                        updateField("general", "ereader_width", 1072);
+                        updateField("general", "ereader_height", 1448);
+                      } else if (prof === "kindle_basic") {
+                        updateField("general", "ereader_width", 600);
+                        updateField("general", "ereader_height", 800);
+                      } else if (prof === "kobo_libra") {
+                        updateField("general", "ereader_width", 1264);
+                        updateField("general", "ereader_height", 1680);
+                      }
+                    }}
+                    className="w-full sm:w-auto sm:min-w-[180px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
+                  >
+                    <option value="xteink_x3">★ Xteink X3 (528×792)</option>
+                    <option value="xteink_x4">Xteink X4 (480×800)</option>
+                    <option value="kindle_pw">Kindle Paperwhite (1072×1448)</option>
+                    <option value="kindle_basic">Kindle Basic (600×800)</option>
+                    <option value="kobo_clara">Kobo Clara (1072×1448)</option>
+                    <option value="kobo_libra">Kobo Libra (1264×1680)</option>
+                    <option value="custom">Custom Resolution</option>
+                  </select>
                 </SettingField>
 
-                <SettingField label="PIN" description="4-8 digits. Whatever your phone types in must match this exactly.">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={String(config.mobile?.pin || "")}
-                    onChange={(e) => updateField("mobile", "pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
-                    placeholder="e.g. 4821"
-                    className="w-full bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent/40 outline-none transition-all placeholder:text-gray-700"
-                  />
+                <SettingField
+                  label="8-bit True Grayscale Mode (Mode L)"
+                  description="Converts images to hardware 8-bit grayscale to eliminate dithering artifacts on e-ink."
+                >
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.general?.ereader_grayscale !== false}
+                      onChange={(e) => updateField("general", "ereader_grayscale", e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent" />
+                  </label>
                 </SettingField>
 
-                {Boolean(config.mobile?.lan_access_enabled) && (
-                  <SettingField label="Open on your phone" description="Same Wi-Fi network, then enter the PIN above.">
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 bg-black/30 border border-white/[0.08] rounded-xl p-3 text-xs font-mono text-accent select-all overflow-x-auto whitespace-nowrap">
-                        {lanInfo
-                          ? `http://${lanInfo.lan_ip}:${lanInfo.port}/mobile.html`
-                          : lanInfoFailed
-                            ? "Couldn't reach the backend. Restart Anicat and reopen Settings."
-                            : "Loading..."}
-                      </code>
-                    </div>
-                  </SettingField>
-                )}
+                <SettingField
+                  label="Auto-Split Landscape Double Spreads"
+                  description="Detects wide illustration spreads (w > h * 1.15) and cuts them into Left & Right portrait pages at full height."
+                >
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.general?.ereader_split_spreads !== false}
+                      onChange={(e) => updateField("general", "ereader_split_spreads", e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent" />
+                  </label>
+                </SettingField>
               </CardSection>
             </div>
           )}
@@ -615,6 +649,24 @@ export function SettingsView({ health }: SettingsViewProps) {
           {activeTab === "player" && (
             <div className="space-y-6 animate-fade-in">
               <CardSection title="Playback">
+
+                <SettingField
+                  label="Player Engine"
+                  description="Choose between the built-in in-app video player (fast, no upscaling) or the external standalone MPV window (Anime4K upscaling, see GPU Upscaling below)."
+                >
+                  <select
+                    value={useSettingsStore.getState().playerType}
+                    onChange={(e) => {
+                      const val = e.target.value as "builtin" | "mpv";
+                      useSettingsStore.getState().setPlayerType(val);
+                      updateField("general", "player_type", val);
+                    }}
+                    className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
+                  >
+                    <option value="builtin">Built-in Player</option>
+                    <option value="mpv">External MPV</option>
+                  </select>
+                </SettingField>
 
                 <SettingField label="Sub/Dub" description="Preferred audio language for streaming.">
                   <select
@@ -642,7 +694,7 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField
                   label="GPU Upscaling"
-                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Best on screens above 1080p; smaller displays won't show much difference. Ctrl+1 in-player toggles this too."
+                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. External MPV window only; the built-in in-app player doesn't upscale. Best on screens above 1080p; smaller displays won't show much difference. Ctrl+1 in-player toggles this too."
                 >
                   <SettingToggle
                     on={(config.stream?.shader_profile || "on") !== "off"}

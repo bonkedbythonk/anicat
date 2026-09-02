@@ -4,9 +4,9 @@ Exercises each provider with a known-good query so scraper breakage is
 noticed before anyone tries to watch something:
 
   - anineko:     search (goes through the Cloudflare clearance path) + stream
-                 resolution + proof that a *mobile-playable* server actually
+                 resolution + proof that a *proxy-reachable* server actually
                  serves segments. Search alone stayed green through a complete
-                 mobile outage, so all three are asserted.
+                 outage, so all three are asserted.
   - mangakatana: search
   - nyaa:        SubsPlease API + Nyaa RSS reachability (the Rust side owns
                  the real logic; this just proves the upstreams answer)
@@ -77,17 +77,18 @@ async def _segment_serves(session: AsyncSession, master_url: str) -> tuple[bool,
 
 
 async def check_anineko() -> str:
-    """Search, resolve streams, and prove at least one of them plays on a phone.
+    """Search, resolve streams, and prove at least one of them actually serves.
 
-    Search alone used to be the whole check, and it stayed green through a
-    complete mobile outage: anineko lists ~12 servers per episode but only the
-    ones on proxy-allowlisted hosts are reachable from the PWA, and the segments
-    behind those are served by CDNs that revoke them per asset. Both halves have
-    to be asserted or this probe reports health it hasn't measured.
+    Search alone used to be the whole check and it stayed green through a
+    complete outage: anineko lists ~12 servers per episode, only the ones on
+    proxy-allowlisted hosts can be fetched through the app at all, and the
+    segments behind those are served by CDNs that revoke them per asset. Both
+    halves have to be asserted or this probe reports health it hasn't measured.
 
-    Desktop is deliberately not the bar here. mpv fetches upstream directly and
-    can play servers the phone cannot, so a check that ignores browser_ok would
-    go green while mobile is dead -- exactly what happened.
+    `browser_ok` is the bar rather than "mpv could play it", because mpv
+    fetches upstream directly and can play servers the proxy cannot reach --
+    so a check that ignored it would go green while the builtin player was
+    dead.
     """
     from anineko import AniNekoProvider
 
@@ -108,7 +109,7 @@ async def check_anineko() -> str:
     if not reachable:
         raise RuntimeError(
             f"streams('{slug}', ep 1) resolved {len(servers)} servers but none are "
-            "proxy-reachable, so the mobile PWA has nothing to play "
+            "proxy-reachable, so the builtin player has nothing to play "
             "(hosts: "
             + ", ".join(sorted({s.url.split('/')[2] for s in servers if '//' in s.url}))
             + ") -- add the stable one to _BROWSER_REACHABLE_HOSTS and ALLOWED_DOMAINS"
@@ -126,12 +127,12 @@ async def check_anineko() -> str:
             if ok:
                 return (
                     f"{len(refs)} results, {len(servers)} servers, "
-                    f"{len(reachable)} mobile-reachable, playing via {s.name} ({detail})"
+                    f"{len(reachable)} proxy-reachable, playing via {s.name} ({detail})"
                 )
             failures.append(f"{s.name}/{s.group}: {detail}")
 
     raise RuntimeError(
-        f"all {len(reachable)} mobile-reachable servers for ep 1 are dead "
+        f"all {len(reachable)} proxy-reachable servers for ep 1 are dead "
         "(playlists resolve but no segments serve) -- " + "; ".join(failures)
     )
 
@@ -173,8 +174,10 @@ async def check_nyaa_rss() -> str:
 
 async def main() -> int:
     # anineko may spin up headless Chromium for Cloudflare clearance, so it
-    # gets a much larger timeout than the plain-HTTP checks.
-    await run_check("anineko", check_anineko(), timeout=300)
+    # gets a much larger timeout than the plain-HTTP checks. Non-fatal: it is
+    # in RETIRED_PROVIDERS and cannot be selected, so a layout change there is
+    # information about whether reinstating it is still viable, not an outage.
+    await run_check("anineko (retired)", check_anineko(), timeout=300, fatal=False)
     await run_check("mangakatana", check_mangakatana(), timeout=60)
     await run_check("subsplease", check_subsplease(), timeout=45)
     await run_check("nyaa-rss", check_nyaa_rss(), timeout=45)

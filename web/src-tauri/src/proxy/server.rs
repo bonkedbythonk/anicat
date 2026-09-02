@@ -47,9 +47,9 @@ pub async fn start_proxy(
     app_state: crate::state::AppState,
 ) -> SocketAddr {
     // Loopback only: every caller (mpv's Lua script, this app's own webview
-    // fetching /proxy, /torrent-stream, /mobile-hls segments) is same-machine.
-    // Used to bind 0.0.0.0 for LAN-reachable mobile PWA access; that surface
-    // is gone, so there's no reason to accept connections from off-box.
+    // fetching /proxy, /torrent-stream, /hls segments) is same-machine.
+    // Bound 0.0.0.0 while there was a phone client to reach it; that surface
+    // is gone, so there is no reason to accept connections from off-box.
     let addr = SocketAddr::from(([127, 0, 0, 1], 13370));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
@@ -79,9 +79,9 @@ pub async fn start_proxy(
         // A <video> element fetches its own HLS playlist and segments itself
         // and cannot be made to send a token; these expose bytes of a torrent
         // this app is already streaming, same as /torrent-stream above.
-        .route("/mobile-hls/{id}/{file}", get(super::remux::session_file_handler))
-        .route("/mobile-hls/{id}/{dir}/{file}", get(super::remux::session_nested_handler))
-        .route("/mobile-hls/stop", get(super::remux::stop_handler))
+        .route("/hls/{id}/{file}", get(super::remux::session_file_handler))
+        .route("/hls/{id}/{dir}/{file}", get(super::remux::session_nested_handler))
+        .route("/hls/stop", get(super::remux::stop_handler))
         .route("/health", get(health_handler))
         .route("/player/next", get(player_next_handler))
         .route("/player/prev", get(player_prev_handler))
@@ -663,8 +663,8 @@ async fn player_preload_handler(
             &pb.provider,
             &None,
             Some(pb.title.clone()),
-            // /player/preload is only ever called by mpv's Lua script; the
-            // PWA has no equivalent trigger.
+            // /player/preload is only ever called by mpv's Lua script, so the
+            // stream it warms is always the one mpv would be given.
             crate::state::StreamClient::Mpv,
             None,
         )
@@ -740,7 +740,7 @@ async fn player_toggle_translation_handler(
         // to half a minute behind where the viewer actually is.
         if let (Some(pos), Some(duration)) = (params.pos, params.duration) {
             if pos > 0 && duration > 0 {
-                // Sub/dub toggle is desktop-only (mobile never calls this route).
+                // Sub/dub toggle is an mpv binding; nothing else calls this route.
                 if let Err(e) = crate::commands::playback::record_playback_progress(
                     &state.app_state,
                     0,
@@ -881,8 +881,8 @@ async fn health_handler() -> &'static str {
 /// demuxer and Safari's native HLS engine resolve relative playlist entries
 /// against the manifest's own request URL (standard RFC 3986 resolution), so
 /// a path-only reference correctly resolves to whatever host the manifest was
-/// fetched from — `127.0.0.1:13370` for desktop mpv, or the Mac's LAN IP for a
-/// phone. A hardcoded `127.0.0.1` host would be unreachable from a phone.
+/// fetched from, and stays correct when the proxy binds a port other than
+/// 13370 (see `start`, which falls back to an OS-assigned one).
 fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url) -> String {
     let mut new_playlist = String::new();
     for line in playlist_text.lines() {
@@ -1019,12 +1019,12 @@ async fn proxy_handler(
     };
     req_builder = req_builder.header("user-agent", ua);
 
-    // An explicit ?referer= (from the mobile playback path, carrying the
-    // stream's own required Referer) wins over the per-host defaults below.
+    // An explicit ?referer= (carrying the stream's own required Referer) wins
+    // over the per-host defaults below.
     //
     // Held to the same allowlist as the target URL. This parameter is
     // caller-controlled on an endpoint that is deliberately unauthenticated
-    // (a phone's <video>/<img> cannot attach a bearer token), so without the
+    // (a webview <video>/<img> cannot attach a bearer token), so without the
     // check anyone who can reach the port could make this server send an
     // arbitrary Referer of their choosing to a third-party CDN. Every real
     // caller sends a provider origin, so this rejects nothing legitimate.

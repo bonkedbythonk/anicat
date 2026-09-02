@@ -23,10 +23,10 @@ endpoint. There is exactly one place to look for each thing.
                 The name is a bare text node, not a <strong>; the group comes
                 from the panel's data-id; the VTT rides in the query string.
 
-Embed hosts, and which of them the mobile PWA can play (see `browser_ok`):
+Embed hosts, and which of them the builtin player can play (see `browser_ok`):
   vivibebe.site   /<token> -> /public/stream/<token>/master.m3u8, derivable
                   with no fetch at all. Proxy-allowlisted, so this is the one
-                  server that works on mobile.
+                  server the builtin player can play.
   otakuhg.site,   jwplayer behind packed JS. Their `links` object now offers
   otakuvid.online only hls3/hls2, both on throwaway domains that rotate per
                   request -- unallowlistable, therefore desktop-only.
@@ -105,20 +105,21 @@ class StreamServer:
     subtitle_url: Optional[str] = None
     #: Whether a browser `<video>` element can actually play this server.
     #:
-    #: Not a codec judgement — a proxy-reachability one. The mobile PWA fetches
-    #: every byte through anicat's proxy, which only talks to an allowlisted set
-    #: of hosts. Most of anineko's embeds resolve to throwaway CDN domains that
-    #: rotate per request and can never be listed, so those servers are dead on
-    #: the phone no matter how healthy they are. mpv fetches directly and is
+    #: Not a codec judgement — a proxy-reachability one. The builtin player
+    #: fetches every byte through anicat's proxy, which only talks to an
+    #: allowlisted set of hosts. Most of anineko's embeds resolve to throwaway
+    #: CDN domains that rotate per request and can never be listed, so those
+    #: servers are dead there no matter how healthy they are. mpv fetches
+    #: directly and is
     #: unaffected, which is why this has to be per-server rather than global.
     browser_ok: bool = False
 
 
 #: Host suffixes whose streams the anicat proxy can actually reach, and which
-#: are therefore playable in the mobile PWA. Kept deliberately narrow: an entry
+#: are therefore playable in the builtin player. Kept deliberately narrow: an entry
 #: here is a promise that the same host also appears in `ALLOWED_DOMAINS` in
 #: `web/src-tauri/src/proxy/server.rs`. Adding one without the other produces a
-#: server the phone offers and then fails to play.
+#: server the site offers and then fails to play.
 _BROWSER_REACHABLE_HOSTS = (
     "vivibebe.site",
     "vibeplayer.site",
@@ -538,11 +539,11 @@ class AniNekoProvider:
 
                 if not any(s.browser_ok for s in resolved_servers):
                     # Not fatal on desktop (mpv bypasses the proxy entirely),
-                    # but it means the phone has nothing to play for this
+                    # but it means the builtin player has nothing to play for this
                     # episode, which is worth a line in the log.
                     log.warning(
                         "anineko %s ep %s: none of the %d servers are proxy-reachable "
-                        "(mobile will have no playable source)",
+                        "(the builtin player will have no playable source)",
                         slug, episode, len(resolved_servers),
                     )
 
@@ -751,7 +752,7 @@ class AniNekoProvider:
     #: taking the embed's token.
     #:
     #: This is the *fast* path and, not coincidentally, the only proxy-reachable
-    #: one: vivibebe is the sole anineko server the mobile PWA can play. Kept as
+    #: one: vivibebe is the sole anineko server the builtin player can play. Kept as
     #: an explicit table rather than the previous inline two-host regex, whose
     #: own docstring admitted the list had gone stale.
     _DIRECT_SHAPE_HOSTS = {
@@ -786,7 +787,7 @@ class AniNekoProvider:
 
         Hosts with a derivable URL shape are handled first and cost **zero**
         HTTP requests — that is most of the wall-clock time of a play on the one
-        server that actually works on mobile. Everything else falls back to
+        server the builtin player can actually play. Everything else falls back to
         fetching and unpacking the embed page.
 
         Note the ordering is the reverse of what it was. Page-extraction-first

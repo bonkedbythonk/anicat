@@ -270,7 +270,7 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
       const parsed = new URL(fullUrl, window.location.origin);
       inner = decodeURIComponent(parsed.searchParams.get("url") || streamUrl);
     } catch {}
-    const isHls = inner.includes(".m3u8") || streamUrl.includes("/mobile-hls/");
+    const isHls = inner.includes(".m3u8") || streamUrl.includes("/hls/");
 
     if (!isHls) {
       video.src = fullUrl;

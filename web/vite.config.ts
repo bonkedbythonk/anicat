@@ -25,7 +25,7 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
     // The desktop builtin player and mpv's Lua script talk to the Rust
-    // backend's axum server over /player, /proxy, /mobile-hls (remux
+    // backend's axum server over /player, /proxy, /hls (remux
     // segments) and /torrent-stream as same-origin paths, so iterating on
     // the frontend alone in `npm run dev` needs those forwarded to a running
     // backend — without this, those fetches fall through to Vite's own SPA
@@ -39,7 +39,7 @@ export default defineConfig({
         target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
         changeOrigin: true,
       },
-      "/mobile-hls": {
+      "/hls": {
         target: process.env.ANICAT_BACKEND ?? "http://127.0.0.1:13370",
         changeOrigin: true,
       },

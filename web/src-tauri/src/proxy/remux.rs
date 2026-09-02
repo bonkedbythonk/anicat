@@ -1,10 +1,10 @@
-//! Serving a torrent release to a browser that cannot open one.
+//! Serving a torrent release to a browser engine that cannot open one.
 //!
-//! Releases are Matroska. Safari has no Matroska support at all, in any
-//! codec, so the PWA on an iPhone could never play the "nyaa" provider — the
-//! player said as much in its own error text and told the viewer to switch
-//! sources. That left the phone with exactly one provider, a scraper, and the
-//! two fail for the same reasons at the same times.
+//! Releases are Matroska, and WebKit has no Matroska support at all, in any
+//! codec. That is the entire reason this module exists: the builtin `<video>`
+//! player runs on the webview's engine, so without a remux the only anime
+//! provider there is would be unplayable in it and the player would tell the
+//! viewer to switch to mpv.
 //!
 //! The container is the whole problem: a simulcast release is already H.264
 //! High 8-bit with AAC-LC audio, which is to say already exactly what iOS
@@ -274,7 +274,7 @@ impl RemuxManager {
             self.reap_locked(&mut sessions).await;
             if let Some((id, session)) = sessions.iter_mut().find(|(_, s)| s.key == key) {
                 session.touch();
-                return Ok(format!("/mobile-hls/{}/stream_0/index.m3u8", id));
+                return Ok(format!("/hls/{}/stream_0/index.m3u8", id));
             }
             if sessions.len() >= MAX_SESSIONS {
                 return Err(format!(
@@ -321,7 +321,7 @@ impl RemuxManager {
                     layout.video_codec,
                     if layout.audio_copy { "copied" } else { "re-encoded to aac" },
                 );
-                return Ok(format!("/mobile-hls/{}/stream_0/index.m3u8", id));
+                return Ok(format!("/hls/{}/stream_0/index.m3u8", id));
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
@@ -389,8 +389,9 @@ impl RemuxManager {
         }
     }
 
-    /// Background sweep, so a session abandoned by a phone that simply walked
-    /// out of range is cleaned up without anyone asking.
+    /// Background sweep, so a session whose viewer simply closed the player is
+    /// cleaned up without anyone asking. Each one holds an ffmpeg process
+    /// writing several megabytes a minute, so nothing may rely on a tidy exit.
     pub fn spawn_reaper(self: &Arc<Self>) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
@@ -516,7 +517,7 @@ pub async fn session_file_handler(
     }
 }
 
-/// The nested form: `/mobile-hls/{id}/stream_0/index.m3u8`.
+/// The nested form: `/hls/{id}/stream_0/index.m3u8`.
 pub async fn session_nested_handler(
     State(state): State<ProxyState>,
     AxumPath((id, dir, file)): AxumPath<(u64, String, String)>,
@@ -627,8 +628,8 @@ mod tests {
             .start(input.to_str().unwrap(), 42, 7, 0, false)
             .await
             .expect("session failed to start");
-        assert!(url.starts_with("/mobile-hls/"), "{url}");
-        let id: u64 = url.trim_start_matches("/mobile-hls/").split('/').next().unwrap().parse().unwrap();
+        assert!(url.starts_with("/hls/"), "{url}");
+        let id: u64 = url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
 
         // The master playlist has to name both the video rendition and the
         // audio codecs, or Safari refuses it outright.

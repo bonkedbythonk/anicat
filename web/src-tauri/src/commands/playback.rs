@@ -286,6 +286,132 @@ async fn restore_preload(state: &AppState, entry: Option<crate::state::Preloaded
     }
 }
 
+/// A short, honest reason a transition failed, for the player's OSD.
+///
+/// Every failure of the next/prev path used to arrive as "No more episodes
+/// available." -- the same sentence the *genuine* end of a season uses. A
+/// resolve that found nothing, a swarm with no seeders, a player that died on
+/// launch and an actually-finished show were indistinguishable, so the honest
+/// report "next episode is unreliable" reached the user as "the app thinks the
+/// show is over" and the real cause was never looked for.
+///
+/// The full error is already in the log; this is the one line that fits on an
+/// OSD, so it names the episode (which says outright that the show is *not*
+/// over) and buckets the cause. The fallback carries the real error text
+/// rather than a vague apology, truncated so a long provider-chain message
+/// can't paint over the video.
+pub(crate) fn transition_failure_message(episode: i64, err: &str) -> String {
+    let lower = err.to_lowercase();
+    let reason = if lower.contains("no stream") || lower.contains("no torrent") || lower.contains("no hd torrent") || lower.contains("not found inside torrent") {
+        "no release found".to_string()
+    } else if lower.contains("pre-buffer") || lower.contains("no seeders") || lower.contains("timed out") || lower.contains("dead") {
+        "source timed out".to_string()
+    } else if lower.contains("mpv exited") {
+        "the player failed to start".to_string()
+    } else {
+        const MAX: usize = 90;
+        let mut short: String = err.chars().take(MAX).collect();
+        if err.chars().count() > MAX {
+            short.push('\u{2026}');
+        }
+        short
+    };
+    format!("Episode {} failed to load: {}.", episode, reason)
+}
+
+/// How long a reused mpv gets to report that it opened the new episode.
+///
+/// Generous on purpose. The stream was pre-buffered before the URL was handed
+/// over, so a healthy transition confirms in seconds -- but opening an MKV over
+/// the torrent-stream endpoint can mean seeking to read a Cues element near the
+/// end of the file, which on a thin swarm is genuinely slow. Rolling the
+/// counter back on an episode that was merely slow would be a worse bug than
+/// the one this fixes, so the bound sits well past the player's own 100s
+/// give-up window: past this, the transition has definitively not happened.
+const LOAD_CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Waits for mpv's own `file-loaded` for this exact episode (see
+/// `/player/loaded`). `false` means it never arrived.
+async fn confirm_playing(
+    state: &AppState,
+    media_id: i64,
+    episode_number: i64,
+    playback_gen: u64,
+) -> bool {
+    let deadline = std::time::Instant::now() + LOAD_CONFIRM_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        {
+            let slot = state.confirmed_playing.lock().await;
+            if *slot == Some((media_id, episode_number)) {
+                return true;
+            }
+        }
+        // A newer start owns the player now; this one's outcome is no longer
+        // anyone's business and rolling anything back would fight it.
+        if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    false
+}
+
+/// Puts the episode bookkeeping back after a transition mpv never completed,
+/// on both sides: the backend's `current_playback` and the player's own
+/// `current_episode` script-opt, which is what the next/prev handlers read to
+/// decide where to go next.
+async fn rollback_failed_transition(
+    state: &AppState,
+    app: &AppHandle,
+    outgoing: Option<crate::state::CurrentPlayback>,
+    media_id: i64,
+    episode_number: i64,
+    playback_gen: u64,
+) {
+    if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+        return;
+    }
+    log::warn!(
+        "mpv never reported opening media {} ep {}; rolling the episode back",
+        media_id, episode_number
+    );
+
+    let restored_episode = outgoing.as_ref().map(|pb| pb.episode_number);
+    {
+        let mut guard = state.current_playback.lock().await;
+        // Only if nothing newer has claimed the slot in the meantime.
+        let stale = guard
+            .as_ref()
+            .map(|pb| pb.media_id == media_id && pb.episode_number == episode_number)
+            .unwrap_or(false);
+        if stale {
+            *guard = outgoing;
+        }
+    }
+
+    if let Some(episode) = restored_episode {
+        // `change-list … append` rather than a whole-map `set_property`: the
+        // other keys in script-opts are still correct and a replace would drop
+        // every one this call didn't happen to know about.
+        let put_back = serde_json::json!({
+            "command": [
+                "change-list", "script-opts", "append",
+                format!("anicat_ui-current_episode={}", episode)
+            ]
+        });
+        if let Err(e) = try_send_ipc(&get_ipc_path(), vec![put_back]).await {
+            log::error!("Failed to roll the player's episode number back: {}", e);
+        }
+    }
+
+    let message = transition_failure_message(episode_number, "the player did not open the stream");
+    if let Err(e) = cancel_mpv_next(&message).await {
+        log::error!("Failed to report the failed transition to mpv: {}", e);
+    }
+    use tauri::Emitter;
+    let _ = app.emit("show_notification", serde_json::json!({ "message": message }));
+}
+
 pub async fn cancel_mpv_next(message: &str) -> Result<(), String> {
     let ipc_path = get_ipc_path();
     let cmd_osd = serde_json::json!({
@@ -295,6 +421,13 @@ pub async fn cancel_mpv_next(message: &str) -> Result<(), String> {
         "command": ["script-message", "anicat-cancel-next"]
     });
     try_send_ipc(&ipc_path, vec![cmd_osd, cmd_cancel]).await
+}
+
+#[tauri::command]
+pub async fn mpv_ipc_command(command: Vec<serde_json::Value>) -> Result<(), String> {
+    let ipc_path = get_ipc_path();
+    let payload = serde_json::json!({ "command": command });
+    try_send_ipc(&ipc_path, vec![payload]).await
 }
 
 /// Tells the webview whether the external mpv window is open. Low Data Mode
@@ -368,7 +501,7 @@ fn strip_verbatim_prefix(p: String) -> String {
     p
 }
 
-fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
+pub(crate) fn resolve_mpv_path(app: &AppHandle) -> Result<(String, String, String), String> {
     // A failure here is recoverable, so don't propagate it: every remaining
     // lookup below (system install, PATH, dev resources) works without a
     // resource dir. Bailing out on `?` turned a resolvable "where did Tauri
@@ -1035,7 +1168,6 @@ fn probe_status_is_permanent(status: u16) -> bool {
 /// Human-facing provider name for notifications.
 pub(crate) fn provider_label(provider: &str) -> &str {
     match provider {
-        "mkissa" => "Mkissa",
         "anineko" => "AniNeko",
         "mangakatana" => "MangaKatana",
         "nyaa" => "Torrents",
@@ -1123,6 +1255,7 @@ pub(crate) async fn resolve_stream_for_provider(
     server: &Option<String>,
     title: Option<String>,
     client: crate::state::StreamClient,
+    exclude_urls: Option<&[String]>,
 ) -> Result<(String, Option<std::collections::HashMap<String, String>>, Option<String>), String> {
     let started = std::time::Instant::now();
     let mut timings = ResolveTimings::default();
@@ -1392,7 +1525,16 @@ pub(crate) async fn resolve_stream_for_provider(
     // stream that never flowed. Probe down the ranked list instead, so a dead
     // server costs a couple of hundred milliseconds rather than the play.
     const MAX_PROBES: usize = 4;
-    let ordered = candidate_order(&servers, selected_server);
+    let mut ordered = candidate_order(&servers, selected_server);
+    if let Some(excluded) = exclude_urls {
+        if !excluded.is_empty() {
+            ordered.retain(|cand| {
+                !excluded.iter().any(|u| {
+                    u == &cand.url || cand.url.contains(u) || u.contains(&cand.url)
+                })
+            });
+        }
+    }
     if ordered.is_empty() {
         timings.log(provider_name, media_id, episode_number, "no-servers", started.elapsed().as_millis());
         return Err(format!("No stream URL found on {}", provider_name));
@@ -1453,7 +1595,16 @@ pub(crate) async fn resolve_stream_for_provider(
                 }
                 if !fresh_servers.is_empty() {
                     let retry_selected = select_server(&fresh_servers, server, &translation_type, target_quality);
-                    let retry_ordered = candidate_order(&fresh_servers, retry_selected);
+                    let mut retry_ordered = candidate_order(&fresh_servers, retry_selected);
+                    if let Some(excluded) = exclude_urls {
+                        if !excluded.is_empty() {
+                            retry_ordered.retain(|cand| {
+                                !excluded.iter().any(|u| {
+                                    u == &cand.url || cand.url.contains(u) || u.contains(&cand.url)
+                                })
+                            });
+                        }
+                    }
                     for cand in retry_ordered.iter().take(MAX_PROBES) {
                         if let StreamProbe::Alive = probe_stream(&state.http_client, &cand.url, cand.headers.as_ref()).await {
                             log::info!("{}: session restart recovered a playable stream ('{}')", provider_name, cand.name);
@@ -1489,13 +1640,44 @@ pub(crate) async fn resolve_stream_for_provider(
 /// the user presses play, mpv has nothing left to wait on.
 #[tauri::command]
 pub async fn preload_episode(
+    app: AppHandle,
     state: State<'_, AppState>,
     media_id: i64,
     episode_number: i64,
     provider: Option<String>,
     title: Option<String>,
 ) -> Result<(), String> {
-    preload_episode_impl(state.inner(), media_id, episode_number, provider, title, crate::state::StreamClient::Mpv).await
+    preload_episode_impl(state.inner(), media_id, episode_number, provider, title, crate::state::StreamClient::Mpv, Some(app)).await
+}
+
+#[tauri::command]
+pub async fn get_preload_status(
+    state: State<'_, AppState>,
+    media_id: i64,
+    episode_number: i64,
+    provider: Option<String>,
+) -> Result<String, String> {
+    let provider_name = match provider {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
+
+    // Check preloaded_stream slot
+    {
+        let slot = state.preloaded_stream.lock().await;
+        if let Some(ref p) = *slot {
+            if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name {
+                return Ok("ready".to_string());
+            }
+        }
+    }
+
+    // Check if in flight
+    if state.preload_in_flight(media_id, episode_number, &provider_name) {
+        return Ok("fetching".to_string());
+    }
+
+    Ok("idle".to_string())
 }
 
 pub async fn preload_episode_impl(
@@ -1505,6 +1687,7 @@ pub async fn preload_episode_impl(
     provider: Option<String>,
     title: Option<String>,
     client: crate::state::StreamClient,
+    app: Option<AppHandle>,
 ) -> Result<(), String> {
     let provider_name = match provider {
         Some(p) if !p.is_empty() => p,
@@ -1531,6 +1714,13 @@ pub async fn preload_episode_impl(
         let slot = state.preloaded_stream.lock().await;
         if let Some(ref p) = *slot {
             if p.media_id == media_id && p.episode_number == episode_number && p.provider == provider_name && p.client == client && p.translation_type == translation_type {
+                if let Some(ref app) = app {
+                    let _ = app.emit("stream_preload_status", serde_json::json!({
+                        "media_id": media_id,
+                        "episode_number": episode_number,
+                        "status": "ready"
+                    }));
+                }
                 return Ok(());
             }
         }
@@ -1545,15 +1735,31 @@ pub async fn preload_episode_impl(
             "Preload for media {} ep {} ({}) already in flight; skipping",
             media_id, episode_number, provider_name
         );
+        if let Some(ref app) = app {
+            let _ = app.emit("stream_preload_status", serde_json::json!({
+                "media_id": media_id,
+                "episode_number": episode_number,
+                "status": "fetching"
+            }));
+        }
         return Ok(());
     };
 
+    if let Some(ref app) = app {
+        let _ = app.emit("stream_preload_status", serde_json::json!({
+            "media_id": media_id,
+            "episode_number": episode_number,
+            "status": "fetching"
+        }));
+    }
+
     let state_inner = state.clone();
+    let app_handle = app;
     tokio::spawn(async move {
         // Held for the whole resolve; dropping it releases the claim however
         // this task ends.
         let _guard = guard;
-        match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title, client).await {
+        match resolve_stream_for_provider(&state_inner, media_id, episode_number, &provider_name, &None, title, client, None).await {
             Ok((raw_url, headers, subtitle_url)) => {
                 let mut slot = state_inner.preloaded_stream.lock().await;
                 *slot = Some(crate::state::PreloadedStream {
@@ -1568,8 +1774,24 @@ pub async fn preload_episode_impl(
                     at: std::time::Instant::now(),
                 });
                 log::info!("Preloaded stream for media {} ep {} ({})", media_id, episode_number, provider_name);
+                if let Some(ref app) = app_handle {
+                    let _ = app.emit("stream_preload_status", serde_json::json!({
+                        "media_id": media_id,
+                        "episode_number": episode_number,
+                        "status": "ready"
+                    }));
+                }
             }
-            Err(e) => log::warn!("preload_episode: media {} ep {} ({}) failed: {}", media_id, episode_number, provider_name, e),
+            Err(e) => {
+                log::warn!("preload_episode: media {} ep {} ({}) failed: {}", media_id, episode_number, provider_name, e);
+                if let Some(ref app) = app_handle {
+                    let _ = app.emit("stream_preload_status", serde_json::json!({
+                        "media_id": media_id,
+                        "episode_number": episode_number,
+                        "status": "idle"
+                    }));
+                }
+            }
         }
     });
     Ok(())
@@ -1887,6 +2109,36 @@ pub async fn start_playback(
             }
         }
 
+        // Superseded while waiting above -- a second press, or a sub/dub toggle.
+        // Bailing here rather than carrying on to the check further down is the
+        // point: everything between the two is work this call's result will
+        // never be used for, and one piece of it (taking the preloaded entry
+        // out of the slot) actively takes that result *away* from the call that
+        // superseded it. Pressing next twice because the first press felt slow
+        // used to convert an instant preloaded transition into a full cold
+        // resolve for exactly that reason.
+        if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+            log::info!(
+                "Superseded by a newer playback start; not resolving media {} ep {}",
+                media_id, episode_number
+            );
+            return Ok(PlaybackStart { stream_url: String::new() });
+        }
+
+        // Claim this target for as long as this start owns it, using the same
+        // registry the preloads use. Two presses landing on the same episode
+        // (which is what happens when the second arrives before the first has
+        // written `current_playback`) then make the second *wait* on the
+        // first's resolve at the guard above, instead of starting a second
+        // `add_torrent` round against the torrent the player is already
+        // reading. Whichever one is superseded puts its stream back in the
+        // slot on the way out, so the survivor finds it ready rather than
+        // resolving the same episode again.
+        //
+        // Best-effort: if the claim is somehow already held despite the wait
+        // above, carry on unclaimed rather than failing a play outright.
+        let _start_claim = state.claim_preload(media_id, episode_number, &provider_name);
+
         // Recomputed here rather than reused from earlier in the function: a
         // mid-playback sub/dub toggle writes the new preference and then
         // calls start_playback for the very episode that may already have a
@@ -1971,6 +2223,18 @@ pub async fn start_playback(
             consumed_preload = Some(p.clone());
             (p.raw_url, p.headers, p.subtitle_url)
         } else {
+            // The probe above is a network round-trip, so the supersede can
+            // land during it. Checked again before the expensive half: the
+            // fallback chain can walk three providers, and on nyaa each is a
+            // full search plus a swarm handshake.
+            if state.playback_generation.load(std::sync::atomic::Ordering::SeqCst) != playback_gen {
+                log::info!(
+                    "Superseded by a newer playback start; abandoning the resolve for media {} ep {}",
+                    media_id, episode_number
+                );
+                restore_preload(&state, consumed_preload.take()).await;
+                return Ok(PlaybackStart { stream_url: String::new() });
+            }
             let candidates = provider_fallback_chain(media_id, &provider_name, fallback_provider, secondary_fallback);
             let mut tried = Vec::new();
             let mut last_err = String::new();
@@ -1982,7 +2246,7 @@ pub async fn start_playback(
                 }
                 tried.push(prov.clone());
 
-                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone(), crate::state::StreamClient::Mpv).await {
+                match resolve_stream_for_provider(&state, media_id, episode_number, &prov, &server, title.clone(), crate::state::StreamClient::Mpv, None).await {
                     Ok(res) => {
                         if prov != provider_name {
                             // Note: don't write the working provider into
@@ -2160,6 +2424,25 @@ pub async fn start_playback(
     cmd.arg("--ontop");
     cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));
 
+    // mpv.conf's slang=en,eng,English exists because mpv's own default only
+    // auto-selects a track carrying the container's "default" flag, and a lot
+    // of multi-audio releases flag none of theirs (see the comment there for
+    // the [Judas]-with-fifteen-untracked-subs example that prompted it). The
+    // exact same gap exists for the *audio* track on a dual-audio release —
+    // no --alang was ever set, so an untagged/wrongly-first-tagged dual-audio
+    // file silently played whatever track happened to be first in the
+    // container, regardless of the sub/dub preference (reported: Chivalry of
+    // a Failed Knight serving dub audio while set to Subtitled). Unlike
+    // subtitle language, this has to track the *current* preference rather
+    // than a fixed default, since a dub-preferring user needs the opposite
+    // list.
+    let translation_type = effective_translation_type(&state, media_id).await;
+    if translation_type == "dub" {
+        cmd.arg("--alang=eng,en,English");
+    } else {
+        cmd.arg("--alang=jpn,ja,Japanese");
+    }
+
     if resume_seconds > 0 {
         cmd.arg(format!("--start={}", resume_seconds));
     }
@@ -2184,6 +2467,18 @@ pub async fn start_playback(
         let cfg = state.config.read().await;
         cfg.stream.shader_profile.clone()
     };
+    // Where the Lua script sends its callbacks. It used to hardcode 13370, but
+    // the proxy only *prefers* that port -- when something else already holds
+    // it, `proxy::server::start` falls back to an OS-assigned one (and says so
+    // in the log). The stream URL is built from the real port, so video played
+    // perfectly while every callback went to whatever else owned 13370: no
+    // progress, no resume position, no watched detection, no preload, and
+    // next/prev doing nothing at all. Exactly the "playback works but the app
+    // forgets everything" report, and invisible unless you thought to check
+    // `lsof -i :13370`.
+    let proxy_port = *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
+    script_opts.push(format!("anicat_ui-proxy_port={}", proxy_port));
+    script_opts.push(format!("anicat_ui-media_id={}", media_id));
     script_opts.push(format!("anicat_ui-autoskip={}", if autoskip { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
     script_opts.push(format!("anicat_ui-current_episode={}", episode_number));
@@ -2317,6 +2612,10 @@ pub async fn start_playback(
     };
 
     let mut reused = false;
+    // The episode currently on screen, captured before the reuse path
+    // overwrites it, so a transition mpv never completes can be walked back to
+    // it rather than leaving the counter one ahead of reality.
+    let mut outgoing: Option<crate::state::CurrentPlayback> = None;
     if has_active_mpv {
         let mut commands = Vec::new();
 
@@ -2353,11 +2652,19 @@ pub async fn start_playback(
             }));
         }
 
-        let (autoskip, autoplay) = {
+        let (autoskip, autoplay, shader_profile) = {
             let cfg = state.config.read().await;
-            (cfg.general.autoskip, cfg.general.autoplay)
+            (cfg.general.autoskip, cfg.general.autoplay, cfg.stream.shader_profile.clone())
         };
+        let reuse_proxy_port =
+            *state.inner.proxy_port.lock().unwrap_or_else(|e| e.into_inner());
         let mut script_opts_parts = Vec::new();
+        // Re-sent for the same reason every other key is: this is a
+        // `set_property script-opts`, which replaces the whole map. Omitting it
+        // would *delete* the port the launch path set and drop the script back
+        // to its built-in default mid-binge.
+        script_opts_parts.push(format!("anicat_ui-proxy_port={}", reuse_proxy_port));
+        script_opts_parts.push(format!("anicat_ui-media_id={}", media_id));
         // Always include skip_times (empty if AniSkip hasn't arrived yet) so
         // the Lua observer doesn't fall back to the previous episode's stale
         // launch-time opts.skip_times value.
@@ -2366,9 +2673,35 @@ pub async fn start_playback(
         script_opts_parts.push(format!("anicat_ui-auto_next={}", if autoplay { "yes" } else { "no" }));
         script_opts_parts.push(format!("anicat_ui-current_episode={}", episode_number));
         script_opts_parts.push(format!("anicat_ui-total_episodes={}", total_eps));
+        // Sets the whole script-opts map, so every key the launch path sends
+        // has to be re-sent here or it is *removed* from a reused mpv rather
+        // than left alone. shader_profile was the one that wasn't.
+        script_opts_parts.push(format!("anicat_ui-shader_profile={}", shader_profile));
 
         commands.push(serde_json::json!({
             "command": ["set_property", "script-opts", script_opts_parts.join(",")]
+        }));
+
+        // Re-apply the upscaling setting for the new episode, the same way the
+        // launch path applies it via --glsl-shaders.
+        //
+        // Only the launch path ever did. `glsl-shaders` is a global property
+        // that survives `loadfile ... replace`, which is right for a Ctrl+1
+        // toggle (that writes the flip back to config, so the two agree), but
+        // wrong for a change made in Settings while mpv is open: config moved
+        // and the running player never heard about it. Auto-next then carried
+        // the stale render graph into every remaining episode of the binge,
+        // and only closing mpv resynced it. Config is the source of truth at
+        // the start of an episode here exactly as it is at launch.
+        //
+        // Sent as a script-message rather than as a `glsl-shaders` write so
+        // the decision can be made against mpv's live value: setting the
+        // property rebuilds the render graph even when the value is
+        // unchanged, which on this transition would stall the first frames of
+        // the episode that just started for the overwhelmingly common case of
+        // nothing having changed at all.
+        commands.push(serde_json::json!({
+            "command": ["script-message", "anicat-set-shader-profile", shader_profile]
         }));
 
         if !title_str.is_empty() {
@@ -2490,6 +2823,15 @@ pub async fn start_playback(
             return Ok(PlaybackStart { stream_url });
         }
 
+        // Cleared before the send so the confirmation wait below can only be
+        // satisfied by *this* transition's file-loaded, never by the one that
+        // is still on screen.
+        {
+            let mut slot = state.confirmed_playing.lock().await;
+            *slot = None;
+        }
+        outgoing = state.current_playback.lock().await.clone();
+
         let ipc_path = get_ipc_path();
         log::info!("Connecting to running MPV at {} via IPC...", ipc_path);
         // Retry a few times — mpv may be briefly busy loading the stream.
@@ -2523,20 +2865,44 @@ pub async fn start_playback(
     }
 
     if reused {
-        let mut guard = state.current_playback.lock().await;
-        *guard = Some(crate::state::CurrentPlayback {
-            media_id,
-            episode_number,
-            provider: provider_name.clone(),
-            title: title_str.clone(),
-            episode_title: episode_title_str.clone(),
-            cover_image: cover_image_str.clone(),
-            total_episodes: total_eps,
-            last_position: 0,
-            last_duration: 0,
-            paused: false,
-        });
+        {
+            let mut guard = state.current_playback.lock().await;
+            *guard = Some(crate::state::CurrentPlayback {
+                media_id,
+                episode_number,
+                provider: provider_name.clone(),
+                title: title_str.clone(),
+                episode_title: episode_title_str.clone(),
+                cover_image: cover_image_str.clone(),
+                total_episodes: total_eps,
+                last_position: 0,
+                last_duration: 0,
+                paused: false,
+            });
+        }
         emit_playback_active(&app, true);
+        // The write above is optimistic and has to be: the callbacks for the
+        // new episode start arriving immediately and need something to report
+        // against. Confirm it in the background -- a successful IPC send only
+        // means mpv received the loadfile, and an mpv that then fails to open
+        // the stream used to leave the counter permanently one ahead, so the
+        // next press skipped the episode that never played. Backgrounded so
+        // the transition still returns at once.
+        let confirm_state = (*state).clone();
+        let confirm_app = app.clone();
+        tokio::spawn(async move {
+            if !confirm_playing(&confirm_state, media_id, episode_number, playback_gen).await {
+                rollback_failed_transition(
+                    &confirm_state,
+                    &confirm_app,
+                    outgoing,
+                    media_id,
+                    episode_number,
+                    playback_gen,
+                )
+                .await;
+            }
+        });
         return Ok(PlaybackStart { stream_url });
     }
 
@@ -2759,6 +3125,26 @@ pub async fn start_playback(
                 let _ = app_handle.emit("progress_updated", serde_json::json!({
                     "media_id": monitor_media_id,
                     "episode_number": monitor_episode,
+                }));
+                // `anicat_playback_state{active:false}` below deliberately does
+                // NOT touch the loading toast (StreamLoadingModal treats a bare
+                // `false` as a normal close, not a signal). That's right for
+                // mpv dying before it ever got this far. It's wrong for mpv
+                // dying *mid a next/prev transition it already reused this same
+                // process for* -- e.g. someone hits the OSC's window-close
+                // button right as auto-next hands off to episode N+1. The
+                // 8-second crashed-launch branch above never sees this case
+                // (this isn't a fresh spawn), so nothing ever told the toast
+                // the transition it was showing "Starting..." for isn't coming.
+                // Confirmed live: the toast sat on "Starting..." indefinitely
+                // after exactly this happened, with mpv already gone and
+                // nothing left running to resolve it. Clear it unconditionally
+                // here too -- a stream that already finished loading dismissed
+                // this itself via `status: "ready"` well before the process
+                // exit reaches this point, so the only toast still up here is
+                // one with no other way to close.
+                let _ = app_handle.emit("playback_loading_status", serde_json::json!({
+                    "status": "done",
                 }));
                 emit_playback_active(&app_handle, false);
                 discord.clear_presence();
@@ -3031,6 +3417,401 @@ pub async fn stop_playback(
     Ok(())
 }
 
+/// Non-HTTP counterpart to the `/player/pause|resume|progress|stop` handlers
+/// in `proxy/server.rs`, for `AniCatPlayer.tsx` (the desktop builtin `<video>`
+/// player) to call via `invoke()` instead of a loopback HTTP round trip. Those
+/// HTTP routes stay, and keep this exact same logic, because mpv's Lua script
+/// can only speak HTTP -- this command exists for the caller that *can* speak
+/// Tauri IPC directly instead.
+///
+/// `"stop"` deliberately does NOT reuse the `stop_playback` command above:
+/// that one also kills mpv and calls `torrent.pause_all()`, which is right
+/// when mpv (the only other reader of that torrent) is going away, but wrong
+/// here -- closing the builtin player's `<video>` element does not mean the
+/// torrent has no more readers. A background `remux.rs` ffmpeg session for
+/// the same torrent+file often keeps running well past that (transcoding
+/// takes real time even though stream-copy is cheap), and pausing the
+/// torrent out from under it starves the still-running remux of new bytes.
+/// Observed live: closing the builtin player mid-remux froze the HLS
+/// playlist's growth, which the player then read as "this episode is only
+/// as long as whatever was buffered at the moment of the pause".
+#[tauri::command]
+pub async fn report_builtin_player_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: String,
+    pos: i64,
+    duration: i64,
+) -> Result<(), String> {
+    match action.as_str() {
+        "stop" => {
+            let play_info = {
+                let mut guard = state.current_playback.lock().await;
+                if let Some(ref mut pb) = *guard {
+                    pb.last_position = pos;
+                    pb.last_duration = duration;
+                }
+                guard.clone()
+            };
+            if let Some(play_info) = play_info {
+                if pos > 0 && duration > 0 {
+                    let state_clone = state.inner().clone();
+                    let media_id = play_info.media_id;
+                    let ep_num = play_info.episode_number;
+                    let total_eps = play_info.total_episodes;
+                    tokio::spawn(async move {
+                        match record_playback_progress(&state_clone, 0, media_id, ep_num, pos, duration, total_eps).await {
+                            Ok(()) => {
+                                let _ = app.emit("progress_updated", serde_json::json!({
+                                    "media_id": media_id,
+                                    "episode_number": ep_num,
+                                }));
+                            }
+                            Err(e) => log::error!("Failed to record progress on builtin player stop: {}", e),
+                        }
+                    });
+                }
+            }
+        }
+        "pause" => {
+            let play_info = {
+                let mut guard = state.current_playback.lock().await;
+                if let Some(ref mut pb) = *guard {
+                    pb.last_position = pos;
+                    pb.last_duration = duration;
+                    if pb.paused {
+                        None
+                    } else {
+                        pb.paused = true;
+                        Some(pb.clone())
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(play_info) = play_info {
+                state.discord.set_presence(
+                    &play_info.title,
+                    play_info.episode_number,
+                    &play_info.episode_title,
+                    play_info.total_episodes,
+                    pos,
+                    duration,
+                    true,
+                );
+            }
+        }
+        "resume" => {
+            let play_info = {
+                let mut guard = state.current_playback.lock().await;
+                if let Some(ref mut pb) = *guard {
+                    pb.last_position = pos;
+                    pb.last_duration = duration;
+                    if pb.paused {
+                        pb.paused = false;
+                        Some(pb.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(play_info) = play_info {
+                state.discord.set_presence(
+                    &play_info.title,
+                    play_info.episode_number,
+                    &play_info.episode_title,
+                    play_info.total_episodes,
+                    pos,
+                    duration,
+                    false,
+                );
+            }
+        }
+        "progress" => {
+            let (play_info, persist_info) = {
+                let mut guard = state.current_playback.lock().await;
+                if let Some(ref mut pb) = *guard {
+                    pb.last_position = pos;
+                    pb.last_duration = duration;
+                    let persist = Some((pb.media_id, pb.episode_number));
+                    if pb.paused {
+                        (None, persist)
+                    } else {
+                        (Some(pb.clone()), persist)
+                    }
+                } else {
+                    (None, None)
+                }
+            };
+            if let Some((media_id, episode_number)) = persist_info {
+                if pos > 0 && duration > 0 {
+                    if let Ok(db) = state.open_db() {
+                        if let Err(e) = crate::registry::service::record_watched_episode(
+                            &db, 0, media_id, episode_number, pos, duration,
+                        ) {
+                            log::error!(
+                                "Failed to persist progress tick (media {} ep {} pos {}): {}",
+                                media_id, episode_number, pos, e
+                            );
+                        }
+                    }
+                }
+            }
+            if let Some(pb) = play_info {
+                state.discord.set_presence(
+                    &pb.title,
+                    pb.episode_number,
+                    &pb.episode_title,
+                    pb.total_episodes,
+                    pos,
+                    duration,
+                    false,
+                );
+            }
+        }
+        other => return Err(format!("unknown player action '{}'", other)),
+    }
+    Ok(())
+}
+
+/// Put a torrent release through ffmpeg and hand back the HLS path, or `None`
+/// to fall through to serving the file as it is.
+async fn remux_torrent_stream(
+    manager: &crate::proxy::remux::RemuxManager,
+    loopback_url: &str,
+    path_and_query: &str,
+    prefer_dub: bool,
+) -> Option<String> {
+    if !manager.is_available().await {
+        return None;
+    }
+    // "/torrent-stream?t=1&f=5" -- the ids the session is keyed by, so two
+    // requests for one episode share an ffmpeg instead of racing.
+    let query = path_and_query.split_once('?').map(|(_, q)| q).unwrap_or("");
+    let mut torrent_id = None;
+    let mut file_id = None;
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("t", v)) => torrent_id = v.parse().ok(),
+            Some(("f", v)) => file_id = v.parse().ok(),
+            _ => {}
+        }
+    }
+    let (torrent_id, file_id) = (torrent_id?, file_id?);
+    match manager.start(loopback_url, torrent_id, file_id, 0, prefer_dub).await {
+        Ok(url) => Some(url),
+        Err(e) => {
+            log::warn!("remux: falling back to the raw file: {}", e);
+            None
+        }
+    }
+}
+
+/// Non-HTTP counterpart to `/mobile-api/playback/resolve` (deleted with the
+/// mobile PWA), kept for `AniCatPlayer.tsx` -- the desktop builtin `<video>`
+/// player, which is the default `playerType` for a fresh install. Unlike mpv,
+/// it has no IPC to push a resolved stream into, so this hands back a URL the
+/// `<video>` element can load directly, the same way the HTTP endpoint did.
+#[tauri::command]
+pub async fn resolve_builtin_player_stream(
+    state: State<'_, AppState>,
+    media_id: i64,
+    episode_number: i64,
+    provider: Option<String>,
+    title: Option<String>,
+    episode_title: Option<String>,
+    cover_image: Option<String>,
+    total_episodes: Option<i64>,
+    exclude_urls: Option<Vec<String>>,
+) -> Result<Value, String> {
+    let state = state.inner();
+    let provider_name = match provider.clone() {
+        Some(p) if !p.is_empty() => p,
+        _ => state.config.read().await.general.provider.clone(),
+    };
+    let (fallback_provider, secondary_fallback) = {
+        let cfg = state.config.read().await;
+        (cfg.general.fallback_provider.clone(), cfg.general.secondary_fallback_provider.clone())
+    };
+
+    let title_str = title.clone().unwrap_or_default();
+    let episode_title_str = episode_title.clone().unwrap_or_default();
+    let cover_image_str = cover_image.clone().unwrap_or_default();
+    let total_eps = total_episodes.unwrap_or(0);
+
+    let translation_type = effective_translation_type(state, media_id).await;
+    const PRELOAD_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+    let preloaded = {
+        let mut slot = state.preloaded_stream.lock().await;
+        match slot.take() {
+            Some(p)
+                if p.media_id == media_id
+                    && p.episode_number == episode_number
+                    && (p.provider == provider_name || p.provider == fallback_provider)
+                    && p.client == crate::state::StreamClient::Browser
+                    && p.translation_type == translation_type
+                    && p.at.elapsed() < PRELOAD_MAX_AGE =>
+            {
+                Some(p)
+            }
+            other => {
+                *slot = other;
+                None
+            }
+        }
+    };
+
+    let (raw_url, stream_headers, raw_subtitle_url, resolved_provider) = if let Some(p) = preloaded {
+        log::info!(
+            "Using preloaded browser stream for media {} ep {} ({})",
+            media_id, episode_number, p.provider
+        );
+        (p.raw_url, p.headers, p.subtitle_url, p.provider)
+    } else {
+        let candidates = provider_fallback_chain(media_id, &provider_name, fallback_provider, secondary_fallback);
+        let mut tried = Vec::new();
+        let mut last_err = String::new();
+        let mut resolved = None;
+
+        for prov in candidates {
+            if prov.is_empty() || prov == "none" || tried.contains(&prov) {
+                continue;
+            }
+            tried.push(prov.clone());
+
+            match resolve_stream_for_provider(
+                state,
+                media_id,
+                episode_number,
+                &prov,
+                &None,
+                title.clone(),
+                crate::state::StreamClient::Browser,
+                exclude_urls.as_deref(),
+            )
+            .await
+            {
+                Ok((url, headers, subtitle_url)) => {
+                    resolved = Some((url, headers, subtitle_url, prov));
+                    break;
+                }
+                Err(e) => {
+                    log::warn!("Builtin player provider '{}' failed for media {} ep {}: {}", prov, media_id, episode_number, e);
+                    last_err = e;
+                }
+            }
+        }
+
+        match resolved {
+            Some(res) => res,
+            None => return Err(format!("No playable stream found on any provider (last error: {})", last_err)),
+        }
+    };
+
+    let torrent_path = raw_url.strip_prefix("http://127.0.0.1:").and_then(|rest| {
+        rest.split_once('/').map(|(_, tail)| format!("/{tail}"))
+    }).filter(|p| p.starts_with("/torrent-stream"));
+    let mut remuxed = false;
+    let prefer_dub = translation_type == "dub";
+    let mut stream_url = if let Some(path_and_query) = torrent_path {
+        match remux_torrent_stream(&state.remux, &raw_url, &path_and_query, prefer_dub).await {
+            Some(url) => {
+                remuxed = true;
+                url
+            }
+            None => path_and_query,
+        }
+    } else {
+        format!("/proxy?url={}", percent_encode(&raw_url))
+    };
+    if let Some(referer) = stream_headers.as_ref().and_then(|h| {
+        h.get("Referer").or_else(|| h.get("referer")).or_else(|| h.get("REFERER"))
+    }) {
+        if stream_url.starts_with("/proxy") {
+            stream_url.push_str(&format!("&referer={}", percent_encode(referer)));
+        }
+    }
+
+    {
+        let mut guard = state.current_playback.lock().await;
+        *guard = Some(crate::state::CurrentPlayback {
+            media_id,
+            episode_number,
+            provider: resolved_provider,
+            title: title_str,
+            episode_title: episode_title_str,
+            cover_image: cover_image_str,
+            total_episodes: total_eps,
+            last_position: 0,
+            last_duration: 0,
+            paused: false,
+        });
+    }
+
+    let resume_seconds = {
+        let mut sec = 0;
+        if let Ok(db) = state.open_db() {
+            if let Ok(entries) = crate::registry::service::get_watched_episodes(&db, 0, media_id) {
+                if let Some(entry) = entries.iter().find(|e| e.episode_number == episode_number) {
+                    sec = resume_position(entry.stop_time, entry.duration);
+                }
+            }
+        }
+        if sec > 0 {
+            if let Some(anilist_progress) = state.cache.get_user_list_progress(media_id) {
+                if anilist_progress >= episode_number {
+                    sec = 0;
+                }
+            }
+        }
+        sec
+    };
+
+    if state.anilist_client.has_token() && media_id > 0 {
+        let already_current = state
+            .cache
+            .get_user_list_status(media_id)
+            .map(|s| s.eq_ignore_ascii_case("CURRENT"))
+            .unwrap_or(false);
+        if !already_current {
+            let anilist = state.anilist_client.clone();
+            let cache = state.cache.clone();
+            tokio::spawn(async move {
+                let mut vars = std::collections::HashMap::new();
+                vars.insert("mediaId".to_string(), serde_json::json!(media_id));
+                vars.insert("status".to_string(), serde_json::json!("CURRENT"));
+                if let Err(e) = anilist
+                    .execute::<serde_json::Value>(crate::anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
+                    .await
+                {
+                    log::warn!("Failed to sync AniList watching list from builtin player: {}", e);
+                } else {
+                    cache.update_user_list_progress(media_id, None, Some("CURRENT"), None);
+                }
+            });
+        }
+    }
+
+    let subtitle_url = raw_subtitle_url.as_ref().map(|sub| {
+        let mut url = format!("/proxy?url={}", percent_encode(sub));
+        if let Some(referer) = stream_headers.as_ref().and_then(|h| {
+            h.get("Referer").or_else(|| h.get("referer")).or_else(|| h.get("REFERER"))
+        }) {
+            url.push_str(&format!("&referer={}", percent_encode(referer)));
+        }
+        url
+    });
+
+    Ok(serde_json::json!({
+        "stream_url": stream_url,
+        "resume_seconds": if remuxed { 0 } else { resume_seconds },
+        "subtitle_url": if remuxed { None } else { subtitle_url },
+    }))
+}
+
 use crate::registry::WatchEntry;
 
 #[tauri::command]
@@ -3209,7 +3990,7 @@ mod tests {
     use super::{
         candidate_order, is_torrent_backed, is_watched, looks_like_playlist, parse_playlist,
         probe_status_is_dead, probe_status_is_permanent, provider_fallback_chain, resume_position,
-        sample_indices, PlaylistStep,
+        sample_indices, transition_failure_message, PlaylistStep,
     };
     use crate::scraper::client::StreamServer;
 
@@ -3226,11 +4007,89 @@ mod tests {
         }
     }
 
+    /// The confirmation is what a completed transition looks like; its absence
+    /// is what a failed one looks like.
+    #[tokio::test]
+    async fn a_reported_open_confirms_the_transition() {
+        let state = crate::state::AppState::new();
+        let gen = state.playback_generation.load(std::sync::atomic::Ordering::SeqCst);
+        {
+            let mut slot = state.confirmed_playing.lock().await;
+            *slot = Some((20977, 6));
+        }
+        assert!(super::confirm_playing(&state, 20977, 6, gen).await);
+    }
+
+    /// A different episode's confirmation must not satisfy this one -- that is
+    /// the whole failure mode, an episode counted as playing when it never
+    /// opened. Kept fast by superseding rather than waiting out the 180s bound.
+    #[tokio::test]
+    async fn another_episodes_open_does_not_confirm_this_one() {
+        let state = crate::state::AppState::new();
+        let gen = state.playback_generation.load(std::sync::atomic::Ordering::SeqCst);
+        {
+            let mut slot = state.confirmed_playing.lock().await;
+            *slot = Some((20977, 5));
+        }
+        // Bump the generation so the wait exits on "someone newer owns this"
+        // rather than on a match -- if ep 5 satisfied a wait for ep 6 the call
+        // would return before this even mattered.
+        state.playback_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(super::confirm_playing(&state, 20977, 6, gen).await);
+        let slot = state.confirmed_playing.lock().await;
+        assert_eq!(*slot, Some((20977, 5)), "the wait must not have written anything");
+    }
+
+    /// The whole point of the message is that it is *not* the end-of-season
+    /// one: it names the episode that failed, which says outright that the
+    /// show has more.
+    #[test]
+    fn a_failed_transition_never_reads_as_the_end_of_the_show() {
+        let cases = [
+            "No stream found on any provider (last error: No HD torrent found for 'X' episode 6)",
+            "All torrent candidates failed (last error: no seeders (pre-buffer timed out))",
+            "mpv exited immediately: ExitStatus(unix_wait_status(256))",
+            "something nobody has seen before",
+        ];
+        for err in cases {
+            let msg = transition_failure_message(6, err);
+            assert!(msg.starts_with("Episode 6 failed to load: "), "{msg}");
+            assert!(
+                !msg.contains("No more episodes"),
+                "the end-of-season sentence must never come out of a failure: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_reason_says_which_kind_of_failure_it_was() {
+        assert!(transition_failure_message(6, "No HD torrent found for 'X' episode 6")
+            .contains("no release found"));
+        assert!(transition_failure_message(6, "no seeders (pre-buffer timed out)")
+            .contains("source timed out"));
+        assert!(transition_failure_message(6, "mpv exited immediately: status 1")
+            .contains("the player failed to start"));
+    }
+
+    /// An unrecognised error is passed through rather than replaced with an
+    /// apology -- but bounded, so a provider-chain message can't cover the
+    /// video it is being shown over.
+    #[test]
+    fn an_unknown_failure_keeps_its_own_words_but_not_all_of_them() {
+        let short = transition_failure_message(6, "disk is full");
+        assert!(short.contains("disk is full"), "{short}");
+        assert!(!short.contains('\u{2026}'), "{short}");
+
+        let long = transition_failure_message(6, &"z".repeat(400));
+        assert!(long.chars().count() < 140, "{} chars: {}", long.chars().count(), long);
+        assert!(long.contains('\u{2026}'), "{long}");
+    }
+
     /// The browser filter is `retain(|s| s.browser_ok.unwrap_or(true))`, and
-    /// the `unwrap_or(true)` is the load-bearing half: providers that don't
-    /// report the field (mkissa, and any older frozen sidecar still in the
-    /// wild) must keep working exactly as before rather than silently
-    /// resolving to nothing on mobile.
+    /// the `unwrap_or(true)` is the load-bearing half: a provider that doesn't
+    /// report the field — including any older frozen sidecar still in the wild
+    /// — must keep working exactly as before rather than silently resolving to
+    /// nothing.
     #[test]
     fn browser_filter_keeps_servers_that_dont_report_the_field() {
         let mut servers = vec![

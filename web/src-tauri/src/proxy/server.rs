@@ -1,43 +1,19 @@
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Query, Request, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
-    middleware,
-    middleware::Next,
+    extract::{Query, State},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::Response,
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use std::net::SocketAddr;
-use tower_http::services::{ServeDir, ServeFile};
-
-use super::{mobile_api, mobile_auth, session};
-
-/// Single entry point for both auth models — picks between the existing
-/// single-PIN gate and Stage 2's per-user session auth per request, based on
-/// the live `multi_user` config flag (an admin running `anicat-server
-/// add-user` can flip this without restarting the server, so it's read
-/// fresh each time rather than decided once at router-build time).
-async fn require_auth(
-    State(state): State<ProxyState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let multi_user = state.app_state.config.read().await.general.multi_user;
-    if multi_user {
-        session::require_user_session(State(state), req, next).await
-    } else {
-        mobile_auth::require_mobile_auth(State(state), ConnectInfo(addr), req, next).await
-    }
-}
 
 #[derive(serde::Deserialize)]
 struct ProxyQuery {
     url: String,
-    /// Optional Referer to forward to the upstream CDN. Set by the mobile
-    /// playback path, which (unlike mpv) can't attach the header client-side.
-    /// Not an SSRF lever — the target host is still allowlist-checked.
+    /// Optional Referer to forward to the upstream CDN — some CDNs 403
+    /// without it. Not an SSRF lever — the target host is still
+    /// allowlist-checked.
     #[serde(default)]
     referer: Option<String>,
 }
@@ -47,46 +23,22 @@ struct PlaybackParams {
     pos: Option<i64>,
     duration: Option<i64>,
     manual: Option<bool>,
+    /// Only sent by `/player/loaded`: what mpv actually opened.
+    episode: Option<i64>,
+    media_id: Option<i64>,
 }
 
 #[derive(Clone)]
 pub struct ProxyState {
     pub client: reqwest::Client,
-    /// `None` when running under the headless `anicat-server` binary — there
-    /// is no Tauri webview to push events to and no same-host mpv process,
-    /// so every AppHandle-dependent side effect below (desktop toasts,
-    /// setting-sync events, the mpv-launching next/prev/toggle handlers, and
-    /// `require_mobile_auth`'s loopback bypass) becomes a no-op rather than
-    /// a hard dependency.
+    /// `None` when running under a non-desktop context — there is no Tauri
+    /// webview to push events to, so every AppHandle-dependent side effect
+    /// below (desktop toasts, setting-sync events, the mpv-launching
+    /// next/prev/toggle handlers) becomes a no-op rather than a hard
+    /// dependency.
     pub app_handle: Option<tauri::AppHandle>,
     pub app_state: crate::state::AppState,
     pub proxy_port: u16,
-    /// Per-IP failed-login counter shared by both login endpoints. Empty until
-    /// something fails; see `throttle` module.
-    pub login_throttle: super::throttle::LoginThrottle,
-}
-
-impl ProxyState {
-    /// Builds an `AppState` scoped to the authenticated caller's own AniList
-    /// session and playback state. `user_id == 0` (single-user mode, or the
-    /// desktop sentinel `require_mobile_auth` always sets) short-circuits to
-    /// a plain clone of the real global state with no DB lookup — see
-    /// `AppState::scoped_for_user`. Shared by `mobile_api.rs`'s handlers and
-    /// the `/player/*` handlers below, since mobile's `<video>` element
-    /// reports progress through the latter, not mobile-api.
-    pub async fn scoped_for(&self, crate::proxy::session::AuthedUser(user_id): crate::proxy::session::AuthedUser) -> crate::state::AppState {
-        if user_id == 0 {
-            return self.app_state.clone();
-        }
-        let (token, username) = self
-            .app_state
-            .open_db()
-            .ok()
-            .and_then(|db| crate::registry::service::get_user_by_id(&db, user_id).ok().flatten())
-            .map(|u| (u.anilist_token, u.anilist_username))
-            .unwrap_or((None, None));
-        self.app_state.scoped_for_user(user_id, token, username).await
-    }
 }
 
 pub async fn start_proxy(
@@ -94,17 +46,16 @@ pub async fn start_proxy(
     app_handle: Option<tauri::AppHandle>,
     app_state: crate::state::AppState,
 ) -> SocketAddr {
-    // 0.0.0.0 so the proxy (and the new mobile-api/PWA routes) are reachable
-    // from other devices on the LAN, not just this machine. /player/* and
-    // /mobile-api/* are gated by require_mobile_auth below; /proxy and
-    // /health are deliberately left open (see the router comment further
-    // down) since they're either harmless or already SSRF-allowlisted.
-    let addr = SocketAddr::from(([0, 0, 0, 0], 13370));
+    // Loopback only: every caller (mpv's Lua script, this app's own webview
+    // fetching /proxy, /torrent-stream, /mobile-hls segments) is same-machine.
+    // Used to bind 0.0.0.0 for LAN-reachable mobile PWA access; that surface
+    // is gone, so there's no reason to accept connections from off-box.
+    let addr = SocketAddr::from(([127, 0, 0, 1], 13370));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
             log::warn!("Port 13370 is in use ({}), falling back to OS-assigned port", e);
-            let fallback = SocketAddr::from(([0, 0, 0, 0], 0));
+            let fallback = SocketAddr::from(([127, 0, 0, 1], 0));
             tokio::net::TcpListener::bind(fallback)
                 .await
                 .expect("Failed to bind any port for HLS proxy")
@@ -119,15 +70,19 @@ pub async fn start_proxy(
         proxy_port: bound.port(),
         app_handle: app_handle.clone(),
         app_state,
-        login_throttle: super::throttle::LoginThrottle::new(),
     };
 
-    // Player callback routes (called by mpv's Lua script today, and by the
-    // mobile <video> element's progress-reporting once it exists) plus the
-    // mobile data API, both behind the PIN gate. require_mobile_auth lets
-    // loopback callers (mpv, always same-machine) through unconditionally,
-    // so the existing desktop flow is unaffected.
-    let gated = Router::new()
+    let app = Router::new()
+        .route("/proxy", get(proxy_handler))
+        .route("/api/media/manga/proxy", get(proxy_handler))
+        .route("/torrent-stream", get(crate::torrent::stream::torrent_stream_handler))
+        // A <video> element fetches its own HLS playlist and segments itself
+        // and cannot be made to send a token; these expose bytes of a torrent
+        // this app is already streaming, same as /torrent-stream above.
+        .route("/mobile-hls/{id}/{file}", get(super::remux::session_file_handler))
+        .route("/mobile-hls/{id}/{dir}/{file}", get(super::remux::session_nested_handler))
+        .route("/mobile-hls/stop", get(super::remux::stop_handler))
+        .route("/health", get(health_handler))
         .route("/player/next", get(player_next_handler))
         .route("/player/prev", get(player_prev_handler))
         .route("/player/stop", get(player_stop_handler))
@@ -135,65 +90,18 @@ pub async fn start_proxy(
         .route("/player/toggle-upscale", get(player_toggle_upscale_handler))
         .route("/player/toggle-auto-next", get(player_toggle_auto_next_handler))
         .route("/player/toggle-autoskip", get(player_toggle_autoskip_handler))
+        .route("/player/loaded", get(player_loaded_handler))
         .route("/player/progress", get(player_progress_handler))
         .route("/player/pause", get(player_pause_handler))
         .route("/player/resume", get(player_resume_handler))
         .route("/player/preload", get(player_preload_handler))
-        .nest("/mobile-api", mobile_api::routes())
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
-
-    let mobile_dist_path = resolve_mobile_dist_path(app_handle.as_ref());
-    log::info!("Serving mobile PWA static files from {:?}", mobile_dist_path);
-    let mobile_index = mobile_dist_path.join("mobile.html");
-    let static_service = ServeDir::new(&mobile_dist_path).fallback(ServeFile::new(&mobile_index));
-    // ServeDir sets no Cache-Control by default, so Safari falls back to
-    // heuristic HTTP caching for mobile.html — the entry point that
-    // references each build's content-hashed JS bundle by name. A phone can
-    // sit on a stale mobile.html (and therefore a stale bundle reference)
-    // for a long time after a Pi redeploy with nothing to force a refetch.
-    // Vite's hashed /assets/* filenames are already safe to cache forever
-    // (a new build never reuses an old hash), so only the unhashed shell
-    // files need no-cache — wrapped via a one-route catch-all Router rather
-    // than a bare tower::ServiceBuilder since `tower` isn't a direct
-    // dependency here, only tower-http and axum (which re-exports what it
-    // needs from tower internally).
-    let static_service = Router::new()
-        .fallback_service(static_service)
-        .layer(middleware::from_fn(no_cache_shell_files));
-
-    let app = Router::new()
-        .route("/proxy", get(proxy_handler))
-        .route("/api/media/manga/proxy", get(proxy_handler))
-        // Ungated like /proxy: mpv fetches this from loopback without a
-        // token, and it only exposes video bytes of torrents this app added.
-        .route("/torrent-stream", get(crate::torrent::stream::torrent_stream_handler))
-        // Ungated for the same reason as /proxy and /torrent-stream above: a
-        // <video> element fetches its own playlist and segments and cannot be
-        // made to send a token, and these expose bytes of a torrent this app
-        // is already streaming to that same phone.
-        .route("/mobile-hls/{id}/{file}", get(super::remux::session_file_handler))
-        .route("/mobile-hls/{id}/{dir}/{file}", get(super::remux::session_nested_handler))
-        .route("/mobile-hls/stop", get(super::remux::stop_handler))
-        .route("/health", get(health_handler))
-        // Unauthenticated on purpose: /auth and /session/login are the login
-        // endpoints themselves (single-PIN and per-user respectively), and
-        // /lan-info is informational (what IP to type into the phone, and
-        // which of the two login flows to show) needed before a client has
-        // a token at all.
-        .route("/mobile-api/auth", post(mobile_auth::authenticate))
-        .route("/mobile-api/session/login", post(session::login))
-        .route("/mobile-api/lan-info", get(mobile_auth::lan_info))
-        .route("/mobile-api/users/list-names", get(mobile_api::list_user_names))
-        .merge(gated)
-        // Fallback rather than a nested prefix: mobile.html and its manifest/
-        // service-worker/asset references are root-relative (a standard Vite
-        // build, not configured with a custom base path), so the static files
-        // need to be reachable at the same paths they reference — e.g.
-        // /mobile-manifest.webmanifest, not /m/mobile-manifest.webmanifest.
-        // Using fallback_service means any request that doesn't match one of
-        // the explicit routes above falls through to these static files
-        // instead of competing with them for the same path space.
-        .fallback_service(static_service)
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+                .expose_headers(tower_http::cors::Any),
+        )
         .with_state(state);
 
     tokio::spawn(async move {
@@ -208,59 +116,6 @@ pub async fn start_proxy(
     });
 
     bound
-}
-
-/// Forces revalidation of the mobile PWA's unhashed entry files (mobile.html,
-/// the manifest, sw.js) so a Pi redeploy is visible on next load instead of
-/// requiring a manual cache clear on the phone. Content-hashed build output
-/// under /assets/ is left alone — a new build never reuses an old hash, so
-/// caching those forever is both safe and desirable.
-async fn no_cache_shell_files(req: Request<Body>, next: Next) -> Response {
-    let is_asset = req.uri().path().starts_with("/assets/");
-    let mut res = next.run(req).await;
-    if !is_asset {
-        res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    }
-    res
-}
-
-/// Locates the built mobile PWA's static assets (mobile.html + its JS/CSS
-/// bundle). In a packaged release these are copied in as a bundle resource
-/// (see tauri.conf.json's `bundle.resources`) — but that resource list is
-/// deliberately narrow (just the mobile entry's own files, not the whole
-/// frontend), so in dev this must prefer the full `web/dist` folder straight
-/// off disk instead: `tauri dev` also stages the same narrow resource list
-/// under target/debug/, and if that were checked first it would shadow the
-/// full dist folder and 404 on anything outside that narrow list (e.g.
-/// shared images like the logo). `web/dist` only exists after running
-/// `npm run build` at least once. ServeDir doesn't require the directory to
-/// exist up front — it just 404s per request until a real build produces it
-/// — so this is safe to call before any build has happened.
-///
-/// The headless `anicat-server` binary has no `AppHandle` to resolve a
-/// bundle resource dir from at all, so it points here via `ANICAT_MOBILE_DIST`
-/// instead (set by the systemd unit to wherever `npm run build`'s `dist/`
-/// was copied on the Pi) — checked first so it also lets a desktop build
-/// override the path for testing without touching this function further.
-fn resolve_mobile_dist_path(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("ANICAT_MOBILE_DIST") {
-        return std::path::PathBuf::from(dir);
-    }
-    if cfg!(debug_assertions) {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        return manifest_dir.join("..").join("dist");
-    }
-    use tauri::Manager;
-    if let Some(app_handle) = app_handle {
-        if let Ok(resource_dir) = app_handle.path().resource_dir() {
-            let candidate = resource_dir.join("mobile-dist");
-            if candidate.join("mobile.html").exists() {
-                return candidate;
-            }
-        }
-    }
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("..").join("dist")
 }
 
 fn notify_frontend(app_handle: &Option<tauri::AppHandle>, message: &str) {
@@ -285,9 +140,35 @@ fn notify_progress_updated(app_handle: &Option<tauri::AppHandle>, media_id: i64,
     }));
 }
 
+/// mpv opened a file. The one signal that a transition actually completed.
+///
+/// `current_playback` is advanced when the `loadfile` batch is *sent*, because
+/// the callbacks for the new episode have to have something to report against.
+/// A successful send is not a successful load, though, and nothing used to
+/// close that gap: if mpv failed to open the stream, the counter stayed
+/// advanced and the next press skipped the episode that never played. This
+/// records what really opened; `start_playback` waits on it and rolls the
+/// bookkeeping back when it never arrives.
+///
+/// Both ids come from the player rather than from `current_playback` here: the
+/// backend writes that record a moment *after* sending the batch, so reading it
+/// in this handler would race the callback, and losing that race would look
+/// exactly like a transition that never happened.
+async fn player_loaded_handler(
+    State(state): State<ProxyState>,
+    Query(params): Query<PlaybackParams>,
+) -> Result<&'static str, StatusCode> {
+    let (Some(episode), Some(media_id)) = (params.episode, params.media_id) else {
+        return Ok("ok");
+    };
+    log::info!("Player reports media {} ep {} is open", media_id, episode);
+    let mut slot = state.app_state.confirmed_playing.lock().await;
+    *slot = Some((media_id, episode));
+    Ok("ok")
+}
+
 async fn player_next_handler(
     State(state): State<ProxyState>,
-    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested next episode: pos={:?}, duration={:?}, manual={:?}", params.pos, params.duration, params.manual);
@@ -296,7 +177,7 @@ async fn player_next_handler(
     // watched if that real position is past the threshold (record_playback_
     // progress decides). So skipping forward mid-episode no longer marks the
     // skipped episode as watched.
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let play_info = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -318,7 +199,7 @@ async fn player_next_handler(
                 tokio::spawn(async move {
                     match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
-                        user_id,
+                        0,
                         media_id,
                         ep_num,
                         pos,
@@ -355,10 +236,20 @@ async fn player_next_handler(
                 .and_then(|n| n.title)
                 .and_then(|t| t.english.or(t.romaji));
             match sequel_title {
-                Some(t) => notify_frontend(
-                    &state.app_handle,
-                    &format!("Season finished. Next up: {}.", t),
-                ),
+                Some(t) => {
+                    let message = format!("Season finished. Next up: {}.", t);
+                    // Also onto the OSD, as a second message superseding the
+                    // one sent above. The sequel is the useful half of this
+                    // answer and it used to reach the webview alone -- which
+                    // during playback is behind a fullscreen mpv window, so
+                    // nobody watching ever saw it. Sent after rather than
+                    // instead, because the first message is immediate while
+                    // this one waits on a media-detail fetch.
+                    if let Err(e) = crate::commands::playback::cancel_mpv_next(&message).await {
+                        log::error!("Failed to show the sequel hint on mpv: {}", e);
+                    }
+                    notify_frontend(&state.app_handle, &message);
+                }
                 None => notify_frontend(&state.app_handle, "No more episodes available."),
             }
             return Ok("ok");
@@ -396,10 +287,14 @@ async fn player_next_handler(
             .await;
             if let Err(ref e) = result {
                 log::warn!("Failed to start next episode: {}", e);
-                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next("No more episodes available.").await {
+                // Deliberately not "No more episodes available." -- that
+                // sentence belongs to the end-of-season branch above and
+                // nowhere else. See `transition_failure_message`.
+                let message = crate::commands::playback::transition_failure_message(next_ep, e);
+                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next(&message).await {
                     log::error!("Failed to cancel mpv next: {}", cancel_err);
                 }
-                notify_frontend(&app_handle_clone, "No more episodes available.");
+                notify_frontend(&app_handle_clone, &message);
             }
         });
         return Ok("ok");
@@ -411,11 +306,10 @@ async fn player_next_handler(
 
 async fn player_prev_handler(
     State(state): State<ProxyState>,
-    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested previous episode: pos={:?}, duration={:?}", params.pos, params.duration);
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let play_info = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -437,7 +331,7 @@ async fn player_prev_handler(
                 tokio::spawn(async move {
                     match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
-                        user_id,
+                        0,
                         media_id,
                         ep_num,
                         pos,
@@ -492,10 +386,11 @@ async fn player_prev_handler(
             .await;
             if let Err(ref e) = result {
                 log::warn!("Failed to start previous episode: {}", e);
-                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next("Failed to load previous episode.").await {
+                let message = crate::commands::playback::transition_failure_message(prev_ep, e);
+                if let Err(cancel_err) = crate::commands::playback::cancel_mpv_next(&message).await {
                     log::error!("Failed to cancel mpv next: {}", cancel_err);
                 }
-                notify_frontend(&app_handle_clone, "Failed to load previous episode.");
+                notify_frontend(&app_handle_clone, &message);
             }
         });
         return Ok("ok");
@@ -507,11 +402,10 @@ async fn player_prev_handler(
 
 async fn player_stop_handler(
     State(state): State<ProxyState>,
-    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested stop: pos={:?}, duration={:?}", params.pos, params.duration);
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let play_info = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -533,7 +427,7 @@ async fn player_stop_handler(
                 tokio::spawn(async move {
                     match crate::commands::playback::record_playback_progress(
                         &scoped_clone,
-                        user_id,
+                        0,
                         media_id,
                         ep_num,
                         pos,
@@ -555,14 +449,13 @@ async fn player_stop_handler(
 
 async fn player_progress_handler(
     State(state): State<ProxyState>,
-    auth @ session::AuthedUser(user_id): session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     // Progress ticks (every 30s and once per completed seek) re-anchor the
     // Discord countdown to the real position, so skipping around doesn't drift.
     // Only re-anchor while playing — a tick during pause must not revive the
     // timer.
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let (play_info, persist_info) = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -589,7 +482,7 @@ async fn player_progress_handler(
         if pos > 0 && duration > 0 {
             if let Ok(db) = scoped.open_db() {
                 if let Err(e) = crate::registry::service::record_watched_episode(
-                    &db, user_id, media_id, episode_number, pos, duration,
+                    &db, 0, media_id, episode_number, pos, duration,
                 ) {
                     log::error!(
                         "Failed to persist progress tick (media {} ep {} pos {}): {}",
@@ -617,14 +510,13 @@ async fn player_progress_handler(
 
 async fn player_pause_handler(
     State(state): State<ProxyState>,
-    auth: session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested pause: pos={:?}, duration={:?}", params.pos, params.duration);
     // Only act on a real play->pause transition. mpv emits pause/resume on
     // window focus changes (e.g. cmd-tab), and re-sending presence each time
     // makes the timer visibly flicker.
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let play_info = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -660,11 +552,10 @@ async fn player_pause_handler(
 
 async fn player_resume_handler(
     State(state): State<ProxyState>,
-    auth: session::AuthedUser,
     Query(params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     log::info!("Player requested resume: pos={:?}, duration={:?}", params.pos, params.duration);
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let play_info = {
         let mut guard = scoped.current_playback.lock().await;
         if let Some(ref mut pb) = *guard {
@@ -700,12 +591,11 @@ async fn player_resume_handler(
 
 async fn player_preload_handler(
     State(state): State<ProxyState>,
-    auth: session::AuthedUser,
     Query(_params): Query<PlaybackParams>,
 ) -> Result<&'static str, StatusCode> {
     // Fired by the player once it's most of the way through an episode: resolve
     // the next episode's stream ahead of time so auto-next is instant.
-    let scoped = state.scoped_for(auth).await;
+    let scoped = state.app_state.clone();
     let pb = {
         let guard = scoped.current_playback.lock().await;
         guard.clone()
@@ -776,6 +666,7 @@ async fn player_preload_handler(
             // /player/preload is only ever called by mpv's Lua script; the
             // PWA has no equivalent trigger.
             crate::state::StreamClient::Mpv,
+            None,
         )
         .await
         {
@@ -1018,48 +909,23 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url) -> String {
 /// `s4.anilist.co`). CDN hosts must be listed as their full domain
 /// (`allanimecdn.b-cdn.net`), never a bare label — a bare-label `contains`
 /// match let `allanimecdn.evil.com` through.
+///
+/// Only the hosts something in the app can still ask for. A retired provider's
+/// scraper module is kept in-tree in case it comes back, but its hosts are
+/// deleted with it: every entry here is a host this process will fetch from on
+/// request, so a list that outlives its reason is pure attack surface and
+/// nothing else. anineko's and mkissa's are gone on those grounds;
+/// `scraper/anineko.py` still names anineko's if it is ever reinstated, and
+/// mkissa's live in this file's history.
+///
+/// What remains is the metadata and manga hosts the app itself reaches — the
+/// anime and cinema paths stream over the torrent engine and never come
+/// through here at all.
 const ALLOWED_DOMAINS: &[&str] = &[
     "anilist.co",
-    "mangakatana.com", "anineko.to", "vibeplayer.site", "ibyteimg.com",
+    "mangakatana.com",
     "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
     "gravatar.com",
-    "allanime.day", "allanimecdn.b-cdn.net", "youtu-chan.com",
-    "wixstatic.com", "tools.fast4speed.rsvp", "mp4upload.com",
-    "filemoon.sx", "filemoon.art", "filemoon.top",
-    "repackager.wixmp.com", "vivibebe.site",
-    // anineko's HD-2, reached via bibiemb.xyz. One fixed Cloudflare Workers
-    // subdomain hosts the playlist, its variants and its segments, so the full
-    // `vibevibe.workers.dev` covers it. Deliberately NOT bare `workers.dev` --
-    // that is a shared public platform and would let the proxy fetch anyone's
-    // Worker. HD-2 is what keeps mobile playable on the episodes where HD-1's
-    // ad-CDN segments have been revoked.
-    "vibevibe.workers.dev",
-    // anineko's jwplayer embed hosts. The scraper deliberately resolves them
-    // to their same-origin `/stream/.../master.m3u8` (the player's own `hls4`)
-    // rather than the `hls2`/`hls3` mirrors, which sit on rotating throwaway
-    // CDN domains that could never be listed here. Playlist, variants and
-    // segments therefore all stay on these three hosts.
-    "otakuhg.site", "otakuvid.online", "otakuvid.com",
-    // anineko's soft-sub sidecar CDN. Only the mobile PWA's <track> element
-    // ever hits this — desktop's mpv fetches --sub-file URLs directly over
-    // the network, bypassing this proxy (and its allowlist) entirely, which
-    // is why a missing entry here breaks subtitles on mobile only.
-    "anizara.store",
-    // mkissa (allanime) ok.ru sources: embed host + video CDN(s). Needed so
-    // the mobile PWA, which proxies every stream, can serve them when the
-    // ok.ru server is chosen over mp4upload. ok.ru rotates the actual video
-    // host between okcdn.ru and vkuser.net (same VK video infrastructure) --
-    // missing either one means playback dies within seconds whenever mkissa
-    // happens to hand back a stream server on the missing host.
-    "ok.ru", "okcdn.ru", "vkuser.net",
-    // anineko's StreamHG server (rotated in as HD-1's replacement when HD-1's
-    // own ad-CDN segments are revoked). Real media, PNG-obfuscated the same
-    // way as the ibyteimg.com case above, served from a TikTok-owned CDN
-    // subdomain under signed URLs (`p16-`/`p19-ad-site-sign-sg.tiktokcdn.com`).
-    // Deliberately the narrow `ad-site-sign-sg.tiktokcdn.com` suffix rather
-    // than bare `tiktokcdn.com` -- the bare domain is TikTok's general CDN and
-    // would let the proxy fetch arbitrary TikTok-hosted content.
-    "ad-site-sign-sg.tiktokcdn.com",
 ];
 
 fn host_is_allowed(url: &str) -> bool {
@@ -1166,8 +1032,6 @@ async fn proxy_handler(
         req_builder = req_builder.header("referer", referer);
     } else if url.contains("mangakatana.com") {
         req_builder = req_builder.header("referer", "https://mangakatana.com/");
-    } else if url.contains("vibeplayer.site") || url.contains("ibyteimg.com") {
-        req_builder = req_builder.header("referer", "https://anineko.to/");
     } else if let Some(referer) = headers.get("referer") {
         req_builder = req_builder.header("referer", referer);
     }
@@ -1223,12 +1087,11 @@ async fn proxy_handler(
         || content_type.contains("mpegurl")
         || content_type.contains("mpegURL");
 
-    // A direct full-file video download (e.g. mkissa's mp4upload source) that
-    // reports a generic content-type. mp4upload serves `application/octet-
-    // stream`, so the content-type test below misses it and it would otherwise
-    // hit the buffered path — reading the whole 100+ MB file into RAM before
-    // the phone gets a single byte, which is the mobile slow-start. Matching by
-    // path extension streams it instead. Deliberately excludes .ts/.m4s HLS
+    // A direct full-file video download that reports a generic content-type.
+    // Some hosts serve `application/octet-stream`, so the content-type test
+    // below misses it and it would otherwise hit the buffered path — reading
+    // the whole 100+ MB file into RAM before the player gets a single byte.
+    // Matching by path extension streams it instead. Deliberately excludes .ts/.m4s HLS
     // segments, which can carry the prepended-PNG obfuscation the buffered path
     // has to strip.
     let path_lc = url.split('?').next().unwrap_or(url).to_lowercase();
@@ -1266,12 +1129,12 @@ async fn proxy_handler(
         response = response
             .header("access-control-allow-origin", "*")
             .header("access-control-expose-headers", "*");
-        // Some origins (mp4upload) satisfy range requests — they return 206 to
-        // a Range header — but never advertise `accept-ranges`. Without it a
-        // browser <video> treats the file as non-seekable and buffers a large
-        // progressive chunk before it will start, which is the slow-start on
-        // the mkissa mp4 source. Advertise it when the upstream didn't, so the
-        // player range-seeks (moov is at the front) and starts promptly.
+        // Some origins satisfy range requests — they return 206 to a Range
+        // header — but never advertise `accept-ranges`. Without it a browser
+        // <video> treats the file as non-seekable and buffers a large
+        // progressive chunk before it will start. Advertise it when the
+        // upstream didn't, so the player range-seeks (moov is at the front)
+        // and starts promptly.
         if !upstream_headers.contains_key("accept-ranges") {
             response = response.header("accept-ranges", "bytes");
         }
@@ -1495,20 +1358,19 @@ mod tests {
         v
     }
 
+    /// An entry is matched as a whole domain or a dotted suffix of one, never
+    /// as a bare label. Written against the CDN entries that are now gone, but
+    /// it is the rule every future entry has to satisfy: name the tenant, never
+    /// the platform hosting it, or the proxy becomes an open relay for whoever
+    /// else rents space there.
     #[test]
-    fn hd2_worker_subdomain_is_allowed_but_not_all_workers() {
-        // HD-2's playlist, variants and segments all sit on one fixed Workers
-        // subdomain, and it is what keeps mobile playable when HD-1's ad-CDN
-        // segments have been revoked.
-        assert!(host_is_allowed(
-            "https://morning-credit-3bcc.vibevibe.workers.dev/abc/master.m3u8"
-        ));
-        // workers.dev is a shared public platform. Allowing the whole thing
-        // would turn the proxy into an open relay for anyone's Worker.
-        assert!(!host_is_allowed("https://someone-else.workers.dev/x.m3u8"));
-        assert!(!host_is_allowed("https://workers.dev/x.m3u8"));
-        // And the usual suffix-confusion guard.
-        assert!(!host_is_allowed("https://vibevibe.workers.dev.evil.com/x.m3u8"));
+    fn a_subdomain_is_allowed_but_a_lookalike_is_not() {
+        // Subdomains of an allowed domain are in.
+        assert!(host_is_allowed("https://s4.anilist.co/file/anilistcdn/x.jpg"));
+        assert!(host_is_allowed("https://deep.nested.anilist.co/x.jpg"));
+        // A hostile host that merely starts with the allowed label is not.
+        assert!(!host_is_allowed("https://anilist.co.evil.com/x.jpg"));
+        assert!(!host_is_allowed("https://notanilist.co/x.jpg"));
     }
 
     #[test]
@@ -1538,29 +1400,30 @@ mod tests {
     #[test]
     fn allows_known_media_hosts() {
         assert!(host_is_allowed("https://s4.anilist.co/file/anilistcdn/x.jpg"));
-        assert!(host_is_allowed("https://allanime.day/apivtwo/x.m3u8"));
-        assert!(host_is_allowed("https://api.allanime.day/api"));
         assert!(host_is_allowed("https://mangakatana.com/page.jpg"));
-        assert!(host_is_allowed("https://repackager.wixmp.com/video.mp4"));
-        // bare CDN token matched as a host label
-        assert!(host_is_allowed("https://allanimecdn.b-cdn.net/seg1.ts"));
-        // mkissa mp4upload + ok.ru sources (with ports / subdomains)
-        assert!(host_is_allowed("https://a3.mp4upload.com:183/d/x/video.mp4"));
-        assert!(host_is_allowed("https://vd724.okcdn.ru/expires/1/x.m3u8"));
+        assert!(host_is_allowed("https://api.ani.zip/mappings?anilist_id=1"));
+        assert!(host_is_allowed("https://api.aniskip.com/v2/skip-times/1/1"));
+        // Ports and subdomains don't change the host match.
+        assert!(host_is_allowed("https://cdn.mangakatana.com:8443/page.jpg"));
+        // A retired provider's hosts go with it.
+        assert!(!host_is_allowed("https://allanime.day/apivtwo/x.m3u8"));
+
+        assert!(!host_is_allowed("https://vd724.okcdn.ru/expires/1/x.m3u8"));
+        assert!(!host_is_allowed("https://anineko.to/watch/x"));
     }
 
     #[test]
     fn blocks_ssrf_bypass_attempts() {
         // token in the query string must not grant access
         assert!(!host_is_allowed("http://169.254.169.254/latest/meta-data/?x=anilist.co"));
-        assert!(!host_is_allowed("http://evil.com/?x=allanime.day"));
+        assert!(!host_is_allowed("http://evil.com/?x=anilist.co"));
         // suffix-spoofing: allowed domain as a prefix label of a hostile host
         assert!(!host_is_allowed("http://anilist.co.evil.com/x"));
         assert!(!host_is_allowed("http://localhost:8080/admin"));
         assert!(!host_is_allowed("not a url"));
         // bare-label spoofing: a hostile host reusing a CDN label as its own
         // first label must not pass now that matching is suffix-only.
-        assert!(!host_is_allowed("http://allanimecdn.evil.com/x"));
         assert!(!host_is_allowed("http://anilistcdn.evil.com/x"));
+        assert!(!host_is_allowed("http://mangakatana.evil.com/x"));
     }
 }

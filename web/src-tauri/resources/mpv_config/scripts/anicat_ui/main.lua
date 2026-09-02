@@ -8,7 +8,12 @@ local opts = {
   autoskip = 'yes',
   current_episode = 0,
   total_episodes = 0,
-  shader_profile = 'eco',
+  shader_profile = 'on',
+  -- Only a fallback. The backend passes the port it actually bound; this value
+  -- is what the script would use if it somehow arrived without one, and it is
+  -- the port the proxy prefers.
+  proxy_port = 13370,
+  media_id = 0,
 }
 
 options.read_options(opts, 'anicat_ui')
@@ -46,6 +51,24 @@ local function get_current_episode_opt()
   local val = opts.current_episode
   if script_opts and script_opts["anicat_ui-current_episode"] ~= nil then
     val = tonumber(script_opts["anicat_ui-current_episode"]) or val
+  end
+  return val
+end
+
+local function get_proxy_port_opt()
+  local script_opts = mp.get_property_native("script-opts")
+  local val = opts.proxy_port
+  if script_opts and script_opts["anicat_ui-proxy_port"] ~= nil then
+    val = tonumber(script_opts["anicat_ui-proxy_port"]) or val
+  end
+  return val
+end
+
+local function get_media_id_opt()
+  local script_opts = mp.get_property_native("script-opts")
+  local val = opts.media_id
+  if script_opts and script_opts["anicat_ui-media_id"] ~= nil then
+    val = tonumber(script_opts["anicat_ui-media_id"]) or val
   end
   return val
 end
@@ -331,6 +354,29 @@ local function disable_shaders()
   refresh_shaders_state()
 end
 
+-- Bring mpv in line with the app's stored shader_profile, sent by the backend
+-- at the start of every episode a reused mpv plays. Compared against the live
+-- property first because writing glsl-shaders rebuilds the render graph even
+-- when the value is unchanged -- and unchanged is the normal case, since
+-- Ctrl+1 already writes its flip back to config. The case this exists for is
+-- the setting being changed in Settings while mpv is open: only the launch
+-- path applied it, so the running player kept the old graph for the rest of
+-- the session.
+local function set_shader_profile(profile)
+  local want_on = profile ~= nil and profile ~= '' and profile ~= 'off'
+  local current_on = (mp.get_property('glsl-shaders') or '') ~= ''
+  if want_on == current_on then
+    return
+  end
+  msg.info("set_shader_profile: '" .. tostring(profile) .. "' -> upscaling "
+    .. (want_on and "on" or "off"))
+  if want_on then
+    enable_standard_shaders()
+  else
+    disable_shaders()
+  end
+end
+
 -- Forward declaration: notify_backend is defined further down (it needs
 -- `state`, which is already in scope by here, but its own definition sits
 -- after these toggle functions in file order). Lua resolves `local`
@@ -478,9 +524,22 @@ notify_backend = function(action, sync, manual)
     pos = state.last_pos or state.position or 0
   end
   local duration = state.duration or 0
-  local url = "http://127.0.0.1:13370/player/" .. action .. "?pos=" .. math.floor(pos) .. "&duration=" .. math.floor(duration)
+  local url = "http://127.0.0.1:" .. get_proxy_port_opt() .. "/player/" .. action
+    .. "?pos=" .. math.floor(pos) .. "&duration=" .. math.floor(duration)
   if manual then
     url = url .. "&manual=true"
+  end
+  if action == "loaded" then
+    -- What actually opened. Both halves come from script-opts, which the
+    -- backend set in the same IPC batch as the loadfile, so they name what mpv
+    -- was asked for -- and this is only ever sent when the open succeeded.
+    --
+    -- The media id is reported rather than looked up on the other side because
+    -- the backend's own record of it is written a moment after the batch is
+    -- sent: reading it there would race this callback, and losing that race
+    -- would look exactly like a transition that never happened.
+    url = url .. "&episode=" .. get_current_episode_opt()
+      .. "&media_id=" .. get_media_id_opt()
   end
   msg.info("notify_backend called: action=" .. tostring(action) .. ", url=" .. url .. ", sync=" .. tostring(sync) .. ", manual=" .. tostring(manual))
   
@@ -495,18 +554,32 @@ notify_backend = function(action, sync, manual)
     capture_stderr = false
   }
 
-  if sync then
-    local ok, err = pcall(mp.command_native, cmd)
-    if not ok then
-      msg.error("Failed to notify backend (sync): " .. tostring(err))
+  -- mpv reports a subprocess that ran and exited nonzero as a *success*: the
+  -- command did what it was asked. curl's exit code lands in `result.status`,
+  -- and nothing used to read it -- so a callback going to a port nothing was
+  -- listening on (curl exit 7) looked identical to one that worked, and the
+  -- whole progress pipeline could be dead with no message anywhere. Report the
+  -- exit code, not just whether mpv managed to launch curl.
+  local function report(success, result, err)
+    if not success then
+      msg.error("Failed to notify backend: " .. tostring(err or "unknown error"))
+      mp.osd_message('AniCat connection failed.', 3.0)
+      return
+    end
+    local status = type(result) == "table" and result.status or 0
+    if status ~= 0 then
+      msg.error(string.format(
+        "Backend callback '%s' failed: curl exited %s for %s", tostring(action), tostring(status), url))
       mp.osd_message('AniCat connection failed.', 3.0)
     end
+  end
+
+  if sync then
+    local ok, result = pcall(mp.command_native, cmd)
+    report(ok, result, ok and nil or result)
   else
     mp.command_native_async(cmd, function(success, result, error)
-      if not success then
-        msg.error("Failed to notify backend: " .. (error or "unknown error"))
-        mp.osd_message('AniCat connection failed.', 3.0)
-      end
+      report(success, result, error)
     end)
   end
 end
@@ -530,9 +603,20 @@ local function arm_next_timeout(fallback_message)
     next_timeout = nil
   end
   next_timeout = mp.add_timeout(NEXT_TIMEOUT_SECS, function()
-    if state.next_triggered and not state.file_loaded then
+    -- `state.next_triggered` alone is the right condition, and the
+    -- `not state.file_loaded` that used to sit beside it was the bug: during a
+    -- transition the *outgoing* episode is still loaded, because nothing has
+    -- reached mpv yet. So on the case this timer exists for -- the backend
+    -- taking longer than the window, or never answering -- the callback
+    -- no-op'd. The OSD text simply expired at its own duration and the player
+    -- sat there with no message and no episode, for as long as the resolve
+    -- chain kept running. A successful transition can't reach here: file-loaded
+    -- clears next_triggered and kills this timer.
+    if state.next_triggered then
       state.next_triggered = false
-      mp.osd_message(fallback_message or 'Failed to load episode.', 3.0)
+      msg.warn(string.format(
+        'transition still unresolved after %ds; releasing the retry guard', NEXT_TIMEOUT_SECS))
+      mp.osd_message(fallback_message or 'Still loading. Press N to retry.', 6.0)
     end
   end)
 end
@@ -562,18 +646,56 @@ local function play_next(sync, manual)
     -- it to decide whether to print the "Playback finished" hint, and no
     -- further file-loaded ever clears it here, so reusing it would silence
     -- that hint exactly when it matters.
-    if state.end_reported then
-      return
+    --
+    -- The guard is on the *work*, not on the whole branch. It used to return
+    -- before the OSD too, which meant the auto-next poll -- firing a second
+    -- after the episode ends, before the viewer has touched anything -- burned
+    -- the one message this branch ever showed. Pressing N after that did
+    -- nothing at all, with no OSD and nothing in the log: the key looked
+    -- broken at exactly the moment someone was checking whether the show had
+    -- more.
+    if not state.end_reported then
+      state.end_reported = true
+      notify_backend("stop", true)
     end
-    state.end_reported = true
-    notify_backend("stop", true)
-    mp.osd_message('Already at the last episode.', 3.0)
+    if manual then
+      -- Ask the backend even though the answer is known to be "no next
+      -- episode". It owns the one thing worth saying here -- whether AniList
+      -- knows a sequel -- and replies straight onto the OSD. That reply was
+      -- previously unreachable for any show whose episode count is known,
+      -- because this branch returned before anything asked.
+      state.next_triggered = true
+      arm_next_timeout('Already at the last episode.')
+      notify_backend("next", nil, true)
+    else
+      -- The auto path must not: it re-enters every second while the finished
+      -- episode sits on its last frame, and each entry would be another
+      -- request and another OSD.
+      mp.osd_message('Already at the last episode.', 3.0)
+    end
     return
   end
 
   state.next_triggered = true
-  arm_next_timeout('No more episodes available.')
-  mp.osd_message('Loading next episode...', 3.0)
+  -- Not "No more episodes available." -- this fires when the transition ran
+  -- out of time, which says nothing about whether the show has more episodes.
+  -- The backend sends its own, more specific reason when it knows one (see
+  -- `transition_failure_message`); this is only for the case where it never
+  -- answered at all.
+  arm_next_timeout('Still loading the next episode. Press N to retry.')
+  -- Held for as long as arm_next_timeout's own window (a cold torrent
+  -- resolve can legitimately take most of that), not the old fixed 3s --
+  -- that expired long before a slow transition finished, leaving the user
+  -- staring at the outgoing episode's last frame with no indication
+  -- anything was still happening. Reported as "auto-next didn't do
+  -- anything" followed by a manual press that (correctly, per already-
+  -- updated backend state) skipped straight past the episode that *was*
+  -- loading. file-loaded clears this the moment the new episode actually
+  -- appears, so it never lingers once there's something to show instead.
+  -- Deliberately longer than the timer that replaces it: at exactly
+  -- NEXT_TIMEOUT_SECS the two race, and the message losing means a blank
+  -- player. file-loaded clears this the moment there's something to show.
+  mp.osd_message('Loading next episode...', NEXT_TIMEOUT_SECS + 10)
   notify_backend("next", sync, manual)
 end
 
@@ -585,8 +707,8 @@ local function play_prev(sync)
   end
 
   state.next_triggered = true
-  arm_next_timeout('Failed to load previous episode.')
-  mp.osd_message('Loading previous episode...', 3.0)
+  arm_next_timeout('Still loading the previous episode. Press P to retry.')
+  mp.osd_message('Loading previous episode...', NEXT_TIMEOUT_SECS + 10)
   notify_backend("prev", sync)
 end
 
@@ -629,7 +751,7 @@ end
 local MIN_PLAYED_FRACTION = 0.5
 
 local function check_near_end_auto_next()
-  if not state.file_loaded or state.next_triggered then
+  if state.is_shutting_down or not state.file_loaded or state.next_triggered then
     return
   end
   if get_auto_next_opt() ~= 'yes' then
@@ -667,6 +789,7 @@ local function register_script_messages()
   mp.register_script_message('anicat-toggle-upscale', enable_shaders)
   mp.register_script_message('anicat-disable-upscale', disable_shaders)
   mp.register_script_message('anicat-toggle-shaders', toggle_shaders)
+  mp.register_script_message('anicat-set-shader-profile', set_shader_profile)
   mp.register_script_message('anicat-set-auto-next', set_auto_next)
   mp.register_script_message('anicat-toggle-auto-next', toggle_auto_next)
   mp.register_script_message('anicat-toggle-autoskip', toggle_autoskip)
@@ -760,6 +883,46 @@ mp.observe_property('glsl-shaders', 'string', function()
   render(true)
 end)
 
+-- Some BD/batch releases bundle a "signs & songs only" subtitle track
+-- (on-screen text translations, meant to run alongside dub audio) *and* the
+-- full dialogue subtitle tracks, but flag the signs-only one "default" in
+-- the container. mpv's own auto-selection honors that flag over anything
+-- else that matches --slang, so the signs-only track wins outright and
+-- dialogue scenes play with no subtitles at all -- reported on Chivalry of a
+-- Failed Knight: "subtitles but partly" (only signs/songs show, no dialogue
+-- lines). mpv has no option to deprioritize a default-flagged forced track
+-- in favor of a non-forced one with equal language match, so this corrects
+-- it after mpv's own selection has already run.
+local function fixup_forced_subtitle_track()
+  local sid = mp.get_property_number('sid')
+  if not sid then return end
+  local tracks = mp.get_property_native('track-list')
+  if not tracks then return end
+  local current, candidates = nil, {}
+  for _, t in ipairs(tracks) do
+    if t.type == 'sub' then
+      if t.id == sid then current = t end
+      table.insert(candidates, t)
+    end
+  end
+  if not current then return end
+  local title = (current.title or ''):lower()
+  local looks_signs_only = current.forced
+    and (title:find('sign') or title:find('song'))
+  if not looks_signs_only then return end
+  for _, t in ipairs(candidates) do
+    local t_title = (t.title or ''):lower()
+    if t.id ~= current.id and not t.forced
+      and not t_title:find('sign') and not t_title:find('song') then
+      msg.info("fixup_forced_subtitle_track: swapping sid " .. current.id
+        .. " ('" .. (current.title or '') .. "', forced signs/songs-only) for sid "
+        .. t.id .. " ('" .. (t.title or '') .. "')")
+      mp.set_property('sid', tostring(t.id))
+      return
+    end
+  end
+end
+
 mp.register_event('file-loaded', function()
   state.file_loaded = true
   state.first_play = true
@@ -773,6 +936,24 @@ mp.register_event('file-loaded', function()
   state.rebuffer_wait_restored = false
   state.rebuffer_baseline = nil
   state.duration = mp.get_property_number('duration') or 0
+  -- Tell the backend the file really opened. Sending the loadfile only proves
+  -- the bytes reached mpv's socket; this is the half that proves mpv acted on
+  -- them, and without it a transition that failed here advanced the episode
+  -- counter anyway and silently skipped an episode on the next press.
+  notify_backend("loaded")
+  fixup_forced_subtitle_track()
+  -- Dismiss the "Loading next/previous episode..." message the moment
+  -- there's something new to look at instead, rather than leaving it to
+  -- run out its own (now much longer) timeout.
+  mp.osd_message('', 0)
+  -- Belt-and-suspenders against a real ordering hazard: the backend's
+  -- IPC batch queues `set_property pause false` right after `loadfile`,
+  -- but `loadfile` only queues the open -- it doesn't wait for the file to
+  -- actually be ready -- so that unpause can execute before keep-open's
+  -- auto-pause-at-the-previous-file's-EOF has been superseded by this new
+  -- file, landing the episode paused on its first frame. Once file-loaded
+  -- fires the file is unambiguously current, so force it here too.
+  mp.set_property_bool('pause', false)
   if next_timeout then
     next_timeout:kill()
     next_timeout = nil
@@ -831,8 +1012,18 @@ mp.register_event('playback-restart', function()
       -- (and Discord countdown) re-anchor immediately instead of drifting
       -- until the next periodic progress tick.
       notify_backend("progress")
-      check_preload()
+      -- Auto-next is checked before the preload, and the preload is skipped
+      -- once it has fired. During normal playback these are minutes apart --
+      -- the preload warms the next episode at 85% and auto-next consumes it
+      -- at the end -- but a seek past the end runs both in the same event,
+      -- microseconds apart. In that order the preload claimed the next
+      -- episode a moment before the transition asked for it, so the backend
+      -- spent the transition polling for a resolve that had no head start on
+      -- the one it would otherwise have run itself.
       check_near_end_auto_next()
+      if not state.next_triggered then
+        check_preload()
+      end
     end
   end
 end)
@@ -849,8 +1040,36 @@ local progress_timer = mp.add_periodic_timer(30, function()
   check_preload()
 end)
 
+-- Every other trigger for the near-end check is an mpv event that fires only
+-- once mpv *finishes* something: eof-reached needs the decoder to run out of
+-- data at a real end-of-stream, playback-restart needs a seek to settle into
+-- playback, and the pause observer needs a user pause. Skipping to the end of
+-- a torrent stream is the case where none of the three ever arrives, because
+-- the tail of the file has not been downloaded yet and the seek it needs
+-- simply never completes.
+--
+-- Measured against mpv over an HTTP source that serves the first 60% of a
+-- file and then stops, which is what a torrent stream looks like to mpv while
+-- its tail pieces are missing. Seeking to 59.6s of a 60.0s file and reading
+-- the properties once a second for eight seconds:
+--
+--   time-pos 59.6  duration 60.023  seeking true
+--   eof-reached false   pause false   paused-for-cache false
+--
+-- unchanged on every sample. So `seeking` never clears (no playback-restart),
+-- the decoder never reaches end-of-stream (no eof-reached), and `pause` stays
+-- false the whole time -- but `time-pos` does report the seek target
+-- immediately, so the position says the episode is over even though mpv is
+-- still trying to get there. Polling reads exactly that, which is why it
+-- advances where the events cannot. The check's own guards (not loaded,
+-- already triggered, auto-next off, unknown duration) make a tick with
+-- nothing to do free.
+local near_end_timer = mp.add_periodic_timer(1, check_near_end_auto_next)
+
 mp.register_event('shutdown', function()
+  state.is_shutting_down = true
   progress_timer:stop()
+  near_end_timer:stop()
   notify_backend("stop", true)
 end)
 

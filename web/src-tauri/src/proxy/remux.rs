@@ -37,12 +37,8 @@ use axum::{
 
 use super::server::ProxyState;
 
-/// How long a session may go unread before it is torn down. A session holds
-/// an ffmpeg process writing several megabytes a minute, so this is shorter
-/// than the scraper's equivalent by an order of magnitude: the cost of being
-/// wrong is a stranded process filling a 15GB SD card, not a lost Cloudflare
-/// clearance.
-const IDLE_TIMEOUT_SECS: u64 = 120;
+/// How long a session may go unread before it is torn down.
+const IDLE_TIMEOUT_SECS: u64 = 900;
 
 /// How long to wait for ffmpeg to produce a playable playlist before giving
 /// up. The first segment cannot appear until the torrent has delivered enough
@@ -84,6 +80,7 @@ fn playable_audio(codec: &str) -> bool {
 pub struct MediaLayout {
     pub video_ok: bool,
     pub audio_copy: bool,
+    pub audio_index: usize,
     /// Index of the first text subtitle track *among subtitle streams*, for
     /// `-map 0:s:N`. Image subtitles (PGS, VobSub) are skipped: converting
     /// them needs OCR, and burning them in needs the video decoded.
@@ -94,11 +91,11 @@ pub struct MediaLayout {
 
 /// Ask ffprobe what is in the file. Reads over HTTP from our own range
 /// endpoint, so it only pulls the header.
-pub async fn probe(input_url: &str) -> Result<MediaLayout, String> {
+pub async fn probe(input_url: &str, prefer_dub: bool) -> Result<MediaLayout, String> {
     let out = tokio::process::Command::new("ffprobe")
         .args([
             "-v", "error",
-            "-show_entries", "stream=index,codec_type,codec_name,pix_fmt",
+            "-show_entries", "stream=index,codec_type,codec_name,pix_fmt:stream_tags=language,title",
             "-of", "csv=p=0",
             input_url,
         ])
@@ -114,13 +111,11 @@ pub async fn probe(input_url: &str) -> Result<MediaLayout, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     let mut video: Option<(String, String)> = None;
-    let mut audio: Option<String> = None;
+    let mut audio_streams: Vec<(usize, String, String)> = Vec::new();
+    let mut audio_counter = 0usize;
     let mut subtitle_index = 0usize;
     let mut text_subtitle = None;
     for line in text.lines() {
-        // index,codec_name,codec_type[,pix_fmt] -- ffprobe emits the fields in
-        // the order the stream declares them, so match on the type rather than
-        // on position.
         let fields: Vec<&str> = line.split(',').collect();
         if fields.len() < 3 {
             continue;
@@ -129,16 +124,17 @@ pub async fn probe(input_url: &str) -> Result<MediaLayout, String> {
         let kind = fields[2];
         match kind {
             "video" if video.is_none() => {
-                // Cover art rides along as an mjpeg "video" stream; it has no
-                // pixel format worth reading and must not be mistaken for the
-                // episode.
                 if codec == "mjpeg" || codec == "png" {
                     continue;
                 }
                 let pix_fmt = fields.get(3).unwrap_or(&"").to_string();
                 video = Some((codec, pix_fmt));
             }
-            "audio" if audio.is_none() => audio = Some(codec),
+            "audio" => {
+                let tags = fields.get(3..).unwrap_or(&[]).join(" ").to_lowercase();
+                audio_streams.push((audio_counter, codec, tags));
+                audio_counter += 1;
+            }
             "subtitle" => {
                 if text_subtitle.is_none() && matches!(codec.as_str(), "ass" | "ssa" | "subrip" | "webvtt" | "mov_text") {
                     text_subtitle = Some(subtitle_index);
@@ -149,10 +145,39 @@ pub async fn probe(input_url: &str) -> Result<MediaLayout, String> {
         }
     }
     let (video_codec, pix_fmt) = video.ok_or_else(|| "no video stream".to_string())?;
-    let audio_codec = audio.unwrap_or_default();
+
+    let is_eng_tagged = |tags: &str| tags.contains("eng") || tags.contains("en") || tags.contains("dub");
+    let is_jpn_tagged = |tags: &str| tags.contains("jpn") || tags.contains("ja") || tags.contains("japanese");
+    let (audio_index, audio_codec) = if audio_streams.is_empty() {
+        (0, String::new())
+    } else if prefer_dub {
+        if let Some((idx, c, _)) = audio_streams.iter().find(|(_, _, tags)| is_eng_tagged(tags)) {
+            (*idx, c.clone())
+        } else if let Some((idx, c, _)) = audio_streams.iter().find(|(_, _, tags)| !is_jpn_tagged(tags)) {
+            // No track says "eng"/"dub", but on a dual-audio release with
+            // incomplete tagging, blindly taking index 0 is a coin flip — one
+            // that landed wrong for at least one real release (Chivalry of a
+            // Failed Knight served dub while set to Subtitled, the mirror of
+            // this case). Prefer any track that isn't confidently the
+            // *other* language over guessing index 0 outright.
+            (*idx, c.clone())
+        } else {
+            (audio_streams[0].0, audio_streams[0].1.clone())
+        }
+    } else {
+        if let Some((idx, c, _)) = audio_streams.iter().find(|(_, _, tags)| is_jpn_tagged(tags)) {
+            (*idx, c.clone())
+        } else if let Some((idx, c, _)) = audio_streams.iter().find(|(_, _, tags)| !is_eng_tagged(tags)) {
+            (*idx, c.clone())
+        } else {
+            (audio_streams[0].0, audio_streams[0].1.clone())
+        }
+    };
+
     Ok(MediaLayout {
         video_ok: playable_video(&video_codec, &pix_fmt),
         audio_copy: playable_audio(&audio_codec),
+        audio_index,
         text_subtitle,
         video_codec,
         audio_codec,
@@ -241,6 +266,7 @@ impl RemuxManager {
         torrent_id: usize,
         file_id: usize,
         start_seconds: i64,
+        prefer_dub: bool,
     ) -> Result<String, String> {
         let key = (torrent_id, file_id, start_seconds);
         {
@@ -248,7 +274,7 @@ impl RemuxManager {
             self.reap_locked(&mut sessions).await;
             if let Some((id, session)) = sessions.iter_mut().find(|(_, s)| s.key == key) {
                 session.touch();
-                return Ok(format!("/mobile-hls/{}/master.m3u8", id));
+                return Ok(format!("/mobile-hls/{}/stream_0/index.m3u8", id));
             }
             if sessions.len() >= MAX_SESSIONS {
                 return Err(format!(
@@ -258,7 +284,7 @@ impl RemuxManager {
             }
         }
 
-        let layout = probe(input_url).await?;
+        let layout = probe(input_url, prefer_dub).await?;
         if !layout.video_ok {
             return Err(format!(
                 "{} video in this release can't be played by a browser without re-encoding it, which this machine is too slow to do",
@@ -284,20 +310,18 @@ impl RemuxManager {
         // treats a 404 on the master playlist as a hard failure rather than
         // something to retry, so returning early would surface as "this
         // episode is broken" on what is really a slow first segment.
-        let master = session_root.join("master.m3u8");
         let first_segment = dir.join("index.m3u8");
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_secs(FIRST_SEGMENT_TIMEOUT_SECS);
         while std::time::Instant::now() < deadline {
-            if master.exists() && playlist_has_segment(&first_segment) {
+            if playlist_has_segment(&first_segment) {
                 log::info!(
-                    "remux: session {} ready ({} video copied, audio {}, subtitles {})",
+                    "remux: session {} ready ({} video copied, audio {})",
                     id,
                     layout.video_codec,
                     if layout.audio_copy { "copied" } else { "re-encoded to aac" },
-                    if layout.text_subtitle.is_some() { "converted" } else { "none usable" },
                 );
-                return Ok(format!("/mobile-hls/{}/master.m3u8", id));
+                return Ok(format!("/mobile-hls/{}/stream_0/index.m3u8", id));
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
@@ -406,26 +430,26 @@ fn spawn_ffmpeg(
     if start_seconds > 0 {
         cmd.args(["-ss", &start_seconds.to_string()]);
     }
-    // Paced at playback speed rather than as fast as the swarm delivers.
-    // Stream copy is limited only by input, so an unpaced remux writes the
-    // whole episode to disk within minutes: 1.4GB of segments beside the
-    // 1.4GB torrent file, twice over for two viewers, on a card with 6GB
-    // free. `-re` keeps what is on disk proportional to what has been
-    // watched, and the session directory is deleted when playback ends.
-    cmd.arg("-re");
-    cmd.args(["-i", input_url]);
-    cmd.args(["-map", "0:v:0", "-map", "0:a:0"]);
-    let mut stream_map = String::from("v:0,a:0");
-    if let Some(sub) = layout.text_subtitle {
-        cmd.args(["-map", &format!("0:s:{sub}")]);
-        cmd.args(["-c:s", "webvtt"]);
-        // A subtitle rendition rather than a sidecar file: the sidecar can
-        // only be fetched once, and a file still being written would hand the
-        // player the handful of cues that existed at that moment. HLS
-        // segments the subtitles alongside the video instead, which is also
-        // the only form Safari takes natively.
-        stream_map.push_str(",s:0,sgroup:subs");
+    // Only for a network input. These are options on ffmpeg's *http* protocol,
+    // and ffmpeg rejects an option the input's protocol doesn't define rather
+    // than ignoring it: against a plain path, ffmpeg 8 answers "Option
+    // reconnect not found." and exits before writing a single segment, so the
+    // caller sat out its whole timeout and reported "timed out waiting for the
+    // first segment" with no clue why (stderr is /dev/null here). The real
+    // input is normally the proxy's own `/torrent-stream` URL, which is why
+    // this survived -- a local path only shows up when something remuxes a
+    // file on disk.
+    if input_url.starts_with("http://") || input_url.starts_with("https://") {
+        cmd.args([
+            "-reconnect", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "10",
+        ]);
     }
+    cmd.args(["-i", input_url]);
+    cmd.args(["-map", "0:v:0", "-map", &format!("0:a:{}", layout.audio_index)]);
+    let stream_map = String::from("v:0,a:0");
     cmd.args(["-c:v", "copy"]);
     if layout.audio_copy {
         cmd.args(["-c:a", "copy"]);
@@ -477,6 +501,8 @@ pub async fn session_file_handler(
         Some((bytes, content_type)) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
             // Playlists grow while ffmpeg writes; a cached one strands the
             // player at whatever length it had on first fetch.
             .header(header::CACHE_CONTROL, "no-store")
@@ -484,6 +510,7 @@ pub async fn session_file_handler(
             .unwrap(),
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
             .body(Body::from("no such remux session"))
             .unwrap(),
     }
@@ -497,6 +524,7 @@ pub async fn session_nested_handler(
     if dir.contains("..") {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
             .body(Body::from("bad path"))
             .unwrap();
     }
@@ -505,11 +533,14 @@ pub async fn session_nested_handler(
         Some((bytes, content_type)) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
             .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(bytes))
             .unwrap(),
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
             .body(Body::from("no such remux session file"))
             .unwrap(),
     }
@@ -587,13 +618,13 @@ mod tests {
             return;
         }
 
-        let layout = probe(input.to_str().unwrap()).await.expect("probe failed");
+        let layout = probe(input.to_str().unwrap(), false).await.expect("probe failed");
         assert!(layout.video_ok, "h264 8-bit should need no re-encoding");
         assert!(layout.audio_copy, "aac should be copied, not re-encoded");
 
         let manager = RemuxManager::new();
         let url = manager
-            .start(input.to_str().unwrap(), 42, 7, 0)
+            .start(input.to_str().unwrap(), 42, 7, 0, false)
             .await
             .expect("session failed to start");
         assert!(url.starts_with("/mobile-hls/"), "{url}");
@@ -621,7 +652,7 @@ mod tests {
 
         // Asking again for the same episode at the same offset reuses the
         // session rather than starting a second ffmpeg beside it.
-        let again = manager.start(input.to_str().unwrap(), 42, 7, 0).await.unwrap();
+        let again = manager.start(input.to_str().unwrap(), 42, 7, 0, false).await.unwrap();
         assert_eq!(again, url);
 
         // A path that climbs out of the session directory is refused however

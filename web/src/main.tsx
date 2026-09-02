@@ -4,8 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { setQueryClient } from "@/lib/events";
+import { useAppStore } from "@/stores/app";
 import App from "./App";
 import "./index.css";
+
+if (typeof window !== "undefined") {
+  (window as any).__ZUSTAND_APP_STORE__ = useAppStore;
+}
 
 if (import.meta.env.DEV) {
   import("@tauri-apps/api/core").then(({ invoke }) => {

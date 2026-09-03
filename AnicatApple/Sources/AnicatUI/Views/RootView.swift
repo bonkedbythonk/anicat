@@ -3,6 +3,7 @@ import AnicatCoreKit
 
 public struct RootView: View {
     @Bindable public var model: AppModel
+    @State private var playerController = PlayerController()
 
     public init(model: AppModel) {
         self.model = model
@@ -69,6 +70,20 @@ public struct RootView: View {
                 .zIndex(10)
             }
 
+            // In-App Video Player Overlay
+            if model.activeStreamURL != nil {
+                PlayerView(
+                    controller: playerController,
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            model.activeStreamURL = nil
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(30)
+            }
+
             // Loading Scrim
             if model.isLoading {
                 ZStack {
@@ -82,6 +97,7 @@ public struct RootView: View {
                 .zIndex(20)
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: model.activeStreamURL != nil)
         .animation(.easeInOut(duration: 0.25), value: model.selectedMediaDetails != nil)
         .animation(.easeInOut(duration: 0.2), value: model.isLoading)
     }

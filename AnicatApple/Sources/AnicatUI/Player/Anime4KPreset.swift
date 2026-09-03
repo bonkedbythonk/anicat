@@ -8,6 +8,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     case modeCFast = "Mode C (Fast)"
 
     public var id: String { rawValue }
+    public var displayName: String { rawValue }
 
     /// Returns the ordered list of GLSL shader file names for this preset.
     public var shaderFileNames: [String] {

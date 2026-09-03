@@ -1,14 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['curl_cffi', 'selectolax', 'cryptography']
+hiddenimports = ['curl_cffi', 'selectolax', 'novel', 'bs4', 'lxml', 'requests', 'ebooklib', 'PIL']
+hiddenimports += collect_submodules('novel')
 tmp_ret = collect_all('curl_cffi')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('selectolax')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('cryptography')
+tmp_ret = collect_all('bs4')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('ebooklib')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

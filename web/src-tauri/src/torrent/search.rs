@@ -1580,7 +1580,7 @@ fn is_strong(c: &Candidate) -> bool {
 /// How many of the pool's candidates `resolve` will ever touch: it slices the
 /// top four, races two of them and keeps the other two as sequential
 /// fallbacks. Everything past this is a longer list nothing reads.
-const SHORTLIST_SIZE: usize = 4;
+pub(crate) const SHORTLIST_SIZE: usize = 4;
 /// How many *strong* candidates are enough to stop querying. Only the raced
 /// pair needs to clear that bar -- see `enough_candidates`, which requires the
 /// rest of the shortlist to be merely viable.

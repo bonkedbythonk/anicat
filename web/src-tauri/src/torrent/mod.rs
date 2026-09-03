@@ -694,7 +694,7 @@ impl TorrentManager {
         // exists) raced nothing, then walked an already-empty iterator, and
         // failed with "All torrent candidates failed (last error: )" without
         // ever having tried it.
-        let shortlist: Vec<&search::Candidate> = candidates.iter().take(4).collect();
+        let shortlist: Vec<&search::Candidate> = candidates.iter().take(search::SHORTLIST_SIZE).collect();
         let raced = shortlist.len() >= 2;
 
         // Race the top two candidates instead of trying them one at a time.
@@ -799,6 +799,47 @@ impl TorrentManager {
                     tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
                     log::info!(
                         "torrent: streaming '{}' (torrent {}, file {})",
+                        cand.name, r.torrent_id, r.file_id
+                    );
+                    return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
+                }
+                Err(e) => {
+                    log::warn!("torrent: candidate '{}' failed: {}", cand.name, e);
+                    last_err = e;
+                }
+            }
+        }
+
+        // The whole shortlist can fail for reasons search never sees: a
+        // release's swarm goes cold between being indexed and being tried, or
+        // never had real seeders to begin with. Measured live on one episode:
+        // 17 candidates found, all four shortlisted ones genuinely dead (0-21
+        // KB/s against a 789 KB/s bar, one hitting the full prebuffer timeout
+        // with zero bytes) -- and the other 13 were never touched. Extending
+        // into the rest of the pool costs no extra search (already fetched),
+        // only the per-candidate liveness check the shortlist already pays,
+        // and a dead-with-no-peers candidate fails that in ~PEER_GRACE, not
+        // the full PREBUFFER_TIMEOUT. Capped, not exhaustive: a pool of
+        // hundreds must not turn one failed play into a multi-minute wait.
+        const EXTENDED_FALLBACK_SIZE: usize = 6;
+        for cand in candidates.iter().skip(search::SHORTLIST_SIZE).take(EXTENDED_FALLBACK_SIZE) {
+            match self
+                .try_candidate(
+                    client,
+                    &session,
+                    cand,
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless },
+                    &std::sync::Mutex::new(None),
+                )
+                .await
+            {
+                Ok(r) => {
+                    self.resolved.lock().await.insert((media_id, episode), r);
+                    let dir = self.cache_dir.clone();
+                    let session_for_cleanup = session.clone();
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                    log::info!(
+                        "torrent: streaming '{}' (torrent {}, file {}) from the extended fallback pool",
                         cand.name, r.torrent_id, r.file_id
                     );
                     return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));

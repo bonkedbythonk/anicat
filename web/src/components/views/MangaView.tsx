@@ -6,9 +6,30 @@ import { mediaApi } from "@/lib/api";
 import type { MediaItem } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/stores/app";
+import { FocusScope, ScopeNav, useFocusable } from "@/focus";
 
 interface MangaViewProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
+}
+
+function BrowseMangaButton({ onClick }: { onClick: () => void }) {
+  const { ref, isFocused, tabIndex } = useFocusable<HTMLButtonElement>();
+
+  return (
+    <button
+      ref={ref}
+      onClick={onClick}
+      tabIndex={tabIndex}
+      className={`flex items-center gap-1.5 rounded-md border px-3.5 py-1.5 text-[12px] font-medium transition-all cursor-pointer ${
+        isFocused
+          ? "border-accent bg-accent/10 text-foreground ring-1 ring-accent"
+          : "border-border text-foreground/70 hover:text-foreground hover:border-foreground/25"
+      }`}
+    >
+      <span>Browse all manga</span>
+      <ArrowRight size={13} />
+    </button>
+  );
 }
 
 export function MangaView({ onSelect }: MangaViewProps) {
@@ -16,10 +37,6 @@ export function MangaView({ onSelect }: MangaViewProps) {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setSearchType = useAppStore((s) => s.setSearchType);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
-
-  useEffect(() => {
-    setActiveFocusScope("manga-default");
-  }, [setActiveFocusScope]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["manga-data"],
@@ -66,6 +83,16 @@ export function MangaView({ onSelect }: MangaViewProps) {
       });
   }, [data]);
 
+  useEffect(() => {
+    if (continueReading.length > 0) {
+      setActiveFocusScope("manga-queue");
+    } else if (data?.readingList?.length) {
+      setActiveFocusScope("row-Reading");
+    } else {
+      setActiveFocusScope("row-Trending Manga");
+    }
+  }, [continueReading.length, data, setActiveFocusScope]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -86,13 +113,10 @@ export function MangaView({ onSelect }: MangaViewProps) {
               {continueReading.length} in progress · {data.readingList.length} reading
             </p>
           </div>
-          <button
-            onClick={handleBrowseCatalog}
-            className="flex items-center gap-1.5 rounded-md border border-border px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 hover:text-foreground hover:border-foreground/25 cursor-pointer"
-          >
-            <span>Browse all manga</span>
-            <ArrowRight size={13} />
-          </button>
+          <FocusScope name="manga-header" orientation="horizontal">
+            <ScopeNav />
+            <BrowseMangaButton onClick={handleBrowseCatalog} />
+          </FocusScope>
         </div>
         {continueReading.length > 0 ? (
           <UpNextQueue
@@ -101,6 +125,7 @@ export function MangaView({ onSelect }: MangaViewProps) {
             lastWatched={{}}
             onSelect={onSelect}
             unit="CH"
+            focusScopeName="manga-queue"
           />
         ) : (
           <p className="meta-mono px-1 text-muted-foreground">Nothing in progress. Pick something below.</p>

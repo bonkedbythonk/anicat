@@ -10,6 +10,7 @@ interface UpNextQueueProps {
   onSelect: (item: MediaItem, action?: "play", episode?: string | null) => void;
   /** "EP" for anime, "CH" for manga. */
   unit?: "EP" | "CH";
+  focusScopeName?: string;
 }
 
 function relativeDay(iso: string | undefined): string | null {
@@ -131,11 +132,11 @@ function QueueItem({
 /** The front page: a dense resume queue. First row is the primary target
  * (solid Resume button); everything below is one click away. Poster art
  * carries the color; all metadata is mono. */
-export function UpNextQueue({ items, newEpisodeIds, lastWatched, onSelect, unit = "EP" }: UpNextQueueProps) {
+export function UpNextQueue({ items, newEpisodeIds, lastWatched, onSelect, unit = "EP", focusScopeName = "home-queue" }: UpNextQueueProps) {
   if (!items.length) return null;
 
   return (
-    <FocusScope name="home-queue" orientation="vertical" role="list" className="rounded-lg border border-border overflow-hidden">
+    <FocusScope name={focusScopeName} orientation="vertical" role="list" className="rounded-lg border border-border overflow-hidden">
       <ScopeNav />
       {items.map((item, i) => (
         <div key={item.id} role="listitem">

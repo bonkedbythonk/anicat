@@ -829,8 +829,18 @@ def _parent_alive(parent_pid: int) -> bool:
         return False
 
 
-def _watch_parent():
-    parent_pid = os.getppid()
+def _watch_parent(parent_pid: int | None = None):
+    """Exit once the Rust host is gone.
+
+    `parent_pid` is passed explicitly because in dev the host spawns this as
+    `uv run python main.py`, so `os.getppid()` is the *uv wrapper*, not
+    anicat. uv is reparented to init when anicat dies and keeps running, so
+    the getppid() check succeeded forever and nothing ever self-terminated --
+    55 orphaned sidecars, oldest two days old, each still holding its port.
+    The fallback is only for a host that predates the flag.
+    """
+    if parent_pid is None:
+        parent_pid = os.getppid()
     while True:
         time.sleep(10)
         if not _parent_alive(parent_pid):
@@ -841,6 +851,7 @@ def _watch_parent():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=19876)
+    parser.add_argument("--parent-pid", type=int, default=None)
     args = parser.parse_args()
-    threading.Thread(target=_watch_parent, daemon=True).start()
+    threading.Thread(target=_watch_parent, args=(args.parent_pid,), daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

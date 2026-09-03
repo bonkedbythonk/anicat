@@ -971,6 +971,12 @@ impl ScraperManager {
             c.arg(&self.scraper_script).arg("--port").arg(port.to_string());
             c
         };
+        // The sidecar's self-terminate watchdog needs *anicat's* pid, not its
+        // own parent's: in dev the spawn is `uv run python main.py`, so its
+        // parent is the uv wrapper, which init adopts and keeps alive when
+        // anicat dies. getppid() therefore stayed valid forever and orphans
+        // piled up -- 55 of them, oldest two days old, each holding a port.
+        cmd.arg("--parent-pid").arg(std::process::id().to_string());
         crate::util::suppress_console(&mut cmd);
         cmd.current_dir(script_dir);
 

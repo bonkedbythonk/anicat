@@ -154,6 +154,45 @@ impl Catalogs {
         Ok(page.page.media.unwrap_or_default())
     }
 
+    /// Filtered discovery: a release-status row ("Newly Releasing") or a
+    /// season/year row ("Seasonal Highlights"). Both go through
+    /// `MEDIA_SEARCH_QUERY` rather than a dedicated query — it already
+    /// declares `$status`, `$season` and `$seasonYear`, so a second query
+    /// would only duplicate its field list for a filter it already supports.
+    pub async fn discover(
+        &self,
+        media_type: &str,
+        status: Option<&str>,
+        season: Option<&str>,
+        season_year: Option<i32>,
+        per_page: i64,
+    ) -> Result<Vec<anilist::types::MediaItem>, String> {
+        let mut vars = HashMap::new();
+        vars.insert("page".to_string(), serde_json::json!(1));
+        vars.insert("perPage".to_string(), serde_json::json!(per_page));
+        vars.insert("type".to_string(), serde_json::json!(media_type));
+        vars.insert("isAdult".to_string(), serde_json::json!(false));
+        // Explicit null, not an empty string: AniList's `search` argument
+        // treats null as "no filter" (unlike `type`, where null matches
+        // nothing — see `insert_search_media_type` on the Tauri side for that
+        // footgun). An empty string is a real search term and returns zero
+        // results.
+        vars.insert("search".to_string(), serde_json::json!(null));
+        vars.insert("sort".to_string(), serde_json::json!(["POPULARITY_DESC"]));
+        if let Some(s) = status {
+            vars.insert("status".to_string(), serde_json::json!(s));
+        }
+        if let Some(s) = season {
+            vars.insert("season".to_string(), serde_json::json!(s));
+        }
+        if let Some(y) = season_year {
+            vars.insert("seasonYear".to_string(), serde_json::json!(y));
+        }
+        let page: anilist::responses::PageResponse<anilist::types::MediaItem> =
+            self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await?;
+        Ok(page.page.media.unwrap_or_default())
+    }
+
     /// One AniList entry, served from the response cache when it is warm.
     pub async fn media_detail(
         &self,

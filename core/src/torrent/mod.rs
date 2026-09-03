@@ -83,6 +83,18 @@ pub struct ResolveTarget<'a> {
     /// episodes inside a pack that holds several seasons' worth. See
     /// `layout::select`.
     pub entry: layout::EntryHint,
+    /// How far into the file playback will start, as a fraction of its
+    /// length (0.0-1.0). `None`/`Some(0.0)` means a fresh play from byte 0,
+    /// which `prebuffer` already probes. Set for a resume: the player opens
+    /// with mpv's `--start=<seconds>`, so its first real read lands deep into
+    /// the file rather than at byte 0, and the pre-buffer gate has to probe
+    /// the same region it hands off — otherwise it proves the swarm is
+    /// delivering unrelated bytes near the start, waves mpv through, and mpv
+    /// then blocks forever on `--cache-pause-initial` waiting for a piece
+    /// nothing prioritized. An estimate from the client's own
+    /// stopTime/duration is close enough: this only needs to warm roughly the
+    /// right region, not land on the exact byte.
+    pub resume_fraction: Option<f64>,
 }
 
 /// What every candidate in one resolve is judged against. Constant across the
@@ -98,6 +110,8 @@ struct CandidateContext<'a> {
     episode: i64,
     episode_count: Option<i64>,
     allow_episodeless: bool,
+    /// See `ResolveTarget::resume_fraction`.
+    resume_fraction: Option<f64>,
 }
 
 /// Elapsed time of each stage of one candidate's attempt, logged as a single
@@ -526,7 +540,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -720,7 +734,7 @@ impl TorrentManager {
         // bounded by whichever candidate actually works, not by however long
         // the first pick takes to fail.
         if let [cand_a, cand_b, ..] = shortlist[..] {
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless };
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction };
             let added_a = std::sync::Mutex::new(None);
             let added_b = std::sync::Mutex::new(None);
             let fut_a = self.try_candidate(client, &session, cand_a, &ctx, &added_a);
@@ -799,7 +813,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction },
                     // Sequential: each attempt is awaited to completion, so its
                     // own error path cleans up after it and nothing is left for
                     // the caller to tear down.
@@ -843,7 +857,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction },
                     &std::sync::Mutex::new(None),
                 )
                 .await
@@ -1052,8 +1066,9 @@ impl TorrentManager {
         handle: &Arc<librqbit::ManagedTorrent>,
         file_id: usize,
         stages: &mut CandidateStages,
+        resume_fraction: Option<f64>,
     ) -> Result<(), String> {
-        use tokio::io::AsyncReadExt;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
         // Was 6MB: on a slow-but-alive swarm this alone was the wait (a
         // ~180KB/s peer took 33s just to deliver 6MB before mpv even
         // started). This only needs to (a) prove the swarm is actually
@@ -1102,7 +1117,24 @@ impl TorrentManager {
             .stream(file_id)
             .map_err(|e| format!("prebuffer stream open failed: {}", e))?;
         let file_len = stream.len();
-        let want = PREBUFFER_BYTES.min(file_len as usize);
+        // Resume opens mpv at `--start=<seconds>`, not byte 0 — its first real
+        // read lands wherever that maps to in the file. Probing byte 0 in that
+        // case proves nothing about the region mpv is about to block on, so
+        // seek here to (roughly) the same offset before reading. The fraction
+        // is an estimate (client-side stopTime/duration against a constant
+        // bitrate assumption), which is fine: this only has to warm the right
+        // neighborhood of pieces, not land on an exact byte.
+        let resume_offset = resume_fraction
+            .filter(|f| *f > 0.0)
+            .map(|f| (file_len as f64 * f.clamp(0.0, 1.0)) as u64)
+            .unwrap_or(0);
+        if resume_offset > 0 {
+            stream
+                .seek(std::io::SeekFrom::Start(resume_offset))
+                .await
+                .map_err(|e| format!("prebuffer seek failed: {}", e))?;
+        }
+        let want = PREBUFFER_BYTES.min((file_len - resume_offset) as usize);
         let mut got = 0usize;
         let mut buf = vec![0u8; 256 * 1024];
         let fetched_at_prebuffer_start = handle
@@ -1644,7 +1676,7 @@ impl TorrentManager {
         // it means mpv starts reading into already-downloaded data instead of
         // spinning on byte 0. Reading the start also forces the first pieces,
         // which for these releases is where the container header lives.
-        if let Err(e) = self.prebuffer(&handle, file_id, stages).await {
+        if let Err(e) = self.prebuffer(&handle, file_id, stages, ctx.resume_fraction).await {
             let _ = session.delete(torrent_id.into(), false).await;
             self.selected_files.lock().await.remove(&torrent_id);
             return Err(e);
@@ -2391,6 +2423,7 @@ mod tests {
                     season: Some(1),
                     season_at_least: None,
                 },
+                resume_fraction: None,
             },
             13370,
         )
@@ -2795,6 +2828,7 @@ mod tests {
                         series: None,
                         entry: case.hint,
                         sibling_titles: &siblings,
+                        resume_fraction: None,
                     },
                     13370,
                 )
@@ -2907,6 +2941,7 @@ mod tests {
                 episode,
                 episode_count: Some(28),
                 allow_episodeless: false,
+                resume_fraction: None,
             };
             let resolved = mgr
                 .try_candidate(&http, &session, batch, &ctx, &std::sync::Mutex::new(None))
@@ -2987,6 +3022,7 @@ mod tests {
                         season: Some(1),
                         season_at_least: None,
                     },
+                resume_fraction: None,
                 },
                 13370,
             )
@@ -3044,6 +3080,7 @@ mod tests {
                     series: None,
                     sibling_titles: &[],
                     entry: layout::EntryHint { kind: layout::EntryKind::Movie, ..Default::default() },
+                    resume_fraction: None,
                 },
                 13370,
             )
@@ -3107,6 +3144,7 @@ mod tests {
                     }),
                     entry: Default::default(),
                     sibling_titles: &[],
+                    resume_fraction: None,
                 },
                 13370,
             )
@@ -3176,6 +3214,7 @@ mod tests {
                 season: Some(1),
                 season_at_least: None,
             },
+                resume_fraction: None,
         };
 
         let cold_started = std::time::Instant::now();

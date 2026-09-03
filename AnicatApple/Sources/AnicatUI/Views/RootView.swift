@@ -3,6 +3,7 @@ import AnicatCoreKit
 
 public struct RootView: View {
     @Bindable public var model: AppModel
+    @State private var showHomeCustomize = false
 
     public init(model: AppModel) {
         self.model = model
@@ -22,7 +23,18 @@ public struct RootView: View {
             HStack(spacing: 0) {
                 // Fixed Left Sidebar (exact Tauri layout)
                 SidebarView(
-                    currentView: $model.currentNavSection,
+                    currentView: Binding(
+                        get: { model.currentNavSection },
+                        set: { section in
+                            // Mirror the web `handleNavigate`: closing the
+                            // detail page is what lets a sidebar click switch
+                            // sections while a title is open. Without it the
+                            // detail view keeps rendering because its `if let
+                            // details` branch wins over `currentNavSection`.
+                            model.selectedMediaDetails = nil
+                            model.currentNavSection = section
+                        }
+                    ),
                     onOpenSearchPalette: { model.paletteOpen = true }
                 )
 
@@ -91,82 +103,7 @@ public struct RootView: View {
                         .id(details.id)
                         .transition(.opacity)
                     } else {
-                        Group {
-                        switch model.currentNavSection {
-                        case .upNext:
-                            homeView
-                        case .schedule:
-                            ScheduleView(items: model.scheduleItems) { item in
-                                openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
-                            }
-                        case .search:
-                            SearchView(
-                                searchText: $model.searchQuery,
-                                results: model.searchResults,
-                                isLoading: model.isLoading,
-                                onSearchCommit: { q, isManga in
-                                    Task { await model.search(query: q, isManga: isManga) }
-                                },
-                                onSelectMedia: { item in
-                                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
-                                }
-                            )
-                        case .settings:
-                            SettingsView(
-                                isSignedIn: model.isSignedIn,
-                                username: model.viewer?.name,
-                                onSaveToken: { token in
-                                    Task { await model.signIn(token: token) }
-                                },
-                                onDisconnectAniList: {
-                                    model.signOut()
-                                }
-                            )
-                        case .library:
-                            LibraryView(
-                                items: model.libraryItems,
-                                isLoading: model.isLoading,
-                                status: Binding(
-                                    get: { model.libraryStatus },
-                                    set: { next in Task { await model.loadLibrary(status: next) } }
-                                ),
-                                mediaType: Binding(
-                                    get: { model.libraryType },
-                                    set: { next in Task { await model.loadLibrary(type: next) } }
-                                ),
-                                isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: model.libraryType == "MANGA" || $0.isManga) }
-                            )
-                        case .manga:
-                            ReadingView(
-                                config: .manga,
-                                reading: model.mangaReading,
-                                trending: model.mangaTrending,
-                                isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                                onBrowse: { model.currentNavSection = .search }
-                            )
-                        case .novels:
-                            ReadingView(
-                                config: .novels,
-                                reading: model.novelReading,
-                                trending: model.novelTrending,
-                                isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                                onBrowse: { model.currentNavSection = .search }
-                            )
-                        case .history:
-                            HistoryView(
-                                viewer: model.viewer,
-                                activity: model.activity,
-                                titles: model.knownTitles
-                            )
-                        case .downloads:
-                            DownloadsView()
-                        }
-                        }
+                        sectionContent
                     }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -295,6 +232,89 @@ public struct RootView: View {
         .globalKeyboardShortcuts(model: model)
     }
 
+    // MARK: - Section Content Switcher
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch model.currentNavSection {
+        case .upNext:
+            homeView
+        case .schedule:
+            ScheduleView(items: model.scheduleItems) { item in
+                openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
+            }
+        case .search:
+            SearchView(
+                searchText: $model.searchQuery,
+                results: model.searchResults,
+                discoverItems: model.trendingItems,
+                isLoading: model.isLoading,
+                onSearchCommit: { q, isManga in
+                    Task { await model.search(query: q, isManga: isManga) }
+                },
+                onSelectMedia: { item in
+                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                },
+                onLoadDiscover: {
+                    Task { await model.loadTrending() }
+                }
+            )
+        case .settings:
+            SettingsView(
+                isSignedIn: model.isSignedIn,
+                username: model.viewer?.name,
+                onSaveToken: { token in
+                    Task { await model.signIn(token: token) }
+                },
+                onDisconnectAniList: {
+                    model.signOut()
+                }
+            )
+        case .library:
+            LibraryView(
+                items: model.libraryItems,
+                isLoading: model.isLoading,
+                status: Binding(
+                    get: { model.libraryStatus },
+                    set: { next in Task { await model.loadLibrary(status: next) } }
+                ),
+                mediaType: Binding(
+                    get: { model.libraryType },
+                    set: { next in Task { await model.loadLibrary(type: next) } }
+                ),
+                isSignedIn: model.isSignedIn,
+                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: model.libraryType == "MANGA" || $0.isManga) }
+            )
+        case .manga:
+            ReadingView(
+                config: .manga,
+                reading: model.mangaReading,
+                trending: model.mangaTrending,
+                isSignedIn: model.isSignedIn,
+                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                onBrowse: { model.currentNavSection = .search }
+            )
+        case .novels:
+            ReadingView(
+                config: .novels,
+                reading: model.novelReading,
+                trending: model.novelTrending,
+                isSignedIn: model.isSignedIn,
+                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                onBrowse: { model.currentNavSection = .search }
+            )
+        case .history:
+            HistoryView(
+                viewer: model.viewer,
+                activity: model.activity,
+                titles: model.knownTitles
+            )
+        case .downloads:
+            DownloadsView()
+        }
+    }
+
     // MARK: - Home / Up Next View
     private var homeView: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -341,6 +361,28 @@ public struct RootView: View {
                                  )
                         }
                         .buttonStyle(.plain)
+
+                        // Reorders/hides the configurable rows below. Shown
+                        // even signed-out, same as HomeView.tsx: Trending,
+                        // Newly Releasing and Seasonal all work without a
+                        // token, only Planning needs one.
+                        Button(action: { showHomeCustomize = true }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.grid.2x2")
+                                    .font(.system(size: 11))
+                                Text("Customize")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(SumiTheme.foreground.opacity(0.7))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
 
                     // Up Next Queue Container
@@ -368,17 +410,34 @@ public struct RootView: View {
                                 }
                             }
                         )
+                    } else {
+                        // Mirrors HomeView.tsx: an empty queue states the absence
+                        // plainly rather than leaving the "Up Next" heading over
+                        // nothing. 15pt semibold headline, 13pt muted detail.
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Nothing in progress")
+                                .font(.system(size: 15, weight: .semibold))
+                                .tracking(-0.2)
+                                .foregroundColor(SumiTheme.foreground)
+                            Text("Pick something from your library and it shows up here.")
+                                .font(.system(size: 13))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        .padding(.horizontal, 4)
                     }
                 }
 
-                // Watching Row
+                // Watching is fixed, not configurable — same split as
+                // HomeView.tsx (queue + Watching are the front page; the rest
+                // are rows the user can reorder or hide).
                 if !model.watchingItems.isEmpty {
                     mediaRow(title: "Watching", count: model.watchingItems.count, items: model.watchingItems)
                 }
 
-                // Trending Row
-                if !model.trendingItems.isEmpty {
-                    mediaRow(title: "Trending Now", count: model.trendingItems.count, items: model.trendingItems)
+                // Configurable rows, in the user's saved order; hidden ones
+                // are skipped entirely rather than shown collapsed.
+                ForEach(model.homeRowConfig.filter(\.visible)) { row in
+                    homeDiscoverRow(id: row.id, title: row.title)
                 }
             }
             // `px-6 lg:px-10 pt-10 pb-8` on the web's scroll container, and
@@ -392,6 +451,41 @@ public struct RootView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
+        .sheet(isPresented: $showHomeCustomize) {
+            HomeCustomizeSheet(model: model, isPresented: $showHomeCustomize)
+        }
+    }
+
+    /// One configurable row, by id. `nil` (rendered as `EmptyView`) means the
+    /// row has nothing to show yet — not signed in for Planning, or still
+    /// empty for everything else — mirroring `renderRow` in HomeView.tsx,
+    /// which returns `null` rather than an empty shelf.
+    @ViewBuilder
+    private func homeDiscoverRow(id: String, title: String) -> some View {
+        switch id {
+        case "planning":
+            if model.isSignedIn && !model.planningItems.isEmpty {
+                mediaRow(title: title, count: model.planningItems.count, items: model.planningItems)
+            }
+        case "smartPlaylist":
+            if model.isSignedIn && !model.smartPicks.isEmpty {
+                mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks)
+            }
+        case "trending":
+            if !model.trendingItems.isEmpty {
+                mediaRow(title: title, count: model.trendingItems.count, items: model.trendingItems)
+            }
+        case "newlyReleasing":
+            if !model.newlyReleasingItems.isEmpty {
+                mediaRow(title: title, count: model.newlyReleasingItems.count, items: model.newlyReleasingItems)
+            }
+        case "seasonal":
+            if !model.seasonalItems.isEmpty {
+                mediaRow(title: title, count: model.seasonalItems.count, items: model.seasonalItems)
+            }
+        default:
+            EmptyView()
+        }
     }
 
     /// Every section, as a palette entry. The palette is the only navigation
@@ -487,6 +581,13 @@ import AppKit
 private struct GlobalKeyboardShortcutsModifier: ViewModifier {
     @Bindable var model: AppModel
     @State private var monitor: Any?
+    @State private var scrollMonitor: Any?
+    @State private var accumulatedDeltaX: CGFloat = 0
+    @State private var accumulatedDeltaY: CGFloat = 0
+    @State private var gestureSampleCount = 0
+    @State private var gestureDisqualified = false
+    @State private var isCooling = false
+    @State private var lastSwipeEventAt: Date = .distantPast
 
     func body(content: Content) -> some View {
         content
@@ -503,12 +604,84 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             handleKeyDown(event)
         }
+        // Mirrors App.tsx's trackpad-back handler: horizontal-dominance guard
+        // against vertical scroll, and the same cooldown-until-idle (not a
+        // fixed timer) so one physical swipe's inertial tail can't re-cross
+        // the threshold and pop a second level.
+        //
+        // Sign is positive, not negative like the web's deltaX: AppKit's
+        // `scrollingDeltaX` already reflects the user's Natural Scrolling
+        // trackpad setting, so which physical swipe direction lands negative
+        // depends on that preference rather than matching the browser's
+        // convention. Confirmed against the real gesture — negative fired on
+        // the forward swipe and did nothing on back.
+        //
+        // A pure vertical scroll still tripped this on this input device: the
+        // dominance ratio alone isn't enough, because ordinary vertical
+        // scrolling here carries a horizontal component large enough to keep
+        // clearing a purely relative (dx > 2*dy) check for several samples in
+        // a row, not just a one-sample startup blip. `gestureSampleCount`
+        // withholds the check for the first couple of samples so a genuine
+        // horizontal swipe (which stays horizontal) can still separate from a
+        // vertical scroll's noisy opening; `gestureDisqualified` is the harder
+        // guard — once a gesture has shown any real vertical travel it can
+        // never fire "back" for the rest of that gesture, even if dx spikes
+        // later, because a real swipe-back gesture has near-zero vertical
+        // travel throughout, not just a favorable ratio at one instant. An
+        // idle gap (trackpad momentum doesn't reliably send `.ended`) starts
+        // a fresh gesture.
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
+            guard model.selectedMediaDetails != nil else { return event }
+            let now = Date()
+            if isCooling {
+                if now.timeIntervalSince(lastSwipeEventAt) > 0.12 {
+                    isCooling = false
+                } else {
+                    lastSwipeEventAt = now
+                    return event
+                }
+            }
+            if now.timeIntervalSince(lastSwipeEventAt) > 0.15 {
+                accumulatedDeltaX = 0
+                accumulatedDeltaY = 0
+                gestureSampleCount = 0
+                gestureDisqualified = false
+            }
+            lastSwipeEventAt = now
+            accumulatedDeltaX += event.scrollingDeltaX
+            accumulatedDeltaY += abs(event.scrollingDeltaY)
+            gestureSampleCount += 1
+            if accumulatedDeltaY > 15 {
+                gestureDisqualified = true
+            }
+            if !gestureDisqualified && gestureSampleCount >= 3 && accumulatedDeltaX > 60 && abs(accumulatedDeltaX) > accumulatedDeltaY * 2 {
+                accumulatedDeltaX = 0
+                accumulatedDeltaY = 0
+                gestureSampleCount = 0
+                isCooling = true
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    model.selectedMediaDetails = nil
+                }
+                return nil
+            }
+            if event.phase == .ended {
+                accumulatedDeltaX = 0
+                accumulatedDeltaY = 0
+                gestureSampleCount = 0
+                gestureDisqualified = false
+            }
+            return event
+        }
     }
 
     private func removeMonitor() {
         if let m = monitor {
             NSEvent.removeMonitor(m)
             monitor = nil
+        }
+        if let m = scrollMonitor {
+            NSEvent.removeMonitor(m)
+            scrollMonitor = nil
         }
     }
 
@@ -601,5 +774,78 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+/// Reorder/hide the home page's configurable rows — mirrors the "Customize
+/// home" modal in HomeView.tsx: arrows to move, an eye to toggle visibility,
+/// order is the list order itself.
+private struct HomeCustomizeSheet: View {
+    @Bindable var model: AppModel
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundColor(SumiTheme.indigo)
+                    Text("Customize home")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(SumiTheme.foreground)
+                }
+                Spacer()
+                Button(action: { isPresented = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 4)
+
+            Text("Reorder with the arrows, show or hide with the eye.")
+                .font(.system(size: 11))
+                .foregroundColor(SumiTheme.muted)
+                .padding(.bottom, 12)
+
+            VStack(spacing: 2) {
+                ForEach(Array(model.homeRowConfig.enumerated()), id: \.element.id) { index, row in
+                    HStack(spacing: 8) {
+                        Text(row.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(row.visible ? SumiTheme.foreground : SumiTheme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button(action: { model.moveHomeRow(at: index, by: -1) }) {
+                            Image(systemName: "chevron.up")
+                                .foregroundColor(index == 0 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(index == 0)
+
+                        Button(action: { model.moveHomeRow(at: index, by: 1) }) {
+                            Image(systemName: "chevron.down")
+                                .foregroundColor(index == model.homeRowConfig.count - 1 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(index == model.homeRowConfig.count - 1)
+
+                        Button(action: { model.toggleHomeRow(id: row.id) }) {
+                            Image(systemName: row.visible ? "eye" : "eye.slash")
+                                .foregroundColor(row.visible ? SumiTheme.indigo : SumiTheme.muted.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .background(SumiTheme.card.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .background(SumiTheme.background)
     }
 }

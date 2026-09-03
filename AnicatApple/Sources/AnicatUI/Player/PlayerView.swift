@@ -131,22 +131,27 @@ public struct PlayerView: View {
 
             Spacer()
 
-            // Anime4K Preset Pill
-            Button(action: { controller.cycleAnime4K() }) {
+            // Anime4K Single Toggle Button (On / Off)
+            Button(action: { controller.toggleAnime4K() }) {
                 HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "bolt.fill")
                         .font(.system(size: 11))
-                    Text("Anime4K: \(controller.activeAnime4KPreset.displayName)")
+                    Text("Anime4K")
                         .sumiTabularMono(size: 11, weight: .semibold)
                 }
-                .foregroundColor(controller.activeAnime4KPreset != .off ? SumiTheme.indigo : SumiTheme.muted)
+                .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : SumiTheme.muted)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.black.opacity(0.5))
+                .background(controller.isAnime4KEnabled ? SumiTheme.indigo.opacity(0.15) : Color.black.opacity(0.5))
                 .clipShape(Capsule())
-                .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                .overlay(
+                    Capsule()
+                        .stroke(controller.isAnime4KEnabled ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border, lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
+            .help(controller.isAnime4KEnabled ? "Anime4K Upscaling: Active (Ctrl+1)" : "Anime4K Upscaling: Inactive (Ctrl+1)")
+            .keyboardShortcut("1", modifiers: [.control])
         }
     }
 
@@ -232,7 +237,11 @@ public struct PlayerView: View {
                 .buttonStyle(.plain)
 
                 // Fullscreen
-                Button(action: {}) {
+                Button(action: {
+                    #if os(macOS)
+                    NSApp.keyWindow?.toggleFullScreen(nil)
+                    #endif
+                }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 14))
                         .foregroundColor(SumiTheme.foreground.opacity(0.8))

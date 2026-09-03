@@ -74,9 +74,28 @@ public final class iCloudSyncService: @unchecked Sendable {
         return keychainSuccess || (loadTokenFromConfigFile() != nil)
     }
 
-    /// Reads the AniList OAuth token from local Keychain, falling back to config.json or config.toml.
+    /// Reads the AniList OAuth token, preferring the config file over the Keychain.
+    ///
+    /// The Keychain used to be the first stop. That item is access-controlled to
+    /// the code signature that created it, and a debug binary is re-signed on
+    /// every `swift build` — so each launch presented macOS with an app it did
+    /// not recognise and popped "AniCat wants to use your confidential information
+    /// stored in \"com.anicat.auth\"" every time. Reading the config file first
+    /// (which `saveAniListToken` always writes) skips the Keychain at startup and
+    /// the prompt with it; the Keychain stays as a last-resort fallback only.
     public func getAniListToken() -> String? {
-        // 1. Check local Keychain
+        // 1. Config file first
+        if let token = loadTokenFromConfigFile(), !token.isEmpty {
+            return token.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // 2. Fallback: config.toml (migrated from Tauri)
+        if let token = loadTokenFromTOMLFile(), !token.isEmpty {
+            _ = saveAniListToken(token)
+            return token
+        }
+
+        // 3. Last resort: local Keychain
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -96,20 +115,6 @@ public final class iCloudSyncService: @unchecked Sendable {
             return token.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        // 2. Fallback: Check config.json
-        if let token = loadTokenFromConfigFile(), !token.isEmpty {
-            // Restore to keychain for fast access
-            _ = saveTokenToKeychain(token)
-            return token
-        }
-
-        // 3. Fallback: Check config.toml (migrated from Tauri)
-        if let token = loadTokenFromTOMLFile(), !token.isEmpty {
-            // Save to both keychain and config.json
-            _ = saveAniListToken(token)
-            return token
-        }
-
         return nil
     }
 
@@ -117,33 +122,6 @@ public final class iCloudSyncService: @unchecked Sendable {
         deleteAniListTokenFromKeychain()
         removeTokenFromConfigFile()
         removeTokenFromTOMLFile()
-    }
-
-    private func saveTokenToKeychain(_ token: String) -> Bool {
-        guard let data = token.data(using: .utf8) else { return false }
-        deleteAniListTokenFromKeychain()
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: tokenAccount,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecAttrSynchronizable as String: false
-        ]
-        var status = SecItemAdd(query as CFDictionary, nil)
-        if status == errSecDuplicateItem {
-            let updateQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: serviceName,
-                kSecAttrAccount as String: tokenAccount,
-                kSecAttrSynchronizable as String: false
-            ]
-            let updateAttrs: [String: Any] = [
-                kSecValueData as String: data
-            ]
-            status = SecItemUpdate(updateQuery as CFDictionary, updateAttrs as CFDictionary)
-        }
-        return status == errSecSuccess
     }
 
     private func deleteAniListTokenFromKeychain() {

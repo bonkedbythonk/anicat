@@ -17,6 +17,35 @@ final class AppearanceLock: NSObject, NSApplicationDelegate {
         NSApp.appearance = NSAppearance(named: .darkAqua)
     }
 }
+
+/// Configures the hosting `NSWindow` the moment a SwiftUI view lands in it,
+/// rather than hoping a timed loop catches it after launch. This is the only
+/// place the title bar is made invisible, and it runs per-window so a window
+/// created (or recreated) at any point gets the same treatment.
+struct WindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { configure(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { configure(nsView.window) }
+    }
+
+    private func configure(_ window: NSWindow?) {
+        guard let window else { return }
+        // Overlay-style titlebar, like Tauri's `titleBarStyle: "Overlay"`:
+        // the content runs under the traffic lights with no title text and no
+        // background strip. Traffic lights stay (Tauri's `decorations: true`),
+        // which is why the sidebar still reserves its 38pt strip for them.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.backgroundColor = .clear
+    }
+}
 #endif
 
 @main
@@ -35,7 +64,7 @@ struct AnicatApp: App {
                 .preferredColorScheme(.dark)
                 #if os(macOS)
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
-                .background(SumiTheme.background)
+                .background(WindowConfigurator())
                 #endif
         }
         #if os(macOS)

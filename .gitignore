@@ -160,3 +160,4 @@ AnicatApple/AnicatCore.xcframework/
 AnicatApple/Sources/AnicatCoreKit/anicat_core.swift
 AnicatApple/Frameworks/
 AnicatApple/Sources/anicat_coreFFI/include/
+.aider*

@@ -227,6 +227,11 @@ pub struct StreamRequest {
     /// first; the rest of the pool stays behind it, so a pick that turns out
     /// to be dead still plays something.
     pub chosen_name: Option<String>,
+    /// Where playback will actually start, as a fraction (0.0-1.0) of the
+    /// episode's length — the caller's own `stopTime / duration`. `None` for
+    /// a fresh play. See `torrent::ResolveTarget::resume_fraction` for why
+    /// this has to reach the pre-buffer gate, not just mpv's `--start`.
+    pub resume_fraction: Option<f64>,
 }
 
 /// The engine. One per app launch.
@@ -354,6 +359,7 @@ impl AnicatEngine {
                     series: None,
                     entry: info.hint,
                     sibling_titles: &info.siblings,
+                    resume_fraction: req.resume_fraction,
                 },
                 port,
             )
@@ -403,6 +409,26 @@ impl AnicatEngine {
         let items = self
             .catalogs
             .trending(&media_type, format.as_deref(), limit.max(1) as i64)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize).collect())
+    }
+
+    /// Filtered discovery for the home page's configurable rows: a release
+    /// `status` ("Newly Releasing" wants `RELEASING`) or a `season`/
+    /// `season_year` pair ("Seasonal Highlights"). Leave both unset for a
+    /// plain popularity-sorted row.
+    pub async fn discover(
+        &self,
+        media_type: String,
+        status: Option<String>,
+        season: Option<String>,
+        season_year: Option<i32>,
+        limit: i32,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .discover(&media_type, status.as_deref(), season.as_deref(), season_year, limit.max(1) as i64)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize).collect())
@@ -477,6 +503,29 @@ impl AnicatEngine {
 
         let episode_count = m.episodes.unwrap_or(0);
         let streaming = m.streaming_episodes.clone().unwrap_or_default();
+
+        // AniList streaming_episodes often lists episodes in reverse order (e.g. Ep 12 down to 1).
+        // Map each streaming episode by parsing the episode number from its title:
+        // "Episode 12 - First Love with Him" -> 12.
+        let mut stream_by_num: std::collections::HashMap<i32, &crate::catalog::anilist::types::StreamingEpisode> = std::collections::HashMap::new();
+        for s in &streaming {
+            if let Some(ref title) = s.title {
+                let lower = title.to_lowercase();
+                let num_opt = if let Some(rest) = lower.strip_prefix("episode ") {
+                    rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<i32>().ok()
+                } else if let Some(rest) = lower.strip_prefix("ep ") {
+                    rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<i32>().ok()
+                } else if let Some(rest) = lower.strip_prefix("ep. ") {
+                    rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<i32>().ok()
+                } else {
+                    None
+                };
+                if let Some(num) = num_opt {
+                    stream_by_num.insert(num, s);
+                }
+            }
+        }
+
         let mut episodes = Vec::new();
         for number in 1..=episode_count {
             let entry = history.iter().find(|e| e.episode_number == number as i64);
@@ -486,13 +535,37 @@ impl AnicatEngine {
                 .filter(|e| e.duration > 0)
                 .map(|e| (e.stop_time as f64 / e.duration as f64) * 100.0)
                 .unwrap_or(0.0);
-            let from_stream = streaming.get((number - 1) as usize);
+
+            // Match by parsed episode number, or fallback to positional index
+            let from_stream = stream_by_num.get(&number).copied().or_else(|| {
+                streaming.get((number - 1) as usize)
+            });
+
+            let raw_title = from_stream
+                .and_then(|s| s.title.clone())
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| format!("Episode {number}"));
+
+            // Strip "Episode X - " or "Episode X: " prefix so title is clean
+            let clean_title = {
+                let t = raw_title.trim();
+                let p1 = format!("Episode {} - ", number);
+                let p2 = format!("Episode {}: ", number);
+                let p3 = format!("Episode {}. ", number);
+                if let Some(c) = t.strip_prefix(&p1) {
+                    c.trim().to_string()
+                } else if let Some(c) = t.strip_prefix(&p2) {
+                    c.trim().to_string()
+                } else if let Some(c) = t.strip_prefix(&p3) {
+                    c.trim().to_string()
+                } else {
+                    t.to_string()
+                }
+            };
+
             episodes.push(EpisodeRow {
                 number,
-                title: from_stream
-                    .and_then(|s| s.title.clone())
-                    .filter(|t| !t.trim().is_empty())
-                    .unwrap_or_else(|| format!("Episode {number}")),
+                title: clean_title,
                 thumbnail: from_stream.and_then(|s| s.thumbnail.clone()),
                 is_watched: percent >= 85.0,
                 progress_percent: percent,

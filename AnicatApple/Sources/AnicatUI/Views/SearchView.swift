@@ -3,38 +3,48 @@ import SwiftUI
 public struct SearchView: View {
     @Binding public var searchText: String
     public let results: [MediaCard.Item]
+    public let discoverItems: [MediaCard.Item]
     public let isLoading: Bool
     public let onSearchCommit: (String, Bool) -> Void
     public let onSelectMedia: (MediaCard.Item) -> Void
+    public let onLoadDiscover: () -> Void
 
     @State private var searchType: String = "ANIME"
 
     public init(
         searchText: Binding<String>,
         results: [MediaCard.Item],
+        discoverItems: [MediaCard.Item] = [],
         isLoading: Bool = false,
         onSearchCommit: @escaping (String, Bool) -> Void = { _, _ in },
-        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in }
+        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
+        onLoadDiscover: @escaping () -> Void = {}
     ) {
         self._searchText = searchText
         self.results = results
+        self.discoverItems = discoverItems
         self.isLoading = isLoading
         self.onSearchCommit = onSearchCommit
         self.onSelectMedia = onSelectMedia
+        self.onLoadDiscover = onLoadDiscover
     }
 
     public init(
         searchText: Binding<String>,
         results: [MediaCard.Item],
+        discoverItems: [MediaCard.Item] = [],
         isLoading: Bool = false,
         onSearchCommit: @escaping (String) -> Void,
-        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in }
+        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
+        onLoadDiscover: @escaping () -> Void = {}
     ) {
         self._searchText = searchText
         self.results = results
+        self.discoverItems = discoverItems
         self.isLoading = isLoading
         self.onSearchCommit = { query, _ in onSearchCommit(query) }
         self.onSelectMedia = onSelectMedia
+        self.onLoadDiscover = onLoadDiscover
     }
 
     public var body: some View {
@@ -103,6 +113,35 @@ public struct SearchView: View {
                 }
                 .padding(.horizontal, 40)
 
+                // Discover Section (shown when search query is empty)
+                if searchText.isEmpty && !discoverItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Discover")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(SumiTheme.foreground)
+                            Spacer()
+                            Text("TRENDING")
+                                .sumiTabularMono(size: 11.5)
+                                .foregroundColor(SumiTheme.indigo)
+                        }
+                        .padding(.horizontal, 40)
+
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
+                            alignment: .leading,
+                            spacing: 20
+                        ) {
+                            ForEach(discoverItems) { item in
+                                MediaCard(item: item) {
+                                    onSelectMedia(item)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 40)
+                    }
+                }
+
                 // Results Count
                 if !results.isEmpty {
                     HStack {
@@ -146,5 +185,6 @@ public struct SearchView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
+        .onAppear { onLoadDiscover() }
     }
 }

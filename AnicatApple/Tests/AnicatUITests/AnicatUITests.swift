@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 @testable import AnicatUI
 
 @Suite("Sumi Ledger & Anime4K Tests")
@@ -10,6 +13,54 @@ struct AnicatUITests {
         #expect(preset.shaderFileNames.count == 6)
         #expect(preset.shaderFileNames.first == "Anime4K_Clamp_Highlights.glsl")
     }
+
+    @Test("Anime4K Single Toggle and 6-Shader Chain Exact Matching")
+    func testAnime4KSingleToggle() {
+        // Verify official 6-shader chain from Tauri AniCat
+        let expectedShaders = [
+            "Anime4K_Clamp_Highlights.glsl",
+            "Anime4K_Restore_CNN_M.glsl",
+            "Anime4K_Upscale_CNN_x2_M.glsl",
+            "Anime4K_AutoDownscalePre_x2.glsl",
+            "Anime4K_AutoDownscalePre_x4.glsl",
+            "Anime4K_Upscale_CNN_x2_S.glsl"
+        ]
+        #expect(Anime4KPreset.on.shaderFileNames == expectedShaders)
+        #expect(Anime4KPreset.off.shaderFileNames.isEmpty)
+        #expect(Anime4KPreset.off.resolveMpvShaderString() == "")
+
+        // Verify PlayerController toggle behavior
+        let controller = PlayerController(title: "Frieren", episodeNumber: 1)
+        controller.isAnime4KEnabled = true
+        #expect(controller.activeAnime4KPreset == .on)
+
+        controller.toggleAnime4K()
+        #expect(controller.isAnime4KEnabled == false)
+        #expect(controller.activeAnime4KPreset == .off)
+
+        controller.cycleAnime4K()
+        #expect(controller.isAnime4KEnabled == true)
+        #expect(controller.activeAnime4KPreset == .on)
+    }
+
+    #if os(macOS)
+    @Test("MpvVideoContainerView Subview Constraint and In-App Embedding")
+    @MainActor
+    func testMpvVideoContainerView() {
+        let container = MpvVideoContainerView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        #expect(container.window == nil)
+
+        // Adding subview should immediately receive container bounds and autoresizing masks
+        let dummyChild = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        container.addSubview(dummyChild)
+        #expect(dummyChild.frame == container.bounds)
+
+        // Resizing and layout must constrain all child views strictly to bounds
+        container.frame = NSRect(x: 0, y: 0, width: 1280, height: 720)
+        container.layout()
+        #expect(dummyChild.frame == NSRect(x: 0, y: 0, width: 1280, height: 720))
+    }
+    #endif
 
     @Test("Sumi Ledger Tokens")
     func testThemeTokens() {

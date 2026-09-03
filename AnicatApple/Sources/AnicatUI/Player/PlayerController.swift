@@ -13,8 +13,13 @@ public final class PlayerController: @unchecked Sendable {
     public var volume: Double = 1.0 // 0 to 1
     public var isMuted: Bool = false
     
-    // Anime4K & Video Quality
-    public var activeAnime4KPreset: Anime4KPreset = .modeAFast
+    // Anime4K & Video Quality (Single On/Off toggle from Tauri)
+    public var isAnime4KEnabled: Bool = true
+
+    public var activeAnime4KPreset: Anime4KPreset {
+        get { isAnime4KEnabled ? .on : .off }
+        set { isAnime4KEnabled = (newValue != .off) }
+    }
     
     // AniSkip (Skip Intro / Outro)
     public var introStartTime: Double? = nil
@@ -35,6 +40,9 @@ public final class PlayerController: @unchecked Sendable {
     public init(title: String = "", episodeNumber: Int = 1) {
         self.title = title
         self.episodeNumber = episodeNumber
+        if UserDefaults.standard.object(forKey: "anicat_gpu_upscaling") != nil {
+            self.isAnime4KEnabled = UserDefaults.standard.bool(forKey: "anicat_gpu_upscaling")
+        }
     }
 
     public func togglePlayPause() {
@@ -78,20 +86,14 @@ public final class PlayerController: @unchecked Sendable {
         seek(to: currentTime + delta)
     }
 
-    public func cycleAnime4K() {
-        switch activeAnime4KPreset {
-        case .off:
-            activeAnime4KPreset = .modeAFast
-        case .modeAFast:
-            activeAnime4KPreset = .modeAHQ
-        case .modeAHQ:
-            activeAnime4KPreset = .modeBFast
-        case .modeBFast:
-            activeAnime4KPreset = .modeCFast
-        case .modeCFast:
-            activeAnime4KPreset = .off
-        }
+    public func toggleAnime4K() {
+        isAnime4KEnabled.toggle()
+        UserDefaults.standard.set(isAnime4KEnabled, forKey: "anicat_gpu_upscaling")
         showControlsBriefly()
+    }
+
+    public func cycleAnime4K() {
+        toggleAnime4K()
     }
 
     public func skipIntro() {

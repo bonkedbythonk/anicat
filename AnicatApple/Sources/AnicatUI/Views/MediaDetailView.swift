@@ -145,6 +145,7 @@ public struct MediaDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 banner
                 content
+                tabsSection
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -285,12 +286,22 @@ public struct MediaDetailView: View {
             }
 
             seasonChain
+        }
+    }
 
+    /// Tabs and their content, full-width below the poster/info row. The web
+    /// build keeps the episode list out of the poster's column — it spans the
+    /// whole content width — and the native port had it squeezed beside the
+    /// poster, which is why every episode row looked about 200pt too narrow.
+    private var tabsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
             tabBar
-                .padding(.top, 16)
-
             tabContent
         }
+        .padding(.horizontal, 56)
+        .padding(.bottom, 64)
+        .frame(maxWidth: 1150, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     /// The one line of state above the title. Everything is muted mono except
@@ -487,38 +498,63 @@ public struct MediaDetailView: View {
                 HStack(spacing: 12) {
                     if leading {
                         Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
-                    }
-                    Color.clear
-                        .frame(width: 40, height: 56)
-                        .overlay {
-                            AsyncImage(url: relation.coverURL) { phase in
-                                if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                } else {
-                                    Rectangle().fill(SumiTheme.card)
+                        Color.clear
+                            .frame(width: 40, height: 56)
+                            .overlay {
+                                AsyncImage(url: relation.coverURL) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } else {
+                                        Rectangle().fill(SumiTheme.card)
+                                    }
                                 }
                             }
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(label)
+                                .sumiTabularMono(size: 11.5)
+                                .foregroundColor(SumiTheme.indigo)
+                            Text(relation.title)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            if let format = relation.format {
+                                Text(format)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(SumiTheme.muted)
+                            }
                         }
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                    VStack(alignment: leading ? .leading : .trailing, spacing: 2) {
-                        Text(label)
-                            .sumiTabularMono(size: 11.5)
-                            .foregroundColor(SumiTheme.indigo)
-                        Text(relation.title)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(SumiTheme.foreground)
-                            .lineLimit(1)
-                        if let format = relation.format {
-                            Text(format)
-                                .font(.system(size: 10))
-                                .foregroundColor(SumiTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(label)
+                                .sumiTabularMono(size: 11.5)
+                                .foregroundColor(SumiTheme.indigo)
+                            Text(relation.title)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            if let format = relation.format {
+                                Text(format)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(SumiTheme.muted)
+                            }
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
-
-                    if !leading {
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Color.clear
+                            .frame(width: 40, height: 56)
+                            .overlay {
+                                AsyncImage(url: relation.coverURL) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } else {
+                                        Rectangle().fill(SumiTheme.card)
+                                    }
+                                }
+                            }
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
                     }
                 }

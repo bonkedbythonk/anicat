@@ -135,7 +135,7 @@ keep-open=yes
 # Remember volume, position, and other settings between launches
 save-position-on-quit=no
 # Start in fullscreen by default
-fullscreen=yes
+fullscreen=no
 # Prevents sub_margins conflict from watch-later restore
 watch-later-options-remove=sub-pos
 # Cache for smooth streaming on slow connections

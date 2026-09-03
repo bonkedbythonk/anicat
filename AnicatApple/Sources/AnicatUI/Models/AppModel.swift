@@ -66,6 +66,73 @@ public final class AppModel: @unchecked Sendable {
     public var searchResults: [MediaCard.Item] = []
     public var scheduleItems: [ScheduleView.ScheduleItem] = []
 
+    // Home's configurable rows (below the fixed Up Next / Watching shelves).
+    // The queue and Watching aren't configurable — they're the front page,
+    // same split as HomeView.tsx.
+    public var planningItems: [MediaCard.Item] = []
+    public var smartPicks: [MediaCard.Item] = []
+    public var newlyReleasingItems: [MediaCard.Item] = []
+    public var seasonalItems: [MediaCard.Item] = []
+
+    /// One configurable home row: which one, its display title, and whether
+    /// the user has it shown. Reorder is the array order itself.
+    public struct HomeRowConfig: Codable, Identifiable, Equatable, Sendable {
+        public var id: String
+        public var title: String
+        public var visible: Bool
+    }
+
+    static let defaultHomeRows: [HomeRowConfig] = [
+        HomeRowConfig(id: "planning", title: "Planning", visible: true),
+        HomeRowConfig(id: "smartPlaylist", title: "Smart Picks", visible: true),
+        HomeRowConfig(id: "trending", title: "Trending Now", visible: true),
+        HomeRowConfig(id: "newlyReleasing", title: "Newly Releasing", visible: true),
+        HomeRowConfig(id: "seasonal", title: "Seasonal Highlights", visible: true),
+    ]
+
+    private static let homeRowsDefaultsKey = "anicat_home_rows"
+
+    /// Reconciled with `defaultHomeRows`: keeps the saved order and
+    /// visibility, drops a row id that no longer exists, and appends any
+    /// newly-added default row at the end so a stale saved config never hides
+    /// a row that didn't exist when it was written.
+    static func loadHomeRowConfig() -> [HomeRowConfig] {
+        guard let data = UserDefaults.standard.data(forKey: homeRowsDefaultsKey),
+              let saved = try? JSONDecoder().decode([HomeRowConfig].self, from: data) else {
+            return defaultHomeRows
+        }
+        let byId = Dictionary(uniqueKeysWithValues: defaultHomeRows.map { ($0.id, $0) })
+        var merged = saved.compactMap { row -> HomeRowConfig? in
+            guard let def = byId[row.id] else { return nil }
+            return HomeRowConfig(id: def.id, title: def.title, visible: row.visible)
+        }
+        let seen = Set(merged.map(\.id))
+        for def in defaultHomeRows where !seen.contains(def.id) {
+            merged.append(def)
+        }
+        return merged
+    }
+
+    public var homeRowConfig: [HomeRowConfig] = AppModel.loadHomeRowConfig()
+
+    private func persistHomeRowConfig() {
+        guard let data = try? JSONEncoder().encode(homeRowConfig) else { return }
+        UserDefaults.standard.set(data, forKey: Self.homeRowsDefaultsKey)
+    }
+
+    public func toggleHomeRow(id: String) {
+        guard let index = homeRowConfig.firstIndex(where: { $0.id == id }) else { return }
+        homeRowConfig[index].visible.toggle()
+        persistHomeRowConfig()
+    }
+
+    public func moveHomeRow(at index: Int, by delta: Int) {
+        let target = index + delta
+        guard homeRowConfig.indices.contains(index), homeRowConfig.indices.contains(target) else { return }
+        homeRowConfig.swapAt(index, target)
+        persistHomeRowConfig()
+    }
+
     // Library / Manga / Novels / History
     public var libraryItems: [MediaCard.Item] = []
     public var libraryStatus: String = "CURRENT"
@@ -139,8 +206,12 @@ public final class AppModel: @unchecked Sendable {
             BonjourDiscovery.shared.startBrowsing()
             #endif
 
-            // Preload initial trending shows
-            await loadInitialCatalog()
+            // Preload everything the signed-in views draw from. `refreshAll`
+            // (not just `loadInitialCatalog`) is what fills Manga, Light
+            // Novels and History — on a launch where the token was already in
+            // the Keychain, `signIn` never runs, so those shelves stayed empty
+            // until the user pasted a token again.
+            await refreshAll()
         } catch {
             self.errorMessage = "Failed to start AniCat Engine: \(error.localizedDescription)"
             print(errorMessage!)
@@ -185,6 +256,8 @@ public final class AppModel: @unchecked Sendable {
         libraryItems = []
         mangaReading = []
         novelReading = []
+        planningItems = []
+        smartPicks = []
     }
 
     /// Everything the signed-in views draw from, in one pass.
@@ -193,6 +266,46 @@ public final class AppModel: @unchecked Sendable {
         await loadLibrary()
         await loadReadingShelves()
         await loadHistory()
+        await loadHomeDiscoverRows()
+    }
+
+    /// AniList's own season/year pair for "now" — the convention the
+    /// seasonal query expects. December belongs to *next* year's Winter, not
+    /// this year's: AniList's "Winter 2025" is Dec 2024 through Feb 2025.
+    static func currentAniListSeason(_ date: Date = Date()) -> (season: String, year: Int) {
+        let month = Calendar.current.component(.month, from: date)
+        let year = Calendar.current.component(.year, from: date)
+        switch month {
+        case 12: return ("WINTER", year + 1)
+        case 1, 2: return ("WINTER", year)
+        case 3, 4, 5: return ("SPRING", year)
+        case 6, 7, 8: return ("SUMMER", year)
+        default: return ("FALL", year)
+        }
+    }
+
+    /// The home page's configurable rows: Planning (signed-in only), a Smart
+    /// Picks blend, Newly Releasing (status RELEASING), and the current
+    /// season. Requires `trendingItems` to already be loaded — Smart Picks
+    /// fills out from it exactly like HomeView.tsx's `smartPicks` does.
+    public func loadHomeDiscoverRows() async {
+        guard let engine else { return }
+        let planning = isSignedIn ? ((try? await engine.userList(status: "PLANNING", mediaType: "ANIME")) ?? []) : []
+        let newlyReleasing = (try? await engine.discover(
+            mediaType: "ANIME", status: "RELEASING", season: nil, seasonYear: nil, limit: 24
+        )) ?? []
+        let (season, year) = Self.currentAniListSeason()
+        let seasonal = (try? await engine.discover(
+            mediaType: "ANIME", status: nil, season: season, seasonYear: Int32(year), limit: 24
+        )) ?? []
+
+        planningItems = planning.map(Self.card)
+        newlyReleasingItems = newlyReleasing.map(Self.card)
+        seasonalItems = seasonal.map(Self.card)
+
+        let planningIds = Set(planningItems.map(\.id))
+        let fill = trendingItems.filter { !planningIds.contains($0.id) }
+        smartPicks = Array((planningItems.shuffled() + fill).prefix(20))
     }
 
     /// Opens the detail page for a title, fetching real AniList metadata and real streaming/registry episodes.
@@ -221,7 +334,7 @@ public final class AppModel: @unchecked Sendable {
                 }
             }
 
-            self.selectedEpisodes = episodes
+            self.selectedEpisodes = episodes.sorted(by: { $0.number < $1.number })
             self.selectedMangaChapters = chapters
             self.selectedMediaDetails = HeroBanner.Details(
                 id: d.catalogId,
@@ -397,6 +510,15 @@ public final class AppModel: @unchecked Sendable {
         isSignedIn = viewer != nil
     }
 
+    /// Loads the trending anime shelf that backs Search's Discover section.
+    /// The same list `loadInitialCatalog` fetches; kept as its own method so
+    /// the search page can top it up without re-running the whole home load.
+    public func loadTrending() async {
+        guard let engine else { return }
+        let trending = (try? await engine.trending(mediaType: "ANIME", format: nil, limit: 24)) ?? []
+        trendingItems = trending.map(Self.card)
+    }
+
     /// Search anime or manga across AniList catalog via the Rust engine.
     public func search(query: String, isManga: Bool? = nil) async {
         guard let engine, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -479,9 +601,17 @@ public final class AppModel: @unchecked Sendable {
         // Restore any existing progress from SQLite or media metadata
         var initialDuration: Double = 0.0
         var initialTime: Double = 0.0
+        // Only from the recorded (real) duration, never the AniList runtime
+        // estimate below — that's a flat ~24min for every episode, and an
+        // estimate-of-an-estimate byte offset would tell the Rust pre-buffer
+        // gate to warm the wrong part of the file.
+        var resumeFraction: Double?
         if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
+            if initialTime > 0, initialDuration > 0 {
+                resumeFraction = initialTime / initialDuration
+            }
         }
         if initialDuration <= 0 {
             if let ep = selectedEpisodes.first(where: { $0.number == Int(episode) }),
@@ -492,13 +622,18 @@ public final class AppModel: @unchecked Sendable {
         self.playerController.currentTime = initialTime
         self.playerController.duration = initialDuration
 
+        // Tells the torrent resolve's pre-buffer gate where mpv's `--start`
+        // will actually land, so it warms that region of the swarm instead of
+        // only proving byte 0 is healthy and handing off to a resume seek
+        // that stalls forever on an unprioritized piece.
         let req = StreamRequest(
             catalog: catalog,
             catalogId: catalogId,
             episode: episode,
             title: effectiveTitle,
             preferDub: false,
-            chosenName: nil
+            chosenName: nil,
+            resumeFraction: resumeFraction
         )
 
         let handle = try await engine.resolveStream(req: req)

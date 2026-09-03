@@ -4223,6 +4223,7 @@ pub async fn report_builtin_player_state(
 struct RemuxedStream {
     video_url: String,
     subtitle_url: String,
+    duration_seconds: Option<f64>,
 }
 
 async fn remux_torrent_stream(
@@ -4248,10 +4249,11 @@ async fn remux_torrent_stream(
     }
     let (torrent_id, file_id) = (torrent_id?, file_id?);
     match manager.start(loopback_url, torrent_id, file_id, 0, prefer_dub).await {
-        Ok(video_url) => {
+        Ok(started) => {
             // "/hls/{id}/stream_0/index.m3u8" -- subs.vtt is a sibling of
             // stream_0 at the session root, served by the same flat
             // `/hls/{id}/{file}` route master.m3u8 already uses.
+            let video_url = started.url;
             let id = video_url
                 .trim_start_matches("/hls/")
                 .split('/')
@@ -4260,6 +4262,7 @@ async fn remux_torrent_stream(
             Some(RemuxedStream {
                 subtitle_url: format!("/hls/{}/subs.vtt", id),
                 video_url,
+                duration_seconds: started.duration_seconds,
             })
         }
         Err(e) => {
@@ -4357,12 +4360,14 @@ pub async fn resolve_builtin_player_stream(
     }).filter(|p| p.starts_with("/torrent-stream"));
     let mut remuxed = false;
     let mut remux_subtitle_url: Option<String> = None;
+    let mut remux_duration_seconds: Option<f64> = None;
     let prefer_dub = translation_type == "dub";
     let mut stream_url = if let Some(path_and_query) = torrent_path {
         match remux_torrent_stream(&state.remux, &raw_url, &path_and_query, prefer_dub).await {
             Some(remuxed_stream) => {
                 remuxed = true;
                 remux_subtitle_url = Some(remuxed_stream.subtitle_url);
+                remux_duration_seconds = remuxed_stream.duration_seconds;
                 remuxed_stream.video_url
             }
             None => path_and_query,
@@ -4465,6 +4470,13 @@ pub async fn resolve_builtin_player_stream(
         // here; it 404s and the <track> element just shows nothing, same as
         // if this were never set.
         "subtitle_url": if remuxed { remux_subtitle_url } else { subtitle_url },
+        // The release's real runtime from the container's own header, not
+        // the HLS playlist's -- see `MediaLayout::duration_seconds`. None for
+        // a non-remuxed stream (the frontend already has a working duration
+        // source there: a normal HTTP/CDN stream's `video.duration` reads
+        // correctly since nothing is progressively rewriting the file under
+        // it) or when ffprobe's header read didn't carry one.
+        "duration_seconds": if remuxed { remux_duration_seconds } else { None },
     }))
 }
 

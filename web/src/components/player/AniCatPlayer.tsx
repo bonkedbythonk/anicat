@@ -111,6 +111,12 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
   const lastProgressReport = useRef(0);
   const currentTimeRef = useRef(0);
   const durationRef = useRef(0);
+  // The release's real runtime, from the container header rather than
+  // `video.duration` -- see the backend's `MediaLayout::duration_seconds`
+  // doc comment. Only set for a remuxed torrent stream; null otherwise
+  // (a normal HTTP/CDN stream's `video.duration` is already correct, since
+  // nothing is progressively rewriting the file under it).
+  const expectedDurationRef = useRef<number | null>(null);
   const hasSeekedResume = useRef(false);
   const wasFullscreenRef = useRef(false);
   const suppressFullscreenWatcher = useRef(false);
@@ -203,6 +209,11 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
       setActiveSkip(null);
       setSkipSegments([]);
       hasSeekedResume.current = false;
+      // Reset before the new resolve returns, not after: a stale value from
+      // the previous episode must not be read as this one's real duration
+      // during the window between the episode switching and the response
+      // landing.
+      expectedDurationRef.current = null;
 
       try {
         const data: any = await invoke("resolve_builtin_player_stream", {
@@ -218,6 +229,9 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
         setStreamUrl(data.stream_url);
         setSubtitleUrl(data.subtitle_url ?? null);
         setResumeSeconds(data.resume_seconds && data.resume_seconds > 0 ? data.resume_seconds : 0);
+        expectedDurationRef.current = typeof data.duration_seconds === "number" && data.duration_seconds > 0
+          ? data.duration_seconds
+          : null;
 
         // Fetch AniSkip segments
         try {
@@ -346,9 +360,18 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
 
     const cur = video.currentTime;
     const dur = video.duration || 0;
+    // `dur` (video.duration) is what the seek bar and buffered-% legitimately
+    // want: how much of the episode is currently seekable, which for a
+    // remux still being written genuinely does grow as more arrives. Every
+    // check below that decides "are we near the end" wants the release's
+    // real length instead, or that growth reads as repeatedly reaching the
+    // end -- reported as "every time it nears the end it adds to the current
+    // time" and, before that, as the episode being marked watched minutes
+    // early, over and over, each time the known duration jumped.
+    const effectiveDur = expectedDurationRef.current || dur;
 
     currentTimeRef.current = cur;
-    durationRef.current = dur;
+    durationRef.current = effectiveDur;
     setCurrentTime(cur);
     setDuration(dur);
 
@@ -377,17 +400,17 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
     }
 
     // Outro Detection (near end of episode)
-    if (dur > 60 && dur - cur <= 25) {
-      setOutroCountdown((prev) => (prev === null ? Math.min(Math.max(1, Math.ceil(dur - cur)), 5) : prev));
+    if (effectiveDur > 60 && effectiveDur - cur <= 25) {
+      setOutroCountdown((prev) => (prev === null ? Math.min(Math.max(1, Math.ceil(effectiveDur - cur)), 5) : prev));
     } else {
       setOutroCountdown(null);
     }
 
     // Periodic Progress Reporting (every 10s)
-    if (cur - lastProgressReport.current >= 10 && dur > 0) {
+    if (cur - lastProgressReport.current >= 10 && effectiveDur > 0) {
       lastProgressReport.current = cur;
-      callPlayer("progress", cur, dur);
-      if ((cur / dur) * 100 >= 80) {
+      callPlayer("progress", cur, effectiveDur);
+      if ((cur / effectiveDur) * 100 >= 80) {
         mediaApi.saveMediaListEntry(props.mediaId, { progress: episodeNumber }).catch(() => {});
         dispatchRefresh();
       }

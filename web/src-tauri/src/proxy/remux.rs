@@ -87,6 +87,19 @@ pub struct MediaLayout {
     pub text_subtitle: Option<usize>,
     pub video_codec: String,
     pub audio_codec: String,
+    /// The release's real total runtime, read from the container's own
+    /// header metadata (an MKV's Segment Info carries this near the start of
+    /// the file, alongside the track list) -- not from how much HLS the
+    /// remux has produced so far. `AniCatPlayer` used `video.duration`
+    /// instead for its watched-threshold and progress-report math, which is
+    /// the *growing* MSE duration of an event playlist still being written:
+    /// reaching 80% of however much had been remuxed by that point marked
+    /// the episode watched minutes early, repeatedly, every time the known
+    /// duration jumped -- reported as "it marks the episode finished, then
+    /// keeps going". `None` if ffprobe's header read didn't carry a duration
+    /// (some releases omit it); the frontend falls back to `video.duration`
+    /// in that case exactly as it always did.
+    pub duration_seconds: Option<f64>,
 }
 
 /// Ask ffprobe what is in the file. Reads over HTTP from our own range
@@ -95,7 +108,8 @@ pub async fn probe(input_url: &str, prefer_dub: bool) -> Result<MediaLayout, Str
     let out = tokio::process::Command::new("ffprobe")
         .args([
             "-v", "error",
-            "-show_entries", "stream=index,codec_type,codec_name,pix_fmt:stream_tags=language,title",
+            "-show_entries",
+            "stream=index,codec_type,codec_name,pix_fmt:stream_tags=language,title:format=duration",
             "-of", "csv=p=0",
             input_url,
         ])
@@ -115,8 +129,17 @@ pub async fn probe(input_url: &str, prefer_dub: bool) -> Result<MediaLayout, Str
     let mut audio_counter = 0usize;
     let mut subtitle_index = 0usize;
     let mut text_subtitle = None;
+    let mut duration_seconds = None;
     for line in text.lines() {
         let fields: Vec<&str> = line.split(',').collect();
+        if fields.len() == 1 {
+            // The `format=duration` row: on its own line since it belongs to
+            // the format section, not a stream, and csv=p=0 gives it no
+            // label to tell it apart from a malformed stream row other than
+            // this field count.
+            duration_seconds = fields[0].trim().parse::<f64>().ok();
+            continue;
+        }
         if fields.len() < 3 {
             continue;
         }
@@ -181,6 +204,7 @@ pub async fn probe(input_url: &str, prefer_dub: bool) -> Result<MediaLayout, Str
         text_subtitle,
         video_codec,
         audio_codec,
+        duration_seconds,
     })
 }
 
@@ -191,12 +215,26 @@ struct Session {
     /// What this session is of, so a second request for the same episode at
     /// the same offset reuses it instead of starting a second ffmpeg.
     key: (usize, usize, i64),
+    /// From the same `probe()` this session's ffmpeg command was built from.
+    /// Remembered here so a reused session can still answer with it, since
+    /// the reuse path never re-probes.
+    duration_seconds: Option<f64>,
 }
 
 impl Session {
     fn touch(&mut self) {
         self.last_read = std::time::Instant::now();
     }
+}
+
+/// What `RemuxManager::start` hands back: where to load the stream from, and
+/// the release's real duration if `probe` found one -- see
+/// `MediaLayout::duration_seconds` for why the caller needs this rather than
+/// the growing duration of the HLS playlist itself.
+#[derive(Debug, PartialEq)]
+pub struct StartedSession {
+    pub url: String,
+    pub duration_seconds: Option<f64>,
 }
 
 /// Owns the running ffmpeg processes and their segment directories.
@@ -217,6 +255,18 @@ impl RemuxManager {
             .unwrap_or_else(std::env::temp_dir)
             .join("anicat")
             .join("remux-sessions");
+        Self::with_root(root)
+    }
+
+    /// `new()`'s real work, taking the root as a parameter so tests can each
+    /// get their own instead of sharing (and `remove_dir_all`-ing) the one
+    /// real machine-wide path. Two tests spawning real ffmpeg sessions
+    /// against the same shared root raced under the default parallel test
+    /// runner: whichever `RemuxManager::new()` ran second deleted the other's
+    /// segment directory out from under its still-running ffmpeg, an
+    /// intermittent failure that only ever showed up running the full suite,
+    /// never a single test in isolation.
+    fn with_root(root: PathBuf) -> Self {
         let _ = std::fs::remove_dir_all(&root);
         Self {
             root,
@@ -267,14 +317,17 @@ impl RemuxManager {
         file_id: usize,
         start_seconds: i64,
         prefer_dub: bool,
-    ) -> Result<String, String> {
+    ) -> Result<StartedSession, String> {
         let key = (torrent_id, file_id, start_seconds);
         {
             let mut sessions = self.sessions.lock().await;
             self.reap_locked(&mut sessions).await;
             if let Some((id, session)) = sessions.iter_mut().find(|(_, s)| s.key == key) {
                 session.touch();
-                return Ok(format!("/hls/{}/stream_0/index.m3u8", id));
+                return Ok(StartedSession {
+                    url: format!("/hls/{}/stream_0/index.m3u8", id),
+                    duration_seconds: session.duration_seconds,
+                });
             }
             if sessions.len() >= MAX_SESSIONS {
                 return Err(format!(
@@ -305,11 +358,18 @@ impl RemuxManager {
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(log_ffmpeg_stderr(id, stderr));
         }
+        let duration_seconds = layout.duration_seconds;
         {
             let mut sessions = self.sessions.lock().await;
             sessions.insert(
                 id,
-                Session { dir: session_root.clone(), child, last_read: std::time::Instant::now(), key },
+                Session {
+                    dir: session_root.clone(),
+                    child,
+                    last_read: std::time::Instant::now(),
+                    key,
+                    duration_seconds,
+                },
             );
         }
 
@@ -328,7 +388,10 @@ impl RemuxManager {
                     layout.video_codec,
                     if layout.audio_copy { "copied" } else { "re-encoded to aac" },
                 );
-                return Ok(format!("/hls/{}/stream_0/index.m3u8", id));
+                return Ok(StartedSession {
+                    url: format!("/hls/{}/stream_0/index.m3u8", id),
+                    duration_seconds,
+                });
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
@@ -723,13 +786,16 @@ mod tests {
 
         let layout = probe(input.to_str().unwrap(), false).await.expect("probe failed");
         assert_eq!(layout.text_subtitle, Some(0), "the srt track should be found at subtitle index 0");
+        let probed_duration = layout.duration_seconds.expect("ffprobe should find the container's own duration");
+        assert!((probed_duration - 8.0).abs() < 0.5, "{probed_duration}");
 
-        let manager = RemuxManager::new();
-        let url = manager
+        let manager = RemuxManager::with_root(dir.join("sessions"));
+        let started = manager
             .start(input.to_str().unwrap(), 43, 7, 0, false)
             .await
             .expect("session failed to start");
-        let id: u64 = url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
+        assert_eq!(started.duration_seconds, layout.duration_seconds);
+        let id: u64 = started.url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
 
         // ffmpeg writes both outputs from one pass over the input, so the vtt
         // can lag slightly behind the first HLS segment. Poll rather than
@@ -764,13 +830,13 @@ mod tests {
         assert!(layout.video_ok, "h264 8-bit should need no re-encoding");
         assert!(layout.audio_copy, "aac should be copied, not re-encoded");
 
-        let manager = RemuxManager::new();
-        let url = manager
+        let manager = RemuxManager::with_root(dir.join("sessions"));
+        let started = manager
             .start(input.to_str().unwrap(), 42, 7, 0, false)
             .await
             .expect("session failed to start");
-        assert!(url.starts_with("/hls/"), "{url}");
-        let id: u64 = url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
+        assert!(started.url.starts_with("/hls/"), "{}", started.url);
+        let id: u64 = started.url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
 
         // The master playlist has to name both the video rendition and the
         // audio codecs, or Safari refuses it outright.
@@ -795,7 +861,7 @@ mod tests {
         // Asking again for the same episode at the same offset reuses the
         // session rather than starting a second ffmpeg beside it.
         let again = manager.start(input.to_str().unwrap(), 42, 7, 0, false).await.unwrap();
-        assert_eq!(again, url);
+        assert_eq!(again, started);
 
         // A path that climbs out of the session directory is refused however
         // it is spelled.

@@ -1,3 +1,7 @@
+# Apple / macOS
+*.app/
+AniCat.app/
+
 # Python
 __pycache__/
 *.py[cod]

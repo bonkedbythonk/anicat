@@ -297,7 +297,14 @@ impl RemuxManager {
         std::fs::create_dir_all(&dir).map_err(|e| format!("segment dir: {e}"))?;
         let session_root = self.root.join(id.to_string());
 
-        let child = spawn_ffmpeg(input_url, &session_root, &layout, start_seconds)?;
+        let mut child = spawn_ffmpeg(input_url, &session_root, &layout, start_seconds)?;
+        // Taken before the child is stored: `stop`/`reap_locked` own it from
+        // here for `.kill()`, and stderr is a separate handle that doesn't
+        // need mutable access to the child to read, so draining it doesn't
+        // race whichever of those tears the process down.
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(log_ffmpeg_stderr(id, stderr));
+        }
         {
             let mut sessions = self.sessions.lock().await;
             sessions.insert(
@@ -470,10 +477,45 @@ fn spawn_ffmpeg(
     cmd.arg("-hls_segment_filename")
         .arg(session_root.join("stream_%v").join("seg%05d.m4s"));
     cmd.arg(session_root.join("stream_%v").join("index.m3u8"));
+    // stderr is piped, not discarded: `start` reads it in the background and
+    // logs whatever ffmpeg said the moment the pipe closes (natural exit,
+    // crash, or our own kill all close it the same way). Without this, an
+    // ffmpeg that stopped remuxing partway through an episode -- server
+    // closed the connection, a codec it didn't expect mid-stream, anything --
+    // left no trace at all: "timed out waiting for the first segment" already
+    // has a comment noting the same blind spot for the startup case.
     cmd.stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     cmd.spawn().map_err(|e| format!("ffmpeg failed to start: {e}"))
+}
+
+/// Drains an ffmpeg session's stderr and logs the tail once the pipe closes.
+///
+/// `-loglevel error` keeps this to genuine problems, so a healthy session
+/// logs nothing at all; a session that stopped remuxing early -- the case
+/// this exists for -- logs the reason instead of leaving a truncated episode
+/// with no explanation anywhere. Capped rather than buffered whole: a
+/// crash-looping process could otherwise write stderr forever into a task
+/// nothing ever reads back except at exit.
+async fn log_ffmpeg_stderr(id: u64, stderr: tokio::process::ChildStderr) {
+    use tokio::io::AsyncBufReadExt;
+    const TAIL_LINES: usize = 40;
+    let mut lines = tokio::io::BufReader::new(stderr).lines();
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(TAIL_LINES);
+    while let Ok(Some(line)) = lines.next_line().await {
+        if tail.len() == TAIL_LINES {
+            tail.pop_front();
+        }
+        tail.push_back(line);
+    }
+    if !tail.is_empty() {
+        log::warn!(
+            "remux: session {} ffmpeg stderr:\n{}",
+            id,
+            Vec::from(tail).join("\n")
+        );
+    }
 }
 
 fn content_type_for(name: &str) -> &'static str {

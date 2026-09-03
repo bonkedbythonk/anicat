@@ -2507,7 +2507,17 @@ async fn spawn_idle_mpv(
     // `--keep-open=yes` still holds it open at EOF.
     cmd.arg("--idle=once");
     cmd.arg("--force-window=yes");
-    cmd.arg("--ontop");
+    // Neither fullscreen nor ontop, and minimized outright: mpv.conf sets
+    // fullscreen=yes globally, so without this override the idle window took
+    // over the whole screen -- solid black, since nothing is loaded yet --
+    // for however long the resolve took. Reported directly: "I see mpv start
+    // up but it's fully black". Promoted to fullscreen+ontop, and
+    // un-minimized, in the same IPC batch that sends the file (see the
+    // `window-minimized` commands below), so the transition the viewer
+    // actually sees is unchanged: the app's own loading UI stays in front
+    // until there is something worth looking at.
+    cmd.arg("--fullscreen=no");
+    cmd.arg("--window-minimized=yes");
     cmd.arg(format!("--input-ipc-server={}", get_ipc_path()));
 
     // mpv.conf's slang=en,eng,English exists because mpv's own default only
@@ -2867,12 +2877,15 @@ pub async fn start_playback(
         .await
         {
             Ok(()) => {
-                // The window is genuinely on screen from here, which is the
-                // whole question the loading modal was answering -- and it is
-                // `--ontop`, so leaving the modal up would only hide it behind
-                // the player. A resolve that then fails returns Err, and the
-                // frontend's catch reopens the modal with the real reason.
-                emit_playback_active(&app, true);
+                // Deliberately no `emit_playback_active(true)` here. The
+                // window is up, but minimized and not fullscreen (see
+                // `spawn_idle_mpv`), so there is nothing on screen yet worth
+                // dismissing the app's own loading UI for -- that now happens
+                // where it always used to, when the reuse path below actually
+                // sends the file and un-minimizes the player. A resolve that
+                // fails instead returns Err, and the frontend's catch keeps
+                // its own modal up with the real reason -- it was never
+                // dismissed in the first place.
             }
             Err(e) => {
                 // Not fatal: the full launch further down still spawns mpv
@@ -3544,6 +3557,22 @@ pub async fn start_playback(
         ];
         commands.push(serde_json::json!({
             "command": load_cmd
+        }));
+
+        // Promotes the idle window `spawn_idle_mpv` deliberately left
+        // minimized and windowed -- so the black screen the resolve used to
+        // sit behind is never shown -- to what a fresh cold launch (or every
+        // later episode of a binge) already has by the time there is
+        // something to look at. A no-op the rest of the time: an mpv that was
+        // already fullscreen/ontop/mapped just gets told what it already is.
+        commands.push(serde_json::json!({
+            "command": ["set_property", "window-minimized", false]
+        }));
+        commands.push(serde_json::json!({
+            "command": ["set_property", "fullscreen", true]
+        }));
+        commands.push(serde_json::json!({
+            "command": ["set_property", "ontop", true]
         }));
 
         commands.push(serde_json::json!({

@@ -22,10 +22,11 @@ import { EreaderDownloadModal } from "./EreaderDownloadModal";
 import { novelApi } from "@/lib/api";
 import type { NovelDetailItem, NovelVolume } from "@/lib/types";
 import { MediaDiscussions } from "./MediaDiscussions";
+import { MediaReviews } from "./MediaReviews";
 import { AnimeThemeList } from "./AnimeThemeList";
 import { useModalDismiss } from "@/hooks/useModalDismiss";
 
-type DetailTabKey = "episodes" | "characters" | "seasons" | "discussions" | "more";
+type DetailTabKey = "episodes" | "characters" | "seasons" | "discussions" | "reviews" | "more";
 
 function FocusableButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const { ref, tabIndex } = useFocusable<HTMLButtonElement>();
@@ -1276,7 +1277,7 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 className="flex"
               >
                 <ScopeNav />
-                {(['episodes', 'characters', 'seasons', 'discussions', 'more'] as const).map((tab) => {
+                {(['episodes', 'characters', 'seasons', 'discussions', 'reviews', 'more'] as const).map((tab) => {
                   const totalEps = isNovel
                     ? (novelData?.books?.length || fullItem.volumes || fullItem.chapters || 0)
                     : isManga
@@ -1295,7 +1296,19 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                       active={activeTab === tab}
                       onSelect={setActiveTab}
                       count={count}
-                      label={tab === 'episodes' ? (isNovel ? 'Volumes & Books' : isManga ? 'Chapters' : 'Episodes') : tab === 'seasons' ? 'Related' : tab === 'characters' ? 'Cast & Staff' : tab === 'discussions' ? 'Discussions' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                      label={
+                        tab === 'episodes'
+                          ? (isNovel ? 'Volumes & Books' : isManga ? 'Chapters' : 'Episodes')
+                          : tab === 'seasons'
+                          ? 'Related'
+                          : tab === 'characters'
+                          ? 'Cast & Staff'
+                          : tab === 'discussions'
+                          ? 'Discussions'
+                          : tab === 'reviews'
+                          ? 'Reviews'
+                          : tab.charAt(0).toUpperCase() + tab.slice(1)
+                      }
                     />
                   );
                 })}
@@ -1627,6 +1640,11 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                       mediaTitle={fullItem.title?.english || fullItem.title?.romaji || title}
                       isManga={isManga}
                     />
+                  </motion.div>
+                )}
+                {activeTab === 'reviews' && (
+                  <motion.div key="reviews" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="h-full w-full">
+                    <MediaReviews mediaId={item.id} />
                   </motion.div>
                 )}
                 {activeTab === 'more' && (

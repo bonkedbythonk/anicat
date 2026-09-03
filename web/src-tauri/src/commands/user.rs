@@ -103,11 +103,9 @@ pub async fn get_user_list_impl(
                 if let Some(lists_arr) = lists.as_array_mut() {
                     let target_upper = target_status.to_uppercase();
                     lists_arr.retain(|list_val| {
-                        if let Some(list_status) = list_val.get("status").and_then(|s| s.as_str()) {
-                            list_status.to_uppercase() == target_upper
-                        } else {
-                            false
-                        }
+                        let name = list_val.get("name").and_then(|s| s.as_str()).unwrap_or("");
+                        let list_status = list_val.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                        list_status.to_uppercase() == target_upper || name.eq_ignore_ascii_case(target_status)
                     });
                 }
             }

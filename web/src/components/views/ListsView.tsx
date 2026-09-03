@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { MediaCard } from "@/components/media/MediaCard";
 import { InfiniteScroll } from "@/components/shared/InfiniteScroll";
 import { MediaTypeToggle } from "@/components/shared/MediaTypeToggle";
@@ -29,8 +30,8 @@ function TabButton({
   type,
   onClick,
 }: {
-  tab: { key: WatchStatus; label: string };
-  activeTab: WatchStatus;
+  tab: { key: string; label: string; count?: number };
+  activeTab: string;
   type: "ANIME" | "MANGA";
   onClick: () => void;
 }) {
@@ -48,13 +49,16 @@ function TabButton({
       onClick={onClick}
       aria-selected={activeTab === tab.key}
       role="tab"
-      className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium whitespace-nowrap cursor-pointer ${
+      className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
         activeTab === tab.key
           ? "bg-accent/15 text-accent"
           : "text-foreground/50 hover:text-foreground/80"
       }`}
     >
-      {label}
+      <span>{label}</span>
+      {tab.count != null && tab.count > 0 && (
+        <span className="ml-1 opacity-60 text-[11px] font-mono">({tab.count})</span>
+      )}
     </button>
   );
 }
@@ -182,6 +186,12 @@ export function ListsView({ onSelect }: ListsViewProps) {
     localStorage.setItem("anicat_library_layout", next);
   };
 
+  const { data: customLists = [] } = useQuery({
+    queryKey: ["custom-lists", type],
+    queryFn: () => mediaApi.getUserCustomLists(type),
+    enabled: isAuthenticated,
+  });
+
   const { items, loading, loadingMore, hasMore, loadMore } =
     usePaginatedList<MediaItem>({
       fetchFn: async (page) => {
@@ -234,6 +244,20 @@ export function ListsView({ onSelect }: ListsViewProps) {
             onClick={() => setActiveTab(tab.key)}
           />
         ))}
+        {customLists.length > 0 && (
+          <>
+            <div className="w-px h-4 bg-border self-center mx-1" />
+            {customLists.map((c) => (
+              <TabButton
+                key={c.name}
+                tab={{ key: c.name, label: c.name, count: c.count }}
+                activeTab={activeTab}
+                type={type}
+                onClick={() => setActiveTab(c.name)}
+              />
+            ))}
+          </>
+        )}
       </FocusScope>
 
       <div className="relative">

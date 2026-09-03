@@ -348,6 +348,47 @@ pub async fn get_media_characters_impl(
 }
 
 #[tauri::command]
+pub async fn get_media_reviews(
+    state: State<'_, AppState>,
+    media_id: i64,
+    page: Option<i32>,
+    per_page: Option<i32>,
+) -> Result<Value, String> {
+    get_media_reviews_impl(state.inner(), media_id, page, per_page).await
+}
+
+pub async fn get_media_reviews_impl(
+    state: &AppState,
+    media_id: i64,
+    page: Option<i32>,
+    per_page: Option<i32>,
+) -> Result<Value, String> {
+    let p = page.unwrap_or(1);
+    let pp = per_page.unwrap_or(20);
+    let key = format!("get_media_reviews|{}|{}|{}", media_id, p, pp);
+    if let Some(v) = state.cache.get(&key) {
+        return Ok(v);
+    }
+
+    let mut vars = HashMap::new();
+    vars.insert("mediaId".to_string(), serde_json::json!(media_id));
+    vars.insert("page".to_string(), serde_json::json!(p));
+    vars.insert("perPage".to_string(), serde_json::json!(pp));
+
+    let result: Value = match state
+        .anilist_client
+        .execute(queries::MEDIA_REVIEWS_QUERY, vars)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return state.cache.stale_or_err(&key, e),
+    };
+
+    state.cache.set(key, result.clone(), "get_media_reviews");
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn get_smart_playlist(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {

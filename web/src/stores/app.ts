@@ -9,6 +9,7 @@ interface AppConfig {
     anime_preview?: boolean;
     preferred_title_language?: string;
     downloads_path?: string;
+    manga_provider?: string;
     notifications?: boolean;
   };
   stream?: {
@@ -142,8 +143,8 @@ interface AppState {
   // the detail page opens (a sibling branch in App.tsx's AnimatePresence
   // ternary), which would otherwise reset the selected tab back to Watching
   // every time you open an item and come back.
-  listsActiveTab: WatchStatus;
-  setListsActiveTab: (tab: WatchStatus) => void;
+  listsActiveTab: WatchStatus | string;
+  setListsActiveTab: (tab: WatchStatus | string) => void;
   listsType: "ANIME" | "MANGA";
   setListsType: (type: "ANIME" | "MANGA") => void;
 

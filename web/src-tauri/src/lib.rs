@@ -166,6 +166,7 @@ pub fn run() {
             commands::media::get_seasonal,
             commands::media::get_upcoming,
             commands::media::get_media_characters,
+            commands::media::get_media_reviews,
             commands::media::get_staff,
             commands::media::get_smart_playlist,
             commands::media::get_episodes,

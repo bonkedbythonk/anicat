@@ -137,7 +137,7 @@ pub const USER_LIST_QUERY: &str = r#"
 query ($userName: String, $type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
   MediaListCollection(userName: $userName, type: $type, status: $status, sort: $sort) {
     lists {
-      name status
+      name status isCustomList
       entries {
         id status score progress progressVolumes repeat private notes
         updatedAt startedAt { year month day } completedAt { year month day }
@@ -354,6 +354,40 @@ query ($page: Int, $perPage: Int, $airingAt_greater: Int, $airingAt_lesser: Int,
       }
     }
     pageInfo { total currentPage hasNextPage }
+  }
+}
+"#;
+
+pub const MEDIA_REVIEWS_QUERY: &str = r#"
+query ($mediaId: Int, $page: Int, $perPage: Int) {
+  Media(id: $mediaId) {
+    reviews(page: $page, perPage: $perPage, sort: [RATING_DESC, ID_DESC]) {
+      pageInfo {
+        total
+        perPage
+        currentPage
+        lastPage
+        hasNextPage
+      }
+      nodes {
+        id
+        summary
+        body(asHtml: false)
+        rating
+        ratingAmount
+        score
+        user {
+          id
+          name
+          avatar {
+            large
+            medium
+          }
+        }
+        createdAt
+        updatedAt
+      }
+    }
   }
 }
 "#;

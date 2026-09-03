@@ -63,6 +63,7 @@ export async function getConfig(): Promise<{
     anime_preview: boolean;
     preferred_title_language: string;
     downloads_path: string;
+    manga_provider?: string;
     time_format?: string;
   };
   stream: {
@@ -372,6 +373,48 @@ export function flattenCharacterEdges(res: unknown): Character[] {
       voiceActors: edge.voiceActors ?? [],
     };
   });
+}
+
+export interface MediaReview {
+  id: number;
+  summary: string;
+  body: string;
+  rating: number;
+  ratingAmount: number;
+  score: number;
+  user: {
+    id: number;
+    name: string;
+    avatar?: {
+      large?: string;
+      medium?: string;
+    };
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MediaReviewsResponse {
+  Media?: {
+    reviews?: {
+      pageInfo?: {
+        total: number;
+        perPage: number;
+        currentPage: number;
+        lastPage: number;
+        hasNextPage: boolean;
+      };
+      nodes?: MediaReview[];
+    };
+  };
+}
+
+export async function getMediaReviews(
+  mediaId: number,
+  page = 1,
+  perPage = 20,
+): Promise<MediaReviewsResponse> {
+  return invoke("get_media_reviews", { mediaId, page, perPage });
 }
 
 export async function getSmartPlaylist(): Promise<{
@@ -809,9 +852,26 @@ export const mediaApi = {
   mapProviderSlug,
   clearProviderCache,
   getUserProfile: getUser,
+  getReviews: getMediaReviews,
+  getUserCustomLists: async (type?: string): Promise<{ name: string; count: number }[]> => {
+    try {
+      const result = await getUserLists(undefined, undefined, type);
+      const lists = result?.MediaListCollection?.lists ?? [];
+      return lists
+        .filter((l: any) => l.isCustomList)
+        .map((l: any) => ({ name: l.name, count: l.entries?.length ?? 0 }));
+    } catch {
+      return [];
+    }
+  },
   getUserList: async (status?: string, type?: string, page?: number) => {
     try {
-      const anilistStatus = ({
+      const isStandardStatus = status && [
+        "watching", "reading", "current", "rereading", "completed",
+        "paused", "dropped", "planning", "repeating"
+      ].includes(status.toLowerCase());
+
+      const anilistStatus = isStandardStatus ? ({
         watching: "CURRENT",
         reading: "CURRENT",
         current: "CURRENT",
@@ -821,7 +881,7 @@ export const mediaApi = {
         dropped: "DROPPED",
         planning: "PLANNING",
         repeating: "REPEATING",
-      } as Record<string, string>)[status?.toLowerCase() ?? ""] ?? status?.toUpperCase() ?? "CURRENT";
+      } as Record<string, string>)[status.toLowerCase()] : (status || "CURRENT");
 
       const result = await getUserLists(undefined, anilistStatus, type);
       const lists = result?.MediaListCollection?.lists ?? [];
@@ -865,7 +925,6 @@ export const mediaApi = {
   checkHealth: getHealth,
   getAppVersion,
   // Stub methods for old component compatibility — delegate to real commands where possible
-  getReviews: async () => [],
   getRecommendations: async () => [],
   getRelations: async () => [],
   addToQueue: async (mediaId: number, episodes: number[], title?: string, coverImage?: string) => {

@@ -4222,7 +4222,7 @@ pub async fn report_builtin_player_state(
 /// covers where there was never a text track to extract.
 struct RemuxedStream {
     video_url: String,
-    subtitle_url: String,
+    subtitle_url: Option<String>,
     duration_seconds: Option<f64>,
 }
 
@@ -4250,17 +4250,19 @@ async fn remux_torrent_stream(
     let (torrent_id, file_id) = (torrent_id?, file_id?);
     match manager.start(loopback_url, torrent_id, file_id, 0, prefer_dub).await {
         Ok(started) => {
-            // "/hls/{id}/stream_0/index.m3u8" -- subs.vtt is a sibling of
-            // stream_0 at the session root, served by the same flat
-            // `/hls/{id}/{file}` route master.m3u8 already uses.
             let video_url = started.url;
             let id = video_url
                 .trim_start_matches("/hls/")
                 .split('/')
                 .next()
                 .unwrap_or_default();
+            let subtitle_url = if started.has_subtitles {
+                Some(format!("/hls/{}/subs.vtt", id))
+            } else {
+                None
+            };
             Some(RemuxedStream {
-                subtitle_url: format!("/hls/{}/subs.vtt", id),
+                subtitle_url,
                 video_url,
                 duration_seconds: started.duration_seconds,
             })
@@ -4366,7 +4368,7 @@ pub async fn resolve_builtin_player_stream(
         match remux_torrent_stream(&state.remux, &raw_url, &path_and_query, prefer_dub).await {
             Some(remuxed_stream) => {
                 remuxed = true;
-                remux_subtitle_url = Some(remuxed_stream.subtitle_url);
+                remux_subtitle_url = remuxed_stream.subtitle_url;
                 remux_duration_seconds = remuxed_stream.duration_seconds;
                 remuxed_stream.video_url
             }

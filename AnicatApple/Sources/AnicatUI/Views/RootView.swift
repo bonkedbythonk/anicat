@@ -46,10 +46,6 @@ public struct RootView: View {
 
                 // Dynamic Main Content Area
                 VStack(spacing: 0) {
-                    // Titlebar Spacer (38px on macOS to clear traffic lights)
-                    Color.clear
-                        .frame(height: 38)
-
                     // Active Section Switcher
                     Group {
                     // The detail page replaces the section, inside the
@@ -98,6 +94,18 @@ public struct RootView: View {
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     model.closeDetail()
                                 }
+                            },
+                            onSetListStatus: { status in
+                                Task { await model.updateListEntry(status: status) }
+                            },
+                            onToggleFavourite: {
+                                Task { await model.toggleFavourite() }
+                            },
+                            onRemoveFromList: {
+                                Task { await model.removeFromList() }
+                            },
+                            onSetEpisodeWatched: { episode, watched in
+                                Task { await model.setEpisodeWatched(episode, watched: watched) }
                             }
                         )
                         .id(details.id)

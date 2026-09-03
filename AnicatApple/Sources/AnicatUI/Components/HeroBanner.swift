@@ -1,0 +1,189 @@
+import SwiftUI
+
+public struct HeroBanner: View {
+    public struct Details: Sendable {
+        public let title: String
+        public let romajiTitle: String?
+        public let bannerURL: URL?
+        public let coverURL: URL?
+        public let format: String?
+        public let year: Int?
+        public let studio: String?
+        public let synopsis: String?
+        public let genres: [String]
+        public let averageScore: Int?
+        public let nextEpisodeText: String?
+        
+        public init(
+            title: String,
+            romajiTitle: String? = nil,
+            bannerURL: URL? = nil,
+            coverURL: URL? = nil,
+            format: String? = nil,
+            year: Int? = nil,
+            studio: String? = nil,
+            synopsis: String? = nil,
+            genres: [String] = [],
+            averageScore: Int? = nil,
+            nextEpisodeText: String? = nil
+        ) {
+            self.title = title
+            self.romajiTitle = romajiTitle
+            self.bannerURL = bannerURL
+            self.coverURL = coverURL
+            self.format = format
+            self.year = year
+            self.studio = studio
+            self.synopsis = synopsis
+            self.genres = genres
+            self.averageScore = averageScore
+            self.nextEpisodeText = nextEpisodeText
+        }
+    }
+
+    public let details: Details
+    public let onPrimaryAction: () -> Void
+    public let onTrailerAction: (() -> Void)?
+
+    public init(
+        details: Details,
+        onPrimaryAction: @escaping () -> Void,
+        onTrailerAction: (() -> Void)? = nil
+    ) {
+        self.details = details
+        self.onPrimaryAction = onPrimaryAction
+        self.onTrailerAction = onTrailerAction
+    }
+
+    public var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Backdrop Image with Gradient Fade
+            GeometryReader { geo in
+                AsyncImage(url: details.bannerURL ?? details.coverURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                    default:
+                        Rectangle()
+                            .fill(SumiTheme.card)
+                    }
+                }
+                
+                // Darkening Overlays for Sumi Ledger Contrast
+                LinearGradient(
+                    stops: [
+                        .init(color: SumiTheme.background.opacity(0.1), location: 0.0),
+                        .init(color: SumiTheme.background.opacity(0.75), location: 0.65),
+                        .init(color: SumiTheme.background, location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                // Left-to-right subtle vignette
+                LinearGradient(
+                    colors: [SumiTheme.background.opacity(0.85), Color.clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+
+            // Content Overlay
+            VStack(alignment: .leading, spacing: SumiTheme.spaceSm) {
+                // Badges & Meta
+                HStack(spacing: 8) {
+                    if let format = details.format {
+                        StatusBadge(.format(format))
+                    }
+                    if let year = details.year {
+                        Text(String(year))
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                    if let studio = details.studio {
+                        Text("• \(studio)")
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                    if let score = details.averageScore, score > 0 {
+                        StatusBadge(.score(score))
+                    }
+                }
+
+                // Title
+                Text(details.title)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(2)
+
+                if let romaji = details.romajiTitle, romaji != details.title {
+                    Text(romaji)
+                        .font(.system(size: 14))
+                        .foregroundColor(SumiTheme.muted)
+                        .lineLimit(1)
+                }
+
+                // Synopsis
+                if let synopsis = details.synopsis {
+                    Text(synopsis)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(SumiTheme.muted)
+                        .lineLimit(3)
+                        .padding(.top, 2)
+                        .frame(maxWidth: 600, alignment: .leading)
+                }
+
+                // Actions
+                HStack(spacing: 12) {
+                    Button(action: onPrimaryAction) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 13))
+                            Text(details.nextEpisodeText ?? "Watch Now")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(SumiTheme.background)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(SumiTheme.indigo)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    }
+                    .buttonStyle(.plain)
+
+                    if let onTrailer = onTrailerAction {
+                        Button(action: onTrailer) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "film")
+                                    .font(.system(size: 13))
+                                Text("Trailer")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(SumiTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding(SumiTheme.spaceLg)
+        }
+        .frame(height: 320)
+        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+        .overlay(
+            RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
+                .stroke(SumiTheme.border, lineWidth: 1)
+        )
+    }
+}

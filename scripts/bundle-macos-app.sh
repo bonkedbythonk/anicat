@@ -52,6 +52,11 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- The Ink & Index skin is dark-only; without this the bundle inherits
+         the system appearance and SumiTheme's dynamic colours resolve to the
+         washi-paper light palette on a Mac set to Light. -->
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
 </dict>
 </plist>
 EOF

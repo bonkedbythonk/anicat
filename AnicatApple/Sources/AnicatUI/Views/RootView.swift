@@ -141,18 +141,19 @@ public struct RootView: View {
     // MARK: - Home / Up Next View
     private var homeView: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 40) {
                 // Up Next Section Header
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Up Next")
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.system(size: 19, weight: .semibold))
+                                .tracking(-0.3)
                                 .foregroundColor(SumiTheme.foreground)
 
                             if !model.upNextItems.isEmpty {
-                                Text("\(model.upNextItems.count) in progress")
-                                    .sumiTabularMono(size: 11, weight: .medium)
+                                Text(upNextSubtitle)
+                                    .sumiTabularMono(size: 11.5)
                                     .foregroundColor(SumiTheme.muted)
                             }
                         }
@@ -165,15 +166,20 @@ public struct RootView: View {
                                 openDetailFor(id: random.id, title: random.title, coverURL: random.coverImageURL)
                             }
                         }) {
+                            // Hairline only, no fill: the web button is
+                            // `border border-border` over the page ground. A
+                            // filled version reads as a macOS push button and
+                            // outweighs the "Resume" control below it, which
+                            // is the one thing on this screen meant to be
+                            // primary.
                             Text("Pick for me")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground.opacity(0.75))
+                                .foregroundColor(SumiTheme.foreground.opacity(0.7))
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 6)
-                                .background(SumiTheme.card)
-                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                         .stroke(SumiTheme.border, lineWidth: 1)
                                 )
                         }
@@ -210,33 +216,53 @@ public struct RootView: View {
                     mediaRow(title: "Trending Now", count: model.trendingItems.count, items: model.trendingItems)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 24)
+            // `px-6 lg:px-10 pt-10 pb-8` on the web's scroll container, and
+            // `max-w-[1100px]` on the page inside it. Without the cap the
+            // shelves stretch the full window and the layout stops matching
+            // at any width past ~1280.
+            .padding(.horizontal, 40)
+            .padding(.top, 40)
+            .padding(.bottom, 32)
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
+    }
+
+    /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only
+    /// appended when there are any, matching HomeView.tsx.
+    private var upNextSubtitle: String {
+        let inProgress = model.upNextItems.count
+        let new = model.upNextItems.filter(\.hasNewEpisode).count
+        var out = "\(inProgress) in progress"
+        if new > 0 {
+            out += " · \(new) new episode\(new == 1 ? "" : "s")"
+        }
+        return out
     }
 
     private func mediaRow(title: String, count: Int, items: [MediaCard.Item]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 Text(title)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
 
                 Spacer()
 
                 Text("\(count) shows")
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(items) { item in
                         MediaCard(item: item) {
                             openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL)
                         }
-                        .frame(width: 165)
+                        .frame(width: 180)
                     }
                 }
                 .padding(.vertical, 4)

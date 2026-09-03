@@ -60,12 +60,18 @@ public struct UpNextQueueView: View {
                 )
 
                 if index < items.count - 1 {
-                    Divider()
-                        .background(SumiTheme.border)
+                    // A `Divider` draws its own system separator colour and
+                    // ignores `.background`, so the hairline read as a bright
+                    // macOS rule instead of the 10% cream border.
+                    Rectangle()
+                        .fill(SumiTheme.border)
+                        .frame(height: 1)
                 }
             }
         }
-        .background(SumiTheme.card)
+        // No fill on the container: only the first row carries `bg-surface`.
+        // Filling the whole card flattened the queue's one piece of hierarchy
+        // — the primary row stopped standing out from the rest.
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
         .overlay(
             RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
@@ -88,8 +94,8 @@ public struct UpNextQueueView: View {
                     HStack(spacing: 16) {
                         // 104x60 Thumbnail
                         ZStack {
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                .fill(SumiTheme.background)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(SumiTheme.card)
                                 .frame(width: 104, height: 60)
 
                             AsyncImage(url: entry.thumbnailURL) { phase in
@@ -111,10 +117,10 @@ public struct UpNextQueueView: View {
                             }
                         }
                         .frame(width: 104, height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
 
                         // Info Column
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 0) {
                             Text(entry.title)
                                 .font(.system(size: isFirst ? 15 : 13.5, weight: isFirst ? .semibold : .medium))
                                 .foregroundColor(SumiTheme.foreground)
@@ -131,8 +137,9 @@ public struct UpNextQueueView: View {
                                     Text("Watched \(watched)")
                                 }
                             }
-                            .sumiTabularMono(size: 11)
+                            .sumiTabularMono(size: 11.5)
                             .foregroundColor(SumiTheme.muted)
+                            .padding(.top, 6)
 
                             // 2px Progress Bar
                             if entry.totalCount > 0 {
@@ -146,7 +153,7 @@ public struct UpNextQueueView: View {
                                     }
                                 }
                                 .frame(maxWidth: 420, maxHeight: 2)
-                                .padding(.top, 2)
+                                .padding(.top, 8)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,13 +165,16 @@ public struct UpNextQueueView: View {
                 Button(action: onPlay) {
                     Text(isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"))
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(isFirst ? SumiTheme.background : SumiTheme.foreground.opacity(0.85))
+                        // `text-black`, not the ink background: the accent is
+                        // a pale indigo and #161310 on it is a muddy low
+                        // contrast where pure black is crisp.
+                        .foregroundColor(isFirst ? Color.black : SumiTheme.foreground.opacity(0.7))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(isFirst ? SumiTheme.indigo : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                 .stroke(isFirst ? Color.clear : SumiTheme.border, lineWidth: 1)
                         )
                 }

@@ -79,11 +79,14 @@ public struct SidebarView: View {
 
             // Bottom Logo & Search Button
             VStack(spacing: 12) {
-                // Subtle Cat Silhouette Mark
+                // The mark is decorative and deliberately almost invisible —
+                // `opacity-10` on the web. Anything more competes with poster
+                // art, which is the only thing in this skin allowed to shout.
                 Image(systemName: "cat.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(SumiTheme.muted.opacity(0.15))
+                    .font(.system(size: 34))
+                    .foregroundColor(SumiTheme.foreground.opacity(0.10))
                     .frame(maxWidth: .infinity)
+                    .padding(.bottom, 8)
 
                 // Search Bar Button (⌘K)
                 Button(action: onOpenSearchPalette) {
@@ -94,26 +97,24 @@ public struct SidebarView: View {
 
                         Spacer()
 
+                        // Bare text, no chip. The web's ⌘K here carries
+                        // `meta-mono` and nothing else; boxing it made the
+                        // control read as two nested buttons.
                         Text("⌘K")
                             .sumiTabularMono(size: 9)
                             .foregroundColor(SumiTheme.muted)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(SumiTheme.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(SumiTheme.background.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
         .frame(width: 200)
@@ -123,10 +124,10 @@ public struct SidebarView: View {
     private func navGroup(title: String, items: [NavSection]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .sumiTabularMono(size: 10.5, weight: .medium)
-                .foregroundColor(SumiTheme.muted.opacity(0.7))
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
                 .padding(.horizontal, 20)
-                .padding(.top, 14)
+                .padding(.top, 16)
                 .padding(.bottom, 6)
 
             ForEach(items) { item in
@@ -152,20 +153,20 @@ public struct SidebarView: View {
                     Text(sc)
                         .sumiTabularMono(size: 10)
                         .foregroundColor(SumiTheme.muted)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(SumiTheme.foreground.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 3)
+                            RoundedRectangle(cornerRadius: 4)
                                 .stroke(SumiTheme.border.opacity(0.5), lineWidth: 1)
                         )
                 }
             }
             .padding(.leading, 20)
-            .padding(.trailing, 14)
+            .padding(.trailing, 16)
             .padding(.vertical, 7)
-            .background(isActive ? SumiTheme.indigo.opacity(0.12) : Color.clear)
+            .background(isActive ? SumiTheme.indigo.opacity(0.10) : Color.clear)
             .overlay(
                 // 2px solid left accent indicator matching Tauri CSS
                 Rectangle()

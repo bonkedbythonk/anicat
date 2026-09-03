@@ -107,6 +107,10 @@ public enum SumiTheme {
     public static let warning = Color(hex: "#EAB308")
     public static let warningLight = Color(hex: "#FACC15")
     
+    /// The muted foreground at the alpha the poster tick's track uses, and
+    /// the same 10% wash behind a progress bar or a shortcut chip.
+    public static var foregroundWash: Color { foreground.opacity(0.10) }
+
     // MARK: - Radius
     public static let radiusSm: CGFloat = 6
     public static let radiusMd: CGFloat = 10
@@ -178,6 +182,15 @@ public enum SumiTheme {
 
 // MARK: - Typography Modifiers
 
+/// `.meta-mono` from index.css: uppercase mono with tabular figures, the
+/// skin's signature for anything that carries state (EP 11 / 25, WATCHED 6H
+/// AGO). Never for titles or button labels — those stay sentence case.
+///
+/// The uppercasing is the part that is easy to lose and most visible when it
+/// is: without it the same string renders "1 in progress" here and
+/// "1 IN PROGRESS" on the web, and every metadata line in the app reads as a
+/// different design. Tracking is `0.08em`, so it scales with the size rather
+/// than being one hardcoded point value across call sites from 9pt to 11.5pt.
 public struct SumiTabularMono: ViewModifier {
     var size: CGFloat = 11.5
     var weight: Font.Weight = .regular
@@ -186,7 +199,8 @@ public struct SumiTabularMono: ViewModifier {
         content
             .font(.system(size: size, weight: weight, design: .monospaced))
             .monospacedDigit()
-            .tracking(0.8)
+            .textCase(.uppercase)
+            .tracking(size * 0.08)
     }
 }
 

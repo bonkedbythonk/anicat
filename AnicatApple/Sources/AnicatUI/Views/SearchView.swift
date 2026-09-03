@@ -26,8 +26,9 @@ public struct SearchView: View {
             VStack(alignment: .leading, spacing: 24) {
                 // Header & Search Input
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Search")
-                        .font(.system(size: 24, weight: .bold))
+                    Text("Search & Browse")
+                        .font(.system(size: 19, weight: .semibold))
+                        .tracking(-0.3)
                         .foregroundColor(SumiTheme.foreground)
 
                     HStack(spacing: 12) {
@@ -37,7 +38,7 @@ public struct SearchView: View {
 
                         TextField("Search anime, manga, studios, genres...", text: $searchText)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 14))
+                            .font(.system(size: 15))
                             .foregroundColor(SumiTheme.foreground)
                             .onSubmit {
                                 onSearchCommit(searchText)
@@ -57,36 +58,45 @@ public struct SearchView: View {
                                 .tint(SumiTheme.indigo)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(SumiTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    // `bg-transparent border border-border rounded-lg`: the
+                    // field is a hairline over the page ground, not a filled
+                    // surface. Filling it made the one input on the page read
+                    // as a card and pulled more weight than the results.
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 40)
 
                 // Results Count
                 if !results.isEmpty {
                     HStack {
-                        Text("\(results.count) RESULTS")
-                            .sumiTabularMono(size: 11, weight: .semibold)
+                        Text("\(results.count) results")
+                            .sumiTabularMono(size: 11.5)
                             .foregroundColor(SumiTheme.muted)
                         Spacer()
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 40)
 
-                    // Responsive Grid
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)], spacing: 20) {
+                    // `gap-5` (20pt) both ways, five to six columns wide. The
+                    // adaptive range brackets the poster width the shelves on
+                    // the home page use so a card is the same size in both.
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
+                        alignment: .leading,
+                        spacing: 20
+                    ) {
                         ForEach(results) { item in
                             MediaCard(item: item) {
                                 onSelectMedia(item)
                             }
                         }
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 40)
                 } else if !searchText.isEmpty && !isLoading {
                     VStack(spacing: 8) {
                         Image(systemName: "questionmark.folder")
@@ -99,7 +109,10 @@ public struct SearchView: View {
                     .frame(maxWidth: .infinity, minHeight: 200)
                 }
             }
-            .padding(.vertical, 24)
+            .padding(.top, 40)
+            .padding(.bottom, 32)
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
     }

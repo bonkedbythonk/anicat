@@ -410,7 +410,7 @@ pub async fn get_episodes_impl(
         Some(p) if !p.is_empty() => p,
         _ => state.config.read().await.general.provider.clone(),
     };
-    let is_manga = provider_name == "mangakatana";
+    let is_manga = provider_name == "mangakatana" || provider_name == "mangadex";
 
     // Torrents have no scrapeable episode list: synthesize one from the count
     // the frontend already knows, or from AniList (aired-so-far for airing
@@ -437,7 +437,7 @@ pub async fn get_episodes_impl(
 
     let mut episodes = if let Some(ref slug) = slug {
         let res = if is_manga {
-            state.scraper_manager.get_manga(slug).await.map(|info| info.episodes)
+            state.scraper_manager.get_manga(slug, &provider_name).await.map(|info| info.episodes)
         } else {
             state.scraper_manager.get_anime(slug, &provider_name).await.map(|info| info.episodes)
         };
@@ -461,10 +461,10 @@ pub async fn get_episodes_impl(
         .await?
         {
             let res = if is_manga {
-                match state.scraper_manager.get_manga(&slug).await {
+                match state.scraper_manager.get_manga(&slug, &provider_name).await {
                     Ok(info) => info.episodes,
                     Err(e) => {
-                        log::error!("get_manga failed for slug '{}': {}", slug, e);
+                        log::error!("get_manga failed for slug '{}' on provider '{}': {}", slug, provider_name, e);
                         vec![]
                     }
                 }
@@ -482,6 +482,25 @@ pub async fn get_episodes_impl(
             vec![]
         }
     };
+
+    // If manga returned 0 chapters on the requested provider, try the alternate provider
+    if is_manga && episodes.is_empty() {
+        let fallback_provider = if provider_name == "mangadex" { "mangakatana" } else { "mangadex" };
+        log::info!("get_episodes: manga provider '{}' returned 0 chapters, trying fallback '{}'", provider_name, fallback_provider);
+        let fb_slug = registry::service::get_provider_slug(&db, media_id, fallback_provider);
+        let fb_res = if let Some(ref s) = fb_slug {
+            state.scraper_manager.get_manga(s, fallback_provider).await.map(|info| info.episodes).ok()
+        } else if let Ok(Some(s)) = resolve_and_save_provider_slug(state, media_id, fallback_provider, true, title.clone()).await {
+            state.scraper_manager.get_manga(&s, fallback_provider).await.map(|info| info.episodes).ok()
+        } else {
+            None
+        };
+        if let Some(eps) = fb_res {
+            if !eps.is_empty() {
+                episodes = eps;
+            }
+        }
+    }
 
     // Self-heal stale mis-matches: a saved slug whose episode count wildly
     // contradicts AniList's total for a finished show was matched to the
@@ -810,6 +829,10 @@ pub async fn search_provider_impl(
         }]);
     }
 
+    if provider_name == "mangakatana" || provider_name == "mangadex" {
+        return state.scraper_manager.search_manga(&query, &provider_name, None).await;
+    }
+
     state.scraper_manager.search(&query, &provider_name).await
 }
 
@@ -888,15 +911,25 @@ pub async fn get_chapter_pages_impl(
     media_id: i64,
     chapter_number: String,
 ) -> Result<Value, String> {
-    let provider_name = "mangakatana".to_string();
-
+    let configured_provider = state.config.read().await.general.manga_provider.clone();
     let db = state.open_db().map_err(|e| e.to_string())?;
-    let slug = registry::service::get_provider_slug(&db, media_id, &provider_name)
-        .ok_or_else(|| format!("No provider mapping for media {}", media_id))?;
+
+    let (slug, provider_used) = match registry::service::get_provider_slug(&db, media_id, &configured_provider) {
+        Some(s) => (s, configured_provider),
+        None => {
+            let alt = if configured_provider == "mangadex" { "mangakatana" } else { "mangadex" };
+            match registry::service::get_provider_slug(&db, media_id, alt) {
+                Some(s) => (s, alt.to_string()),
+                None => {
+                    return Err(format!("No provider mapping for media {}", media_id));
+                }
+            }
+        }
+    };
 
     let pages = state
         .scraper_manager
-        .get_chapter_pages(&slug, &chapter_number)
+        .get_chapter_pages(&slug, &chapter_number, &provider_used)
         .await?;
 
     Ok(pages)
@@ -1980,7 +2013,7 @@ pub async fn resolve_and_save_provider_slug_for_episode(
         }
         log::info!("resolve_and_save_provider_slug: searching '{}' on '{}'", query, provider_name);
         let search_res = if is_manga {
-            state.scraper_manager.search_manga(query).await
+            state.scraper_manager.search_manga(query, provider_name, Some(media_id)).await
         } else {
             state.scraper_manager.search(query, provider_name).await
         };

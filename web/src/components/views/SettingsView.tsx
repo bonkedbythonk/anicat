@@ -516,10 +516,11 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField label="Manga Provider" description="Source for manga chapters.">
                   <select
-                    value={String(config.general?.manga_provider || "mangakatana")}
+                    value={String(config.general?.manga_provider || "mangadex")}
                     onChange={(e) => updateField("general", "manga_provider", e.target.value)}
                     className="w-full sm:w-auto sm:min-w-[160px] bg-surface border border-border rounded-lg px-3 py-1.5 text-[13px] font-medium focus:border-accent outline-none transition-all appearance-none cursor-pointer text-foreground"
                   >
+                    <option value="mangadex">MangaDex (Default)</option>
                     <option value="mangakatana">MangaKatana</option>
                   </select>
                 </SettingField>

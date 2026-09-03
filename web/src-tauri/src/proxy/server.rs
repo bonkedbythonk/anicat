@@ -952,6 +952,8 @@ fn rewrite_playlist(playlist_text: &str, base_url: &reqwest::Url) -> String {
 const ALLOWED_DOMAINS: &[&str] = &[
     "anilist.co",
     "mangakatana.com",
+    "mangadex.org",
+    "mangadex.network",
     "ani.zip", "aniskip.com", "api.jikan.moe", "imgur.com",
     "gravatar.com",
 ];

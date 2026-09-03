@@ -318,12 +318,13 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
   // Secondary tabs (characters, reviews, recommendations) are lazy-loaded
   // only when the user switches to them, avoiding 4 simultaneous GraphQL
   // requests on mount that can trigger AniList rate limits.
+  const mangaProvider = (config?.general?.manga_provider as string) || "mangadex";
   const {
     data: episodesRaw,
     isLoading: loadingEps,
   } = useQuery({
-    queryKey: ["media-episodes", item.id, isManga ? "mangakatana" : selectedProvider],
-    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? "mangakatana" : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || undefined, fullItem?.episodes ?? item.episodes ?? undefined),
+    queryKey: ["media-episodes", item.id, isManga ? mangaProvider : selectedProvider],
+    queryFn: () => mediaApi.getEpisodes(item.id, isManga ? mangaProvider : selectedProvider, item.title?.english || item.title?.romaji || item.title?.native || undefined, fullItem?.episodes ?? item.episodes ?? undefined),
     enabled: !!selectedProvider || isManga,
   });
   const episodes: Episode[] = Array.isArray(episodesRaw) ? episodesRaw : [];
@@ -1790,7 +1791,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                 if (!matchQuery.trim()) return;
                 setMatchLoading(true);
                 try {
-                  const results = await mediaApi.searchProvider(matchQuery.trim(), selectedProvider);
+                  const targetProvider = isManga ? mangaProvider : selectedProvider;
+                  const results = await mediaApi.searchProvider(matchQuery.trim(), targetProvider);
                   setMatchResults(results);
                 } catch {
                   notifyError("Search failed.");
@@ -1824,7 +1826,8 @@ export function MediaDetail({ item, onClose, initialAction, onRead }: MediaDetai
                     onClick={async () => {
                       setMatchSaving(true);
                       try {
-                        await mediaApi.mapProviderSlug(item.id, selectedProvider, r.id);
+                        const targetProvider = isManga ? mangaProvider : selectedProvider;
+                        await mediaApi.mapProviderSlug(item.id, targetProvider, r.id);
                         await mediaApi.clearProviderCache(item.id).catch(() => {});
                         queryClient.invalidateQueries({ queryKey: ['media-episodes', item.id], refetchType: 'all' });
                         queryClient.invalidateQueries({ queryKey: ['media-detail', item.id], refetchType: 'all' });

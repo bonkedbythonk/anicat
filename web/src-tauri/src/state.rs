@@ -115,7 +115,7 @@ fn default_media_api() -> String {
     "anilist".into()
 }
 fn default_manga_provider() -> String {
-    "mangakatana".into()
+    "mangadex".into()
 }
 fn default_novel_provider() -> String {
     "ranobedb".into()

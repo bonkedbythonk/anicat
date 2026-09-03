@@ -74,7 +74,7 @@ const FOREGROUND_IDLE_TIMEOUT_SECS: u64 = 1800;
 /// Providers the Python sidecar actually implements — the only ones worth
 /// sending to `/warmup`. `nyaa` is served by the embedded torrent engine and
 /// `none` is the "no fallback" sentinel; neither has a sidecar module.
-const SIDECAR_PROVIDERS: &[&str] = &["mangakatana"];
+const SIDECAR_PROVIDERS: &[&str] = &["mangakatana", "mangadex"];
 const READY_RETRY_MS: u64 = 100;
 const MAX_READY_ATTEMPTS: u32 = 50;
 
@@ -579,13 +579,22 @@ impl ScraperManager {
         }
     }
 
-    pub async fn search_manga(&self, query: &str) -> Result<Vec<AnimeRef>, String> {
+    pub async fn search_manga(
+        &self,
+        query: &str,
+        provider: &str,
+        anilist_id: Option<i64>,
+    ) -> Result<Vec<AnimeRef>, String> {
         let port = self.ensure_running().await?;
-        let url = format!(
-            "http://127.0.0.1:{}/manga/search?query={}",
+        let mut url = format!(
+            "http://127.0.0.1:{}/manga/search?query={}&provider={}",
             port,
-            crate::util::percent_encode(query)
+            crate::util::percent_encode(query),
+            crate::util::percent_encode(provider),
         );
+        if let Some(al_id) = anilist_id {
+            url.push_str(&format!("&anilist_id={}", al_id));
+        }
         let resp = self
             .http_client
             .get(&url)
@@ -593,11 +602,11 @@ impl ScraperManager {
             .send()
             .await
             .map_err(|e| {
-                log::error!("Scraper manga search request failed (query={}): {}", query, e);
+                log::error!("Scraper manga search request failed (query={}, provider={}): {}", query, provider, e);
                 format!("Scraper search failed: {}", e)
             })?;
         let body = sidecar_body(resp).await.map_err(|e| {
-            log::error!("Scraper manga search errored (query={}): {}", query, e);
+            log::error!("Scraper manga search errored (query={}, provider={}): {}", query, provider, e);
             format!("Scraper search failed: {}", e)
         })?;
         serde_json::from_str(&body).map_err(|e| {
@@ -606,12 +615,13 @@ impl ScraperManager {
         })
     }
 
-    pub async fn get_manga(&self, slug: &str) -> Result<AnimeInfo, String> {
+    pub async fn get_manga(&self, slug: &str, provider: &str) -> Result<AnimeInfo, String> {
         let port = self.ensure_running().await?;
         let url = format!(
-            "http://127.0.0.1:{}/manga/get?slug={}",
+            "http://127.0.0.1:{}/manga/get?slug={}&provider={}",
             port,
-            crate::util::percent_encode(slug)
+            crate::util::percent_encode(slug),
+            crate::util::percent_encode(provider),
         );
         let resp = self
             .http_client
@@ -620,12 +630,12 @@ impl ScraperManager {
             .send()
             .await
             .map_err(|e| {
-                log::error!("Scraper get_manga request failed (slug={}): {}", slug, e);
+                log::error!("Scraper get_manga request failed (slug={}, provider={}): {}", slug, provider, e);
                 format!("Scraper get_manga failed: {}", e)
             })?;
         // Same 200-with-`error` shape as `/get` above.
         let body = sidecar_body(resp).await.map_err(|e| {
-            log::error!("Scraper get_manga errored (slug={}): {}", slug, e);
+            log::error!("Scraper get_manga errored (slug={}, provider={}): {}", slug, provider, e);
             format!("Scraper get_manga failed: {}", e)
         })?;
         serde_json::from_str(&body).map_err(|e| {
@@ -638,13 +648,15 @@ impl ScraperManager {
         &self,
         slug: &str,
         chapter: &str,
+        provider: &str,
     ) -> Result<serde_json::Value, String> {
         let port = self.ensure_running().await?;
         let url = format!(
-            "http://127.0.0.1:{}/manga/chapter?slug={}&chapter={}",
+            "http://127.0.0.1:{}/manga/chapter?slug={}&chapter={}&provider={}",
             port,
             crate::util::percent_encode(slug),
-            crate::util::percent_encode(chapter)
+            crate::util::percent_encode(chapter),
+            crate::util::percent_encode(provider),
         );
         let resp = self
             .http_client
@@ -653,11 +665,11 @@ impl ScraperManager {
             .send()
             .await
             .map_err(|e| {
-                log::error!("Scraper get_chapter_pages request failed (slug={}, chapter={}): {}", slug, chapter, e);
+                log::error!("Scraper get_chapter_pages request failed (slug={}, chapter={}, provider={}): {}", slug, chapter, provider, e);
                 format!("Scraper get_chapter_pages failed: {}", e)
             })?;
         let body = sidecar_body(resp).await.map_err(|e| {
-            log::error!("Scraper get_chapter_pages errored (slug={}, chapter={}): {}", slug, chapter, e);
+            log::error!("Scraper get_chapter_pages errored (slug={}, chapter={}, provider={}): {}", slug, chapter, provider, e);
             format!("Scraper get_chapter_pages failed: {}", e)
         })?;
         serde_json::from_str(&body).map_err(|e| {

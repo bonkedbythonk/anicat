@@ -39,6 +39,9 @@ def _load_provider(name: str) -> object:
     elif name == "mangakatana":
         from mangakatana import MangaKatanaProvider
         PROVIDERS["mangakatana"] = MangaKatanaProvider()
+    elif name == "mangadex":
+        from mangadex import MangaDexProvider
+        PROVIDERS["mangadex"] = MangaDexProvider()
     return PROVIDERS.get(name)
 
 
@@ -245,22 +248,34 @@ async def debug_test():
 
 
 @app.get("/manga/search")
-async def manga_search(query: str = Query(...)):
+async def manga_search(
+    query: str = Query(...),
+    provider: str = Query("mangadex"),
+    anilist_id: Optional[int] = Query(None),
+):
     _touch()
     try:
-        prov = _load_provider("mangakatana")
-        results = await prov.search(query)
+        prov = _require_provider(provider)
+        if hasattr(prov, "search"):
+            import inspect
+            sig = inspect.signature(prov.search)
+            if "anilist_id" in sig.parameters:
+                results = await prov.search(query, anilist_id=anilist_id)
+            else:
+                results = await prov.search(query)
+        else:
+            results = []
         return [{"id": r["id"], "title": r["title"], "year": None} for r in results]
     except Exception as e:
-        logger.exception(f"Manga search failed for query='{query}'")
+        logger.exception(f"Manga search failed for query='{query}' provider='{provider}'")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/manga/get")
-async def get_manga(slug: str = Query(...)):
+async def get_manga(slug: str = Query(...), provider: str = Query("mangadex")):
     _touch()
     try:
-        prov = _load_provider("mangakatana")
+        prov = _require_provider(provider)
         info = await prov.get(slug)
         if info is None:
             return {"title": "", "episodes": []}
@@ -272,25 +287,29 @@ async def get_manga(slug: str = Query(...)):
             ],
         }
     except Exception as e:
-        logger.exception(f"Manga get failed for slug='{slug}'")
+        logger.exception(f"Manga get failed for slug='{slug}' provider='{provider}'")
         return {"title": "", "episodes": [], "error": str(e)}
 
 
 @app.get("/manga/chapter")
-async def get_chapter(slug: str = Query(...), chapter: str = Query(...)):
+async def get_chapter(
+    slug: str = Query(...),
+    chapter: str = Query(...),
+    provider: str = Query("mangadex"),
+):
     _touch()
     try:
-        prov = _load_provider("mangakatana")
+        prov = _require_provider(provider)
         info = await prov.get(slug)
         if not info or not info.get("chapters"):
             return {"thumbnails": [], "title": ""}
-        
+
         target_ch = None
         for ep in info["chapters"]:
             if str(ep["number"]) == chapter:
                 target_ch = ep
                 break
-                
+
         if not target_ch:
             try:
                 ch_float = float(chapter)
@@ -300,16 +319,16 @@ async def get_chapter(slug: str = Query(...), chapter: str = Query(...)):
                         break
             except ValueError:
                 pass
-                
+
         if not target_ch:
             return {"thumbnails": [], "title": ""}
-            
+
         pages_info = await prov.get_pages(target_ch["url"])
         if not pages_info:
             return {"thumbnails": [], "title": ""}
         return pages_info
     except Exception as e:
-        logger.exception(f"Manga chapter failed for slug='{slug}' chapter='{chapter}'")
+        logger.exception(f"Manga chapter failed for slug='{slug}' chapter='{chapter}' provider='{provider}'")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 

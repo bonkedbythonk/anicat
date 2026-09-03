@@ -4212,12 +4212,25 @@ pub async fn report_builtin_player_state(
 
 /// Put a torrent release through ffmpeg and hand back the HLS path, or `None`
 /// to fall through to serving the file as it is.
+/// The remuxed video URL, plus a guessed subtitle URL alongside it.
+///
+/// The subtitle URL is not confirmed to exist -- `spawn_ffmpeg` only writes
+/// `subs.vtt` when the release has a text subtitle track, and checking that
+/// here would mean an extra read of the session directory on every play. A
+/// browser `<track>` element handles a missing file the same way it handles
+/// no `src` at all: silently no subtitles, which is exactly the case this
+/// covers where there was never a text track to extract.
+struct RemuxedStream {
+    video_url: String,
+    subtitle_url: String,
+}
+
 async fn remux_torrent_stream(
     manager: &crate::proxy::remux::RemuxManager,
     loopback_url: &str,
     path_and_query: &str,
     prefer_dub: bool,
-) -> Option<String> {
+) -> Option<RemuxedStream> {
     if !manager.is_available().await {
         return None;
     }
@@ -4235,7 +4248,20 @@ async fn remux_torrent_stream(
     }
     let (torrent_id, file_id) = (torrent_id?, file_id?);
     match manager.start(loopback_url, torrent_id, file_id, 0, prefer_dub).await {
-        Ok(url) => Some(url),
+        Ok(video_url) => {
+            // "/hls/{id}/stream_0/index.m3u8" -- subs.vtt is a sibling of
+            // stream_0 at the session root, served by the same flat
+            // `/hls/{id}/{file}` route master.m3u8 already uses.
+            let id = video_url
+                .trim_start_matches("/hls/")
+                .split('/')
+                .next()
+                .unwrap_or_default();
+            Some(RemuxedStream {
+                subtitle_url: format!("/hls/{}/subs.vtt", id),
+                video_url,
+            })
+        }
         Err(e) => {
             log::warn!("remux: falling back to the raw file: {}", e);
             None
@@ -4330,12 +4356,14 @@ pub async fn resolve_builtin_player_stream(
         rest.split_once('/').map(|(_, tail)| format!("/{tail}"))
     }).filter(|p| p.starts_with("/torrent-stream"));
     let mut remuxed = false;
+    let mut remux_subtitle_url: Option<String> = None;
     let prefer_dub = translation_type == "dub";
     let mut stream_url = if let Some(path_and_query) = torrent_path {
         match remux_torrent_stream(&state.remux, &raw_url, &path_and_query, prefer_dub).await {
-            Some(url) => {
+            Some(remuxed_stream) => {
                 remuxed = true;
-                url
+                remux_subtitle_url = Some(remuxed_stream.subtitle_url);
+                remuxed_stream.video_url
             }
             None => path_and_query,
         }
@@ -4428,7 +4456,15 @@ pub async fn resolve_builtin_player_stream(
     Ok(serde_json::json!({
         "stream_url": stream_url,
         "resume_seconds": if remuxed { 0 } else { resume_seconds },
-        "subtitle_url": if remuxed { None } else { subtitle_url },
+        // A remuxed torrent release has no `raw_subtitle_url` to proxy --
+        // nyaa's resolve never returns one (see resolve_stream_for_provider's
+        // torrent arm) -- so `subtitle_url` here is always None for it, and
+        // used to be sent as None outright rather than the vtt sibling
+        // `remux_torrent_stream` extracts from the release's own MKV subtitle
+        // track. A release with no text subtitle stream still gets a URL
+        // here; it 404s and the <track> element just shows nothing, same as
+        // if this were never set.
+        "subtitle_url": if remuxed { remux_subtitle_url } else { subtitle_url },
     }))
 }
 

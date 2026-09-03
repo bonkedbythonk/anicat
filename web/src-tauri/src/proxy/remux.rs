@@ -477,6 +477,21 @@ fn spawn_ffmpeg(
     cmd.arg("-hls_segment_filename")
         .arg(session_root.join("stream_%v").join("seg%05d.m4s"));
     cmd.arg(session_root.join("stream_%v").join("index.m3u8"));
+
+    // A second output on the same input: `probe` already finds a text
+    // subtitle track when there is one (see `MediaLayout::text_subtitle`'s
+    // doc comment), but nothing ever mapped it into the remux, so a torrent
+    // release with subs baked into the MKV played with none in the builtin
+    // player -- the video/audio -map pair above is the only stream this
+    // command ever asked for. `content_type_for` and the session-file route
+    // already serve ".vtt"; only the extraction itself was missing.
+    // Image subtitles (PGS, VobSub) are excluded upstream in `probe`, since
+    // the webvtt encoder only accepts text-based codecs.
+    if let Some(idx) = layout.text_subtitle {
+        cmd.args(["-map", &format!("0:s:{idx}")]);
+        cmd.args(["-c:s", "webvtt"]);
+        cmd.arg(session_root.join("subs.vtt"));
+    }
     // stderr is piped, not discarded: `start` reads it in the background and
     // logs whatever ffmpeg said the moment the pipe closes (natural exit,
     // crash, or our own kill all close it the same way). Without this, an
@@ -650,6 +665,80 @@ mod tests {
             .status()
             .await;
         status.map(|s| s.success()).unwrap_or(false)
+    }
+
+    /// Same as `fixture`, plus an embedded SRT track -- what a fansub release
+    /// actually ships subtitles as, muxed into the MKV rather than alongside
+    /// it as a sidecar file.
+    async fn fixture_with_subtitle(path: &std::path::Path, srt_path: &std::path::Path) -> bool {
+        if !RemuxManager::probe_binaries().await {
+            eprintln!("skipping: ffmpeg/ffprobe not installed");
+            return false;
+        }
+        if tokio::fs::write(
+            srt_path,
+            "1\n00:00:00,000 --> 00:00:01,500\nHello world\n\n2\n00:00:01,500 --> 00:00:02,000\nSecond line\n\n",
+        )
+        .await
+        .is_err()
+        {
+            return false;
+        }
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-nostdin", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=8",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=8",
+            ])
+            .arg("-i").arg(srt_path)
+            .args([
+                "-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-c:s", "srt",
+            ])
+            .arg(path)
+            .status()
+            .await;
+        status.map(|s| s.success()).unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn a_release_with_an_embedded_subtitle_track_gets_a_vtt_sibling() {
+        let dir = std::env::temp_dir().join(format!("anicat-remux-subs-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let input = dir.join("episode.mkv");
+        let srt = dir.join("sub.srt");
+        if !fixture_with_subtitle(&input, &srt).await {
+            return;
+        }
+
+        let layout = probe(input.to_str().unwrap(), false).await.expect("probe failed");
+        assert_eq!(layout.text_subtitle, Some(0), "the srt track should be found at subtitle index 0");
+
+        let manager = RemuxManager::new();
+        let url = manager
+            .start(input.to_str().unwrap(), 43, 7, 0, false)
+            .await
+            .expect("session failed to start");
+        let id: u64 = url.trim_start_matches("/hls/").split('/').next().unwrap().parse().unwrap();
+
+        // ffmpeg writes both outputs from one pass over the input, so the vtt
+        // can lag slightly behind the first HLS segment. Poll rather than
+        // read once immediately after start.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let vtt = loop {
+            if let Some((bytes, content_type)) = manager.read(id, "subs.vtt").await {
+                assert_eq!(content_type, "text/vtt");
+                break String::from_utf8(bytes).unwrap();
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("subs.vtt never appeared");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        };
+        assert!(vtt.starts_with("WEBVTT"), "{vtt}");
+        assert!(vtt.contains("Hello world"), "{vtt}");
+
+        manager.stop(id).await;
     }
 
     #[tokio::test]

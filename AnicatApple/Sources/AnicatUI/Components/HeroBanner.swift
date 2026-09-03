@@ -14,6 +14,30 @@ public struct HeroBanner: View {
         public let genres: [String]
         public let averageScore: Int?
         public let nextEpisodeText: String?
+        /// AniList `status`: RELEASING, FINISHED, NOT_YET_RELEASED. Drives the
+        /// one coloured word in the meta line.
+        public let status: String?
+        public let episodeCount: Int?
+        /// Where the resume offer points, when there is one.
+        public let resumeEpisode: Int?
+        public let resumeSeconds: Int?
+        public let prequel: Relation?
+        public let sequel: Relation?
+
+        /// A neighbouring season, as the detail page's chain cards draw it.
+        public struct Relation: Sendable, Identifiable {
+            public let id: Int64
+            public let title: String
+            public let format: String?
+            public let coverURL: URL?
+
+            public init(id: Int64, title: String, format: String? = nil, coverURL: URL? = nil) {
+                self.id = id
+                self.title = title
+                self.format = format
+                self.coverURL = coverURL
+            }
+        }
         
         public init(
             id: Int64 = 0,
@@ -27,8 +51,20 @@ public struct HeroBanner: View {
             synopsis: String? = nil,
             genres: [String] = [],
             averageScore: Int? = nil,
-            nextEpisodeText: String? = nil
+            nextEpisodeText: String? = nil,
+            status: String? = nil,
+            episodeCount: Int? = nil,
+            resumeEpisode: Int? = nil,
+            resumeSeconds: Int? = nil,
+            prequel: Relation? = nil,
+            sequel: Relation? = nil
         ) {
+            self.status = status
+            self.episodeCount = episodeCount
+            self.resumeEpisode = resumeEpisode
+            self.resumeSeconds = resumeSeconds
+            self.prequel = prequel
+            self.sequel = sequel
             self.id = id
             self.title = title
             self.romajiTitle = romajiTitle

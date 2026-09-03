@@ -144,6 +144,77 @@ public final class AppModel: @unchecked Sendable {
         await loadHistory()
     }
 
+    /// Opens the detail page for a title, replacing the fabricated stand-in
+    /// that used to fill it: 28 episodes numbered 1...28, every one titled
+    /// "Episode N", a hardcoded synopsis of "An extraordinary journey begins."
+    /// and a score of 92 regardless of the show.
+    public func openDetail(catalogId: Int64, isManga: Bool = false) async {
+        guard let engine else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let d = try await engine.mediaDetail(catalogId: catalogId, isManga: isManga)
+            selectedMediaDetails = HeroBanner.Details(
+                id: d.catalogId,
+                title: d.title,
+                romajiTitle: d.romajiTitle,
+                bannerURL: d.bannerImage.flatMap(URL.init(string:)),
+                coverURL: URL(string: d.coverImage),
+                format: d.format,
+                year: d.year.map(Int.init),
+                studio: d.studio,
+                synopsis: d.synopsis,
+                genres: d.genres,
+                averageScore: d.averageScore.map(Int.init),
+                nextEpisodeText: nil,
+                status: d.status,
+                episodeCount: (d.episodeCount ?? d.chapterCount).map(Int.init),
+                resumeEpisode: d.resumeEpisode.map(Int.init),
+                resumeSeconds: d.resumeSeconds.map(Int.init),
+                prequel: d.prequel.map(Self.relation),
+                sequel: d.sequel.map(Self.relation)
+            )
+            selectedEpisodes = d.episodes.map { e in
+                MediaDetailView.EpisodeItem(
+                    id: Int64(e.number),
+                    number: Int(e.number),
+                    title: e.title,
+                    thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
+                    isWatched: e.isWatched,
+                    progressPercent: e.progressPercent,
+                    runtimeMinutes: e.runtimeMinutes.map(Int.init)
+                )
+            }
+            selectedMangaChapters = []
+            if isManga {
+                await loadMangaChapters(title: d.title, anilistId: catalogId)
+            }
+        } catch {
+            errorMessage = "Could not open that title: \(error.localizedDescription)"
+        }
+    }
+
+    /// MangaDex has no AniList ids of its own to search by, so the title is
+    /// the query and `links.al` is what confirms the match.
+    private func loadMangaChapters(title: String, anilistId: Int64) async {
+        guard let engine else { return }
+        guard let match = try? await engine.searchManga(query: title, anilistId: anilistId),
+              let first = match.first else { return }
+        let chapters = (try? await engine.getMangaChapters(mangaId: first.id)) ?? []
+        selectedMangaChapters = chapters.map {
+            MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
+        }
+    }
+
+    static func relation(_ r: RelatedTitle) -> HeroBanner.Details.Relation {
+        HeroBanner.Details.Relation(
+            id: r.catalogId,
+            title: r.title,
+            format: r.format,
+            coverURL: URL(string: r.coverImage)
+        )
+    }
+
     /// Maps the engine's flat summary onto a card. One place, so a card in
     /// the Library draws its progress tick from the same fields as one in a
     /// home shelf.

@@ -41,6 +41,36 @@ public struct RootView: View {
 
                     // Active Section Switcher
                     Group {
+                    // The detail page replaces the section, inside the
+                    // content column. It is not a window-wide overlay: the
+                    // sidebar stays visible and stays navigable, which is what
+                    // the web build does by rendering it inside <main>.
+                    if let details = model.selectedMediaDetails {
+                        MediaDetailView(
+                            details: details,
+                            episodes: model.selectedEpisodes,
+                            mangaChapters: model.selectedMangaChapters,
+                            characters: [],
+                            onPlayEpisode: { ep in
+                                Task {
+                                    _ = try? await model.resolveAndPlay(
+                                        catalogId: details.id,
+                                        episode: Int64(ep.number),
+                                        title: details.title
+                                    )
+                                }
+                            },
+                            onReadChapter: { _ in },
+                            onExportAppleBooks: {},
+                            onClose: {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    model.selectedMediaDetails = nil
+                                }
+                            }
+                        )
+                        .transition(.opacity)
+                    } else {
+                        Group {
                         switch model.currentNavSection {
                         case .upNext:
                             homeView
@@ -113,6 +143,8 @@ public struct RootView: View {
                         case .downloads:
                             DownloadsView()
                         }
+                        }
+                    }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -129,33 +161,6 @@ public struct RootView: View {
                 .transition(.opacity)
             }
 
-            // Media Detail Overlay
-            if let details = model.selectedMediaDetails {
-                MediaDetailView(
-                    details: details,
-                    episodes: model.selectedEpisodes,
-                    mangaChapters: model.selectedMangaChapters,
-                    characters: [],
-                    onPlayEpisode: { ep in
-                        Task {
-                            _ = try? await model.resolveAndPlay(
-                                catalogId: details.id,
-                                episode: Int64(ep.number),
-                                title: details.title
-                            )
-                        }
-                    },
-                    onReadChapter: { _ in },
-                    onExportAppleBooks: {},
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            model.selectedMediaDetails = nil
-                        }
-                    }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .zIndex(10)
-            }
 
             // In-App Video Player Overlay
             if let streamURL = model.activeStreamURL {
@@ -362,36 +367,10 @@ public struct RootView: View {
         .background(SumiTheme.background)
     }
 
-    private func openDetailFor(id: Int64, title: String, coverURL: URL?) {
-        let details = HeroBanner.Details(
-            id: id,
-            title: title,
-            romajiTitle: nil,
-            bannerURL: coverURL,
-            coverURL: coverURL,
-            format: "TV",
-            year: 2024,
-            studio: nil,
-            synopsis: "An extraordinary journey begins.",
-            genres: ["Adventure", "Fantasy", "Drama"],
-            averageScore: 92,
-            nextEpisodeText: "EP 5 / 28"
-        )
-
-        let episodes = (1...28).map { ep in
-            MediaDetailView.EpisodeItem(
-                id: Int64(ep),
-                number: ep,
-                title: "Episode \(ep)",
-                thumbnailURL: coverURL,
-                isWatched: ep < 5,
-                progressPercent: ep == 5 ? 45 : 0
-            )
-        }
-
-        withAnimation(.easeInOut(duration: 0.25)) {
-            model.selectedMediaDetails = details
-            model.selectedEpisodes = episodes
-        }
+    /// Opens the detail page. The fabricated 28-episode stand-in this used
+    /// to build is gone; the engine answers with the real entry.
+    private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false) {
+        Task { await model.openDetail(catalogId: id, isManga: isManga) }
     }
+
 }

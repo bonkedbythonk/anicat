@@ -150,6 +150,61 @@ pub struct ViewerProfile {
     pub top_genres: Vec<String>,
 }
 
+/// A neighbouring entry in a franchise, for the detail page's season chain.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RelatedTitle {
+    pub catalog_id: i64,
+    pub title: String,
+    pub format: Option<String>,
+    pub cover_image: String,
+}
+
+/// One episode row on the detail page.
+///
+/// AniList has no episode table: it gives a total count and, for some titles,
+/// a `streamingEpisodes` list scraped from the streaming sites. The rows are
+/// therefore synthesized from the count and enriched from that list where it
+/// lines up, which is why `title` falls back to "Episode N" rather than the
+/// row going missing.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct EpisodeRow {
+    pub number: i32,
+    pub title: String,
+    pub thumbnail: Option<String>,
+    pub is_watched: bool,
+    /// 0-100 through the episode, from the local registry.
+    pub progress_percent: f64,
+    pub runtime_minutes: Option<i32>,
+}
+
+/// Everything the detail page draws.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct MediaDetail {
+    pub catalog_id: i64,
+    pub title: String,
+    pub romaji_title: Option<String>,
+    pub cover_image: String,
+    pub banner_image: Option<String>,
+    pub format: Option<String>,
+    pub status: Option<String>,
+    pub year: Option<i32>,
+    pub studio: Option<String>,
+    pub synopsis: Option<String>,
+    pub genres: Vec<String>,
+    pub average_score: Option<i32>,
+    pub episode_count: Option<i32>,
+    pub chapter_count: Option<i32>,
+    pub duration_minutes: Option<i32>,
+    /// The episode the resume button points at, and how far into it, from the
+    /// local registry rather than from AniList — AniList tracks whole
+    /// episodes and knows nothing about a position inside one.
+    pub resume_episode: Option<i32>,
+    pub resume_seconds: Option<i32>,
+    pub prequel: Option<RelatedTitle>,
+    pub sequel: Option<RelatedTitle>,
+    pub episodes: Vec<EpisodeRow>,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct WatchProgress {
     pub episode_number: i64,
@@ -404,6 +459,94 @@ impl AnicatEngine {
             .collect())
     }
 
+    /// One title, with its episode list and this device's progress folded in.
+    pub async fn media_detail(&self, catalog_id: i64, is_manga: bool) -> FfiResult<MediaDetail> {
+        let res = self
+            .catalogs
+            .media_detail(catalog_id, is_manga)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        let m = res.media.ok_or_else(|| AnicatError::NotFound {
+            msg: format!("AniList has no media {catalog_id}"),
+        })?;
+
+        let history = self
+            .registry
+            .history_for(Catalog::Anilist, catalog_id)
+            .unwrap_or_default();
+
+        let episode_count = m.episodes.unwrap_or(0);
+        let streaming = m.streaming_episodes.clone().unwrap_or_default();
+        let mut episodes = Vec::new();
+        for number in 1..=episode_count {
+            let entry = history.iter().find(|e| e.episode_number == number as i64);
+            // 85% is the same threshold the player uses to advance AniList
+            // progress, so "watched" means the same thing in both places.
+            let percent = entry
+                .filter(|e| e.duration > 0)
+                .map(|e| (e.stop_time as f64 / e.duration as f64) * 100.0)
+                .unwrap_or(0.0);
+            let from_stream = streaming.get((number - 1) as usize);
+            episodes.push(EpisodeRow {
+                number,
+                title: from_stream
+                    .and_then(|s| s.title.clone())
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or_else(|| format!("Episode {number}")),
+                thumbnail: from_stream.and_then(|s| s.thumbnail.clone()),
+                is_watched: percent >= 85.0,
+                progress_percent: percent,
+                runtime_minutes: m.duration,
+            });
+        }
+
+        // The furthest episode with a real position that is not finished. A
+        // completed episode is not something to resume into.
+        let resume = history
+            .iter()
+            .filter(|e| e.duration > 0 && e.stop_time > 0)
+            .filter(|e| (e.stop_time as f64 / e.duration as f64) < 0.85)
+            .max_by_key(|e| e.episode_number);
+
+        let (prequel, sequel) = relations(&m);
+
+        Ok(MediaDetail {
+            catalog_id,
+            title: m
+                .title
+                .as_ref()
+                .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                .unwrap_or_default(),
+            romaji_title: m.title.as_ref().and_then(|t| t.romaji.clone()),
+            cover_image: m
+                .cover_image
+                .as_ref()
+                .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                .unwrap_or_default(),
+            banner_image: m.banner_image.clone(),
+            format: m.format.clone(),
+            status: m.status.clone(),
+            year: m.season_year.or_else(|| m.start_date.as_ref().and_then(|d| d.year)),
+            studio: m
+                .studios
+                .as_ref()
+                .and_then(|s| s.nodes.as_ref())
+                .and_then(|n| n.first())
+                .and_then(|s| s.name.clone()),
+            synopsis: m.description.as_ref().map(|d| strip_html(d)),
+            genres: m.genres.clone().unwrap_or_default(),
+            average_score: m.average_score,
+            episode_count: m.episodes,
+            chapter_count: m.chapters,
+            duration_minutes: m.duration,
+            resume_episode: resume.map(|e| e.episode_number as i32),
+            resume_seconds: resume.map(|e| e.stop_time as i32),
+            prequel,
+            sequel,
+            episodes,
+        })
+    }
+
     pub async fn search_manga(
         &self,
         query: String,
@@ -503,6 +646,63 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
     }
+}
+
+/// AniList descriptions are HTML fragments — `<br>`, `<i>`, the odd `<b>`.
+/// SwiftUI's `Text` renders markup literally, so a raw description shows the
+/// tags as text. Strips them rather than rendering, which is all a synopsis
+/// needs.
+fn strip_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                // A `<br>` is a real line break in the source text.
+                out.push(' ');
+            }
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&mdash;", "\u{2014}")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The franchise's immediate neighbours, if AniList names them.
+fn relations(m: &anilist::types::MediaItem) -> (Option<RelatedTitle>, Option<RelatedTitle>) {
+    let mut prequel = None;
+    let mut sequel = None;
+    for edge in m.relations.as_ref().and_then(|r| r.edges.as_ref()).into_iter().flatten() {
+        let Some(node) = edge.node.as_ref() else { continue };
+        let card = RelatedTitle {
+            catalog_id: node.id,
+            title: node
+                .title
+                .as_ref()
+                .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                .unwrap_or_default(),
+            format: node.format.clone(),
+            cover_image: node
+                .cover_image
+                .as_ref()
+                .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                .unwrap_or_default(),
+        };
+        match edge.relation_type.as_deref() {
+            Some("PREQUEL") if prequel.is_none() => prequel = Some(card),
+            Some("SEQUEL") if sequel.is_none() => sequel = Some(card),
+            _ => {}
+        }
+    }
+    (prequel, sequel)
 }
 
 /// One place that flattens `MediaItem` for the FFI, so a field added for one

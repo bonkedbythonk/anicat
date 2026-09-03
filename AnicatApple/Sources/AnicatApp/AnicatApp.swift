@@ -24,5 +24,33 @@ struct AnicatApp: App {
             SidebarCommands()
         }
         #endif
+
+        #if os(macOS)
+        MenuBarExtra("AniCat", systemImage: "cat.fill") {
+            MenuBarView(
+                lastWatchedTitle: model.upNextItems.first?.title,
+                lastWatchedEpisode: model.upNextItems.first?.nextEpisodeOrChapter,
+                lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+                onResumeLastWatched: {
+                    if let first = model.upNextItems.first {
+                        Task {
+                            _ = try? await model.resolveAndPlay(
+                                catalogId: first.id,
+                                episode: Int64(first.nextEpisodeOrChapter),
+                                title: first.title
+                            )
+                        }
+                    }
+                },
+                onOpenMainApp: {
+                    NSApp.activate(ignoringOtherApps: true)
+                },
+                onQuit: {
+                    NSApp.terminate(nil)
+                }
+            )
+        }
+        .menuBarExtraStyle(.window)
+        #endif
     }
 }

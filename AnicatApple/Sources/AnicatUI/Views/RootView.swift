@@ -71,12 +71,13 @@ public struct RootView: View {
             }
 
             // In-App Video Player Overlay
-            if model.activeStreamURL != nil {
+            if let streamURL = model.activeStreamURL {
                 PlayerView(
                     controller: playerController,
+                    streamURL: streamURL,
                     onClose: {
                         withAnimation(.easeInOut(duration: 0.25)) {
-                            model.activeStreamURL = nil
+                            model.stopPlayback()
                         }
                     }
                 )

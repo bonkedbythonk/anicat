@@ -2,10 +2,12 @@ import SwiftUI
 
 public struct PlayerView: View {
     @Bindable public var controller: PlayerController
+    public let streamURL: URL?
     public let onClose: () -> Void
 
-    public init(controller: PlayerController, onClose: @escaping () -> Void) {
+    public init(controller: PlayerController, streamURL: URL? = nil, onClose: @escaping () -> Void) {
         self.controller = controller
+        self.streamURL = streamURL
         self.onClose = onClose
     }
 
@@ -15,7 +17,14 @@ public struct PlayerView: View {
             Color.black
                 .ignoresSafeArea()
 
-            // Simulated Video Surface (or Embedded Metal Layer)
+            #if os(macOS)
+            MpvMetalSurface(controller: controller, streamURL: streamURL)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    controller.togglePlayPause()
+                }
+            #else
             VStack {
                 Spacer()
                 Image(systemName: "film")
@@ -25,15 +34,13 @@ public struct PlayerView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground.opacity(0.7))
                     .padding(.top, 8)
-                Text("Episode \(controller.episodeNumber) · Rendering via Apple Metal")
-                    .sumiTabularMono(size: 12)
-                    .foregroundColor(SumiTheme.indigo)
                 Spacer()
             }
             .contentShape(Rectangle())
             .onTapGesture {
                 controller.togglePlayPause()
             }
+            #endif
 
             // Paused Overlay Icon
             if !controller.isPlaying && controller.areControlsVisible {

@@ -41,8 +41,16 @@ let package = Package(
             ]
         ),
         .target(
+            name: "Cmpv",
+            path: "Sources/Cmpv",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .unsafeFlags(["-L/opt/homebrew/opt/mpv/lib", "-lmpv"])
+            ]
+        ),
+        .target(
             name: "AnicatUI",
-            dependencies: ["AnicatCoreKit"],
+            dependencies: ["AnicatCoreKit", "Cmpv"],
             path: "Sources/AnicatUI",
             resources: [
                 .copy("Resources/Shaders")
@@ -50,7 +58,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Anicat",
-            dependencies: ["AnicatUI", "AnicatCoreKit"],
+            dependencies: ["AnicatUI", "AnicatCoreKit", "Cmpv"],
             path: "Sources/AnicatApp"
         ),
         // Covers the FFI boundary itself, independently of any view: the

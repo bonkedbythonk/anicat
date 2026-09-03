@@ -1,0 +1,5 @@
+module Cmpv [system] {
+    header "Cmpv.h"
+    link "mpv"
+    export *
+}

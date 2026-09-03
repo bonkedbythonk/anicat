@@ -38,6 +38,7 @@ public struct MangaReaderView: View {
     @State private var showControls: Bool = true
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
+    @State private var wasFullScreenBeforeOpen: Bool = false
 
     public init(
         title: String,
@@ -102,6 +103,36 @@ public struct MangaReaderView: View {
                 .transition(.opacity)
             }
         }
+        .onAppear {
+            #if os(macOS)
+            if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                wasFullScreenBeforeOpen = window.styleMask.contains(.fullScreen)
+                if !wasFullScreenBeforeOpen {
+                    window.toggleFullScreen(nil)
+                }
+            }
+            #endif
+        }
+        .onDisappear {
+            #if os(macOS)
+            if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
+                    window.toggleFullScreen(nil)
+                }
+            }
+            #endif
+        }
+    }
+
+    private func exitReader() {
+        #if os(macOS)
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
+                window.toggleFullScreen(nil)
+            }
+        }
+        #endif
+        onClose()
     }
 
     // MARK: - Webtoon (Continuous Vertical) View
@@ -190,7 +221,7 @@ public struct MangaReaderView: View {
     // MARK: - Top Bar
     private var topBar: some View {
         HStack {
-            Button(action: onClose) {
+            Button(action: exitReader) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
@@ -211,6 +242,22 @@ public struct MangaReaderView: View {
             .padding(.leading, 8)
 
             Spacer()
+
+            // Fullscreen Toggle Button
+            Button(action: {
+                #if os(macOS)
+                (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
+                #endif
+            }) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                    .frame(width: 32, height: 32)
+                    .background(SumiTheme.card.opacity(0.85))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
 
             // Reading Mode Picker
             HStack(spacing: 4) {

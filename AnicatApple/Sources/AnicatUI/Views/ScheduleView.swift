@@ -9,6 +9,7 @@ public struct ScheduleView: View {
         public let airingTimeText: String
         public let countdownText: String
         public let dayGroup: String // e.g. "Monday, September 4"
+        public let airingAt: Int64 // unix seconds; dayGroup is display-only and not sortable
         public let isWatching: Bool
 
         public init(
@@ -19,6 +20,7 @@ public struct ScheduleView: View {
             airingTimeText: String,
             countdownText: String,
             dayGroup: String,
+            airingAt: Int64,
             isWatching: Bool = false
         ) {
             self.id = id
@@ -28,6 +30,7 @@ public struct ScheduleView: View {
             self.airingTimeText = airingTimeText
             self.countdownText = countdownText
             self.dayGroup = dayGroup
+            self.airingAt = airingAt
             self.isWatching = isWatching
         }
     }
@@ -49,7 +52,7 @@ public struct ScheduleView: View {
         let filtered = items.filter { !watchingOnly || $0.isWatching }
         let grouped = Dictionary(grouping: filtered, by: { $0.dayGroup })
         return grouped.map { (day: $0.key, items: $0.value) }
-            .sorted(by: { $0.day < $1.day })
+            .sorted(by: { ($0.items.map(\.airingAt).min() ?? 0) < ($1.items.map(\.airingAt).min() ?? 0) })
     }
 
     public var body: some View {

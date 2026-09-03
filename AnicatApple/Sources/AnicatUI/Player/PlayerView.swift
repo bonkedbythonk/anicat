@@ -1,9 +1,18 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 public struct PlayerView: View {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
     public let onClose: () -> Void
+    #if os(macOS)
+    // Only exit fullscreen on close if we're the one who entered it — if the
+    // window was already fullscreen (user did it manually before pressing
+    // play), leave it that way when the player closes.
+    @State private var enteredFullscreen = false
+    #endif
 
     public init(controller: PlayerController, streamURL: URL? = nil, onClose: @escaping () -> Void) {
         self.controller = controller
@@ -42,8 +51,18 @@ public struct PlayerView: View {
             }
             #endif
 
+            // Buffering Spinner — covers both the initial resolve-to-first-frame
+            // stretch and any mid-playback stall, so the black canvas never
+            // sits with nothing on screen while mpv is still working.
+            if controller.isBuffering {
+                ProgressView()
+                    .scaleEffect(1.4)
+                    .tint(SumiTheme.indigo)
+                    .transition(.opacity)
+            }
+
             // Paused Overlay Icon
-            if !controller.isPlaying && controller.areControlsVisible {
+            if !controller.isBuffering && !controller.isPlaying && controller.areControlsVisible {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 72))
                     .foregroundColor(SumiTheme.indigo.opacity(0.9))
@@ -103,8 +122,21 @@ public struct PlayerView: View {
         .onContinuousHover { _ in
             controller.showControlsBriefly()
         }
+        .onAppear {
+            if let window = NSApp.keyWindow ?? NSApp.mainWindow, !window.styleMask.contains(.fullScreen) {
+                enteredFullscreen = true
+                window.toggleFullScreen(nil)
+            }
+        }
+        .onDisappear {
+            if enteredFullscreen, let window = NSApp.keyWindow ?? NSApp.mainWindow, window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
+            enteredFullscreen = false
+        }
         #endif
         .animation(.easeInOut(duration: 0.25), value: controller.areControlsVisible)
+        .animation(.easeInOut(duration: 0.15), value: controller.isBuffering)
     }
 
     // MARK: - Top Bar

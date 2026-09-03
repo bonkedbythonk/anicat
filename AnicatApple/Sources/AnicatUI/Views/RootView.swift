@@ -256,13 +256,16 @@ public struct RootView: View {
                 results: model.searchResults,
                 discoverItems: model.trendingItems,
                 isLoading: model.isLoading,
-                onSearchCommit: { q, isManga in
-                    Task { await model.search(query: q, isManga: isManga) }
+                onSearchCommit: { q, mediaType in
+                    Task { await model.search(query: q, mediaType: mediaType) }
                 },
                 onSelectMedia: { item in
                     openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
                 },
                 onLoadDiscover: {
+                    Task { await model.loadTrending() }
+                },
+                onShuffle: {
                     Task { await model.loadTrending() }
                 }
             )

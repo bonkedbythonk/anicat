@@ -33,8 +33,6 @@ public struct SettingsView: View {
     // General: Advanced
     @AppStorage("anicat_cinema_enabled") private var cinemaEnabled: Bool = false
     @AppStorage("anicat_tmdb_token") private var tmdbToken: String = ""
-    @AppStorage("anicat_discord_rpc") private var discordRpc: Bool = false
-    @AppStorage("anicat_downloads_path") private var downloadsPath: String = "~/Downloads/AniCat"
     @AppStorage("anicat_anime_provider") private var animeProvider: String = "Torrents (Nyaa)"
     @AppStorage("anicat_manga_provider") private var mangaProvider: String = "MangaDex (Default)"
     @AppStorage("anicat_novel_provider") private var novelProvider: String = "RanobeDB"
@@ -46,12 +44,10 @@ public struct SettingsView: View {
     @AppStorage("anicat_ereader_split_spreads") private var ereaderSplitSpreads: Bool = true
 
     // Player
-    @AppStorage("anicat_player_engine") private var playerEngine: String = "Built-in Player"
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
-    @AppStorage("anicat_low_data_mode") private var lowDataMode: Bool = false
 
     // Account & Transient State
     @State private var anilistTokenInput: String = ""
@@ -310,46 +306,6 @@ public struct SettingsView: View {
                 Divider()
                     .background(SumiTheme.border)
 
-                // Discord RPC
-                SettingField(
-                    label: "Discord Rich Presence",
-                    description: "Show current anime in your Discord status."
-                ) {
-                    SumiSwitch(isOn: $discordRpc)
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Download Location
-                SettingField(
-                    label: "Download Location",
-                    description: "Where downloaded episodes are saved."
-                ) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "internaldrive")
-                            .font(.system(size: 13))
-                            .foregroundColor(SumiTheme.muted)
-
-                        TextField("", text: $downloadsPath)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(SumiTheme.foreground)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
-                    .frame(maxWidth: 240)
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
                 // Anime Provider
                 SettingField(
                     label: "Anime Provider",
@@ -545,21 +501,6 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Playback Card
             SettingsCard(title: "Playback") {
-                // Player Engine
-                SettingField(
-                    label: "Player Engine",
-                    description: "Choose between the built-in in-app video player (fast, no upscaling) or the external standalone MPV window (Anime4K upscaling, see GPU Upscaling below)."
-                ) {
-                    SumiDropdown(
-                        options: ["Built-in Player", "External MPV"],
-                        selected: $playerEngine,
-                        minWidth: 160
-                    )
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
                 // Sub/Dub
                 SettingField(
                     label: "Sub/Dub",
@@ -594,22 +535,12 @@ public struct SettingsView: View {
                     SumiSwitch(isOn: $gpuUpscaling)
                 }
 
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Low Data Mode
-                SettingField(
-                    label: "Low Data Mode",
-                    description: "For slow connections. While something is playing, background traffic pauses so the stream gets all the bandwidth: no home-screen polling, no hover prefetching, and the next episode's torrent won't start downloading until the current one finishes. Manga pages load one at a time instead of six in parallel."
-                ) {
-                    SumiSwitch(isOn: $lowDataMode)
-                }
             }
 
             // Keyboard Shortcuts Card
             SettingsCard(title: "Keyboard Shortcuts") {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("When playing media in the external MPV window, you can use these shortcuts:")
+                    Text("While a video is playing, you can use these shortcuts:")
                         .font(.system(size: 12))
                         .foregroundColor(SumiTheme.muted)
 
@@ -986,7 +917,6 @@ public struct SettingsView: View {
                     Architecture: arm64
                     Signed In: \(isSignedIn)
                     AniList Viewer: \(username ?? "None")
-                    Player Engine: \(playerEngine)
                     Anime4K Upscaling: \(gpuUpscaling ? "Enabled" : "Disabled")
                     Timestamp: \(Date())
                     """

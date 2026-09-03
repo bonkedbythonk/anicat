@@ -5,9 +5,11 @@ public struct SearchView: View {
     public let results: [MediaCard.Item]
     public let discoverItems: [MediaCard.Item]
     public let isLoading: Bool
-    public let onSearchCommit: (String, Bool) -> Void
+    /// Query, and the AniList media type: "ANIME", "MANGA", or "NOVEL".
+    public let onSearchCommit: (String, String) -> Void
     public let onSelectMedia: (MediaCard.Item) -> Void
     public let onLoadDiscover: () -> Void
+    public let onShuffle: () -> Void
 
     @State private var searchType: String = "ANIME"
 
@@ -16,9 +18,10 @@ public struct SearchView: View {
         results: [MediaCard.Item],
         discoverItems: [MediaCard.Item] = [],
         isLoading: Bool = false,
-        onSearchCommit: @escaping (String, Bool) -> Void = { _, _ in },
+        onSearchCommit: @escaping (String, String) -> Void = { _, _ in },
         onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
-        onLoadDiscover: @escaping () -> Void = {}
+        onLoadDiscover: @escaping () -> Void = {},
+        onShuffle: @escaping () -> Void = {}
     ) {
         self._searchText = searchText
         self.results = results
@@ -27,24 +30,15 @@ public struct SearchView: View {
         self.onSearchCommit = onSearchCommit
         self.onSelectMedia = onSelectMedia
         self.onLoadDiscover = onLoadDiscover
+        self.onShuffle = onShuffle
     }
 
-    public init(
-        searchText: Binding<String>,
-        results: [MediaCard.Item],
-        discoverItems: [MediaCard.Item] = [],
-        isLoading: Bool = false,
-        onSearchCommit: @escaping (String) -> Void,
-        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
-        onLoadDiscover: @escaping () -> Void = {}
-    ) {
-        self._searchText = searchText
-        self.results = results
-        self.discoverItems = discoverItems
-        self.isLoading = isLoading
-        self.onSearchCommit = { query, _ in onSearchCommit(query) }
-        self.onSelectMedia = onSelectMedia
-        self.onLoadDiscover = onLoadDiscover
+    private var searchPlaceholder: String {
+        switch searchType {
+        case "MANGA": return "Search manga, authors, genres..."
+        case "NOVEL": return "Search light novels, authors, genres..."
+        default: return "Search anime, studios, genres..."
+        }
     }
 
     public var body: some View {
@@ -61,9 +55,11 @@ public struct SearchView: View {
                         Spacer()
 
                         SumiSegmentedControl(
-                            options: [("ANIME", "Anime"), ("MANGA", "Manga")],
+                            options: [("ANIME", "Anime"), ("MANGA", "Manga"), ("NOVEL", "Novels")],
                             selection: $searchType
                         )
+
+                        SumiOutlineButton("Shuffle", systemImage: "shuffle", action: onShuffle)
                     }
 
                     HStack(spacing: 12) {
@@ -71,12 +67,12 @@ public struct SearchView: View {
                             .font(.system(size: 16))
                             .foregroundColor(SumiTheme.muted)
 
-                        TextField(searchType == "MANGA" ? "Search manga, authors, genres..." : "Search anime, studios, genres...", text: $searchText)
+                        TextField(searchPlaceholder, text: $searchText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 15))
                             .foregroundColor(SumiTheme.foreground)
                             .onSubmit {
-                                onSearchCommit(searchText, searchType == "MANGA")
+                                onSearchCommit(searchText, searchType)
                             }
 
                         if !searchText.isEmpty {
@@ -108,7 +104,7 @@ public struct SearchView: View {
                 .onChange(of: searchType) { _, next in
                     let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
-                        onSearchCommit(trimmed, next == "MANGA")
+                        onSearchCommit(trimmed, next)
                     }
                 }
                 .padding(.horizontal, 40)

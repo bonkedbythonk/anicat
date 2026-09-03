@@ -635,8 +635,10 @@ public final class AppModel: @unchecked Sendable {
         trendingItems = trending.map(Self.card)
     }
 
-    /// Search anime or manga across AniList catalog via the Rust engine.
-    public func search(query: String, isManga: Bool? = nil) async {
+    /// Search anime, manga, or light novels across the AniList catalog.
+    /// `mediaType` is "ANIME", "MANGA", or "NOVEL"; `isManga` is kept for
+    /// existing callers that only distinguish anime from manga.
+    public func search(query: String, mediaType: String? = nil, isManga: Bool? = nil) async {
         guard let engine, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
@@ -646,11 +648,15 @@ public final class AppModel: @unchecked Sendable {
         defer { isLoading = false }
 
         do {
-            let shouldSearchManga = isManga ?? (currentNavSection == .manga || currentNavSection == .novels)
+            let resolvedType = mediaType ?? (isManga == true ? "MANGA" : (isManga == false ? "ANIME" : nil))
+                ?? (currentNavSection == .novels ? "NOVEL" : (currentNavSection == .manga ? "MANGA" : "ANIME"))
             let summaries: [MediaSummary]
-            if shouldSearchManga {
+            switch resolvedType {
+            case "NOVEL":
+                summaries = try await engine.searchNovel(query: query)
+            case "MANGA":
                 summaries = try await engine.searchMangaCatalog(query: query)
-            } else {
+            default:
                 summaries = try await engine.searchAnime(query: query)
             }
             self.searchResults = summaries.map { Self.card($0) }
@@ -742,12 +748,16 @@ public final class AppModel: @unchecked Sendable {
         // will actually land, so it warms that region of the swarm instead of
         // only proving byte 0 is healthy and handing off to a resume seek
         // that stalls forever on an unprioritized piece.
+        // Settings' Sub/Dub picker was write-only until now — nothing read
+        // `anicat_sub_dub` back, so choosing "Dubbed" changed nothing about
+        // which release got picked.
+        let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
         let req = StreamRequest(
             catalog: catalog,
             catalogId: catalogId,
             episode: episode,
             title: effectiveTitle,
-            preferDub: false,
+            preferDub: preferDub,
             chosenName: nil,
             resumeFraction: resumeFraction
         )
@@ -905,11 +915,12 @@ public final class AppModel: @unchecked Sendable {
                     airingTimeText: formatter.string(from: date),
                     countdownText: Self.countdown(to: date),
                     dayGroup: dayFormatter.string(from: date),
+                    airingAt: at,
                     isWatching: watchingIds.contains(s.catalogId)
                 )
             )
         }
-        scheduleItems = combinedAiring.sorted { ($0.episodeNumber, $0.dayGroup) < ($1.episodeNumber, $1.dayGroup) }
+        scheduleItems = combinedAiring.sorted { $0.airingAt < $1.airingAt }
     }
 
     /// "6h ago", "3d ago" — the same buckets `relativeDay` uses on the web.

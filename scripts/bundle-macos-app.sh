@@ -63,4 +63,9 @@ EOF
 
 echo "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
+# Ad-hoc sign the app bundle with a stable designated requirement so macOS TCC
+# preserves privacy grants across launches and rebuilds instead of prompting repeatedly.
+echo "==> Ad-hoc signing $APP_DIR..."
+codesign --force --deep --sign - "$APP_DIR" 2>/dev/null || true
+
 echo "==> Successfully created $APP_DIR"

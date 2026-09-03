@@ -160,6 +160,7 @@ struct RealDataWiringTests {
                 airingTimeText: "12:00",
                 countdownText: "in 1h",
                 dayGroup: "Monday",
+                airingAt: 1,
                 isWatching: true
             ),
             ScheduleView.ScheduleItem(
@@ -170,6 +171,7 @@ struct RealDataWiringTests {
                 airingTimeText: "14:00",
                 countdownText: "in 3h",
                 dayGroup: "Monday",
+                airingAt: 2,
                 isWatching: false
             )
         ]

@@ -259,6 +259,24 @@ public struct MangaReaderView: View {
             .buttonStyle(.plain)
             .padding(.trailing, 4)
 
+            // Reading Direction Toggle
+            Button(action: {
+                readingDirection = readingDirection == .rtl ? .ltr : .rtl
+            }) {
+                Text(readingDirection == .rtl ? "RTL" : "LTR")
+                    .sumiTabularMono(size: 11, weight: .semibold)
+                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                    .frame(width: 40, height: 32)
+                    .background(SumiTheme.card.opacity(0.85))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
+
             // Reading Mode Picker
             HStack(spacing: 4) {
                 ForEach(ReadingMode.allCases) { mode in

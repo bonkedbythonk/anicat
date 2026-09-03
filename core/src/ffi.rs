@@ -324,6 +324,10 @@ impl AnicatEngine {
         self.search_catalog(query, "MANGA").await
     }
 
+    pub async fn search_novel(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
+        self.search_catalog_with_format(query, "MANGA", "NOVEL").await
+    }
+
     /// Find a torrent for an episode and hand back what the player opens.
     pub async fn resolve_stream(&self, req: StreamRequest) -> FfiResult<StreamHandle> {
         // cinema.rs and series.rs are in the crate but not reachable from
@@ -757,17 +761,40 @@ impl AnicatEngine {
     }
 
     async fn search_catalog(&self, query: String, media_type: &str) -> FfiResult<Vec<MediaSummary>> {
+        self.search_catalog_impl(query, media_type, None).await
+    }
+
+    async fn search_catalog_with_format(
+        &self,
+        query: String,
+        media_type: &str,
+        format: &str,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        self.search_catalog_impl(query, media_type, Some(format)).await
+    }
+
+    async fn search_catalog_impl(
+        &self,
+        query: String,
+        media_type: &str,
+        format: Option<&str>,
+    ) -> FfiResult<Vec<MediaSummary>> {
         let mut vars = std::collections::HashMap::new();
         vars.insert("search".to_string(), serde_json::json!(query));
         vars.insert("type".to_string(), serde_json::json!(media_type));
         vars.insert("page".to_string(), serde_json::json!(1));
         vars.insert("perPage".to_string(), serde_json::json!(25));
+        if let Some(f) = format {
+            vars.insert("format".to_string(), serde_json::json!([f]));
+        }
+        eprintln!("DEBUG search_catalog_impl vars={:?}", vars);
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
             .catalogs
             .anilist
             .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
+        eprintln!("DEBUG search_catalog_impl got {} items", page.page.media.as_ref().map(|v| v.len()).unwrap_or(0));
         Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
     }
 }

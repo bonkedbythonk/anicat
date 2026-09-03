@@ -221,4 +221,58 @@ impl Catalogs {
         }
         Ok(result)
     }
+
+    /// Creates or updates the signed-in user's list entry for a title.
+    /// `status`/`score`/`progress` are each optional so a caller can change
+    /// just one field — AniList's `SaveMediaListEntry` only touches the
+    /// arguments it's given, leaving the rest of the entry as it was.
+    pub async fn save_media_list_entry(
+        &self,
+        media_id: i64,
+        status: Option<&str>,
+        score: Option<f64>,
+        progress: Option<i64>,
+    ) -> Result<(), String> {
+        let mut vars = HashMap::new();
+        vars.insert("mediaId".to_string(), serde_json::json!(media_id));
+        if let Some(s) = status {
+            vars.insert("status".to_string(), serde_json::json!(s));
+        }
+        if let Some(s) = score {
+            vars.insert("score".to_string(), serde_json::json!(s));
+        }
+        if let Some(p) = progress {
+            vars.insert("progress".to_string(), serde_json::json!(p));
+        }
+        let _: serde_json::Value =
+            self.anilist.execute(anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars).await?;
+        // `media_detail` caches the mediaListEntry alongside everything else,
+        // so a status/score/progress edit that isn't invalidated here reads
+        // back as unchanged the moment the detail page reopens.
+        self.cache.invalidate("media_detail");
+        Ok(())
+    }
+
+    /// Toggles the AniList favourite heart for a title.
+    pub async fn toggle_favourite(&self, media_id: i64, is_manga: bool) -> Result<(), String> {
+        let mut vars = HashMap::new();
+        let key = if is_manga { "mangaId" } else { "animeId" };
+        vars.insert(key.to_string(), serde_json::json!(media_id));
+        let _: serde_json::Value =
+            self.anilist.execute(anilist::queries::TOGGLE_FAVOURITE_MUTATION, vars).await?;
+        self.cache.invalidate("media_detail");
+        Ok(())
+    }
+
+    /// Removes a title from the signed-in user's list entirely. Takes the
+    /// list *entry's* id (`MediaListEntry.id`), not the media's AniList id —
+    /// `DeleteMediaListEntry` is keyed on the former.
+    pub async fn delete_media_list_entry(&self, entry_id: i64) -> Result<(), String> {
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(entry_id));
+        let _: serde_json::Value =
+            self.anilist.execute(anilist::queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars).await?;
+        self.cache.invalidate("media_detail");
+        Ok(())
+    }
 }

@@ -23,6 +23,18 @@ public struct HeroBanner: View {
         public let resumeSeconds: Int?
         public let prequel: Relation?
         public let sequel: Relation?
+        /// `CURRENT`/`PLANNING`/`COMPLETED`/`DROPPED`/`PAUSED`/`REPEATING`, or
+        /// `nil` when this title isn't on the signed-in user's list.
+        public let listStatus: String?
+        public let userScore: Double?
+        /// The list entry's own id. `DeleteMediaListEntry` is keyed on this,
+        /// not on `id` (the AniList media id).
+        public let listEntryId: Int64?
+        /// AniList's own progress count, separate from `resumeEpisode` (which
+        /// comes from local watch history) — marking an episode watched by
+        /// hand has to advance this one.
+        public let listProgress: Int?
+        public let isFavourite: Bool
 
         /// A neighbouring season, as the detail page's chain cards draw it.
         public struct Relation: Sendable, Identifiable {
@@ -57,7 +69,12 @@ public struct HeroBanner: View {
             resumeEpisode: Int? = nil,
             resumeSeconds: Int? = nil,
             prequel: Relation? = nil,
-            sequel: Relation? = nil
+            sequel: Relation? = nil,
+            listStatus: String? = nil,
+            userScore: Double? = nil,
+            listEntryId: Int64? = nil,
+            listProgress: Int? = nil,
+            isFavourite: Bool = false
         ) {
             self.status = status
             self.episodeCount = episodeCount
@@ -65,6 +82,11 @@ public struct HeroBanner: View {
             self.resumeSeconds = resumeSeconds
             self.prequel = prequel
             self.sequel = sequel
+            self.listStatus = listStatus
+            self.userScore = userScore
+            self.listEntryId = listEntryId
+            self.listProgress = listProgress
+            self.isFavourite = isFavourite
             self.id = id
             self.title = title
             self.romajiTitle = romajiTitle

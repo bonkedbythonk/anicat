@@ -31,7 +31,7 @@ public struct RootView: View {
                             // sections while a title is open. Without it the
                             // detail view keeps rendering because its `if let
                             // details` branch wins over `currentNavSection`.
-                            model.selectedMediaDetails = nil
+                            model.clearDetail()
                             model.currentNavSection = section
                         }
                     ),
@@ -96,7 +96,7 @@ public struct RootView: View {
                             onExportAppleBooks: {},
                             onClose: {
                                 withAnimation(.easeInOut(duration: 0.25)) {
-                                    model.selectedMediaDetails = nil
+                                    model.closeDetail()
                                 }
                             }
                         )
@@ -660,7 +660,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 gestureSampleCount = 0
                 isCooling = true
                 withAnimation(.easeInOut(duration: 0.25)) {
-                    model.selectedMediaDetails = nil
+                    model.closeDetail()
                 }
                 return nil
             }

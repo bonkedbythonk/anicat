@@ -203,6 +203,19 @@ pub struct MediaDetail {
     pub prequel: Option<RelatedTitle>,
     pub sequel: Option<RelatedTitle>,
     pub episodes: Vec<EpisodeRow>,
+    /// `CURRENT`, `PLANNING`, `COMPLETED`, `DROPPED`, `PAUSED`, `REPEATING`,
+    /// or `None` when this title isn't on the signed-in user's list at all.
+    pub list_status: Option<String>,
+    pub user_score: Option<f64>,
+    /// The list entry's own id — `DeleteMediaListEntry` is keyed on this, not
+    /// on `catalog_id`. `None` alongside `list_status: None` means there is
+    /// nothing to remove.
+    pub list_entry_id: Option<i64>,
+    /// AniList progress as the *list* has it, separate from `resume_episode`
+    /// (which comes from the local watch-history registry). Marking an
+    /// episode watched by hand has to advance this one.
+    pub list_progress: Option<i32>,
+    pub is_favourite: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -617,7 +630,45 @@ impl AnicatEngine {
             prequel,
             sequel,
             episodes,
+            list_status: m.media_list_entry.as_ref().and_then(|e| e.status.clone()),
+            user_score: m.media_list_entry.as_ref().and_then(|e| e.score),
+            list_entry_id: m.media_list_entry.as_ref().and_then(|e| e.id),
+            list_progress: m.media_list_entry.as_ref().and_then(|e| e.progress),
+            is_favourite: m.is_favourite.unwrap_or(false),
         })
+    }
+
+    /// Creates/updates the signed-in user's list entry for a title — status
+    /// change, score edit, or a manual progress bump (mark-watched). Each
+    /// argument is independent; pass `None` to leave that field alone.
+    pub async fn update_list_entry(
+        &self,
+        catalog_id: i64,
+        status: Option<String>,
+        score: Option<f64>,
+        progress: Option<i64>,
+    ) -> FfiResult<()> {
+        self.catalogs
+            .save_media_list_entry(catalog_id, status.as_deref(), score, progress)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// Toggles the AniList favourite heart for a title.
+    pub async fn toggle_favourite(&self, catalog_id: i64, is_manga: bool) -> FfiResult<()> {
+        self.catalogs
+            .toggle_favourite(catalog_id, is_manga)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// Removes a title from the signed-in user's list. Takes
+    /// `MediaDetail::list_entry_id`, not the catalog id.
+    pub async fn remove_from_list(&self, list_entry_id: i64) -> FfiResult<()> {
+        self.catalogs
+            .delete_media_list_entry(list_entry_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })
     }
 
     pub async fn search_manga(

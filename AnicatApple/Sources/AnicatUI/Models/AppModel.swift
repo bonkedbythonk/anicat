@@ -36,9 +36,12 @@ public final class AppModel: @unchecked Sendable {
             let dataDir = appSupport.appendingPathComponent("AniCat", isDirectory: true)
             try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
 
+            // Zero-Login iCloud Sync: retrieve token from iCloud Keychain if not explicitly provided
+            let token = anilistToken ?? iCloudSyncService.shared.getAniListToken()
+
             let coreEngine = try AnicatEngine(
                 dataDir: dataDir.path,
-                anilistToken: anilistToken,
+                anilistToken: token,
                 tmdbKey: tmdbKey
             )
             self.engine = coreEngine
@@ -46,6 +49,13 @@ public final class AppModel: @unchecked Sendable {
             let port = try await coreEngine.streamPort()
             print("AniCat Rust Engine ready! Dynamic stream server on port: \(port)")
             self.isInitialized = true
+
+            // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS
+            #if os(macOS)
+            BonjourDiscovery.shared.startAdvertising(port: port)
+            #else
+            BonjourDiscovery.shared.startBrowsing()
+            #endif
 
             // Preload initial trending shows
             await loadInitialCatalog()
@@ -111,7 +121,22 @@ public final class AppModel: @unchecked Sendable {
         }
 
         self.activeStreamURL = streamURL
+
+        // Apple Handoff: broadcast current playback activity to iPhone / iPad / Mac
+        ContinuityManager.shared.advertisePlayback(
+            catalogId: catalogId,
+            title: title ?? "Anime",
+            episode: Int(episode),
+            timePositionSeconds: 0
+        )
+
         return streamURL
+    }
+
+    /// Stops playback and clears the Apple Handoff broadcast.
+    public func stopPlayback() {
+        self.activeStreamURL = nil
+        ContinuityManager.shared.stopAdvertising()
     }
 
     /// Loads trending and default shows to populate the dashboard.

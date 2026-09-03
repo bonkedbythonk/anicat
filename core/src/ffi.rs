@@ -90,9 +90,10 @@ pub struct MangaChapter {
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct StreamHandle {
-    /// What the player opens. Built against `proxy_port`, which the host app
-    /// owns: the range server that serves an in-progress torrent file lives on
-    /// the Swift side of the boundary, next to libmpv.
+    /// What the player opens: a loopback range URL served by this engine. The
+    /// file on disk is sparse while the torrent downloads, so a path would
+    /// read holes; and the `FileStream` that fills them has no representation
+    /// across the FFI, so the server has to be on this side.
     pub url: String,
     pub torrent_id: u64,
     pub file_id: u64,
@@ -128,9 +129,12 @@ pub struct AnicatEngine {
     http: reqwest::Client,
     catalogs: Catalogs,
     registry: Registry,
-    torrents: TorrentManager,
+    torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
-    proxy_port: u16,
+    /// Started on the first resolve rather than in the constructor, which is
+    /// sync and so has no runtime to bind a listener on. `OnceCell` rather
+    /// than a flag: two resolves racing must produce one server, not two.
+    stream_port: tokio::sync::OnceCell<u16>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -142,7 +146,6 @@ impl AnicatEngine {
         data_dir: String,
         anilist_token: Option<String>,
         tmdb_key: Option<String>,
-        proxy_port: u16,
     ) -> FfiResult<Arc<Self>> {
         let dir = PathBuf::from(&data_dir);
         let http = reqwest::Client::builder()
@@ -153,11 +156,19 @@ impl AnicatEngine {
         Ok(Arc::new(Self {
             catalogs: Catalogs::new(http.clone(), anilist_token, tmdb_key),
             registry,
-            torrents: TorrentManager::with_cache_dir(dir.join("torrent-streams")),
+            torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
             http,
-            proxy_port,
+            stream_port: tokio::sync::OnceCell::new(),
         }))
+    }
+
+    /// The loopback port the range server is on, starting it if it is not up
+    /// yet. Always ask rather than assume a number: the OS assigns it, and a
+    /// hardcoded port is how the Tauri build ended up playing video perfectly
+    /// while every player callback went to whatever else owned 13370.
+    pub async fn stream_port(&self) -> FfiResult<u16> {
+        self.ensure_stream_server().await
     }
 
     pub async fn search_anime(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
@@ -170,6 +181,17 @@ impl AnicatEngine {
 
     /// Find a torrent for an episode and hand back what the player opens.
     pub async fn resolve_stream(&self, req: StreamRequest) -> FfiResult<StreamHandle> {
+        // cinema.rs and series.rs are in the crate but not reachable from
+        // here: `ResolveTarget::movie`/`series` would have to be populated
+        // from TMDB detail, which Phase 2 wires up. Refusing is the honest
+        // answer — falling through would silently run the anime search for a
+        // film and return some unrelated release.
+        if req.catalog != FfiCatalog::Anilist {
+            return Err(AnicatError::NotFound {
+                msg: format!("{:?} playback is not wired up yet", req.catalog),
+            });
+        }
+        let port = self.ensure_stream_server().await?;
         let media = MediaKey::new(req.catalog.into(), req.catalog_id);
         let info = crate::torrent::gather_media_info(
             &self.registry,
@@ -206,7 +228,7 @@ impl AnicatEngine {
                     entry: info.hint,
                     sibling_titles: &info.siblings,
                 },
-                self.proxy_port,
+                port,
             )
             .await
             .map_err(|msg| AnicatError::NotFound { msg })?;
@@ -302,6 +324,14 @@ impl AnicatEngine {
 }
 
 impl AnicatEngine {
+    async fn ensure_stream_server(&self) -> FfiResult<u16> {
+        self.stream_port
+            .get_or_try_init(|| crate::torrent::stream::serve(self.torrents.clone()))
+            .await
+            .copied()
+            .map_err(|msg| AnicatError::Internal { msg })
+    }
+
     async fn search_catalog(&self, query: String, media_type: &str) -> FfiResult<Vec<MediaSummary>> {
         let mut vars = std::collections::HashMap::new();
         vars.insert("search".to_string(), serde_json::json!(query));

@@ -154,3 +154,5 @@ AnicatApple/.build/
 # and a generated .swift — a build artifact, regenerated rather than reviewed.
 AnicatApple/AnicatCore.xcframework/
 AnicatApple/Sources/AnicatCoreKit/anicat_core.swift
+AnicatApple/Frameworks/
+AnicatApple/Sources/anicat_coreFFI/include/

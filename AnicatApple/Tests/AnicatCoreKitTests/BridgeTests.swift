@@ -10,14 +10,23 @@ final class BridgeTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("anicat-bridge-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Port 0: nothing in this test opens the returned url, and the range
-        // server that would own a real port is the host app's, not the
-        // engine's.
-        return try AnicatEngine(dataDir: dir.path, anilistToken: nil, tmdbKey: nil, proxyPort: 0)
+        return try AnicatEngine(dataDir: dir.path, anilistToken: nil, tmdbKey: nil)
     }
 
     func testEngineConstructsAndOpensItsRegistry() throws {
         _ = try makeEngine()
+    }
+
+    /// The port is the engine's to assign and report. A host that hardcoded
+    /// one is the Tauri build's bug — video playing while every callback went
+    /// to whatever else held 13370.
+    func testTheEngineReportsALiveRangeServerPort() async throws {
+        let engine = try makeEngine()
+        let port = try await engine.streamPort()
+        XCTAssertGreaterThan(port, 0)
+        // Same server on a second ask, not a second server.
+        let again = try await engine.streamPort()
+        XCTAssertEqual(port, again)
     }
 
     func testProgressRoundTripsThroughSqlite() throws {

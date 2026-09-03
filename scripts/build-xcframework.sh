@@ -12,6 +12,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORE="$ROOT/core"
 OUT="$ROOT/AnicatApple"
+# Where Package.swift's binaryTarget points. Keep the two in step: a stale
+# copy at another path links fine and is silently a different build.
+FRAMEWORKS="$OUT/Frameworks"
+# SwiftPM cannot import a modulemap out of a binaryTarget directly, so the
+# generated C header is also exposed as its own tiny target.
+SHIM="$OUT/Sources/anicat_coreFFI"
 TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
 
 cd "$CORE"
@@ -36,13 +42,17 @@ mv "$GEN"/*.h "$HEADERS"/
 cat "$GEN"/*.modulemap > "$HEADERS/module.modulemap"
 rm -f "$GEN"/*.modulemap
 
-rm -rf "$OUT/AnicatCore.xcframework"
+rm -rf "$FRAMEWORKS/AnicatCore.xcframework"
+mkdir -p "$FRAMEWORKS"
 xcodebuild -create-xcframework \
   -library "$CORE/target/aarch64-apple-darwin/release/libanicat_core.a"  -headers "$HEADERS" \
   -library "$CORE/target/aarch64-apple-ios/release/libanicat_core.a"     -headers "$HEADERS" \
   -library "$CORE/target/aarch64-apple-ios-sim/release/libanicat_core.a" -headers "$HEADERS" \
-  -output "$OUT/AnicatCore.xcframework"
+  -output "$FRAMEWORKS/AnicatCore.xcframework"
 
-mkdir -p "$OUT/Sources/AnicatCoreKit"
+mkdir -p "$OUT/Sources/AnicatCoreKit" "$SHIM/include"
 cp "$GEN"/*.swift "$OUT/Sources/AnicatCoreKit/"
+cp "$HEADERS"/* "$SHIM/include/"
+# SwiftPM refuses a target with no compilable source of its own.
+[ -f "$SHIM/empty.c" ] || echo "// Placeholder: this target exists only to expose the generated UniFFI header." > "$SHIM/empty.c"
 echo "==> AnicatCore.xcframework and AnicatCoreKit bindings are up to date"

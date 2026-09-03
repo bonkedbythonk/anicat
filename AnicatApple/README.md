@@ -5,8 +5,9 @@ in `../core`.
 
 ## Building
 
-`AnicatCore.xcframework` and `Sources/AnicatCoreKit/anicat_core.swift` are build
-artifacts and are not committed. Produce them before the first `swift build`:
+`Frameworks/AnicatCore.xcframework`, `Sources/anicat_coreFFI/include/` and
+`Sources/AnicatCoreKit/anicat_core.swift` are build artifacts and are not
+committed. Produce them before the first `swift build`:
 
 ```bash
 bash scripts/build-xcframework.sh

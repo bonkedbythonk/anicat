@@ -10,6 +10,7 @@ pub mod layout;
 pub mod seadex;
 pub mod series;
 pub mod search;
+pub mod stream;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

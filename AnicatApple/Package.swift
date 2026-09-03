@@ -1,30 +1,62 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
-// AnicatCoreKit is the generated UniFFI binding plus the prebuilt Rust engine.
-// The .a inside the xcframework is produced by scripts/build-xcframework.sh —
-// it is a build artifact, not source, and is regenerated rather than edited.
 let package = Package(
     name: "AnicatApple",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v17)
+    ],
     products: [
-        .library(name: "AnicatCoreKit", targets: ["AnicatCoreKit"])
+        .library(
+            name: "AnicatCoreKit",
+            targets: ["AnicatCoreKit"]
+        ),
+        .library(
+            name: "AnicatUI",
+            targets: ["AnicatUI"]
+        )
     ],
     targets: [
-        .binaryTarget(name: "AnicatCore", path: "AnicatCore.xcframework"),
+        .binaryTarget(
+            name: "AnicatCore",
+            path: "Frameworks/AnicatCore.xcframework"
+        ),
+        .target(
+            name: "anicat_coreFFI",
+            dependencies: ["AnicatCore"],
+            path: "Sources/anicat_coreFFI",
+            publicHeadersPath: "include"
+        ),
         .target(
             name: "AnicatCoreKit",
-            dependencies: ["AnicatCore"],
-            linkerSettings: [
-                // rusqlite's bundled SQLite and librqbit's memmap2 both reach
-                // into libSystem; aws-lc-rs (rustls' backend) pulls in libc++.
-                .linkedLibrary("c++"),
-                // Reachability and the system trust store, reached through
-                // rustls-platform-verifier's dependencies.
-                .linkedFramework("SystemConfiguration"),
-                .linkedFramework("Security")
+            dependencies: ["AnicatCore", "anicat_coreFFI"],
+            path: "Sources/AnicatCoreKit",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
             ]
         ),
-        .testTarget(name: "AnicatCoreKitTests", dependencies: ["AnicatCoreKit"])
+        .target(
+            name: "AnicatUI",
+            dependencies: ["AnicatCoreKit"],
+            path: "Sources/AnicatUI",
+            resources: [
+                .copy("Resources/Shaders")
+            ]
+        ),
+        // Covers the FFI boundary itself, independently of any view: the
+        // engine constructs, an async Rust future completes on the Swift
+        // side, a record round-trips through SQLite, and a Rust Err arrives
+        // as a Swift throw.
+        .testTarget(
+            name: "AnicatCoreKitTests",
+            dependencies: ["AnicatCoreKit"],
+            path: "Tests/AnicatCoreKitTests"
+        ),
+        .testTarget(
+            name: "AnicatUITests",
+            dependencies: ["AnicatUI", "AnicatCoreKit"],
+            path: "Tests/AnicatUITests"
+        )
     ]
 )

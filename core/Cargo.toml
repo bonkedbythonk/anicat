@@ -1,0 +1,47 @@
+[package]
+name = "anicat-core"
+version = "0.1.0"
+license = "GPL-3.0-only"
+edition = "2021"
+
+[lib]
+name = "anicat_core"
+# staticlib for the Apple xcframework, cdylib for uniffi-bindgen's own
+# library-mode inspection, rlib so `cargo test` can link the crate normally.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+uniffi = { version = "0.28", features = ["tokio", "cli"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+rusqlite = { version = "0.32", features = ["bundled"] }
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+futures-util = "0.3"
+thiserror = "2"
+regex-lite = "0.1"
+dirs = "6"
+tokio-util = { version = "0.7", features = ["io"] }
+# disable-upload: this is a personal streaming client, not a seedbox — we
+# download to watch and never upload. Also silences the bulk of the peer
+# churn that librqbit logs.
+# default-features off + rust-tls: librqbit's default "default-tls" feature
+# enables reqwest/default-tls (native-tls) crate-graph-wide, which flips
+# reqwest::Client::new() from rustls to macOS SecureTransport — and
+# api.aniskip.com's TLS handshake fails under SecureTransport, silently
+# breaking AniSkip for every provider. Keep the whole crate on rustls.
+librqbit = { version = "8", default-features = false, features = ["disable-upload", "rust-tls"] }
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }
+
+[dev-dependencies]
+env_logger = "0.11"
+tokio = { version = "1", features = ["full", "test-util"] }

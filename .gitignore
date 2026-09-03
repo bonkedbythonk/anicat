@@ -146,3 +146,11 @@ skills-lock.json
 
 # Local impeccable config and hook cache
 .impeccable/
+
+# Native Apple refactor (core/ + AnicatApple/)
+core/target/
+AnicatApple/.build/
+# Produced by scripts/build-xcframework.sh from core/. ~200MB of static libs
+# and a generated .swift — a build artifact, regenerated rather than reviewed.
+AnicatApple/AnicatCore.xcframework/
+AnicatApple/Sources/AnicatCoreKit/anicat_core.swift

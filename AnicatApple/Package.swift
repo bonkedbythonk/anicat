@@ -53,7 +53,8 @@ let package = Package(
             dependencies: ["AnicatCoreKit", "Cmpv"],
             path: "Sources/AnicatUI",
             resources: [
-                .copy("Resources/Shaders")
+                .copy("Resources/Shaders"),
+                .process("Resources/Images")
             ]
         ),
         .executableTarget(

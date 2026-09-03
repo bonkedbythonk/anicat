@@ -14,7 +14,12 @@ public struct RootView: View {
             SumiTheme.background
                 .ignoresSafeArea()
 
-            // Main Application Shell: Fixed 200px Sidebar + Dynamic Content
+            // `.ignoresSafeArea()` is what puts the shell at the true window
+            // top. `hiddenTitleBar` makes the title bar transparent but does
+            // not remove it, so SwiftUI still insets its content below it —
+            // measured against the running Tauri app, every row in the sidebar
+            // sat about 32pt low, and the 38pt traffic-light spacer below was
+            // clearing a gap that had already been cleared.
             HStack(spacing: 0) {
                 // Fixed Left Sidebar (exact Tauri layout)
                 SidebarView(
@@ -76,6 +81,7 @@ public struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .ignoresSafeArea()
 
             // Media Detail Overlay
             if let details = model.selectedMediaDetails {

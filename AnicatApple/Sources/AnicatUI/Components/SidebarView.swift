@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 public struct SidebarView: View {
     public enum NavSection: String, CaseIterable, Identifiable {
@@ -79,12 +84,12 @@ public struct SidebarView: View {
 
             // Bottom Logo & Search Button
             VStack(spacing: 12) {
-                // The mark is decorative and deliberately almost invisible —
-                // `opacity-10` on the web. Anything more competes with poster
-                // art, which is the only thing in this skin allowed to shout.
-                Image(systemName: "cat.fill")
-                    .font(.system(size: 34))
-                    .foregroundColor(SumiTheme.foreground.opacity(0.10))
+                // The actual mark, not a glyph that resembles one: `h-20`
+                // (80pt), grayscaled, at `opacity-10`. An SF Symbol cat is a
+                // different drawing at a different weight and reads as a
+                // placeholder next to the real logo.
+                SumiLogoMark()
+                    .frame(height: 80)
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 8)
 
@@ -118,7 +123,7 @@ public struct SidebarView: View {
             .padding(.bottom, 16)
         }
         .frame(width: 200)
-        .background(SumiTheme.card)
+        .background(VibrancyBackdrop())
     }
 
     private func navGroup(title: String, items: [NavSection]) -> some View {
@@ -150,8 +155,13 @@ public struct SidebarView: View {
                 Spacer()
 
                 if let sc = item.shortcut {
+                    // The chip is `meta-mono` at its full 11.5pt, and it — not
+                    // the label — sets the row height: measured against the
+                    // running Tauri app, a row with a shortcut is 37pt and one
+                    // without is 34. Shrinking the chip to 10pt compressed
+                    // every row and the whole list drifted short of the web.
                     Text(sc)
-                        .sumiTabularMono(size: 10)
+                        .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.muted)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -163,6 +173,7 @@ public struct SidebarView: View {
                         )
                 }
             }
+            .frame(minHeight: 23)
             .padding(.leading, 20)
             .padding(.trailing, 16)
             .padding(.vertical, 7)
@@ -177,4 +188,44 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+
+/// The sidebar watermark, loaded out of the module bundle by URL.
+///
+/// `Image(_:bundle:)` looks the name up in an asset catalog, and the logo
+/// ships as a loose PNG resource — so the by-name form silently renders
+/// nothing and the mark simply vanished from the sidebar. Reading the file
+/// is the form that works for a resource that is not in a catalog.
+struct SumiLogoMark: View {
+    var body: some View {
+        Group {
+            if let image = Self.mark {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .grayscale(1)
+                    .opacity(0.10)
+            }
+        }
+    }
+
+    private static let mark: Image? = {
+        let candidates = [
+            Bundle.module.url(forResource: "anicat_logo", withExtension: "png"),
+            Bundle.module.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
+        ]
+        #if os(macOS)
+        for case let url? in candidates {
+            if let nsImage = NSImage(contentsOf: url) { return Image(nsImage: nsImage) }
+        }
+        #else
+        for case let url? in candidates {
+            if let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {
+                return Image(uiImage: uiImage)
+            }
+        }
+        #endif
+        return nil
+    }()
 }

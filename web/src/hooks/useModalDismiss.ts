@@ -24,7 +24,7 @@ export function useModalDismiss<T extends HTMLElement = HTMLDivElement>(
             node.querySelectorAll<HTMLElement>(
               'a[href], button:not([disabled]), textarea, input:not([disabled]), select, [tabindex]:not([tabindex="-1"])',
             ),
-          ).filter((el) => el.offsetParent !== null)
+          ).filter((el) => el.offsetParent !== null || (!el.hasAttribute("hidden") && el.style.display !== "none"))
         : [];
 
     // Move focus into the dialog on open so keyboard users start inside it.

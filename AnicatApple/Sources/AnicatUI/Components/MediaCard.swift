@@ -186,8 +186,10 @@ public struct MediaCard: View {
                 }
                 .padding(.horizontal, 2)
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         #if os(macOS)
         .onHover { hovering in
             isHovered = hovering

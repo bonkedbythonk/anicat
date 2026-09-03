@@ -86,6 +86,7 @@ public struct UpNextQueueView: View {
         let onPlay: () -> Void
 
         @State private var isHovered = false
+        @State private var isPlayHovered = false
 
         var body: some View {
             HStack(spacing: 16) {
@@ -158,27 +159,31 @@ public struct UpNextQueueView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
 
                 // Dedicated Play / Resume Button
                 Button(action: onPlay) {
                     Text(isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"))
                         .font(.system(size: 12.5, weight: .semibold))
-                        // `text-black`, not the ink background: the accent is
-                        // a pale indigo and #161310 on it is a muddy low
-                        // contrast where pure black is crisp.
-                        .foregroundColor(isFirst ? Color.black : SumiTheme.foreground.opacity(0.7))
+                        .foregroundColor(isFirst ? Color.black : (isPlayHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(isFirst ? SumiTheme.indigo : Color.clear)
+                        .background(isFirst ? (isPlayHovered ? SumiTheme.indigo.opacity(0.85) : SumiTheme.indigo) : (isPlayHovered ? SumiTheme.card : Color.clear))
                         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                         .overlay(
                             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(isFirst ? Color.clear : SumiTheme.border, lineWidth: 1)
+                                .stroke(isFirst ? Color.clear : (isPlayHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border), lineWidth: 1)
                         )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                #if os(macOS)
+                .onHover { isPlayHovered = $0 }
+                #endif
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

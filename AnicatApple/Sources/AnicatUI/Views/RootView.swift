@@ -52,11 +52,15 @@ public struct RootView: View {
                             characters: [],
                             onPlayEpisode: { ep in
                                 Task {
-                                    _ = try? await model.resolveAndPlay(
-                                        catalogId: details.id,
-                                        episode: Int64(ep.number),
-                                        title: details.title
-                                    )
+                                    do {
+                                        _ = try await model.resolveAndPlay(
+                                            catalogId: details.id,
+                                            episode: Int64(ep.number),
+                                            title: details.title
+                                        )
+                                    } catch {
+                                        model.errorMessage = "Failed to play episode \(ep.number): \(error.localizedDescription)"
+                                    }
                                 }
                             },
                             onReadChapter: { chapter in
@@ -109,6 +113,8 @@ public struct RootView: View {
                             )
                         case .settings:
                             SettingsView(
+                                isSignedIn: model.isSignedIn,
+                                username: model.viewer?.name,
                                 onSaveToken: { token in
                                     Task { await model.signIn(token: token) }
                                 },
@@ -168,13 +174,12 @@ public struct RootView: View {
             }
             .ignoresSafeArea()
 
-            // Command palette. Above the detail page and below the player:
-            // it navigates the app, and the player is modal over all of it.
+            // Command palette. Above sections, player, and reader so navigation is accessible anywhere.
             if model.paletteOpen {
                 CommandPalette(commands: paletteCommands) {
                     model.paletteOpen = false
                 }
-                .zIndex(25)
+                .zIndex(50)
                 .transition(.opacity)
             }
 
@@ -266,7 +271,7 @@ public struct RootView: View {
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(40)
+                .zIndex(60)
             }
 
             // Loading Scrim
@@ -279,7 +284,7 @@ public struct RootView: View {
                         .tint(SumiTheme.indigo)
                 }
                 .transition(.opacity)
-                .zIndex(20)
+                .zIndex(70)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.activeStreamURL != nil)
@@ -287,6 +292,7 @@ public struct RootView: View {
         .animation(.easeInOut(duration: 0.25), value: model.selectedMediaDetails != nil)
         .animation(.easeInOut(duration: 0.25), value: model.errorMessage != nil)
         .animation(.easeInOut(duration: 0.2), value: model.isLoading)
+        .globalKeyboardShortcuts(model: model)
     }
 
     // MARK: - Home / Up Next View
@@ -349,11 +355,15 @@ public struct RootView: View {
                                     openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL, isManga: true)
                                 } else {
                                     Task {
-                                        _ = try? await model.resolveAndPlay(
-                                            catalogId: entry.id,
-                                            episode: Int64(entry.nextEpisodeOrChapter),
-                                            title: entry.title
-                                        )
+                                        do {
+                                            _ = try await model.resolveAndPlay(
+                                                catalogId: entry.id,
+                                                episode: Int64(entry.nextEpisodeOrChapter),
+                                                title: entry.title
+                                            )
+                                        } catch {
+                                            model.errorMessage = "Failed to play episode \(entry.nextEpisodeOrChapter): \(error.localizedDescription)"
+                                        }
                                     }
                                 }
                             }
@@ -398,8 +408,7 @@ public struct RootView: View {
             return CommandPalette.Command(id: raw, label: "Go to \(section.label)") {
                 Task { @MainActor in
                     guard let target = SidebarView.NavSection(rawValue: raw) else { return }
-                    model.selectedMediaDetails = nil
-                    model.currentNavSection = target
+                    model.navigate(to: target)
                 }
             }
         }
@@ -470,4 +479,127 @@ public struct RootView: View {
         Task { await model.openDetail(id: id, isManga: isManga) }
     }
 
+}
+
+#if os(macOS)
+import AppKit
+
+private struct GlobalKeyboardShortcutsModifier: ViewModifier {
+    @Bindable var model: AppModel
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                setupMonitor()
+            }
+            .onDisappear {
+                removeMonitor()
+            }
+    }
+
+    private func setupMonitor() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handleKeyDown(event)
+        }
+    }
+
+    private func removeMonitor() {
+        if let m = monitor {
+            NSEvent.removeMonitor(m)
+            monitor = nil
+        }
+    }
+
+    @MainActor
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        let isCmd = event.modifierFlags.contains(.command)
+        let isCtrl = event.modifierFlags.contains(.control)
+        let isAlt = event.modifierFlags.contains(.option)
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+
+        // 1. Cmd+K: Toggle Command Palette (even while typing)
+        if isCmd && !isCtrl && !isAlt && chars == "k" {
+            model.paletteOpen.toggle()
+            return nil
+        }
+
+        // 2. ESC key (keyCode 53):
+        // Order of dismissal:
+        // 1. CommandPalette (topmost overlay)
+        // 2. PlayerView (modal video overlay)
+        // 3. MangaReaderView (modal reader overlay)
+        // 4. MediaDetailView (detail page)
+        if event.keyCode == 53 {
+            var handled = false
+            withAnimation(.easeInOut(duration: 0.25)) {
+                handled = model.handleEscapeKey()
+            }
+            return handled ? nil : event
+        }
+
+        // Guard: Don't intercept single-key navigation when typing in an input field
+        if let responder = NSApp.keyWindow?.firstResponder,
+           responder is NSTextView || responder is NSTextField || responder is NSText {
+            return event
+        }
+
+        // 3. Player-specific shortcuts when PlayerView is active
+        if model.activeStreamURL != nil && !isCmd && !isCtrl && !isAlt {
+            // Spacebar: play / pause
+            if event.keyCode == 49 {
+                model.playerController.togglePlayPause()
+                return nil
+            }
+            // Left arrow: seek -10s
+            if event.keyCode == 123 {
+                model.playerController.seekRelative(by: -10)
+                return nil
+            }
+            // Right arrow: seek +10s
+            if event.keyCode == 124 {
+                model.playerController.seekRelative(by: 10)
+                return nil
+            }
+        }
+
+        // 4. Navigation shortcuts (only when no modifier keys are held)
+        if !isCmd && !isCtrl && !isAlt {
+            // '/': Open Command Palette / focus search
+            if chars == "/" {
+                model.paletteOpen = true
+                return nil
+            }
+
+            // Numbers 1-9: Switch views
+            if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    model.navigate(to: targetSection)
+                }
+                return nil
+            }
+
+            // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), D (Downloads)
+            if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    model.navigate(to: targetSection)
+                }
+                return nil
+            }
+        }
+
+        return event
+    }
+}
+#endif
+
+extension View {
+    fileprivate func globalKeyboardShortcuts(model: AppModel) -> some View {
+        #if os(macOS)
+        self.modifier(GlobalKeyboardShortcutsModifier(model: model))
+        #else
+        self
+        #endif
+    }
 }

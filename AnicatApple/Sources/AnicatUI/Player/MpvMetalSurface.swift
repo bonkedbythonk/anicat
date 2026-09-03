@@ -30,6 +30,13 @@ public struct MpvMetalSurface: NSViewRepresentable {
     public func updateNSView(_ nsView: NSView, context: Context) {
         let coordinator = context.coordinator
 
+        // Update stream URL if changed or new
+        if let streamURL = streamURL {
+            coordinator.loadFile(url: streamURL.absoluteString)
+        } else {
+            coordinator.clearLoadedURL()
+        }
+
         // Update playback state
         coordinator.setPaused(!controller.isPlaying)
 
@@ -72,6 +79,17 @@ public struct MpvMetalSurface: NSViewRepresentable {
             mpv_set_option_string(handle, "osc", "no")
             mpv_set_option_string(handle, "osd-level", "0")
             mpv_set_option_string(handle, "input-default-bindings", "no")
+            mpv_set_option_string(handle, "demuxer-max-bytes", "128M")
+            mpv_set_option_string(handle, "demuxer-readahead-secs", "15")
+            mpv_set_option_string(handle, "demuxer-seekable-cache", "yes")
+            mpv_set_option_string(handle, "cache", "yes")
+            mpv_set_option_string(handle, "cache-pause", "yes")
+            mpv_set_option_string(handle, "force-seekable", "yes")
+            mpv_set_option_string(handle, "hr-seek", "default")
+            mpv_set_option_string(handle, "ytdl", "no")
+            mpv_set_option_string(handle, "sub-auto", "fuzzy")
+            mpv_set_option_string(handle, "slang", "en,eng,English")
+            mpv_set_option_string(handle, "subs-fallback", "yes")
 
             // Attach directly to the NSView layer
             var viewPtr = Int64(Int(bitPattern: Unmanaged.passUnretained(view).toOpaque()))
@@ -86,6 +104,14 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
             self.mpv = handle
             self.isRunning = true
+
+            // Wire controller actions directly to this mpv instance
+            controller.onSeek = { [weak self] seconds in
+                self?.seek(to: seconds)
+            }
+            controller.onSetPause = { [weak self] paused in
+                self?.setPaused(paused)
+            }
 
             // Observe playback properties
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
@@ -105,16 +131,30 @@ public struct MpvMetalSurface: NSViewRepresentable {
                     if let a = arg { free(UnsafeMutableRawPointer(mutating: a)) }
                 }
             }
-            _ = cArgs.withUnsafeMutableBufferPointer { ptr in
-                mpv_command(mpv, ptr.baseAddress)
+            cArgs.withUnsafeMutableBufferPointer { ptr in
+                let res = mpv_command(mpv, ptr.baseAddress)
+                if res < 0 {
+                    let errStr = String(cString: mpv_error_string(res))
+                    print("[libmpv] mpv_command(\(args.joined(separator: " "))) error: \(errStr) (\(res))")
+                }
             }
         }
 
         func loadFile(url: String) {
             guard url != lastLoadedURL else { return }
             lastLoadedURL = url
-            runCommand(["loadfile", url])
+            if controller.currentTime > 0, let mpv = mpv {
+                let startSec = String(format: "%.2f", controller.currentTime)
+                mpv_set_property_string(mpv, "start", startSec)
+            } else if let mpv = mpv {
+                mpv_set_property_string(mpv, "start", "none")
+            }
+            runCommand(["loadfile", url, "replace"])
             print("[libmpv] Playing stream: \(url)")
+        }
+
+        func clearLoadedURL() {
+            lastLoadedURL = nil
         }
 
         func setPaused(_ paused: Bool) {
@@ -157,9 +197,11 @@ public struct MpvMetalSurface: NSViewRepresentable {
                         if name == "time-pos", let data = prop.data {
                             let pos = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
-                                self.controller.currentTime = pos
-                                self.controller.checkIntroStatus()
-                                self.controller.onPositionChange?(pos, self.controller.duration)
+                                if !self.controller.isScrubbing {
+                                    self.controller.currentTime = pos
+                                    self.controller.checkIntroStatus()
+                                    self.controller.onPositionChange?(pos, self.controller.duration)
+                                }
                             }
                         } else if name == "duration", let data = prop.data {
                             let dur = data.assumingMemoryBound(to: Double.self).pointee
@@ -183,6 +225,9 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
         func stop() {
             isRunning = false
+            controller.onSeek = nil
+            controller.onSetPause = nil
+            lastLoadedURL = nil
             controller.onPlaybackStopped?()
             if let handle = mpv {
                 mpv_destroy(handle)

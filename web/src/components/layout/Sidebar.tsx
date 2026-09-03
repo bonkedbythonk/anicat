@@ -175,6 +175,7 @@ export function Sidebar() {
           ref={ref}
           tabIndex={tabIndex}
           onClick={() => setPaletteOpen(true)}
+          aria-label={`Search anything (${isMacOS ? "⌘K" : "Ctrl K"})`}
           className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border text-[12px] text-muted-foreground hover:text-foreground hover:border-foreground/25 cursor-pointer"
         >
           <span>Search anything</span>

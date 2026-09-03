@@ -16,13 +16,19 @@ public struct SettingsView: View {
     @State private var autoSkipIntro: Bool = true
     @State private var hardwareDecoding: Bool = true
 
+    public let isSignedIn: Bool
+    public let username: String?
     public let onSaveToken: (String) -> Void
     public let onDisconnectAniList: () -> Void
 
     public init(
+        isSignedIn: Bool = false,
+        username: String? = nil,
         onSaveToken: @escaping (String) -> Void = { _ in },
         onDisconnectAniList: @escaping () -> Void = {}
     ) {
+        self.isSignedIn = isSignedIn
+        self.username = username
         self.onSaveToken = onSaveToken
         self.onDisconnectAniList = onDisconnectAniList
     }
@@ -94,35 +100,72 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("OAUTH TOKEN")
-                    .sumiTabularMono(size: 10, weight: .semibold)
-                    .foregroundColor(SumiTheme.muted)
+                if isSignedIn {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(Color(hex: "#34D399"))
+                            .frame(width: 8, height: 8)
 
-                HStack {
-                    SecureField("Paste AniList OAuth Token...", text: $anilistTokenInput)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground)
+                        Text(username != nil ? "Connected as \(username!)" : "Connected to AniList")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
 
-                    Button("Save & Connect") {
-                        if !anilistTokenInput.isEmpty {
-                            onSaveToken(anilistTokenInput)
+                        Spacer()
+
+                        Button("Disconnect") {
+                            onDisconnectAniList()
                         }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.warning)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(SumiTheme.background)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .padding(12)
+                    .background(SumiTheme.card.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+                } else {
+                    Text("OAUTH TOKEN")
+                        .sumiTabularMono(size: 10, weight: .semibold)
+                        .foregroundColor(SumiTheme.muted)
+
+                    HStack {
+                        SecureField("Paste AniList OAuth Token...", text: $anilistTokenInput)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .foregroundColor(SumiTheme.foreground)
+
+                        Button("Save & Connect") {
+                            if !anilistTokenInput.isEmpty {
+                                onSaveToken(anilistTokenInput)
+                            }
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.background)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(SumiTheme.indigo)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .contentShape(Rectangle())
+                    }
+                    .padding(10)
+                    .background(SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
                 }
-                .padding(10)
-                .background(SumiTheme.card)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
             }
         }
     }

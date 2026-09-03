@@ -63,11 +63,15 @@ struct AnicatApp: App {
                     if let first = model.upNextItems.first {
                         if first.unit != "CH" {
                             Task {
-                                _ = try? await model.resolveAndPlay(
-                                    catalogId: first.id,
-                                    episode: Int64(first.nextEpisodeOrChapter),
-                                    title: first.title
-                                )
+                                do {
+                                    _ = try await model.resolveAndPlay(
+                                        catalogId: first.id,
+                                        episode: Int64(first.nextEpisodeOrChapter),
+                                        title: first.title
+                                    )
+                                } catch {
+                                    model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
+                                }
                             }
                         } else {
                             Task { @MainActor in

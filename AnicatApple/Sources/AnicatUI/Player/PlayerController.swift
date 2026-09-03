@@ -21,9 +21,12 @@ public final class PlayerController: @unchecked Sendable {
     public var introEndTime: Double? = nil
     public var isIntroActive: Bool = false
 
-    // Progress & Playback callbacks for real SQLite recording
+    // Progress & Playback callbacks for real SQLite recording and libmpv sync
     public var onPositionChange: (@Sendable (_ currentTime: Double, _ duration: Double) -> Void)?
     public var onPlaybackStopped: (@Sendable () -> Void)?
+    public var onSeek: (@Sendable (_ seconds: Double) -> Void)?
+    public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?
+    public var isScrubbing: Bool = false
     
     // Autohide controls timer
     public var areControlsVisible: Bool = true
@@ -37,7 +40,25 @@ public final class PlayerController: @unchecked Sendable {
     public func togglePlayPause() {
         isPlaying.toggle()
         showControlsBriefly()
+        onSetPause?(!isPlaying)
         if !isPlaying {
+            onPositionChange?(currentTime, duration)
+        }
+    }
+
+    public func play() {
+        if !isPlaying {
+            isPlaying = true
+            showControlsBriefly()
+            onSetPause?(false)
+        }
+    }
+
+    public func pause() {
+        if isPlaying {
+            isPlaying = false
+            showControlsBriefly()
+            onSetPause?(true)
             onPositionChange?(currentTime, duration)
         }
     }
@@ -49,6 +70,7 @@ public final class PlayerController: @unchecked Sendable {
         }
         checkIntroStatus()
         showControlsBriefly()
+        onSeek?(currentTime)
         onPositionChange?(currentTime, duration)
     }
 

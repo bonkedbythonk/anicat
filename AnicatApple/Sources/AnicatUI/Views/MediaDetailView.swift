@@ -98,6 +98,7 @@ public struct MediaDetailView: View {
 
     @State private var selectedTab: DetailTab = .episodes
     @State private var isSynopsisExpanded = false
+    @State private var isBackHovered = false
 
     public init(
         details: HeroBanner.Details,
@@ -187,17 +188,36 @@ public struct MediaDetailView: View {
             )
             .frame(height: 288)
 
-            Button(action: onClose) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
-                    Text("Back")
+            // Top Left Back Button (positioned directly above poster card in 1150pt container)
+            VStack(alignment: .leading) {
+                Button(action: onClose) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(isBackHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(isBackHovered ? SumiTheme.card.opacity(0.9) : Color.black.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(isBackHovered ? SumiTheme.border : Color.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundColor(SumiTheme.foreground.opacity(0.7))
+                .buttonStyle(.plain)
+                #if os(macOS)
+                .onHover { isBackHovered = $0 }
+                #endif
+                Spacer()
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 56)
             .padding(.top, 24)
+            .frame(maxWidth: 1150, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(height: 288)
         .clipped()
@@ -449,57 +469,73 @@ public struct MediaDetailView: View {
     }
 
     private func relationCard(_ relation: HeroBanner.Details.Relation, label: String, leading: Bool) -> some View {
-        Button {
-            onSelectRelation?(relation)
-        } label: {
-            HStack(spacing: 12) {
-                if leading {
-                    Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
-                }
-                Color.clear
-                    .frame(width: 40, height: 56)
-                    .overlay {
-                        AsyncImage(url: relation.coverURL) { phase in
-                            if let image = phase.image {
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            } else {
-                                Rectangle().fill(SumiTheme.card)
+        RelationCardView(relation: relation, label: label, leading: leading, onSelect: onSelectRelation)
+    }
+
+    private struct RelationCardView: View {
+        let relation: HeroBanner.Details.Relation
+        let label: String
+        let leading: Bool
+        let onSelect: ((HeroBanner.Details.Relation) -> Void)?
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button {
+                onSelect?(relation)
+            } label: {
+                HStack(spacing: 12) {
+                    if leading {
+                        Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
+                    }
+                    Color.clear
+                        .frame(width: 40, height: 56)
+                        .overlay {
+                            AsyncImage(url: relation.coverURL) { phase in
+                                if let image = phase.image {
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } else {
+                                    Rectangle().fill(SumiTheme.card)
+                                }
                             }
                         }
-                    }
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: leading ? .leading : .trailing, spacing: 2) {
-                    Text(label)
-                        .sumiTabularMono(size: 11.5)
-                        .foregroundColor(SumiTheme.indigo)
-                    Text(relation.title)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(SumiTheme.foreground)
-                        .lineLimit(1)
-                    if let format = relation.format {
-                        Text(format)
-                            .font(.system(size: 10))
-                            .foregroundColor(SumiTheme.muted)
+                    VStack(alignment: leading ? .leading : .trailing, spacing: 2) {
+                        Text(label)
+                            .sumiTabularMono(size: 11.5)
+                            .foregroundColor(SumiTheme.indigo)
+                        Text(relation.title)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(1)
+                        if let format = relation.format {
+                            Text(format)
+                                .font(.system(size: 10))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
+
+                    if !leading {
+                        Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
-
-                if !leading {
-                    Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
-                }
+                .padding(10)
+                .background(isHovered ? SumiTheme.card : SumiTheme.foreground.opacity(0.02))
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        .stroke(isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
             }
-            .padding(10)
-            .background(SumiTheme.foreground.opacity(0.02))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Tabs
@@ -579,31 +615,49 @@ public struct MediaDetailView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(mangaChapters) { chapter in
-                        Button { onReadChapter(chapter) } label: {
-                            HStack(spacing: 12) {
-                                Text("CH \(chapter.number)")
-                                    .sumiTabularMono(size: 11.5)
-                                    .foregroundColor(SumiTheme.indigo)
-                                Text(chapter.title)
-                                    .font(.system(size: 13.5, weight: .medium))
-                                    .foregroundColor(SumiTheme.foreground)
-                                    .lineLimit(1)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .contentShape(Rectangle())
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
+                        ChapterRowView(chapter: chapter) {
+                            onReadChapter(chapter)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
         default:
             SumiEmptyState(headline: "Not available", detail: "This tab has nothing to show for this title yet.")
+        }
+    }
+
+    private struct ChapterRowView: View {
+        let chapter: MediaDetailView.MangaChapterItem
+        let onRead: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: onRead) {
+                HStack(spacing: 12) {
+                    Text("CH \(chapter.number)")
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.indigo)
+                    Text(chapter.title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundColor(SumiTheme.foreground)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(isHovered ? SumiTheme.card : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        .stroke(isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
         }
     }
 }
@@ -642,7 +696,7 @@ private struct EpisodeRow: View {
             .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
             .overlay(
                 RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(isResumeTarget ? SumiTheme.foreground.opacity(0.25) : SumiTheme.border, lineWidth: 1)
+                    .stroke(isHovered ? SumiTheme.border.opacity(0.9) : (isResumeTarget ? SumiTheme.foreground.opacity(0.25) : SumiTheme.border), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }

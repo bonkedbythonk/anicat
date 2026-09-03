@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { mediaApi, type MediaItem } from "@/lib/api";
@@ -10,7 +10,7 @@ import { FocusContext } from "@/focus/FocusScope";
 import type { ViewType } from "@/lib/types";
 
 interface PaletteRow {
-  kind: "library" | "anilist" | "nav" | "action";
+  kind: "library" | "anilist" | "cinema" | "nav" | "action";
   key: string;
   label: string;
   hint?: string;
@@ -49,8 +49,8 @@ function PaletteRowButton({ row }: { row: PaletteRow }) {
       aria-selected={isFocused}
       onClick={row.run}
       onMouseMove={() => ref.current?.focus()}
-      className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-pointer ${
-        isFocused ? "bg-accent/12 text-foreground" : "text-foreground/60"
+      className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-pointer transition-colors ${
+        isFocused ? "bg-accent/12 text-foreground" : "text-foreground/60 hover:text-foreground hover:bg-foreground/[0.04]"
       }`}
     >
       {row.cover && (
@@ -88,6 +88,8 @@ function PaletteResults({
         e.preventDefault();
         if (inputFocused) {
           scope.focusLast();
+        } else if (scope.activeIndex === 0) {
+          inputRef.current?.focus();
         } else {
           scope.focusPrev();
         }
@@ -105,10 +107,12 @@ function PaletteResults({
   rows.forEach((row) => {
     const title =
       row.kind === "library" || row.kind === "action"
-        ? "Your library"
+        ? "YOUR LIBRARY"
         : row.kind === "nav"
-          ? "Navigate"
-          : "AniList";
+          ? "NAVIGATE"
+          : row.kind === "cinema"
+            ? "SHOWS"
+            : "ANILIST";
     const section = sections.find((s) => s.title === title);
     if (section) section.rows.push(row);
     else sections.push({ title, rows: [row] });
@@ -123,7 +127,7 @@ function PaletteResults({
       )}
       {sections.map((section) => (
         <div key={section.title} className="px-1.5 pb-1">
-          <div className="meta-mono px-2.5 pt-2 pb-1 text-muted-foreground/70 select-none">{section.title}</div>
+          <div className="meta-mono px-2.5 pt-2 pb-1 text-muted-foreground/70 select-none uppercase tracking-wider text-[11px]">{section.title}</div>
           {section.rows.map((row) => (
             <PaletteRowButton key={row.key} row={row} />
           ))}
@@ -181,14 +185,21 @@ export function CommandPalette() {
   const anilistQ = useQuery({
     queryKey: ["palette-search", debounced],
     queryFn: () => mediaApi.search(debounced, "ANIME", 1, {}),
-    enabled: open && debounced.length >= 3 && appMode === "anime",
+    enabled: open && debounced.length >= 2 && appMode === "anime",
     staleTime: 60_000,
   });
 
-  const close = () => {
-    setOpen(false);
+  const cinemaQ = useQuery({
+    queryKey: ["palette-cinema-search", debounced],
+    queryFn: () => mediaApi.cinemaSearch(debounced),
+    enabled: open && debounced.length >= 2 && appMode === "cinema",
+    staleTime: 60_000,
+  });
+
+  const close = useCallback(() => {
     setQuery("");
-  };
+    setOpen(false);
+  }, [setOpen]);
 
   const rows = useMemo<PaletteRow[]>(() => {
     const q = query.trim().toLowerCase();
@@ -253,28 +264,46 @@ export function CommandPalette() {
             close();
             closeDetail();
             setCurrentView(nav.view);
+            previousScopeRef.current = `${nav.view}-default`;
+            setActiveFocusScope(`${nav.view}-default`);
           },
         });
       }
     }
 
-    const libIds = new Set(libraryPool.map((m) => m.id));
-    for (const m of (anilistQ.data?.media || []).filter((m: MediaItem) => !libIds.has(m.id)).slice(0, 5)) {
-      out.push({
-        kind: "anilist",
-        key: `al-${m.id}`,
-        label: m.title.english || m.title.romaji || "",
-        hint: "AniList",
-        cover: m.cover_image?.medium || m.cover_image?.large,
-        run: () => {
-          close();
-          openDetail(m);
-        },
-      });
+    if (appMode === "cinema") {
+      for (const m of (cinemaQ.data?.media || []).slice(0, 5)) {
+        out.push({
+          kind: "cinema",
+          key: `cin-${m.id}`,
+          label: m.title.english || m.title.romaji || "",
+          hint: "Cinema",
+          cover: m.cover_image?.medium || m.cover_image?.large,
+          run: () => {
+            close();
+            openDetail(m);
+          },
+        });
+      }
+    } else {
+      const libIds = new Set(libraryPool.map((m) => m.id));
+      for (const m of (anilistQ.data?.media || []).filter((m: MediaItem) => !libIds.has(m.id)).slice(0, 5)) {
+        out.push({
+          kind: "anilist",
+          key: `al-${m.id}`,
+          label: m.title.english || m.title.romaji || "",
+          hint: "AniList",
+          cover: m.cover_image?.medium || m.cover_image?.large,
+          run: () => {
+            close();
+            openDetail(m);
+          },
+        });
+      }
     }
 
     return out;
-  }, [query, watchingQ.data, repeatingQ.data, planningQ.data, anilistQ.data, appMode]);
+  }, [query, watchingQ.data, repeatingQ.data, planningQ.data, anilistQ.data, cinemaQ.data, appMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -296,7 +325,7 @@ export function CommandPalette() {
   return (
     <div
       ref={modalRef}
-      className="fixed inset-0 z-[300] bg-black/50 flex items-start justify-center pt-[14vh]"
+      className="fixed inset-0 z-[300] bg-black/60 flex items-start justify-center pt-[14vh]"
       onClick={close}
       role="dialog"
       aria-modal="true"
@@ -316,8 +345,12 @@ export function CommandPalette() {
             placeholder="Search shows, actions, pages"
             className="flex-1 bg-transparent px-2 py-1 text-[14px] text-foreground placeholder:text-muted-foreground outline-none border-none shadow-none focus:ring-0 focus-visible:shadow-none"
           />
-          {anilistQ.isFetching && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
-          <kbd className="meta-mono text-[9px] text-muted-foreground border border-border rounded px-1.5 py-0.5">Esc</kbd>
+          {(anilistQ.isFetching || cinemaQ.isFetching) && (
+            <Loader2 size={14} className="animate-spin text-muted-foreground shrink-0" />
+          )}
+          <kbd className="meta-mono text-[9px] text-muted-foreground border border-border rounded px-1.5 py-0.5 select-none shrink-0">
+            ESC
+          </kbd>
         </div>
         <FocusScope
           name="command-palette-list"

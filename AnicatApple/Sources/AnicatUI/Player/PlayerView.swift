@@ -170,8 +170,15 @@ public struct PlayerView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
+                            controller.isScrubbing = true
                             let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                            controller.seek(to: Double(fraction) * controller.duration)
+                            controller.currentTime = Double(fraction) * controller.duration
+                        }
+                        .onEnded { value in
+                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                            let target = Double(fraction) * controller.duration
+                            controller.isScrubbing = false
+                            controller.seek(to: target)
                         }
                 )
             }

@@ -6,7 +6,7 @@ import UIKit
 #endif
 
 public struct SidebarView: View {
-    public enum NavSection: String, CaseIterable, Identifiable {
+    public enum NavSection: String, CaseIterable, Identifiable, Sendable {
         case upNext = "home"
         case schedule = "schedule"
         case library = "lists"
@@ -41,6 +41,26 @@ public struct SidebarView: View {
             case .novels: return "N"
             case .search: return "/"
             case .downloads: return "D"
+            default: return nil
+            }
+        }
+
+        public static let numberedSections: [NavSection] = [
+            .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads
+        ]
+
+        public static func fromNumberKey(_ num: Int) -> NavSection? {
+            guard num >= 1 && num <= numberedSections.count else { return nil }
+            return numberedSections[num - 1]
+        }
+
+        public static func fromLetterKey(_ char: Character) -> NavSection? {
+            switch char.lowercased() {
+            case "h": return .upNext
+            case "l": return .library
+            case "m": return .manga
+            case "n": return .novels
+            case "d": return .downloads
             default: return nil
             }
         }
@@ -151,51 +171,65 @@ public struct SidebarView: View {
     }
 
     private func navItemButton(_ item: NavSection) -> some View {
-        let isActive = currentView == item
-
-        return Button(action: {
+        NavItemButton(item: item, isActive: currentView == item) {
             currentView = item
-        }) {
-            HStack {
-                Text(item.label)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7))
-
-                Spacer()
-
-                if let sc = item.shortcut {
-                    // The chip is `meta-mono` at its full 11.5pt, and it — not
-                    // the label — sets the row height: measured against the
-                    // running Tauri app, a row with a shortcut is 37pt and one
-                    // without is 34. Shrinking the chip to 10pt compressed
-                    // every row and the whole list drifted short of the web.
-                    Text(sc)
-                        .sumiTabularMono(size: 11.5)
-                        .foregroundColor(SumiTheme.muted)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(SumiTheme.foreground.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(SumiTheme.border.opacity(0.5), lineWidth: 1)
-                        )
-                }
-            }
-            .frame(minHeight: 23)
-            .padding(.leading, 20)
-            .padding(.trailing, 16)
-            .padding(.vertical, 7)
-            .background(isActive ? SumiTheme.indigo.opacity(0.10) : Color.clear)
-            .overlay(
-                // 2px solid left accent indicator matching Tauri CSS
-                Rectangle()
-                    .fill(isActive ? SumiTheme.indigo : Color.clear)
-                    .frame(width: 2),
-                alignment: .leading
-            )
         }
-        .buttonStyle(.plain)
+    }
+
+    private struct NavItemButton: View {
+        let item: NavSection
+        let isActive: Bool
+        let onSelect: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: onSelect) {
+                HStack {
+                    Text(item.label)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                        .foregroundColor(isActive ? SumiTheme.foreground : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
+
+                    Spacer()
+
+                    if let sc = item.shortcut {
+                        // The chip is `meta-mono` at its full 11.5pt, and it — not
+                        // the label — sets the row height: measured against the
+                        // running Tauri app, a row with a shortcut is 37pt and one
+                        // without is 34. Shrinking the chip to 10pt compressed
+                        // every row and the whole list drifted short of the web.
+                        Text(sc)
+                            .sumiTabularMono(size: 11.5)
+                            .foregroundColor(SumiTheme.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(SumiTheme.foreground.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(SumiTheme.border.opacity(0.5), lineWidth: 1)
+                            )
+                    }
+                }
+                .frame(minHeight: 23)
+                .padding(.leading, 20)
+                .padding(.trailing, 16)
+                .padding(.vertical, 7)
+                .background(isActive ? SumiTheme.indigo.opacity(0.10) : (isHovered ? SumiTheme.foreground.opacity(0.04) : Color.clear))
+                .overlay(
+                    // 2px solid left accent indicator matching Tauri CSS
+                    Rectangle()
+                        .fill(isActive ? SumiTheme.indigo : Color.clear)
+                        .frame(width: 2),
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
+        }
     }
 }
 

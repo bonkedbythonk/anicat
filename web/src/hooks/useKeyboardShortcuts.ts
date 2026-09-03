@@ -40,10 +40,10 @@ export function useKeyboardShortcuts() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-      // Cmd/Ctrl+K opens the palette even while typing in an input.
+      // Cmd/Ctrl+K opens/toggles the palette even while typing in an input.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setPaletteOpen(true);
+        setPaletteOpen(!useAppStore.getState().paletteOpen);
         return;
       }
 

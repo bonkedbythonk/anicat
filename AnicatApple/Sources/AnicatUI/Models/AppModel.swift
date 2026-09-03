@@ -458,6 +458,11 @@ public final class AppModel: @unchecked Sendable {
         episode: Int64,
         title: String? = nil
     ) async throws -> URL {
+        let effectiveTitle = title ?? self.selectedMediaDetails?.title ?? self.knownTitles[catalogId] ?? "Anime"
+        self.playerController.title = effectiveTitle
+        self.playerController.episodeNumber = Int(episode)
+        self.playerController.isPlaying = true
+
         guard let engine else {
             throw NSError(domain: "AniCat", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
         }
@@ -468,27 +473,30 @@ public final class AppModel: @unchecked Sendable {
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode
-        self.currentPlaybackTitle = title
+        self.currentPlaybackTitle = effectiveTitle
         self.lastRecordedSecond = -1
 
-        self.playerController.title = title ?? "Anime"
-        self.playerController.episodeNumber = Int(episode)
-        self.playerController.isPlaying = true
-
-        // Restore any existing progress from SQLite
+        // Restore any existing progress from SQLite or media metadata
+        var initialDuration: Double = 0.0
+        var initialTime: Double = 0.0
         if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
-            self.playerController.currentTime = Double(progress.stopTime)
-            self.playerController.duration = Double(progress.duration)
-        } else {
-            self.playerController.currentTime = 0.0
-            self.playerController.duration = 0.0
+            initialTime = Double(progress.stopTime)
+            initialDuration = Double(progress.duration)
         }
+        if initialDuration <= 0 {
+            if let ep = selectedEpisodes.first(where: { $0.number == Int(episode) }),
+               let runtime = ep.runtimeMinutes, runtime > 0 {
+                initialDuration = Double(runtime * 60)
+            }
+        }
+        self.playerController.currentTime = initialTime
+        self.playerController.duration = initialDuration
 
         let req = StreamRequest(
             catalog: catalog,
             catalogId: catalogId,
             episode: episode,
-            title: title,
+            title: effectiveTitle,
             preferDub: false,
             chosenName: nil
         )
@@ -498,12 +506,20 @@ public final class AppModel: @unchecked Sendable {
             throw NSError(domain: "AniCat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handle.url)"])
         }
 
+        // Before returning streamURL, configure playerController with actual title, episode number, and duration
+        self.playerController.title = effectiveTitle
+        self.playerController.episodeNumber = Int(episode)
+        self.playerController.isPlaying = true
+        if self.playerController.duration <= 0 && initialDuration > 0 {
+            self.playerController.duration = initialDuration
+        }
+
         self.activeStreamURL = streamURL
 
         // Apple Handoff: broadcast current playback activity to iPhone / iPad / Mac
         ContinuityManager.shared.advertisePlayback(
             catalogId: catalogId,
-            title: title ?? "Anime",
+            title: effectiveTitle,
             episode: Int(episode),
             timePositionSeconds: playerController.currentTime
         )
@@ -541,6 +557,40 @@ public final class AppModel: @unchecked Sendable {
                 await openDetail(id: currentDetails.id, isManga: isManga)
             }
         }
+    }
+
+    /// Handles dismissal hierarchy for ESC key:
+    /// 1. CommandPalette (topmost overlay)
+    /// 2. PlayerView (modal video playback)
+    /// 3. MangaReaderView (modal manga reading)
+    /// 4. MediaDetailView (detail page)
+    @discardableResult
+    public func handleEscapeKey() -> Bool {
+        if paletteOpen {
+            paletteOpen = false
+            return true
+        }
+        if activeStreamURL != nil {
+            stopPlayback()
+            return true
+        }
+        if activeReadingSession != nil {
+            closeReader()
+            return true
+        }
+        if selectedMediaDetails != nil {
+            selectedMediaDetails = nil
+            return true
+        }
+        return false
+    }
+
+    /// Navigates to a specific section, closing any active playback, reader, or detail views.
+    public func navigate(to section: SidebarView.NavSection) {
+        stopPlayback()
+        closeReader()
+        selectedMediaDetails = nil
+        currentNavSection = section
     }
 
     /// Fills the home page.

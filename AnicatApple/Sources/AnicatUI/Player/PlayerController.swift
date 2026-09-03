@@ -6,7 +6,7 @@ import Observation
 public final class PlayerController: @unchecked Sendable {
     public var isPlaying: Bool = true
     public var currentTime: Double = 0.0 // seconds
-    public var duration: Double = 1440.0 // seconds (e.g. 24m)
+    public var duration: Double = 0.0 // seconds
     public var title: String = ""
     public var episodeNumber: Int = 1
     public var isBuffering: Bool = false
@@ -17,9 +17,13 @@ public final class PlayerController: @unchecked Sendable {
     public var activeAnime4KPreset: Anime4KPreset = .modeAFast
     
     // AniSkip (Skip Intro / Outro)
-    public var introStartTime: Double? = 90.0 // sample 1:30
-    public var introEndTime: Double? = 175.0   // sample 2:55
+    public var introStartTime: Double? = nil
+    public var introEndTime: Double? = nil
     public var isIntroActive: Bool = false
+
+    // Progress & Playback callbacks for real SQLite recording
+    public var onPositionChange: (@Sendable (_ currentTime: Double, _ duration: Double) -> Void)?
+    public var onPlaybackStopped: (@Sendable () -> Void)?
     
     // Autohide controls timer
     public var areControlsVisible: Bool = true
@@ -33,12 +37,19 @@ public final class PlayerController: @unchecked Sendable {
     public func togglePlayPause() {
         isPlaying.toggle()
         showControlsBriefly()
+        if !isPlaying {
+            onPositionChange?(currentTime, duration)
+        }
     }
 
     public func seek(to seconds: Double) {
-        currentTime = min(max(seconds, 0), duration)
+        currentTime = max(seconds, 0)
+        if duration > 0 {
+            currentTime = min(currentTime, duration)
+        }
         checkIntroStatus()
         showControlsBriefly()
+        onPositionChange?(currentTime, duration)
     }
 
     public func seekRelative(by delta: Double) {

@@ -159,16 +159,21 @@ public struct MpvMetalSurface: NSViewRepresentable {
                             await MainActor.run {
                                 self.controller.currentTime = pos
                                 self.controller.checkIntroStatus()
+                                self.controller.onPositionChange?(pos, self.controller.duration)
                             }
                         } else if name == "duration", let data = prop.data {
                             let dur = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
                                 self.controller.duration = dur
+                                self.controller.onPositionChange?(self.controller.currentTime, dur)
                             }
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {
                                 self.controller.isPlaying = !paused
+                                if paused {
+                                    self.controller.onPositionChange?(self.controller.currentTime, self.controller.duration)
+                                }
                             }
                         }
                     }
@@ -178,6 +183,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
         func stop() {
             isRunning = false
+            controller.onPlaybackStopped?()
             if let handle = mpv {
                 mpv_destroy(handle)
                 self.mpv = nil

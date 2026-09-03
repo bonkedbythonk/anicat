@@ -4,14 +4,16 @@ public struct SearchView: View {
     @Binding public var searchText: String
     public let results: [MediaCard.Item]
     public let isLoading: Bool
-    public let onSearchCommit: (String) -> Void
+    public let onSearchCommit: (String, Bool) -> Void
     public let onSelectMedia: (MediaCard.Item) -> Void
+
+    @State private var searchType: String = "ANIME"
 
     public init(
         searchText: Binding<String>,
         results: [MediaCard.Item],
         isLoading: Bool = false,
-        onSearchCommit: @escaping (String) -> Void = { _ in },
+        onSearchCommit: @escaping (String, Bool) -> Void = { _, _ in },
         onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in }
     ) {
         self._searchText = searchText
@@ -21,27 +23,50 @@ public struct SearchView: View {
         self.onSelectMedia = onSelectMedia
     }
 
+    public init(
+        searchText: Binding<String>,
+        results: [MediaCard.Item],
+        isLoading: Bool = false,
+        onSearchCommit: @escaping (String) -> Void,
+        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in }
+    ) {
+        self._searchText = searchText
+        self.results = results
+        self.isLoading = isLoading
+        self.onSearchCommit = { query, _ in onSearchCommit(query) }
+        self.onSelectMedia = onSelectMedia
+    }
+
     public var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 24) {
                 // Header & Search Input
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Search & Browse")
-                        .font(.system(size: 19, weight: .semibold))
-                        .tracking(-0.3)
-                        .foregroundColor(SumiTheme.foreground)
+                    HStack(alignment: .center) {
+                        Text("Search & Browse")
+                            .font(.system(size: 19, weight: .semibold))
+                            .tracking(-0.3)
+                            .foregroundColor(SumiTheme.foreground)
+
+                        Spacer()
+
+                        SumiSegmentedControl(
+                            options: [("ANIME", "Anime"), ("MANGA", "Manga")],
+                            selection: $searchType
+                        )
+                    }
 
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 16))
                             .foregroundColor(SumiTheme.muted)
 
-                        TextField("Search anime, manga, studios, genres...", text: $searchText)
+                        TextField(searchType == "MANGA" ? "Search manga, authors, genres..." : "Search anime, studios, genres...", text: $searchText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 15))
                             .foregroundColor(SumiTheme.foreground)
                             .onSubmit {
-                                onSearchCommit(searchText)
+                                onSearchCommit(searchText, searchType == "MANGA")
                             }
 
                         if !searchText.isEmpty {
@@ -69,6 +94,12 @@ public struct SearchView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+                }
+                .onChange(of: searchType) { _, next in
+                    let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        onSearchCommit(trimmed, next == "MANGA")
+                    }
                 }
                 .padding(.horizontal, 40)
 

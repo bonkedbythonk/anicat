@@ -19,6 +19,46 @@ public final class AppModel: @unchecked Sendable {
     public var selectedMangaChapters: [MediaDetailView.MangaChapterItem] = []
     public var activeStreamURL: URL?
 
+    // PlayerController & Playback Tracking
+    public let playerController = PlayerController()
+    public var currentPlaybackCatalog: FfiCatalog = .anilist
+    public var currentPlaybackCatalogId: Int64?
+    public var currentPlaybackEpisode: Int64?
+    public var currentPlaybackTitle: String?
+    private var lastRecordedSecond: Int64 = -1
+
+    // Manga Reading Session
+    public struct MangaReadingSession: Identifiable, Sendable {
+        public var id: String { chapterId }
+        public let title: String
+        public let chapterTitle: String
+        public let chapterId: String
+        public let pageURLs: [URL]
+        public let chapterIndex: Int
+        public let chapters: [MediaDetailView.MangaChapterItem]
+        public let anilistId: Int64?
+
+        public init(
+            title: String,
+            chapterTitle: String,
+            chapterId: String,
+            pageURLs: [URL],
+            chapterIndex: Int,
+            chapters: [MediaDetailView.MangaChapterItem],
+            anilistId: Int64?
+        ) {
+            self.title = title
+            self.chapterTitle = chapterTitle
+            self.chapterId = chapterId
+            self.pageURLs = pageURLs
+            self.chapterIndex = chapterIndex
+            self.chapters = chapters
+            self.anilistId = anilistId
+        }
+    }
+
+    public var activeReadingSession: MangaReadingSession?
+
     // Dashboard State
     public var upNextItems: [UpNextQueueView.QueueEntry] = []
     public var watchingItems: [MediaCard.Item] = []
@@ -53,7 +93,18 @@ public final class AppModel: @unchecked Sendable {
     /// have nothing to show without it and say so rather than sitting empty.
     public var isSignedIn = false
 
-    public init() {}
+    public init() {
+        setupPlayerCallbacks()
+    }
+
+    private func setupPlayerCallbacks() {
+        playerController.onPositionChange = { [weak self] currentTime, duration in
+            self?.handlePlaybackPositionChange(currentTime: currentTime, duration: duration)
+        }
+        playerController.onPlaybackStopped = { [weak self] in
+            self?.stopPlayback()
+        }
+    }
 
     /// Initializes the headless Rust engine and opens the SQLite registry.
     public func initialize(anilistToken: String? = nil, tmdbKey: String? = nil) async {
@@ -144,17 +195,35 @@ public final class AppModel: @unchecked Sendable {
         await loadHistory()
     }
 
-    /// Opens the detail page for a title, replacing the fabricated stand-in
-    /// that used to fill it: 28 episodes numbered 1...28, every one titled
-    /// "Episode N", a hardcoded synopsis of "An extraordinary journey begins."
-    /// and a score of 92 regardless of the show.
-    public func openDetail(catalogId: Int64, isManga: Bool = false) async {
+    /// Opens the detail page for a title, fetching real AniList metadata and real streaming/registry episodes.
+    public func openDetail(id: Int64, isManga: Bool = false) async {
         guard let engine else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            let d = try await engine.mediaDetail(catalogId: catalogId, isManga: isManga)
-            selectedMediaDetails = HeroBanner.Details(
+            let d = try await engine.mediaDetail(catalogId: id, isManga: isManga)
+            let episodes = d.episodes.map { e in
+                MediaDetailView.EpisodeItem(
+                    id: Int64(e.number),
+                    number: Int(e.number),
+                    title: e.title,
+                    thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
+                    isWatched: e.isWatched,
+                    progressPercent: e.progressPercent,
+                    runtimeMinutes: e.runtimeMinutes.map(Int.init)
+                )
+            }
+            var chapters: [MediaDetailView.MangaChapterItem] = []
+            if isManga || d.chapterCount != nil || d.format == "MANGA" || d.format == "NOVEL" || d.format == "ONE_SHOT" {
+                let fetched = (try? await engine.mangaChapters(alId: id)) ?? []
+                chapters = fetched.map {
+                    MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
+                }
+            }
+
+            self.selectedEpisodes = episodes
+            self.selectedMangaChapters = chapters
+            self.selectedMediaDetails = HeroBanner.Details(
                 id: d.catalogId,
                 title: d.title,
                 romajiTitle: d.romajiTitle,
@@ -174,35 +243,81 @@ public final class AppModel: @unchecked Sendable {
                 prequel: d.prequel.map(Self.relation),
                 sequel: d.sequel.map(Self.relation)
             )
-            selectedEpisodes = d.episodes.map { e in
-                MediaDetailView.EpisodeItem(
-                    id: Int64(e.number),
-                    number: Int(e.number),
-                    title: e.title,
-                    thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
-                    isWatched: e.isWatched,
-                    progressPercent: e.progressPercent,
-                    runtimeMinutes: e.runtimeMinutes.map(Int.init)
-                )
-            }
-            selectedMangaChapters = []
-            if isManga {
-                await loadMangaChapters(title: d.title, anilistId: catalogId)
-            }
         } catch {
             errorMessage = "Could not open that title: \(error.localizedDescription)"
         }
     }
 
-    /// MangaDex has no AniList ids of its own to search by, so the title is
-    /// the query and `links.al` is what confirms the match.
-    private func loadMangaChapters(title: String, anilistId: Int64) async {
+    public func openDetail(catalogId: Int64, isManga: Bool = false) async {
+        await openDetail(id: catalogId, isManga: isManga)
+    }
+
+    /// Opens the manga reader for a selected chapter, fetching real page images via engine.mangaPages.
+    public func openReader(
+        title: String,
+        chapter: MediaDetailView.MangaChapterItem,
+        allChapters: [MediaDetailView.MangaChapterItem] = [],
+        anilistId: Int64? = nil
+    ) async {
         guard let engine else { return }
-        guard let match = try? await engine.searchManga(query: title, anilistId: anilistId),
-              let first = match.first else { return }
-        let chapters = (try? await engine.getMangaChapters(mangaId: first.id)) ?? []
-        selectedMangaChapters = chapters.map {
-            MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let pages = try await engine.mangaPages(chapterId: chapter.id)
+            let urls = pages.compactMap { URL(string: $0) }
+            let index = allChapters.firstIndex(where: { $0.id == chapter.id }) ?? 0
+            let displayTitle = chapter.title.isEmpty ? "Chapter \(chapter.number)" : "CH \(chapter.number): \(chapter.title)"
+            self.activeReadingSession = MangaReadingSession(
+                title: title,
+                chapterTitle: displayTitle,
+                chapterId: chapter.id,
+                pageURLs: urls,
+                chapterIndex: index,
+                chapters: allChapters,
+                anilistId: anilistId
+            )
+            ContinuityManager.shared.advertiseReading(
+                mangaId: chapter.id,
+                title: title,
+                chapter: chapter.number,
+                pageIndex: 0
+            )
+        } catch {
+            errorMessage = "Could not load chapter pages: \(error.localizedDescription)"
+            print("Manga pages load failed: \(error)")
+        }
+    }
+
+    public func closeReader() {
+        activeReadingSession = nil
+        ContinuityManager.shared.stopAdvertising()
+    }
+
+    public func nextChapter() async {
+        guard let session = activeReadingSession else { return }
+        let nextIndex = session.chapterIndex + 1
+        if nextIndex < session.chapters.count {
+            let nextChapter = session.chapters[nextIndex]
+            await openReader(
+                title: session.title,
+                chapter: nextChapter,
+                allChapters: session.chapters,
+                anilistId: session.anilistId
+            )
+        }
+    }
+
+    public func prevChapter() async {
+        guard let session = activeReadingSession else { return }
+        let prevIndex = session.chapterIndex - 1
+        if prevIndex >= 0 {
+            let prevChapter = session.chapters[prevIndex]
+            await openReader(
+                title: session.title,
+                chapter: prevChapter,
+                allChapters: session.chapters,
+                anilistId: session.anilistId
+            )
         }
     }
 
@@ -282,8 +397,8 @@ public final class AppModel: @unchecked Sendable {
         isSignedIn = viewer != nil
     }
 
-    /// Search anime across AniList catalog via the Rust engine.
-    public func search(query: String) async {
+    /// Search anime or manga across AniList catalog via the Rust engine.
+    public func search(query: String, isManga: Bool? = nil) async {
         guard let engine, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
@@ -293,20 +408,47 @@ public final class AppModel: @unchecked Sendable {
         defer { isLoading = false }
 
         do {
-            let summaries = try await engine.searchAnime(query: query)
-            self.searchResults = summaries.map { summary in
-                MediaCard.Item(
-                    id: summary.catalogId,
-                    title: summary.title,
-                    coverImageURL: URL(string: summary.coverImage),
-                    isManga: false,
-                    score: summary.averageScore.map { Int($0) },
-                    totalEpisodesOrChapters: summary.episodes.map { Int($0) }
-                )
+            let shouldSearchManga = isManga ?? (currentNavSection == .manga || currentNavSection == .novels)
+            let summaries: [MediaSummary]
+            if shouldSearchManga {
+                summaries = try await engine.searchMangaCatalog(query: query)
+            } else {
+                summaries = try await engine.searchAnime(query: query)
             }
+            self.searchResults = summaries.map { Self.card($0) }
         } catch {
             print("Search failed: \(error)")
         }
+    }
+
+    /// Handles real-time playback position changes from the player and records to SQLite.
+    public func handlePlaybackPositionChange(currentTime: Double, duration: Double) {
+        guard let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode,
+              let engine else { return }
+
+        let rawStop = Int64(currentTime)
+        let dur = Int64(duration)
+        let stopTime = dur > 0 ? min(rawStop, dur) : rawStop
+
+        // Only record if whole second changed and valid
+        guard stopTime != lastRecordedSecond, stopTime >= 0 else { return }
+        lastRecordedSecond = stopTime
+
+        try? engine.recordProgress(
+            catalog: currentPlaybackCatalog,
+            catalogId: catalogId,
+            episodeNumber: episode,
+            stopTime: stopTime,
+            duration: dur
+        )
+
+        ContinuityManager.shared.advertisePlayback(
+            catalogId: catalogId,
+            title: currentPlaybackTitle ?? "Anime",
+            episode: Int(episode),
+            timePositionSeconds: currentTime
+        )
     }
 
     /// Resolves a torrent release and prepares the stream URL for playback.
@@ -322,6 +464,25 @@ public final class AppModel: @unchecked Sendable {
 
         isLoading = true
         defer { isLoading = false }
+
+        self.currentPlaybackCatalog = catalog
+        self.currentPlaybackCatalogId = catalogId
+        self.currentPlaybackEpisode = episode
+        self.currentPlaybackTitle = title
+        self.lastRecordedSecond = -1
+
+        self.playerController.title = title ?? "Anime"
+        self.playerController.episodeNumber = Int(episode)
+        self.playerController.isPlaying = true
+
+        // Restore any existing progress from SQLite
+        if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
+            self.playerController.currentTime = Double(progress.stopTime)
+            self.playerController.duration = Double(progress.duration)
+        } else {
+            self.playerController.currentTime = 0.0
+            self.playerController.duration = 0.0
+        }
 
         let req = StreamRequest(
             catalog: catalog,
@@ -344,16 +505,42 @@ public final class AppModel: @unchecked Sendable {
             catalogId: catalogId,
             title: title ?? "Anime",
             episode: Int(episode),
-            timePositionSeconds: 0
+            timePositionSeconds: playerController.currentTime
         )
 
         return streamURL
     }
 
-    /// Stops playback and clears the Apple Handoff broadcast.
+    /// Stops playback, records final progress into SQLite, and clears the Apple Handoff broadcast.
     public func stopPlayback() {
+        if let catalogId = currentPlaybackCatalogId,
+           let episode = currentPlaybackEpisode,
+           let engine {
+            let dur = Int64(playerController.duration)
+            let rawStop = Int64(playerController.currentTime)
+            let stopTime = dur > 0 ? min(rawStop, dur) : rawStop
+            try? engine.recordProgress(
+                catalog: currentPlaybackCatalog,
+                catalogId: catalogId,
+                episodeNumber: episode,
+                stopTime: stopTime,
+                duration: dur
+            )
+        }
         self.activeStreamURL = nil
+        self.currentPlaybackCatalogId = nil
+        self.currentPlaybackEpisode = nil
+        self.currentPlaybackTitle = nil
+        self.lastRecordedSecond = -1
         ContinuityManager.shared.stopAdvertising()
+
+        Task {
+            await loadHistory()
+            if let currentDetails = selectedMediaDetails {
+                let isManga = currentDetails.format == "MANGA" || currentDetails.format == "NOVEL" || currentDetails.format == "ONE_SHOT"
+                await openDetail(id: currentDetails.id, isManga: isManga)
+            }
+        }
     }
 
     /// Fills the home page.
@@ -399,20 +586,30 @@ public final class AppModel: @unchecked Sendable {
         formatter.dateFormat = "HH:mm"
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "EEEE, MMMM d"
-        scheduleItems = watching.compactMap { s in
-            guard let at = s.nextAiringAt, let ep = s.nextEpisode else { return nil }
+        let watchingIds = Set(watching.map(\.catalogId))
+        var seenIds = Set<Int64>()
+        var combinedAiring: [ScheduleView.ScheduleItem] = []
+
+        for s in (watching + trending) {
+            guard !seenIds.contains(s.catalogId),
+                  let at = s.nextAiringAt,
+                  let ep = s.nextEpisode else { continue }
+            seenIds.insert(s.catalogId)
             let date = Date(timeIntervalSince1970: TimeInterval(at))
-            return ScheduleView.ScheduleItem(
-                id: s.catalogId,
-                title: s.title,
-                coverImageURL: URL(string: s.coverImage),
-                episodeNumber: Int(ep),
-                airingTimeText: formatter.string(from: date),
-                countdownText: Self.countdown(to: date),
-                dayGroup: dayFormatter.string(from: date)
+            combinedAiring.append(
+                ScheduleView.ScheduleItem(
+                    id: s.catalogId,
+                    title: s.title,
+                    coverImageURL: URL(string: s.coverImage),
+                    episodeNumber: Int(ep),
+                    airingTimeText: formatter.string(from: date),
+                    countdownText: Self.countdown(to: date),
+                    dayGroup: dayFormatter.string(from: date),
+                    isWatching: watchingIds.contains(s.catalogId)
+                )
             )
         }
-        .sorted { ($0.episodeNumber, $0.dayGroup) < ($1.episodeNumber, $1.dayGroup) }
+        scheduleItems = combinedAiring.sorted { ($0.episodeNumber, $0.dayGroup) < ($1.episodeNumber, $1.dayGroup) }
     }
 
     /// "6h ago", "3d ago" — the same buckets `relativeDay` uses on the web.

@@ -26,14 +26,10 @@ public struct MenuBarView: View {
     public let onQuit: () -> Void
 
     public init(
-        lastWatchedTitle: String? = "Frieren: Beyond Journey's End",
-        lastWatchedEpisode: Int? = 5,
+        lastWatchedTitle: String? = nil,
+        lastWatchedEpisode: Int? = nil,
         lastWatchedThumbnailURL: URL? = nil,
-        airingItems: [AiringTodayItem] = [
-            AiringTodayItem(id: 1, title: "Dungeon Meshi", episodeNumber: 24, countdownText: "in 1h 45m"),
-            AiringTodayItem(id: 2, title: "Solo Leveling", episodeNumber: 12, countdownText: "in 4h 10m"),
-            AiringTodayItem(id: 3, title: "Oshi no Ko", episodeNumber: 8, countdownText: "in 7h 20m")
-        ],
+        airingItems: [AiringTodayItem] = [],
         onResumeLastWatched: @escaping () -> Void = {},
         onOpenMainApp: @escaping () -> Void = {},
         onQuit: @escaping () -> Void = {}

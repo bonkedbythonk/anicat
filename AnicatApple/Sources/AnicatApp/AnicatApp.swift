@@ -51,14 +51,28 @@ struct AnicatApp: App {
                 lastWatchedTitle: model.upNextItems.first?.title,
                 lastWatchedEpisode: model.upNextItems.first?.nextEpisodeOrChapter,
                 lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+                airingItems: model.scheduleItems.prefix(5).map {
+                    MenuBarView.AiringTodayItem(
+                        id: $0.id,
+                        title: $0.title,
+                        episodeNumber: $0.episodeNumber,
+                        countdownText: $0.countdownText
+                    )
+                },
                 onResumeLastWatched: {
                     if let first = model.upNextItems.first {
-                        Task {
-                            _ = try? await model.resolveAndPlay(
-                                catalogId: first.id,
-                                episode: Int64(first.nextEpisodeOrChapter),
-                                title: first.title
-                            )
+                        if first.unit != "CH" {
+                            Task {
+                                _ = try? await model.resolveAndPlay(
+                                    catalogId: first.id,
+                                    episode: Int64(first.nextEpisodeOrChapter),
+                                    title: first.title
+                                )
+                            }
+                        } else {
+                            Task { @MainActor in
+                                await model.openDetail(id: first.id, isManga: true)
+                            }
                         }
                     }
                 },

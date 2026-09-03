@@ -92,6 +92,7 @@ public struct MediaDetailView: View {
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     public let onReadChapter: (MangaChapterItem) -> Void
+    public let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
     public let onExportAppleBooks: () -> Void
     public let onClose: () -> Void
 
@@ -105,6 +106,7 @@ public struct MediaDetailView: View {
         characters: [CharacterItem] = [],
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
+        onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
         onExportAppleBooks: @escaping () -> Void = {},
         onClose: @escaping () -> Void = {}
     ) {
@@ -114,8 +116,21 @@ public struct MediaDetailView: View {
         self.characters = characters
         self.onPlayEpisode = onPlayEpisode
         self.onReadChapter = onReadChapter
+        self.onSelectRelation = onSelectRelation
         self.onExportAppleBooks = onExportAppleBooks
         self.onClose = onClose
+
+        let initial: DetailTab
+        if !episodes.isEmpty {
+            initial = .episodes
+        } else if !mangaChapters.isEmpty {
+            initial = .manga
+        } else if details.format == "MANGA" || details.format == "NOVEL" || details.format == "ONE_SHOT" {
+            initial = .manga
+        } else {
+            initial = .episodes
+        }
+        self._selectedTab = State(initialValue: initial)
     }
 
 
@@ -275,7 +290,8 @@ public struct MediaDetailView: View {
                 EmptyView()
             }
             if let count = details.episodeCount, count > 0 {
-                Text("\(count) EP").foregroundColor(SumiTheme.indigo).fontWeight(.semibold)
+                let unit = (episodes.isEmpty && !mangaChapters.isEmpty) ? "CH" : "EP"
+                Text("\(count) \(unit)").foregroundColor(SumiTheme.indigo).fontWeight(.semibold)
             }
             if let year = details.year {
                 Text(String(year)).foregroundColor(SumiTheme.muted)
@@ -310,23 +326,41 @@ public struct MediaDetailView: View {
     /// so there is never a question about what the primary action is.
     private var actionBar: some View {
         HStack(spacing: 10) {
-            Button {
-                if let episode = resumeTarget { onPlayEpisode(episode) }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "play.fill").font(.system(size: 12))
-                    Text(primaryActionLabel)
+            if !episodes.isEmpty {
+                Button {
+                    if let episode = resumeTarget { onPlayEpisode(episode) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill").font(.system(size: 12))
+                        Text(primaryActionLabel)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 11)
+                    .background(SumiTheme.indigo)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.black)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 11)
-                .background(SumiTheme.indigo)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .buttonStyle(.plain)
+                .disabled(resumeTarget == nil)
+                .opacity(resumeTarget == nil ? 0.5 : 1)
+            } else if let first = mangaChapters.first {
+                Button {
+                    onReadChapter(first)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "book.fill").font(.system(size: 12))
+                        Text("Read Chapter \(first.number)")
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 11)
+                    .background(SumiTheme.indigo)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .disabled(resumeTarget == nil)
-            .opacity(resumeTarget == nil ? 0.5 : 1)
 
             hairlineControl { Text("Watching").font(.system(size: 13, weight: .medium)) }
             hairlineControl { Image(systemName: "heart").font(.system(size: 14)) }
@@ -415,51 +449,57 @@ public struct MediaDetailView: View {
     }
 
     private func relationCard(_ relation: HeroBanner.Details.Relation, label: String, leading: Bool) -> some View {
-        HStack(spacing: 12) {
-            if leading {
-                Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
-            }
-            Color.clear
-                .frame(width: 40, height: 56)
-                .overlay {
-                    AsyncImage(url: relation.coverURL) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } else {
-                            Rectangle().fill(SumiTheme.card)
+        Button {
+            onSelectRelation?(relation)
+        } label: {
+            HStack(spacing: 12) {
+                if leading {
+                    Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
+                }
+                Color.clear
+                    .frame(width: 40, height: 56)
+                    .overlay {
+                        AsyncImage(url: relation.coverURL) { phase in
+                            if let image = phase.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } else {
+                                Rectangle().fill(SumiTheme.card)
+                            }
                         }
                     }
-                }
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            VStack(alignment: leading ? .leading : .trailing, spacing: 2) {
-                Text(label)
-                    .sumiTabularMono(size: 11.5)
-                    .foregroundColor(SumiTheme.indigo)
-                Text(relation.title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineLimit(1)
-                if let format = relation.format {
-                    Text(format)
-                        .font(.system(size: 10))
-                        .foregroundColor(SumiTheme.muted)
+                VStack(alignment: leading ? .leading : .trailing, spacing: 2) {
+                    Text(label)
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.indigo)
+                    Text(relation.title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(SumiTheme.foreground)
+                        .lineLimit(1)
+                    if let format = relation.format {
+                        Text(format)
+                            .font(.system(size: 10))
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
+
+                if !leading {
+                    Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
-
-            if !leading {
-                Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
-            }
+            .padding(10)
+            .background(SumiTheme.foreground.opacity(0.02))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
-        .padding(10)
-        .background(SumiTheme.foreground.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 
     // MARK: - Tabs
@@ -482,6 +522,13 @@ public struct MediaDetailView: View {
         }
     }
 
+    private var activeTab: DetailTab {
+        if availableTabs.contains(selectedTab) {
+            return selectedTab
+        }
+        return availableTabs.first ?? .episodes
+    }
+
     private var tabBar: some View {
         HStack(spacing: 28) {
             ForEach(availableTabs) { tab in
@@ -490,13 +537,13 @@ public struct MediaDetailView: View {
                 } label: {
                     VStack(spacing: 8) {
                         Text(tabLabel(tab))
-                            .sumiTabularMono(size: 11.5, weight: selectedTab == tab ? .semibold : .regular)
-                            .foregroundColor(selectedTab == tab ? SumiTheme.foreground : SumiTheme.muted)
+                            .sumiTabularMono(size: 11.5, weight: activeTab == tab ? .semibold : .regular)
+                            .foregroundColor(activeTab == tab ? SumiTheme.foreground : SumiTheme.muted)
                         // The underline is the whole indicator; the tab row has
                         // no pill and no fill, so the bar reads as one rule
                         // with one segment lit.
                         Rectangle()
-                            .fill(selectedTab == tab ? SumiTheme.indigo : Color.clear)
+                            .fill(activeTab == tab ? SumiTheme.indigo : Color.clear)
                             .frame(height: 2)
                     }
                     .fixedSize()
@@ -510,7 +557,7 @@ public struct MediaDetailView: View {
 
     @ViewBuilder
     private var tabContent: some View {
-        switch selectedTab {
+        switch activeTab {
         case .episodes:
             if episodes.isEmpty {
                 SumiEmptyState(headline: "No episodes found", detail: "Nothing was returned for this title.")
@@ -527,28 +574,32 @@ public struct MediaDetailView: View {
                 }
             }
         case .manga:
-            VStack(spacing: 8) {
-                ForEach(mangaChapters) { chapter in
-                    Button { onReadChapter(chapter) } label: {
-                        HStack(spacing: 12) {
-                            Text("CH \(chapter.number)")
-                                .sumiTabularMono(size: 11.5)
-                                .foregroundColor(SumiTheme.indigo)
-                            Text(chapter.title)
-                                .font(.system(size: 13.5, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                                .lineLimit(1)
-                            Spacer()
+            if mangaChapters.isEmpty {
+                SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(mangaChapters) { chapter in
+                        Button { onReadChapter(chapter) } label: {
+                            HStack(spacing: 12) {
+                                Text("CH \(chapter.number)")
+                                    .sumiTabularMono(size: 11.5)
+                                    .foregroundColor(SumiTheme.indigo)
+                                Text(chapter.title)
+                                    .font(.system(size: 13.5, weight: .medium))
+                                    .foregroundColor(SumiTheme.foreground)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
+                            .overlay(
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .contentShape(Rectangle())
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         default:

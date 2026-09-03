@@ -3,7 +3,6 @@ import AnicatCoreKit
 
 public struct RootView: View {
     @Bindable public var model: AppModel
-    @State private var playerController = PlayerController()
 
     public init(model: AppModel) {
         self.model = model
@@ -60,7 +59,24 @@ public struct RootView: View {
                                     )
                                 }
                             },
-                            onReadChapter: { _ in },
+                            onReadChapter: { chapter in
+                                Task {
+                                    await model.openReader(
+                                        title: details.title,
+                                        chapter: chapter,
+                                        allChapters: model.selectedMangaChapters,
+                                        anilistId: details.id
+                                    )
+                                }
+                            },
+                            onSelectRelation: { rel in
+                                openDetailFor(
+                                    id: rel.id,
+                                    title: rel.title,
+                                    coverURL: rel.coverURL,
+                                    isManga: rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
+                                )
+                            },
                             onExportAppleBooks: {},
                             onClose: {
                                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -68,6 +84,7 @@ public struct RootView: View {
                                 }
                             }
                         )
+                        .id(details.id)
                         .transition(.opacity)
                     } else {
                         Group {
@@ -76,18 +93,18 @@ public struct RootView: View {
                             homeView
                         case .schedule:
                             ScheduleView(items: model.scheduleItems) { item in
-                                openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL)
+                                openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
                             }
                         case .search:
                             SearchView(
                                 searchText: $model.searchQuery,
                                 results: model.searchResults,
                                 isLoading: model.isLoading,
-                                onSearchCommit: { q in
-                                    Task { await model.search(query: q) }
+                                onSearchCommit: { q, isManga in
+                                    Task { await model.search(query: q, isManga: isManga) }
                                 },
                                 onSelectMedia: { item in
-                                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL)
+                                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
                                 }
                             )
                         case .settings:
@@ -112,7 +129,7 @@ public struct RootView: View {
                                     set: { next in Task { await model.loadLibrary(type: next) } }
                                 ),
                                 isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) }
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: model.libraryType == "MANGA" || $0.isManga) }
                             )
                         case .manga:
                             ReadingView(
@@ -120,8 +137,8 @@ public struct RootView: View {
                                 reading: model.mangaReading,
                                 trending: model.mangaTrending,
                                 isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
-                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
                                 onBrowse: { model.currentNavSection = .search }
                             )
                         case .novels:
@@ -130,8 +147,8 @@ public struct RootView: View {
                                 reading: model.novelReading,
                                 trending: model.novelTrending,
                                 isSignedIn: model.isSignedIn,
-                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
-                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
                                 onBrowse: { model.currentNavSection = .search }
                             )
                         case .history:
@@ -165,7 +182,7 @@ public struct RootView: View {
             // In-App Video Player Overlay
             if let streamURL = model.activeStreamURL {
                 PlayerView(
-                    controller: playerController,
+                    controller: model.playerController,
                     streamURL: streamURL,
                     onClose: {
                         withAnimation(.easeInOut(duration: 0.25)) {
@@ -175,6 +192,81 @@ public struct RootView: View {
                 )
                 .transition(.opacity)
                 .zIndex(30)
+            }
+
+            // In-App Manga Reader Overlay
+            if let session = model.activeReadingSession {
+                MangaReaderView(
+                    title: session.title,
+                    chapterTitle: session.chapterTitle,
+                    pageURLs: session.pageURLs,
+                    onPageChanged: { page in
+                        ContinuityManager.shared.advertiseReading(
+                            mangaId: session.chapterId,
+                            title: session.title,
+                            chapter: session.chapterTitle,
+                            pageIndex: page
+                        )
+                    },
+                    onNextChapter: {
+                        Task { await model.nextChapter() }
+                    },
+                    onPrevChapter: {
+                        Task { await model.prevChapter() }
+                    },
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            model.closeReader()
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(35)
+            }
+
+            // Error Toast
+            if let error = model.errorMessage {
+                VStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(SumiTheme.warning)
+                            .font(.system(size: 14))
+
+                        Text(error)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(2)
+
+                        Spacer()
+
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                model.errorMessage = nil
+                            }
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(SumiTheme.muted)
+                                .padding(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)
+                    .padding(.top, 44)
+                    .padding(.horizontal, 24)
+
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(40)
             }
 
             // Loading Scrim
@@ -191,7 +283,9 @@ public struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.activeStreamURL != nil)
+        .animation(.easeInOut(duration: 0.25), value: model.activeReadingSession != nil)
         .animation(.easeInOut(duration: 0.25), value: model.selectedMediaDetails != nil)
+        .animation(.easeInOut(duration: 0.25), value: model.errorMessage != nil)
         .animation(.easeInOut(duration: 0.2), value: model.isLoading)
     }
 
@@ -220,7 +314,7 @@ public struct RootView: View {
                         // "Pick for me" Random Episode Selector
                         Button(action: {
                             if let random = model.trendingItems.randomElement() {
-                                openDetailFor(id: random.id, title: random.title, coverURL: random.coverImageURL)
+                                openDetailFor(id: random.id, title: random.title, coverURL: random.coverImageURL, isManga: random.isManga)
                             }
                         }) {
                             // Hairline only, no fill: the web button is
@@ -238,7 +332,7 @@ public struct RootView: View {
                                 .overlay(
                                     RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                         .stroke(SumiTheme.border, lineWidth: 1)
-                                )
+                                 )
                         }
                         .buttonStyle(.plain)
                     }
@@ -248,15 +342,19 @@ public struct RootView: View {
                         UpNextQueueView(
                             items: model.upNextItems,
                             onSelect: { entry in
-                                openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL)
+                                openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL, isManga: entry.unit == "CH")
                             },
                             onPlay: { entry in
-                                Task {
-                                    _ = try? await model.resolveAndPlay(
-                                        catalogId: entry.id,
-                                        episode: Int64(entry.nextEpisodeOrChapter),
-                                        title: entry.title
-                                    )
+                                if entry.unit == "CH" {
+                                    openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL, isManga: true)
+                                } else {
+                                    Task {
+                                        _ = try? await model.resolveAndPlay(
+                                            catalogId: entry.id,
+                                            episode: Int64(entry.nextEpisodeOrChapter),
+                                            title: entry.title
+                                        )
+                                    }
                                 }
                             }
                         )
@@ -338,7 +436,7 @@ public struct RootView: View {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(items) { item in
                         MediaCard(item: item) {
-                            openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL)
+                            openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
                         }
                         .frame(width: 180)
                     }
@@ -367,10 +465,9 @@ public struct RootView: View {
         .background(SumiTheme.background)
     }
 
-    /// Opens the detail page. The fabricated 28-episode stand-in this used
-    /// to build is gone; the engine answers with the real entry.
+    /// Opens the detail page, querying the Rust core via UniFFI.
     private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false) {
-        Task { await model.openDetail(catalogId: id, isManga: isManga) }
+        Task { await model.openDetail(id: id, isManga: isManga) }
     }
 
 }

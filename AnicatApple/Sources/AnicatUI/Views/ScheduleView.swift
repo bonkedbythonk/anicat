@@ -9,6 +9,7 @@ public struct ScheduleView: View {
         public let airingTimeText: String
         public let countdownText: String
         public let dayGroup: String // e.g. "Monday, September 4"
+        public let isWatching: Bool
 
         public init(
             id: Int64,
@@ -17,7 +18,8 @@ public struct ScheduleView: View {
             episodeNumber: Int,
             airingTimeText: String,
             countdownText: String,
-            dayGroup: String
+            dayGroup: String,
+            isWatching: Bool = false
         ) {
             self.id = id
             self.title = title
@@ -26,6 +28,7 @@ public struct ScheduleView: View {
             self.airingTimeText = airingTimeText
             self.countdownText = countdownText
             self.dayGroup = dayGroup
+            self.isWatching = isWatching
         }
     }
 
@@ -43,7 +46,8 @@ public struct ScheduleView: View {
     }
 
     private var groupedItems: [(day: String, items: [ScheduleItem])] {
-        let grouped = Dictionary(grouping: items, by: { $0.dayGroup })
+        let filtered = items.filter { !watchingOnly || $0.isWatching }
+        let grouped = Dictionary(grouping: filtered, by: { $0.dayGroup })
         return grouped.map { (day: $0.key, items: $0.value) }
             .sorted(by: { $0.day < $1.day })
     }
@@ -104,8 +108,15 @@ public struct ScheduleView: View {
                 }
                 .padding(.horizontal, SumiTheme.spaceMd)
 
-                // Day Groups
-                ForEach(groupedItems, id: \.day) { group in
+                if groupedItems.isEmpty {
+                    SumiEmptyState(
+                        headline: watchingOnly ? "No watching shows airing soon" : "No airing shows found",
+                        detail: watchingOnly ? "Shows you are currently watching with upcoming episodes will appear here." : "Airing schedules will appear here for ongoing shows."
+                    )
+                    .padding(.top, 40)
+                } else {
+                    // Day Groups
+                    ForEach(groupedItems, id: \.day) { group in
                     VStack(alignment: .leading, spacing: SumiTheme.spaceMd) {
                         Text(group.day.uppercased())
                             .sumiTabularMono(size: 13, weight: .bold)
@@ -163,6 +174,7 @@ public struct ScheduleView: View {
                         }
                         .padding(.horizontal, SumiTheme.spaceMd)
                     }
+                }
                 }
             }
             .padding(.vertical, SumiTheme.spaceLg)

@@ -12,6 +12,7 @@ public final class AppModel: @unchecked Sendable {
 
     // Active Navigation
     public var currentNavSection: SidebarView.NavSection = .upNext
+    public var paletteOpen = false
     public var searchQuery: String = ""
     public var selectedMediaDetails: HeroBanner.Details?
     public var selectedEpisodes: [MediaDetailView.EpisodeItem] = []

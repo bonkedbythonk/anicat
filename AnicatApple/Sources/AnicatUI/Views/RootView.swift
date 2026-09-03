@@ -24,11 +24,7 @@ public struct RootView: View {
                 // Fixed Left Sidebar (exact Tauri layout)
                 SidebarView(
                     currentView: $model.currentNavSection,
-                    onOpenSearchPalette: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            model.currentNavSection = .search
-                        }
-                    }
+                    onOpenSearchPalette: { model.paletteOpen = true }
                 )
 
                 // Hairline Divider
@@ -122,6 +118,16 @@ public struct RootView: View {
                 }
             }
             .ignoresSafeArea()
+
+            // Command palette. Above the detail page and below the player:
+            // it navigates the app, and the player is modal over all of it.
+            if model.paletteOpen {
+                CommandPalette(commands: paletteCommands) {
+                    model.paletteOpen = false
+                }
+                .zIndex(25)
+                .transition(.opacity)
+            }
 
             // Media Detail Overlay
             if let details = model.selectedMediaDetails {
@@ -273,6 +279,27 @@ public struct RootView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
+    }
+
+    /// Every section, as a palette entry. The palette is the only navigation
+    /// that reaches a section without the sidebar, so the list has to stay in
+    /// step with `NavSection` — driving it off `allCases` is what keeps it
+    /// there when a section is added.
+    private var paletteCommands: [CommandPalette.Command] {
+        SidebarView.NavSection.allCases.map { section in
+            let model = self.model
+            // `rawValue` rather than the enum case: the case is task-isolated
+            // once it crosses into the @MainActor closure, and re-deriving it
+            // from the string on the other side keeps the capture Sendable.
+            let raw = section.rawValue
+            return CommandPalette.Command(id: raw, label: "Go to \(section.label)") {
+                Task { @MainActor in
+                    guard let target = SidebarView.NavSection(rawValue: raw) else { return }
+                    model.selectedMediaDetails = nil
+                    model.currentNavSection = target
+                }
+            }
+        }
     }
 
     /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only

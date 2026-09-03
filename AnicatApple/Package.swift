@@ -8,6 +8,10 @@ let package = Package(
         .iOS(.v17)
     ],
     products: [
+        .executable(
+            name: "Anicat",
+            targets: ["Anicat"]
+        ),
         .library(
             name: "AnicatCoreKit",
             targets: ["AnicatCoreKit"]
@@ -43,6 +47,11 @@ let package = Package(
             resources: [
                 .copy("Resources/Shaders")
             ]
+        ),
+        .executableTarget(
+            name: "Anicat",
+            dependencies: ["AnicatUI", "AnicatCoreKit"],
+            path: "Sources/AnicatApp"
         ),
         // Covers the FFI boundary itself, independently of any view: the
         // engine constructs, an async Rust future completes on the Swift

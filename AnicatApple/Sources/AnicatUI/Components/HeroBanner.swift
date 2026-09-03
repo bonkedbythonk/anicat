@@ -1,7 +1,8 @@
 import SwiftUI
 
 public struct HeroBanner: View {
-    public struct Details: Sendable {
+    public struct Details: Sendable, Identifiable {
+        public let id: Int64
         public let title: String
         public let romajiTitle: String?
         public let bannerURL: URL?
@@ -15,6 +16,7 @@ public struct HeroBanner: View {
         public let nextEpisodeText: String?
         
         public init(
+            id: Int64 = 0,
             title: String,
             romajiTitle: String? = nil,
             bannerURL: URL? = nil,
@@ -27,6 +29,7 @@ public struct HeroBanner: View {
             averageScore: Int? = nil,
             nextEpisodeText: String? = nil
         ) {
+            self.id = id
             self.title = title
             self.romajiTitle = romajiTitle
             self.bannerURL = bannerURL

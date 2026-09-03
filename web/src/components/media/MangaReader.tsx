@@ -39,6 +39,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
   const [zoom, setZoom] = useState(1);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the reader put the *app window* into native fullscreen.
   // Native Tauri fullscreen does not set document.fullscreenElement, and on
   // Windows there is no system gesture to leave it — so without restoring it
@@ -200,33 +201,191 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     setCurrentPage(prev => Math.max(0, prev - step));
   }, [readingMode]);
 
+  const handleNextChapter = useCallback(() => {
+    localStorage.removeItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
+    if (onProgressUpdate) onProgressUpdate(chapterNumber);
+    onNavigateChapter?.("next");
+  }, [chapterNumber, mediaId, onNavigateChapter, onProgressUpdate]);
+
+  const handlePrevChapter = useCallback(() => {
+    localStorage.removeItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
+    onNavigateChapter?.("prev");
+  }, [chapterNumber, mediaId, onNavigateChapter]);
+
+  const scrollVertical = useCallback((delta: number) => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({ top: delta, behavior: "smooth" });
+    }
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept typing if user focuses an input or textarea
+      const targetTag = (e.target as HTMLElement)?.tagName;
+      if (targetTag === "INPUT" || targetTag === "TEXTAREA") return;
+
       switch (e.key) {
         case "ArrowRight":
+        case "l":
+        case "L":
           e.preventDefault();
-          if (readingDirection === "rtl") {
+          if (readingMode === "vertical") {
+            scrollVertical(300);
+          } else if (readingDirection === "rtl") {
             handlePrev();
           } else {
             handleNext();
           }
           break;
+
+        case "ArrowLeft":
+        case "h":
+        case "H":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollVertical(-300);
+          } else if (readingDirection === "rtl") {
+            handleNext();
+          } else {
+            handlePrev();
+          }
+          break;
+
+        case "ArrowDown":
+        case "j":
+        case "J":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollVertical(300);
+          } else {
+            handleNext();
+          }
+          break;
+
+        case "ArrowUp":
+        case "k":
+        case "K":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollVertical(-300);
+          } else {
+            handlePrev();
+          }
+          break;
+
         case " ":
           e.preventDefault();
-          handleNext(); // Spacebar always moves forward in standard flows
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          if (readingDirection === "rtl") {
+          if (readingMode === "vertical") {
+            scrollVertical(e.shiftKey ? -window.innerHeight * 0.75 : window.innerHeight * 0.75);
+          } else if (e.shiftKey) {
+            handlePrev();
+          } else {
             handleNext();
+          }
+          break;
+
+        case "PageDown":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollVertical(window.innerHeight * 0.8);
+          } else {
+            handleNext();
+          }
+          break;
+
+        case "PageUp":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollVertical(-window.innerHeight * 0.8);
           } else {
             handlePrev();
           }
           break;
+
+        case "Home":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+          } else {
+            setCurrentPage(0);
+          }
+          break;
+
+        case "End":
+          e.preventDefault();
+          if (readingMode === "vertical") {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTo({
+                top: scrollContainerRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+            }
+          } else {
+            setCurrentPage(Math.max(0, pages.length - 1));
+          }
+          break;
+
+        case "[":
+          if (hasPrevChapter) {
+            e.preventDefault();
+            handlePrevChapter();
+          }
+          break;
+
+        case "]":
+          if (hasNextChapter) {
+            e.preventDefault();
+            handleNextChapter();
+          }
+          break;
+
+        case "r":
+        case "R":
+          e.preventDefault();
+          setReadingDirection(prev => {
+            const next = prev === "ltr" ? "rtl" : "ltr";
+            localStorage.setItem("anicat_manga_reading_direction", next);
+            return next;
+          });
+          break;
+
+        case "m":
+        case "M":
+          e.preventDefault();
+          setReadingMode(prev => prev === "single" ? "double" : prev === "double" ? "vertical" : "single");
+          break;
+
+        case "+":
+        case "=":
+          e.preventDefault();
+          setZoom(z => Math.min(2.5, +(z + 0.1).toFixed(1)));
+          break;
+
+        case "-":
+        case "_":
+          e.preventDefault();
+          setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(1)));
+          break;
+
+        case "0":
+          e.preventDefault();
+          setZoom(1);
+          break;
+
+        case "c":
+        case "C":
+        case "i":
+        case "I":
+          e.preventDefault();
+          setShowControls(prev => !prev);
+          break;
+
         case "f":
         case "F":
+          e.preventDefault();
           toggleFullscreen();
           break;
+
         case "Escape":
           // First Escape leaves fullscreen; a second one closes the reader.
           if (enteredFullscreenRef.current) {
@@ -235,16 +394,24 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
             onClose();
           }
           break;
-        case "m":
-        case "M":
-          setReadingMode(prev => prev === "single" ? "double" : prev === "double" ? "vertical" : "single");
-          break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleNext, handlePrev, onClose, readingDirection]);
+  }, [
+    handleNext,
+    handlePrev,
+    handleNextChapter,
+    handlePrevChapter,
+    hasNextChapter,
+    hasPrevChapter,
+    onClose,
+    pages.length,
+    readingDirection,
+    readingMode,
+    scrollVertical,
+  ]);
 
   // Trackpad horizontal swipe → flip pages (single/double mode only).
   // Attached to the container element (not window) so stopPropagation
@@ -354,15 +521,6 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
     onClose();
   };
 
-  // Same as handleFinish but continues straight into the next chapter instead
-  // of closing the reader -- this is the primary end-of-chapter action when
-  // there is a next chapter to read, since closing and re-opening from the
-  // chapter list every time was the friction being fixed here.
-  const handleNextChapter = () => {
-    localStorage.removeItem(`anicat_manga_${mediaId}_${chapterNumber}_page`);
-    if (onProgressUpdate) onProgressUpdate(chapterNumber);
-    onNavigateChapter?.("next");
-  };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     // Prevent scroll wheel from triggering mousemove events by checking actual movement
@@ -539,6 +697,7 @@ export default function MangaReader({ mediaId, chapterNumber, initialPage = 0, o
 
       {/* Content Area */}
       <div 
+        ref={scrollContainerRef}
         className={`flex-1 w-full overflow-y-auto scroll-smooth scrollbar-hide ${readingMode === "vertical" ? "" : "flex items-center justify-center"}`}
         onClick={readingMode === "vertical" ? (e) => {
           if ((e.target as HTMLElement).closest('button')) return;

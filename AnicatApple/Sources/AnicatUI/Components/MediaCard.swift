@@ -167,6 +167,14 @@ public struct MediaCard: View {
                             Text(reason)
                                 .lineLimit(1)
                         }
+
+                        // A card with no score, no list entry and no playlist
+                        // reason has nothing in this row at all, and an empty
+                        // `HStack` is zero-height however large a `minHeight`
+                        // is asked of it. In a shelf that only cost a few
+                        // points; in the search grid the difference compounds
+                        // down every row. A hair space keeps the line box.
+                        Text("\u{200A}")
                     }
                     .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)

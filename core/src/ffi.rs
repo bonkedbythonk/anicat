@@ -50,6 +50,17 @@ pub enum FfiCatalog {
     MangaDex,
 }
 
+impl From<Catalog> for FfiCatalog {
+    fn from(c: Catalog) -> Self {
+        match c {
+            Catalog::Anilist => FfiCatalog::Anilist,
+            Catalog::TmdbMovie => FfiCatalog::TmdbMovie,
+            Catalog::TmdbTv => FfiCatalog::TmdbTv,
+            Catalog::MangaDex => FfiCatalog::MangaDex,
+        }
+    }
+}
+
 impl From<FfiCatalog> for Catalog {
     fn from(c: FfiCatalog) -> Self {
         match c {
@@ -70,7 +81,20 @@ pub struct MediaSummary {
     pub cover_image: String,
     pub format: Option<String>,
     pub episodes: Option<i32>,
+    pub chapters: Option<i32>,
     pub average_score: Option<i32>,
+    /// The signed-in user's own progress, when AniList returned a list entry
+    /// for this title. The Library and Manga views draw the poster tick from
+    /// it, so dropping it renders every card as unwatched.
+    pub progress: Option<i32>,
+    /// `CURRENT`, `COMPLETED`, `PLANNING`, `PAUSED`, `DROPPED`, `REPEATING`.
+    pub list_status: Option<String>,
+    pub user_score: Option<f64>,
+    /// Unix seconds of the last list update.
+    pub updated_at: Option<i64>,
+    /// Unix seconds at which the next episode airs, when one is scheduled.
+    pub next_airing_at: Option<i64>,
+    pub next_episode: Option<i32>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -97,6 +121,33 @@ pub struct StreamHandle {
     pub url: String,
     pub torrent_id: u64,
     pub file_id: u64,
+}
+
+/// One watch, for the History view's activity chart.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ActivityRow {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    /// `YYYY-MM-DD HH:MM:SS`, UTC, as SQLite wrote it.
+    pub watched_at: String,
+}
+
+/// The signed-in AniList user and their lifetime totals.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ViewerProfile {
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    pub anime_count: Option<i64>,
+    pub episodes_watched: Option<i64>,
+    pub minutes_watched: Option<i64>,
+    pub anime_mean_score: Option<f64>,
+    pub manga_count: Option<i64>,
+    pub chapters_read: Option<i64>,
+    pub manga_mean_score: Option<f64>,
+    /// Most-watched genres, already ordered by count.
+    pub top_genres: Vec<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -169,6 +220,27 @@ impl AnicatEngine {
     /// while every player callback went to whatever else owned 13370.
     pub async fn stream_port(&self) -> FfiResult<u16> {
         self.ensure_stream_server().await
+    }
+
+    /// Sign in (or out, with `None`) without rebuilding the engine.
+    ///
+    /// The engine is constructed once at launch, before the user has pasted
+    /// anything, so a token that arrives later has to be handed to the live
+    /// client. Passing it to the constructor a second time does nothing: the
+    /// host already holds an engine and the new one is never used.
+    ///
+    /// Clears the cached viewer name too, since the next token is a different
+    /// person and `user_list` is keyed by that name.
+    pub fn set_anilist_token(&self, token: Option<String>) {
+        self.catalogs
+            .anilist
+            .set_token(token.filter(|t| !t.trim().is_empty()));
+    }
+
+    /// Whether the engine currently holds an AniList token. Says nothing
+    /// about whether it is still valid — `viewer_profile` answers that.
+    pub fn has_anilist_token(&self) -> bool {
+        self.catalogs.anilist.has_token()
     }
 
     pub async fn search_anime(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
@@ -245,6 +317,91 @@ impl AnicatEngine {
             torrent_id: torrent_id as u64,
             file_id: file_id as u64,
         })
+    }
+
+    /// One status bucket of the user's AniList list.
+    ///
+    /// `status` is an AniList `MediaListStatus` (`CURRENT`, `COMPLETED`,
+    /// `PLANNING`, `PAUSED`, `DROPPED`, `REPEATING`) and `media_type` is
+    /// `ANIME` or `MANGA`.
+    pub async fn user_list(
+        &self,
+        status: String,
+        media_type: String,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .user_list(&status, &media_type)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize).collect())
+    }
+
+    /// Trending titles. `format` narrows to one AniList format — pass `NOVEL`
+    /// with `MANGA` for light novels, which are not a type of their own.
+    pub async fn trending(
+        &self,
+        media_type: String,
+        format: Option<String>,
+        limit: i32,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .trending(&media_type, format.as_deref(), limit.max(1) as i64)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize).collect())
+    }
+
+    /// The signed-in user. Errors when there is no token, which the History
+    /// view renders as its signed-out state.
+    pub async fn viewer_profile(&self) -> FfiResult<ViewerProfile> {
+        let res = self
+            .catalogs
+            .viewer_profile()
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        let v = res.viewer.ok_or_else(|| AnicatError::NotFound {
+            msg: "AniList returned no viewer".into(),
+        })?;
+        let anime = v.statistics.as_ref().and_then(|s| s.anime.as_ref());
+        let manga = v.statistics.as_ref().and_then(|s| s.manga.as_ref());
+        Ok(ViewerProfile {
+            name: v.name.unwrap_or_default(),
+            avatar_url: v.avatar.as_ref().and_then(|a| a.large.clone().or_else(|| a.medium.clone())),
+            banner_url: v.banner_image,
+            anime_count: anime.and_then(|a| a.count),
+            episodes_watched: anime.and_then(|a| a.episodes_watched),
+            minutes_watched: anime.and_then(|a| a.minutes_watched),
+            anime_mean_score: anime.and_then(|a| a.mean_score),
+            manga_count: manga.and_then(|m| m.count),
+            chapters_read: manga.and_then(|m| m.chapters_read),
+            manga_mean_score: manga.and_then(|m| m.mean_score),
+            top_genres: anime
+                .and_then(|a| a.genres.as_ref())
+                .map(|g| g.iter().filter_map(|x| x.genre.clone()).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Local watch history, newest first. Unlike everything else on the
+    /// History view this needs no token — the registry recorded it.
+    pub fn watch_activity(&self, limit: i32) -> FfiResult<Vec<ActivityRow>> {
+        let rows = self
+            .registry
+            .recent_activity(limit.max(1) as i64)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ActivityRow {
+                catalog: Catalog::parse(&r.catalog)
+                    .map(FfiCatalog::from)
+                    .unwrap_or(FfiCatalog::Anilist),
+                catalog_id: r.catalog_id,
+                episode_number: r.episode_number,
+                watched_at: r.watched_at,
+            })
+            .collect())
     }
 
     pub async fn search_manga(
@@ -344,28 +501,39 @@ impl AnicatEngine {
             .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
-        Ok(page
-            .page
-            .media
-            .unwrap_or_default()
-            .into_iter()
-            .map(|m| MediaSummary {
-                catalog: FfiCatalog::Anilist,
-                catalog_id: m.id,
-                title: m
-                    .title
-                    .as_ref()
-                    .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
-                    .unwrap_or_default(),
-                cover_image: m
-                    .cover_image
-                    .as_ref()
-                    .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
-                    .unwrap_or_default(),
-                format: m.format.clone(),
-                episodes: m.episodes,
-                average_score: m.average_score,
-            })
-            .collect())
+        Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
+    }
+}
+
+/// One place that flattens `MediaItem` for the FFI, so a field added for one
+/// view cannot go missing on another. Every list, shelf and grid in the app
+/// draws from the record this returns.
+fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
+    let entry = m.media_list_entry.as_ref();
+    MediaSummary {
+        catalog: FfiCatalog::Anilist,
+        catalog_id: m.id,
+        // English first, romaji behind it — AniList leaves `english` null for
+        // plenty of titles and a blank card is worse than a romaji one.
+        title: m
+            .title
+            .as_ref()
+            .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+            .unwrap_or_default(),
+        cover_image: m
+            .cover_image
+            .as_ref()
+            .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+            .unwrap_or_default(),
+        format: m.format.clone(),
+        episodes: m.episodes,
+        chapters: m.chapters,
+        average_score: m.average_score,
+        progress: entry.and_then(|e| e.progress),
+        list_status: entry.and_then(|e| e.status.clone()),
+        user_score: entry.and_then(|e| e.score),
+        updated_at: entry.and_then(|e| e.updated_at),
+        next_airing_at: m.next_airing_episode.as_ref().and_then(|n| n.airing_at),
+        next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
     }
 }

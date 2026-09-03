@@ -88,10 +88,19 @@ public struct SidebarView: View {
                 // (80pt), grayscaled, at `opacity-10`. An SF Symbol cat is a
                 // different drawing at a different weight and reads as a
                 // placeholder next to the real logo.
-                SumiLogoMark()
-                    .frame(height: 80)
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 8)
+                VStack(spacing: 6) {
+                    SumiLogoMark()
+                        .frame(height: 80)
+                    // The mode caption under the mark. It names which of the
+                    // two worlds the app is in; the switch itself only appears
+                    // once cinema mode is enabled, so this is a label rather
+                    // than a control here.
+                    Text("Anime and manga")
+                        .sumiTabularMono(size: 9)
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 8)
 
                 // Search Bar Button (⌘K)
                 Button(action: onOpenSearchPalette) {

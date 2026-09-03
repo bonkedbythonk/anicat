@@ -67,15 +67,55 @@ public struct RootView: View {
                         case .settings:
                             SettingsView(
                                 onSaveToken: { token in
-                                    _ = iCloudSyncService.shared.saveAniListToken(token)
-                                    Task { await model.initialize(anilistToken: token) }
+                                    Task { await model.signIn(token: token) }
                                 },
                                 onDisconnectAniList: {
-                                    iCloudSyncService.shared.deleteAniListToken()
+                                    model.signOut()
                                 }
                             )
-                        case .library, .history, .downloads, .manga, .novels:
-                            genericListView(title: model.currentNavSection.label)
+                        case .library:
+                            LibraryView(
+                                items: model.libraryItems,
+                                isLoading: model.isLoading,
+                                status: Binding(
+                                    get: { model.libraryStatus },
+                                    set: { next in Task { await model.loadLibrary(status: next) } }
+                                ),
+                                mediaType: Binding(
+                                    get: { model.libraryType },
+                                    set: { next in Task { await model.loadLibrary(type: next) } }
+                                ),
+                                isSignedIn: model.isSignedIn,
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) }
+                            )
+                        case .manga:
+                            ReadingView(
+                                config: .manga,
+                                reading: model.mangaReading,
+                                trending: model.mangaTrending,
+                                isSignedIn: model.isSignedIn,
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onBrowse: { model.currentNavSection = .search }
+                            )
+                        case .novels:
+                            ReadingView(
+                                config: .novels,
+                                reading: model.novelReading,
+                                trending: model.novelTrending,
+                                isSignedIn: model.isSignedIn,
+                                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL) },
+                                onBrowse: { model.currentNavSection = .search }
+                            )
+                        case .history:
+                            HistoryView(
+                                viewer: model.viewer,
+                                activity: model.activity,
+                                titles: model.knownTitles
+                            )
+                        case .downloads:
+                            DownloadsView()
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -276,6 +316,7 @@ public struct RootView: View {
         }
     }
 
+    @available(*, deprecated, message: "Every section has a real view now.")
     private func genericListView(title: String) -> some View {
         VStack(spacing: 12) {
             Spacer()

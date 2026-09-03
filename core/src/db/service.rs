@@ -13,6 +13,16 @@ pub struct WatchEntry {
     pub duration: i64,
 }
 
+/// One watch, as the History view's activity chart reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityEntry {
+    pub catalog: String,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    /// SQLite `datetime('now')`, i.e. `YYYY-MM-DD HH:MM:SS` in UTC.
+    pub watched_at: String,
+}
+
 /// The registry, owning its one connection.
 ///
 /// A `Mutex<Connection>` rather than a pool: every caller is in-process on one
@@ -112,6 +122,33 @@ impl Registry {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    /// Every watch across every title, newest first.
+    ///
+    /// The per-title `history_for` cannot answer this: the History view's
+    /// activity chart counts watches per *day* across the whole library, so it
+    /// needs the rows ordered by when they happened rather than by which show
+    /// they belong to. `idx_watch_history_watched` is the index for it.
+    pub fn recent_activity(&self, limit: i64) -> Result<Vec<ActivityEntry>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, episode_number, watched_at FROM watch_history
+                 ORDER BY watched_at DESC LIMIT ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![limit], |r| {
+                Ok(ActivityEntry {
+                    catalog: r.get::<_, String>(0)?,
+                    catalog_id: r.get(1)?,
+                    episode_number: r.get(2)?,
+                    watched_at: r.get(3)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     pub fn set_provider_slug(
         &self,
         catalog: Catalog,
@@ -173,6 +210,28 @@ mod tests {
         db.record_progress(Catalog::Anilist, 5, 3, 90, 0).unwrap();
         let e = db.get_progress(Catalog::Anilist, 5, 3).unwrap().unwrap();
         assert_eq!((e.stop_time, e.duration), (90, 1440));
+    }
+
+    #[test]
+    fn activity_comes_back_newest_first_across_every_title() {
+        let db = Registry::open_in_memory().unwrap();
+        // Written in the order they happened; `watched_at` defaults to now for
+        // all three, so seed it explicitly to pin the ordering.
+        for (id, ep, at) in [(1, 1, "2026-09-01 10:00:00"), (2, 4, "2026-09-03 09:00:00"), (1, 2, "2026-09-02 08:00:00")] {
+            db.record_progress(Catalog::Anilist, id, ep, 10, 100).unwrap();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE watch_history SET watched_at = ?1 WHERE catalog_id = ?2 AND episode_number = ?3",
+                params![at, id, ep],
+            )
+            .unwrap();
+        }
+        let out = db.recent_activity(10).unwrap();
+        assert_eq!(
+            out.iter().map(|e| (e.catalog_id, e.episode_number)).collect::<Vec<_>>(),
+            [(2, 4), (1, 2), (1, 1)]
+        );
+        assert_eq!(db.recent_activity(2).unwrap().len(), 2);
     }
 
     #[test]

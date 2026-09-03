@@ -144,6 +144,10 @@ pub struct MediaListEntry {
     pub repeat: Option<i32>,
     pub private: Option<bool>,
     pub notes: Option<String>,
+    /// Unix seconds. `MediaListCollection` sorts on it, and the Library view
+    /// shows it as "updated 3d ago".
+    #[serde(rename = "updatedAt")]
+    pub updated_at: Option<i64>,
     #[serde(rename = "startedAt")]
     pub started_at: Option<FuzzyDate>,
     #[serde(rename = "completedAt")]

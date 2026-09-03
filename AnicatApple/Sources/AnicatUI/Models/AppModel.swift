@@ -25,6 +25,33 @@ public final class AppModel: @unchecked Sendable {
     public var searchResults: [MediaCard.Item] = []
     public var scheduleItems: [ScheduleView.ScheduleItem] = []
 
+    // Library / Manga / Novels / History
+    public var libraryItems: [MediaCard.Item] = []
+    public var libraryStatus: String = "CURRENT"
+    public var libraryType: String = "ANIME"
+    public var mangaTrending: [MediaCard.Item] = []
+    public var mangaReading: [MediaCard.Item] = []
+    public var novelTrending: [MediaCard.Item] = []
+    public var novelReading: [MediaCard.Item] = []
+    public var viewer: ViewerProfile?
+    public var activity: [ActivityRow] = []
+
+    /// Titles for ids the History log has rows for, gathered from every list
+    /// already loaded. The registry stores a `catalog_id` and nothing else —
+    /// it has no idea what a show is called — so the name has to come from
+    /// whatever the catalog views have already fetched.
+    public var knownTitles: [Int64: String] {
+        var out: [Int64: String] = [:]
+        for item in watchingItems + trendingItems + libraryItems + mangaReading + novelReading + searchResults {
+            out[item.id] = item.title
+        }
+        return out
+    }
+
+    /// Whether AniList answered with a viewer. The four catalog-backed views
+    /// have nothing to show without it and say so rather than sitting empty.
+    public var isSignedIn = false
+
     public init() {}
 
     /// Initializes the headless Rust engine and opens the SQLite registry.
@@ -66,6 +93,121 @@ public final class AppModel: @unchecked Sendable {
             self.errorMessage = "Failed to start AniCat Engine: \(error.localizedDescription)"
             print(errorMessage!)
         }
+    }
+
+    /// Hands a pasted token to the running engine and reloads everything.
+    ///
+    /// This used to route back through `initialize`, which opens with
+    /// `guard engine == nil else { return }` — the engine is built at launch,
+    /// before any token exists, so that guard fired every time and the token
+    /// reached the Keychain but never the AniList client. Saving appeared to
+    /// do nothing at all.
+    public func signIn(token: String) async {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let engine, !trimmed.isEmpty else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        engine.setAnilistToken(token: trimmed)
+        let profile = try? await engine.viewerProfile()
+        guard profile != nil else {
+            isSignedIn = false
+            errorMessage = "AniList rejected that token."
+            return
+        }
+        _ = iCloudSyncService.shared.saveAniListToken(trimmed)
+        viewer = profile
+        isSignedIn = true
+        errorMessage = nil
+        await refreshAll()
+    }
+
+    public func signOut() {
+        engine?.setAnilistToken(token: nil)
+        iCloudSyncService.shared.deleteAniListToken()
+        isSignedIn = false
+        viewer = nil
+        watchingItems = []
+        upNextItems = []
+        scheduleItems = []
+        libraryItems = []
+        mangaReading = []
+        novelReading = []
+    }
+
+    /// Everything the signed-in views draw from, in one pass.
+    public func refreshAll() async {
+        await loadInitialCatalog()
+        await loadLibrary()
+        await loadReadingShelves()
+        await loadHistory()
+    }
+
+    /// Maps the engine's flat summary onto a card. One place, so a card in
+    /// the Library draws its progress tick from the same fields as one in a
+    /// home shelf.
+    static func card(_ s: MediaSummary) -> MediaCard.Item {
+        let total = s.episodes ?? s.chapters
+        let progress = s.progress.map { Int($0) }
+        let released = s.nextEpisode.map { Int($0) - 1 } ?? total.map { Int($0) }
+        return MediaCard.Item(
+            id: s.catalogId,
+            title: s.title,
+            coverImageURL: URL(string: s.coverImage),
+            isManga: s.episodes == nil && s.chapters != nil,
+            score: s.averageScore.map { Int($0) },
+            progress: progress,
+            totalEpisodesOrChapters: total.map { Int($0) },
+            hasNewEpisode: {
+                guard let p = progress, let r = released else { return false }
+                return s.listStatus == "CURRENT" && p < r
+            }()
+        )
+    }
+
+    /// Loads the user's list for one status bucket.
+    public func loadLibrary(status: String? = nil, type: String? = nil) async {
+        guard let engine else { return }
+        if let status { libraryStatus = status }
+        if let type { libraryType = type }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let rows = try await engine.userList(status: libraryStatus, mediaType: libraryType)
+            libraryItems = rows.map(Self.card)
+        } catch {
+            libraryItems = []
+            print("Library load failed: \(error)")
+        }
+    }
+
+    /// Manga and light novels share a shape: a trending shelf plus whatever
+    /// the user is already reading. Novels are AniList's `NOVEL` format under
+    /// the `MANGA` type, not a type of their own.
+    public func loadReadingShelves() async {
+        guard let engine else { return }
+        // Sequential rather than `async let`: the engine is a shared
+        // reference and the strict-concurrency checker rejects sending it
+        // into concurrent children. The three calls are cached AniList reads,
+        // so the cost of serialising them is a few hundred milliseconds once
+        // per visit, not per interaction.
+        let trendingManga = (try? await engine.trending(mediaType: "MANGA", format: nil, limit: 24)) ?? []
+        let novels = (try? await engine.trending(mediaType: "MANGA", format: "NOVEL", limit: 24)) ?? []
+        let readingRows = (try? await engine.userList(status: "CURRENT", mediaType: "MANGA")) ?? []
+
+        mangaTrending = trendingManga.map(Self.card)
+        novelTrending = novels.map(Self.card)
+        mangaReading = readingRows.filter { $0.format != "NOVEL" }.map(Self.card)
+        novelReading = readingRows.filter { $0.format == "NOVEL" }.map(Self.card)
+    }
+
+    /// The History view: the AniList profile when signed in, and the local
+    /// watch log either way — the registry recorded that without a token.
+    public func loadHistory() async {
+        guard let engine else { return }
+        activity = (try? engine.watchActivity(limit: 500)) ?? []
+        viewer = try? await engine.viewerProfile()
+        isSignedIn = viewer != nil
     }
 
     /// Search anime across AniList catalog via the Rust engine.
@@ -142,53 +284,82 @@ public final class AppModel: @unchecked Sendable {
         ContinuityManager.shared.stopAdvertising()
     }
 
-    /// Loads trending and default shows to populate the dashboard.
+    /// Fills the home page.
+    ///
+    /// Everything here is real. This used to search for the literal string
+    /// "Frieren" and then invent an Up Next entry and a week of airing times
+    /// ("Monday, September 4", "in 2h 15m") out of the results — which made
+    /// the app look populated in a screenshot while showing nothing a user
+    /// could act on, and made the Schedule view a fiction.
     private func loadInitialCatalog() async {
         guard let engine else { return }
-        do {
-            let trending = try await engine.searchAnime(query: "Frieren")
-            self.trendingItems = trending.map { s in
-                MediaCard.Item(
-                    id: s.catalogId,
-                    title: s.title,
-                    coverImageURL: URL(string: s.coverImage),
-                    score: s.averageScore.map { Int($0) },
-                    totalEpisodesOrChapters: s.episodes.map { Int($0) }
-                )
-            }
-            
-            // Seed a sample Up Next entry for verification
-            if let first = trending.first {
-                self.upNextItems = [
-                    UpNextQueueView.QueueEntry(
-                        id: first.catalogId,
-                        title: first.title,
-                        thumbnailURL: URL(string: first.coverImage),
-                        nextEpisodeOrChapter: 1,
-                        totalCount: Int(first.episodes ?? 28),
-                        progressPercent: 0,
-                        watchedTimeAgo: nil,
-                        hasNewEpisode: true,
-                        unit: "EP"
-                    )
-                ]
-            }
 
-            // Populate initial schedule items from trending
-            self.scheduleItems = trending.prefix(8).enumerated().map { i, s in
-                let days = ["Monday, September 4", "Tuesday, September 5", "Wednesday, September 6"]
-                return ScheduleView.ScheduleItem(
-                    id: s.catalogId,
-                    title: s.title,
-                    coverImageURL: URL(string: s.coverImage),
-                    episodeNumber: Int((s.episodes ?? 12) / 2),
-                    airingTimeText: "23:30",
-                    countdownText: "in \(i + 2)h 15m",
-                    dayGroup: days[i % days.count]
-                )
-            }
-        } catch {
-            print("Failed to load initial catalog: \(error)")
+        let trending = (try? await engine.trending(mediaType: "ANIME", format: nil, limit: 24)) ?? []
+        trendingItems = trending.map(Self.card)
+
+        let watching = (try? await engine.userList(status: "CURRENT", mediaType: "ANIME")) ?? []
+        let profile = try? await engine.viewerProfile()
+        isSignedIn = profile != nil
+        viewer = profile
+        watchingItems = watching.map(Self.card)
+
+        upNextItems = watching.compactMap { s in
+            let progress = Int(s.progress ?? 0)
+            let total = Int(s.episodes ?? 0)
+            let released = s.nextEpisode.map { Int($0) - 1 } ?? total
+            return UpNextQueueView.QueueEntry(
+                id: s.catalogId,
+                title: s.title,
+                thumbnailURL: URL(string: s.coverImage),
+                nextEpisodeOrChapter: progress + 1,
+                totalCount: total,
+                progressPercent: total > 0 ? Double(progress) / Double(total) * 100 : 0,
+                watchedTimeAgo: s.updatedAt.map(Self.relativeTime),
+                hasNewEpisode: progress < released,
+                unit: "EP"
+            )
         }
+
+        // Only shows AniList actually has an airing time for. A show with no
+        // `nextAiringEpisode` is not on the schedule; it is finished, or
+        // between seasons.
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEEE, MMMM d"
+        scheduleItems = watching.compactMap { s in
+            guard let at = s.nextAiringAt, let ep = s.nextEpisode else { return nil }
+            let date = Date(timeIntervalSince1970: TimeInterval(at))
+            return ScheduleView.ScheduleItem(
+                id: s.catalogId,
+                title: s.title,
+                coverImageURL: URL(string: s.coverImage),
+                episodeNumber: Int(ep),
+                airingTimeText: formatter.string(from: date),
+                countdownText: Self.countdown(to: date),
+                dayGroup: dayFormatter.string(from: date)
+            )
+        }
+        .sorted { ($0.episodeNumber, $0.dayGroup) < ($1.episodeNumber, $1.dayGroup) }
+    }
+
+    /// "6h ago", "3d ago" — the same buckets `relativeDay` uses on the web.
+    static func relativeTime(_ unixSeconds: Int64) -> String {
+        let seconds = Date().timeIntervalSince1970 - TimeInterval(unixSeconds)
+        let hours = Int(seconds / 3600)
+        if hours < 1 { return "just now" }
+        if hours < 24 { return "\(hours)h ago" }
+        let days = hours / 24
+        if days == 1 { return "yesterday" }
+        if days < 7 { return "\(days)d ago" }
+        return "\(days / 7)w ago"
+    }
+
+    static func countdown(to date: Date) -> String {
+        let seconds = Int(date.timeIntervalSinceNow)
+        if seconds <= 0 { return "aired" }
+        let hours = seconds / 3600
+        if hours < 24 { return "in \(hours)h \(seconds % 3600 / 60)m" }
+        return "in \(hours / 24)d \(hours % 24)h"
     }
 }

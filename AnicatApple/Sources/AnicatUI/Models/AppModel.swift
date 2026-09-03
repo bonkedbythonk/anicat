@@ -11,6 +11,8 @@ public final class AppModel: @unchecked Sendable {
     public var errorMessage: String?
 
     // Active Navigation
+    public var currentNavSection: SidebarView.NavSection = .upNext
+    public var searchQuery: String = ""
     public var selectedMediaDetails: HeroBanner.Details?
     public var selectedEpisodes: [MediaDetailView.EpisodeItem] = []
     public var selectedMangaChapters: [MediaDetailView.MangaChapterItem] = []
@@ -21,6 +23,7 @@ public final class AppModel: @unchecked Sendable {
     public var watchingItems: [MediaCard.Item] = []
     public var trendingItems: [MediaCard.Item] = []
     public var searchResults: [MediaCard.Item] = []
+    public var scheduleItems: [ScheduleView.ScheduleItem] = []
 
     public init() {}
 
@@ -169,6 +172,20 @@ public final class AppModel: @unchecked Sendable {
                         unit: "EP"
                     )
                 ]
+            }
+
+            // Populate initial schedule items from trending
+            self.scheduleItems = trending.prefix(8).enumerated().map { i, s in
+                let days = ["Monday, September 4", "Tuesday, September 5", "Wednesday, September 6"]
+                return ScheduleView.ScheduleItem(
+                    id: s.catalogId,
+                    title: s.title,
+                    coverImageURL: URL(string: s.coverImage),
+                    episodeNumber: Int((s.episodes ?? 12) / 2),
+                    airingTimeText: "23:30",
+                    countdownText: "in \(i + 2)h 15m",
+                    dayGroup: days[i % days.count]
+                )
             }
         } catch {
             print("Failed to load initial catalog: \(error)")

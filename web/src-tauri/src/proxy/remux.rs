@@ -431,7 +431,17 @@ fn spawn_ffmpeg(
     start_seconds: i64,
 ) -> Result<tokio::process::Child, String> {
     let mut cmd = tokio::process::Command::new("ffmpeg");
-    cmd.arg("-nostdin").args(["-loglevel", "error"]);
+    // `warning`, not `error`: a source that arrived over a network connection
+    // with pauses (the torrent stream, waiting on the swarm) is exactly where
+    // ffmpeg logs non-fatal timestamp problems ("Non-monotonic DTS",
+    // "Application provided invalid... dts") at warning level -- and those
+    // are the concrete signature of a stream-copy remux producing PTS
+    // discontinuities the HLS muxer doesn't mark, which is indistinguishable
+    // from the player's own logs as "the episode plays in disconnected
+    // chunks, each treated as complete". `error` alone stayed silent through
+    // exactly that failure mode; this is what `log_ffmpeg_stderr` needs to
+    // actually see it happen.
+    cmd.arg("-nostdin").args(["-loglevel", "warning"]);
     // Before -i, so the seek is a keyframe jump rather than a decode from
     // zero; our range endpoint turns it into a piece-priority jump in the
     // swarm, exactly as an mpv seek does.

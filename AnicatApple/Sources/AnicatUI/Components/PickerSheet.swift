@@ -165,7 +165,11 @@ public struct PickerSheet: View {
                             }
                             .buttonStyle(.plain)
 
-                            Button(action: { cursor += 1 }) {
+                            Button(action: {
+                                withAnimation(.easeOut(duration: 0.25)) {
+                                    cursor += 1
+                                }
+                            }) {
                                 Text("Show another")
                                     .font(.system(size: 12.5, weight: .medium))
                                     .foregroundColor(SumiTheme.foreground.opacity(0.8))
@@ -184,6 +188,7 @@ public struct PickerSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .animation(.easeOut(duration: 0.25), value: pick.id)
             } else {
                 VStack(spacing: 16) {
                     Spacer()
@@ -205,24 +210,34 @@ public struct PickerSheet: View {
     private var filterChipsRow: some View {
         HStack(spacing: 6) {
             PickerChip(title: "Continue", isActive: mood == .continue) {
-                mood = .continue
-                cursor = 0
+                withAnimation(.easeOut(duration: 0.25)) {
+                    mood = .continue
+                    cursor = 0
+                }
             }
             PickerChip(title: "Something new", isActive: mood == .somethingNew) {
-                mood = .somethingNew
-                cursor = 0
+                withAnimation(.easeOut(duration: 0.25)) {
+                    mood = .somethingNew
+                    cursor = 0
+                }
             }
             PickerChip(title: "Short", isActive: filterShort) {
-                filterShort.toggle()
-                cursor = 0
+                withAnimation(.easeOut(duration: 0.25)) {
+                    filterShort.toggle()
+                    cursor = 0
+                }
             }
             PickerChip(title: "Comfy", isActive: filterComfy) {
-                filterComfy.toggle()
-                cursor = 0
+                withAnimation(.easeOut(duration: 0.25)) {
+                    filterComfy.toggle()
+                    cursor = 0
+                }
             }
             PickerChip(title: "Intense", isActive: filterIntense) {
-                filterIntense.toggle()
-                cursor = 0
+                withAnimation(.easeOut(duration: 0.25)) {
+                    filterIntense.toggle()
+                    cursor = 0
+                }
             }
         }
     }
@@ -450,5 +465,6 @@ private struct PickerChip: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.15), value: isActive)
     }
 }

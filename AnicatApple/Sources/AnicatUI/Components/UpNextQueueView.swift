@@ -181,6 +181,7 @@ public struct UpNextQueueView: View {
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
+                .animation(.easeOut(duration: 0.15), value: isPlayHovered)
                 #if os(macOS)
                 .onHover { isPlayHovered = $0 }
                 #endif
@@ -188,6 +189,7 @@ public struct UpNextQueueView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(isFirst ? SumiTheme.card : (isHovered ? SumiTheme.card.opacity(0.6) : Color.clear))
+            .animation(.easeOut(duration: 0.15), value: isHovered)
             #if os(macOS)
             .onHover { hovering in
                 isHovered = hovering

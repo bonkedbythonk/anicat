@@ -130,6 +130,7 @@ public struct CommandPalette: View {
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 10)
                                 .background(index == highlighted ? SumiTheme.indigo.opacity(0.12) : Color.clear)
+                                .animation(.easeOut(duration: 0.12), value: highlighted == index)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)

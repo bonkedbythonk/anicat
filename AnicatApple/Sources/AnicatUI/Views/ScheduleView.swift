@@ -74,7 +74,11 @@ public struct ScheduleView: View {
 
                     // Global vs Watching Only Toggle
                     HStack(spacing: 2) {
-                        Button(action: { watchingOnly = false }) {
+                        Button(action: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                watchingOnly = false
+                            }
+                        }) {
                             HStack(spacing: 6) {
                                 Image(systemName: "globe")
                                 Text("Global")
@@ -89,7 +93,11 @@ public struct ScheduleView: View {
                         }
                         .buttonStyle(.plain)
 
-                        Button(action: { watchingOnly = true }) {
+                        Button(action: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                watchingOnly = true
+                            }
+                        }) {
                             HStack(spacing: 6) {
                                 Image(systemName: "tv")
                                 Text("Watching")
@@ -104,6 +112,7 @@ public struct ScheduleView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    .animation(.easeOut(duration: 0.15), value: watchingOnly)
                     .padding(3)
                     .background(SumiTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
@@ -114,75 +123,78 @@ public struct ScheduleView: View {
                 }
                 .padding(.horizontal, SumiTheme.spaceMd)
 
-                if groupedItems.isEmpty {
-                    SumiEmptyState(
-                        headline: watchingOnly ? "No watching shows airing soon" : "No airing shows found",
-                        detail: watchingOnly ? "Shows you are currently watching with upcoming episodes will appear here." : "Airing schedules will appear here for ongoing shows."
-                    )
-                    .padding(.top, 40)
-                } else {
-                    // Day Groups
-                    ForEach(groupedItems, id: \.day) { group in
-                    VStack(alignment: .leading, spacing: SumiTheme.spaceMd) {
-                        Text(group.day.uppercased())
-                            .sumiTabularMono(size: 13, weight: .bold)
-                            .foregroundColor(SumiTheme.indigo)
-                            .padding(.horizontal, SumiTheme.spaceMd)
+                Group {
+                    if groupedItems.isEmpty {
+                        SumiEmptyState(
+                            headline: watchingOnly ? "No watching shows airing soon" : "No airing shows found",
+                            detail: watchingOnly ? "Shows you are currently watching with upcoming episodes will appear here." : "Airing schedules will appear here for ongoing shows."
+                        )
+                        .padding(.top, 40)
+                    } else {
+                        // Day Groups
+                        ForEach(groupedItems, id: \.day) { group in
+                            VStack(alignment: .leading, spacing: SumiTheme.spaceMd) {
+                                Text(group.day.uppercased())
+                                    .sumiTabularMono(size: 13, weight: .bold)
+                                    .foregroundColor(SumiTheme.indigo)
+                                    .padding(.horizontal, SumiTheme.spaceMd)
 
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
-                            ForEach(group.items) { item in
-                                Button(action: { onSelectItem(item) }) {
-                                    HStack(spacing: 12) {
-                                        // Poster Thumbnail
-                                        AsyncImage(url: item.coverImageURL) { phase in
-                                            if let img = phase.image {
-                                                img.resizable().aspectRatio(contentMode: .fill)
-                                            } else {
-                                                Rectangle().fill(SumiTheme.card)
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+                                    ForEach(group.items) { item in
+                                        Button(action: { onSelectItem(item) }) {
+                                            HStack(spacing: 12) {
+                                                // Poster Thumbnail
+                                                AsyncImage(url: item.coverImageURL) { phase in
+                                                    if let img = phase.image {
+                                                        img.resizable().aspectRatio(contentMode: .fill)
+                                                    } else {
+                                                        Rectangle().fill(SumiTheme.card)
+                                                    }
+                                                }
+                                                .frame(width: 55, height: 75)
+                                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+
+                                                // Meta
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(item.title)
+                                                        .font(.system(size: 13.5, weight: .semibold))
+                                                        .foregroundColor(SumiTheme.foreground)
+                                                        .lineLimit(2)
+
+                                                    HStack(spacing: 8) {
+                                                        Text("Ep \(item.episodeNumber)")
+                                                            .sumiTabularMono(size: 11, weight: .medium)
+                                                            .foregroundColor(SumiTheme.indigo)
+
+                                                        Text(item.airingAt > 0 ? SumiTheme.formatTime(Date(timeIntervalSince1970: TimeInterval(item.airingAt)), timeFormat: timeFormat) : item.airingTimeText)
+                                                            .sumiTabularMono(size: 11)
+                                                            .foregroundColor(SumiTheme.muted)
+                                                    }
+
+                                                    Text(item.countdownText)
+                                                        .sumiTabularMono(size: 10.5)
+                                                        .foregroundColor(SumiTheme.muted.opacity(0.8))
+                                                }
+                                                Spacer()
                                             }
+                                            .padding(8)
+                                            .background(SumiTheme.card)
+                                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                                    .stroke(SumiTheme.border, lineWidth: 1)
+                                            )
+                                            .contentShape(Rectangle())
                                         }
-                                        .frame(width: 55, height: 75)
-                                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-
-                                        // Meta
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(item.title)
-                                                .font(.system(size: 13.5, weight: .semibold))
-                                                .foregroundColor(SumiTheme.foreground)
-                                                .lineLimit(2)
-
-                                            HStack(spacing: 8) {
-                                                Text("Ep \(item.episodeNumber)")
-                                                    .sumiTabularMono(size: 11, weight: .medium)
-                                                    .foregroundColor(SumiTheme.indigo)
-
-                                                Text(item.airingAt > 0 ? SumiTheme.formatTime(Date(timeIntervalSince1970: TimeInterval(item.airingAt)), timeFormat: timeFormat) : item.airingTimeText)
-                                                    .sumiTabularMono(size: 11)
-                                                    .foregroundColor(SumiTheme.muted)
-                                            }
-
-                                            Text(item.countdownText)
-                                                .sumiTabularMono(size: 10.5)
-                                                .foregroundColor(SumiTheme.muted.opacity(0.8))
-                                        }
-                                        Spacer()
+                                        .buttonStyle(.plain)
                                     }
-                                    .padding(8)
-                                    .background(SumiTheme.card)
-                                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                            .stroke(SumiTheme.border, lineWidth: 1)
-                                    )
-                                    .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .padding(.horizontal, SumiTheme.spaceMd)
                             }
                         }
-                        .padding(.horizontal, SumiTheme.spaceMd)
                     }
                 }
-                }
+                .animation(.easeOut(duration: 0.25), value: watchingOnly)
             }
             .padding(.vertical, SumiTheme.spaceLg)
         }

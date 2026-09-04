@@ -1,129 +1,88 @@
 import SwiftUI
 import AppKit
+import OpenGL.GL
 import Cmpv
 
 #if os(macOS)
-/// Dedicated NSView container for libmpv rendering.
-/// Defers mpv initialization until attached to an active NSWindow (`self.window != nil`)
-/// to prevent libmpv from spawning a standalone Cocoa window or switching to a new macOS desktop space.
+/// Carries a non-`Sendable` value across an explicit `@Sendable` closure
+/// boundary. Safe here specifically because the receiving closure only ever
+/// reads it once, after the sender has already stopped touching it — not a
+/// general-purpose escape hatch.
+private final class UnsafeSendableBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
+/// Renders mpv via libmpv's render API (`mpv_render_context`) into our own
+/// `NSOpenGLView`, instead of handing mpv a `wid` and letting its cocoa-cb
+/// backend own a real Cocoa window.
+///
+/// The `wid` approach (previous implementation) always spawns mpv's own
+/// auxiliary NSWindow internally — embedding is done by mpv reparenting that
+/// window's content view into ours after the fact, which is exactly the
+/// "stray window" mpv's own docs warn about: "using the render API is
+/// recommended, because window embedding can cause various issues" (render.h).
+/// It's also the direct cause of every symptom hit in practice: the window
+/// briefly visible in the wrong place before capture, its content view's
+/// stale frame leaving the video pillarboxed, and cocoa-cb swapping the Dock
+/// tile to mpv's own logo the moment its vo/window is created.
+///
+/// The render API has no window at all — mpv draws into an FBO we own on
+/// demand, so none of that exists by construction. `OpenGL` (not Metal) is
+/// used because it's the only accelerated backend `render.h`/`render_gl.h`
+/// expose on macOS (`MPV_RENDER_API_TYPE_OPENGL` — there is no
+/// `MPV_RENDER_API_TYPE_METAL` in libmpv's public API); this is the same
+/// mechanism mpv's own macOS docs describe for hardware decoding via CGL, and
+/// what embedders predating cocoa-cb (and IINA's advanced/embedded mode) use.
 @MainActor
-public final class MpvVideoContainerView: NSView {
+public final class MpvRenderView: NSOpenGLView {
     public weak var coordinator: MpvMetalSurface.Coordinator?
-    private var observerRegistered = false
-    // Windows that existed before mpv_initialize was called — never
-    // candidates for reparenting. Without this, captureMpvWindowIfNeeded
-    // grabbed whatever NSWindow it saw first that wasn't ours (a Settings
-    // panel, an alert), not necessarily mpv's own auxiliary window.
-    private var preMpvWindowIDs: Set<ObjectIdentifier> = []
 
     public override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+        let attrs: [NSOpenGLPixelFormatAttribute] = [
+            UInt32(NSOpenGLPFAAccelerated),
+            UInt32(NSOpenGLPFADoubleBuffer),
+            UInt32(NSOpenGLPFAColorSize), 32,
+            UInt32(NSOpenGLPFAOpenGLProfile), UInt32(NSOpenGLProfileVersion3_2Core),
+            0
+        ]
+        guard let pixelFormat = NSOpenGLPixelFormat(attributes: attrs) else {
+            fatalError("[libmpv] No OpenGL 3.2 core pixel format available")
+        }
+        // NSOpenGLView's real designated initializer is init(frame:pixelFormat:);
+        // delegating to it (rather than the plain init(frame:) this override
+        // shadows) is how every NSOpenGLView subclass picks its pixel format.
+        super.init(frame: frameRect, pixelFormat: pixelFormat)!
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        setupWindowObserver()
+        openGLContext?.setValues([1], for: .swapInterval)
     }
 
     public required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
-        setupWindowObserver()
-    }
-
-    public override func viewWillMove(toWindow newWindow: NSWindow?) {
-        super.viewWillMove(toWindow: newWindow)
-        if newWindow == nil && observerRegistered {
-            NotificationCenter.default.removeObserver(self, name: NSWindow.didUpdateNotification, object: nil)
-            observerRegistered = false
-        }
-    }
-
-    private func setupWindowObserver() {
-        guard !observerRegistered else { return }
-        observerRegistered = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleWindowUpdate),
-            name: NSWindow.didUpdateNotification,
-            object: nil
-        )
-    }
-
-    @objc private func handleWindowUpdate() {
-        captureMpvWindowIfNeeded()
+        fatalError("init(coder:) is not used — MpvRenderView is always constructed programmatically")
     }
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard self.window != nil else { return }
+        guard window != nil else { return }
         coordinator?.attachMpv(to: self)
-        captureMpvWindowIfNeeded()
     }
 
-    public override func layout() {
-        super.layout()
-        if self.window != nil && coordinator?.mpvHandle == nil {
-            coordinator?.attachMpv(to: self)
-        }
-        captureMpvWindowIfNeeded()
-        subviews.forEach { $0.frame = self.bounds }
+    public override func reshape() {
+        super.reshape()
+        openGLContext?.update()
+        needsDisplay = true
     }
 
-    public override func didAddSubview(_ subview: NSView) {
-        super.didAddSubview(subview)
-        subview.frame = self.bounds
-        subview.autoresizingMask = [.width, .height]
-    }
-
-    public func recordPreMpvWindows() {
-        preMpvWindowIDs = Set(NSApp.windows.map(ObjectIdentifier.init))
-    }
-
-    /// Intercepts any separate Cocoa window spawned by libmpv on macOS,
-    /// reparents its content view directly inside this container view, and hides the external window.
-    /// Returns whether a window was captured this call, so pollers can stop early.
-    @discardableResult
-    public func captureMpvWindowIfNeeded() -> Bool {
-        guard let myWindow = self.window else { return false }
-        for w in NSApp.windows {
-            // Only mpv's own auxiliary window is a candidate: not ours, not a
-            // panel, and not a window that already existed before mpv spawned it.
-            guard w !== myWindow, !w.isKind(of: NSPanel.self), !preMpvWindowIDs.contains(ObjectIdentifier(w)) else { continue }
-            if let cv = w.contentView, cv.superview !== self {
-                // Zero the alpha before anything else — orderOut/setIsVisible
-                // still let the window's already-composited frame flash on
-                // screen at its default position for one frame; alpha is a
-                // synchronous CALayer property, so this is the only step that
-                // actually prevents the visible "window in the wrong place" flash.
-                w.alphaValue = 0
-                w.orderOut(nil)
-                w.setIsVisible(false)
-                // The vo (and its Dock icon swap) is created lazily on first
-                // frame, not at mpv_initialize, so the icon can still flip to
-                // mpv's logo after the reset there — reset again here, at the
-                // point we know the vo actually exists.
-                NSApp.applicationIconImage = nil
-                cv.removeFromSuperview()
-                self.addSubview(cv)
-                cv.frame = self.bounds
-                cv.autoresizingMask = [.width, .height]
-                print("[libmpv] Successfully integrated mpv surface directly into AniCat window.")
-                // The 16ms poll can now win the race before SwiftUI has ever
-                // laid this container out, so `self.bounds` at that instant
-                // is still .zero — cv.frame above pins the video to a 0x0
-                // (visually: original-window-sized) rect in the corner
-                // forever, since nothing else re-triggers a layout pass.
-                // Forcing one now, once layout has actually happened, is
-                // what makes it fill the container.
-                self.needsLayout = true
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    cv.frame = self.bounds
-                }
-                return true
-            }
-        }
-        return false
+    public override func draw(_ dirtyRect: NSRect) {
+        guard let context = openGLContext else { return }
+        context.makeCurrentContext()
+        let scale = window?.backingScaleFactor ?? 1
+        coordinator?.renderFrame(
+            width: Int32(bounds.width * scale),
+            height: Int32(bounds.height * scale)
+        )
+        context.flushBuffer()
     }
 }
 
@@ -136,45 +95,40 @@ public struct MpvMetalSurface: NSViewRepresentable {
         self.streamURL = streamURL
     }
 
-    public func makeNSView(context: Context) -> MpvVideoContainerView {
-        let view = MpvVideoContainerView(frame: .zero)
+    public func makeNSView(context: Context) -> MpvRenderView {
+        let view = MpvRenderView(frame: .zero)
         view.coordinator = context.coordinator
-        context.coordinator.containerView = view
+        context.coordinator.renderView = view
         context.coordinator.controller = controller
 
-        if let streamURL = streamURL {
+        if let streamURL {
             context.coordinator.setPendingStreamURL(streamURL.absoluteString)
         }
 
         return view
     }
 
-    public func updateNSView(_ nsView: MpvVideoContainerView, context: Context) {
+    public func updateNSView(_ nsView: MpvRenderView, context: Context) {
         let coordinator = context.coordinator
         nsView.coordinator = coordinator
-        coordinator.containerView = nsView
+        coordinator.renderView = nsView
         coordinator.controller = controller
 
-        // If view is already attached to a window but mpv is not initialized yet
         if nsView.window != nil && coordinator.mpvHandle == nil {
             coordinator.attachMpv(to: nsView)
         }
 
-        // Update stream URL if changed or new
-        if let streamURL = streamURL {
+        if let streamURL {
             coordinator.loadFile(url: streamURL.absoluteString)
         } else {
             coordinator.clearLoadedURL()
         }
 
-        // Update playback state
         coordinator.setPaused(!controller.isPlaying)
-
-        // Update Anime4K shaders
         coordinator.applyAnime4K(enabled: controller.isAnime4KEnabled)
     }
 
-    public static func dismantleNSView(_ nsView: MpvVideoContainerView, coordinator: Coordinator) {
+    public static func dismantleNSView(_ nsView: MpvRenderView, coordinator: Coordinator) {
         coordinator.stop()
     }
 
@@ -184,12 +138,21 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
     public final class Coordinator: NSObject, @unchecked Sendable {
         private var mpv: OpaquePointer?
+        private var renderCtx: OpaquePointer?
         private var isRunning = false
         fileprivate var controller: PlayerController
-        fileprivate weak var containerView: MpvVideoContainerView?
+        fileprivate weak var renderView: MpvRenderView?
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
+        // Signaled once by the event-loop task's own thread when it has
+        // actually stopped touching `mpv`, so `stop()` can block until that
+        // happens before it frees the render context or destroys the
+        // handle. Waiting on `isRunning` alone was not enough — the flag
+        // flipping false and the loop noticing it are two different threads
+        // observing the same field with no ordering between them and
+        // whoever's `mpv`/`renderCtx` call landed first.
+        private let eventLoopStopped = DispatchSemaphore(value: 0)
 
         public var mpvHandle: OpaquePointer? { mpv }
 
@@ -206,12 +169,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
             pendingStreamURL = url
         }
 
-        func attachMpv(to view: NSView) {
+        func attachMpv(to view: MpvRenderView) {
             guard mpv == nil else { return }
             setupMpv(for: view, controller: controller)
         }
 
-        func setupMpv(for view: NSView, controller: PlayerController) {
+        func setupMpv(for view: MpvRenderView, controller: PlayerController) {
             guard mpv == nil else { return }
 
             guard let handle = mpv_create() else {
@@ -219,18 +182,16 @@ public struct MpvMetalSurface: NSViewRepresentable {
                 return
             }
 
-            // In-app window containment and minimalism: prevent creating external Cocoa window or entering fullscreen desktop space
-            mpv_set_option_string(handle, "fullscreen", "no")
-            mpv_set_option_string(handle, "border", "no")
-            mpv_set_option_string(handle, "window-maximized", "no")
+            // "libmpv" is the special vo name that opts into the render API
+            // instead of a normal window-owning vo — no "wid" is set at all.
+            mpv_set_option_string(handle, "vo", "libmpv")
             mpv_set_option_string(handle, "keep-open", "yes")
 
             // High-performance Apple Silicon settings.
-            // "Hardware Decoding" in Settings used to be decorative — this
-            // was unconditional regardless of the toggle.
+            // "Hardware Decoding" in Settings was decorative until this read
+            // it back — re-wire on every mpv rewrite that touches this line.
             let hwdecEnabled = UserDefaults.standard.object(forKey: "anicat_hardware_decoding") == nil
                 || UserDefaults.standard.bool(forKey: "anicat_hardware_decoding")
-            mpv_set_option_string(handle, "vo", "gpu-next")
             mpv_set_option_string(handle, "hwdec", hwdecEnabled ? "videotoolbox" : "no")
             mpv_set_option_string(handle, "osc", "no")
             mpv_set_option_string(handle, "osd-level", "0")
@@ -247,13 +208,6 @@ public struct MpvMetalSurface: NSViewRepresentable {
             mpv_set_option_string(handle, "slang", "en,eng,English")
             mpv_set_option_string(handle, "subs-fallback", "yes")
 
-            // Attach directly to the hosted NSView layer
-            var viewPtr = Int64(Int(bitPattern: Unmanaged.passUnretained(view).toOpaque()))
-            mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &viewPtr)
-
-            MainActor.assumeIsolated {
-                (view as? MpvVideoContainerView)?.recordPreMpvWindows()
-            }
             let initStatus = mpv_initialize(handle)
             if initStatus < 0 {
                 print("[libmpv] Failed to initialize mpv: \(initStatus)")
@@ -261,44 +215,113 @@ public struct MpvMetalSurface: NSViewRepresentable {
                 return
             }
 
-            // cocoa-cb overwrites NSApp's Dock tile with mpv's own logo the
-            // moment it initializes its vo, regardless of `wid` embedding —
-            // it's independent of the auxiliary-window capture above. `nil`
-            // restores the bundle's own icon.
-            MainActor.assumeIsolated {
-                NSApp.applicationIconImage = nil
+            let hasGLContext = MainActor.assumeIsolated { () -> Bool in
+                guard let ctx = view.openGLContext else { return false }
+                ctx.makeCurrentContext()
+                return true
             }
+            guard hasGLContext else {
+                print("[libmpv] No OpenGL context on render view")
+                mpv_destroy(handle)
+                return
+            }
+
+            var glInitParams = mpv_opengl_init_params(
+                get_proc_address: { _, name in
+                    guard let name else { return nil }
+                    // Render.h/render_gl.h: "macOS: CGL is required
+                    // (CGLGetCurrentContext() returning non-NULL)". The
+                    // OpenGL framework's symbols are already loaded into the
+                    // process by NSOpenGLContext at this point, so a plain
+                    // dlsym against the global (RTLD_DEFAULT) namespace
+                    // resolves them without linking against CGL directly.
+                    return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name)
+                },
+                get_proc_address_ctx: nil
+            )
+
+            let apiTypeCString = strdup(MPV_RENDER_API_TYPE_OPENGL)
+            defer { free(apiTypeCString) }
+
+            var createStatus: Int32 = -1
+            withUnsafeMutablePointer(to: &glInitParams) { initParamsPtr in
+                var params: [mpv_render_param] = [
+                    mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiTypeCString),
+                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: UnsafeMutableRawPointer(initParamsPtr)),
+                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                ]
+                createStatus = mpv_render_context_create(&renderCtx, handle, &params)
+            }
+
+            if createStatus < 0 || renderCtx == nil {
+                print("[libmpv] Failed to create render context: \(createStatus)")
+                mpv_destroy(handle)
+                return
+            }
+
+            let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+            mpv_render_context_set_update_callback(renderCtx, { ctx in
+                guard let ctx else { return }
+                let coordinator = Unmanaged<Coordinator>.fromOpaque(ctx).takeUnretainedValue()
+                DispatchQueue.main.async {
+                    coordinator.renderView?.needsDisplay = true
+                }
+            }, selfPtr)
 
             self.mpv = handle
             self.isRunning = true
 
-            // Wire controller actions directly to this mpv instance
             controller.onSeek = { [weak self] seconds in
                 self?.seek(to: seconds)
             }
             controller.onSetPause = { [weak self] paused in
                 self?.setPaused(paused)
             }
+            controller.onCycleAudioTrack = { [weak self] in
+                self?.runCommand(["cycle", "audio"])
+            }
+            controller.onCycleSubtitleTrack = { [weak self] in
+                self?.runCommand(["cycle", "sub"])
+            }
+            controller.onFetchTrackInfo = { [weak self] in
+                self?.fetchTrackInfo() ?? (audio: "-", subtitle: "-")
+            }
 
-            // Observe playback properties
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 4, "paused-for-cache", MPV_FORMAT_FLAG)
+            mpv_observe_property(handle, 5, "cache-buffering-state", MPV_FORMAT_INT64)
 
-            // Start background event loop
             startEventLoop()
 
-            // Apply initial Anime4K state
             applyAnime4K(enabled: controller.isAnime4KEnabled)
-
-            // Apply initial pause state
             setPaused(!controller.isPlaying)
 
-            // Play pending stream if available
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
             }
+        }
+
+        /// Called from `MpvRenderView.draw(_:)` with its OpenGL context
+        /// already current, on every update-callback-triggered redraw.
+        func renderFrame(width: Int32, height: Int32) {
+            guard let renderCtx, width > 0, height > 0 else { return }
+            var fbo = mpv_opengl_fbo(fbo: 0, w: width, h: height, internal_format: 0)
+            // The default framebuffer's origin is bottom-left; mpv's video
+            // frames are top-left — without this the picture renders upside down.
+            var flip: CInt = 1
+            withUnsafeMutablePointer(to: &fbo) { fboPtr in
+                withUnsafeMutablePointer(to: &flip) { flipPtr in
+                    var params: [mpv_render_param] = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(fboPtr)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPtr)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                    ]
+                    mpv_render_context_render(renderCtx, &params)
+                }
+            }
+            mpv_render_context_report_swap(renderCtx)
         }
 
         func runCommand(_ args: [String]) {
@@ -329,6 +352,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
             // has no property to key off — set it optimistically here and
             // let the first time-pos update (proof a frame decoded) clear it.
             controller.isBuffering = true
+            controller.bufferingPercent = nil
             if controller.currentTime > 0 {
                 let startSec = String(format: "%.2f", controller.currentTime)
                 mpv_set_property_string(mpv, "start", startSec)
@@ -337,23 +361,6 @@ public struct MpvMetalSurface: NSViewRepresentable {
             }
             runCommand(["loadfile", url, "replace"])
             print("[libmpv] Playing stream: \(url)")
-
-            scheduleMpvWindowCapture()
-        }
-
-        /// Polls every 16ms (roughly one display frame) instead of the old
-        /// fixed 50/200/500ms checks, so the auxiliary window mpv spawns gets
-        /// reparented before it has a chance to composite a visible frame at
-        /// its default position. Stops as soon as capture succeeds; the
-        /// NSWindow.didUpdateNotification observer in the container view
-        /// still catches anything this misses.
-        private func scheduleMpvWindowCapture(attempt: Int = 0) {
-            guard attempt < 30, let containerView else { return }
-            let captured = MainActor.assumeIsolated { containerView.captureMpvWindowIfNeeded() }
-            if captured { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
-                self?.scheduleMpvWindowCapture(attempt: attempt + 1)
-            }
         }
 
         func clearLoadedURL() {
@@ -395,8 +402,30 @@ public struct MpvMetalSurface: NSViewRepresentable {
             applyAnime4K(enabled: preset != .off)
         }
 
+        /// mpv exposes the currently-selected track's language/title as
+        /// nested sub-properties (e.g. "current-tracks/audio/lang") — no
+        /// need to pull and parse the full MPV_FORMAT_NODE track-list for
+        /// just "what's playing right now".
+        func fetchTrackInfo() -> (audio: String, subtitle: String) {
+            guard let mpv else { return (audio: "-", subtitle: "-") }
+            func stringProperty(_ name: String) -> String? {
+                guard let cstr = mpv_get_property_string(mpv, name) else { return nil }
+                defer { mpv_free(cstr) }
+                let value = String(cString: cstr)
+                return value.isEmpty ? nil : value
+            }
+            let audio = stringProperty("current-tracks/audio/lang")
+                ?? stringProperty("current-tracks/audio/title")
+                ?? "Off"
+            let subtitle = stringProperty("current-tracks/sub/lang")
+                ?? stringProperty("current-tracks/sub/title")
+                ?? "Off"
+            return (audio: audio, subtitle: subtitle)
+        }
+
         private func startEventLoop() {
             guard let mpv = mpv else { return }
+            let eventLoopStopped = eventLoopStopped
 
             Task.detached(priority: .userInitiated) { [weak self, mpv] in
                 while true {
@@ -435,6 +464,11 @@ public struct MpvMetalSurface: NSViewRepresentable {
                             await MainActor.run {
                                 self.controller.isBuffering = buffering
                             }
+                        } else if name == "cache-buffering-state", let data = prop.data {
+                            let percent = Int(data.assumingMemoryBound(to: Int64.self).pointee)
+                            await MainActor.run {
+                                self.controller.bufferingPercent = percent
+                            }
                         } else if name == "duration", let data = prop.data {
                             let dur = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
@@ -452,8 +486,9 @@ public struct MpvMetalSurface: NSViewRepresentable {
                         }
                     }
                 }
-                // Destroy mpv handle strictly after the wait loop has terminated
-                mpv_destroy(mpv)
+                // The loop no longer destroys anything here — see `stop()`
+                // for why. It only signals that it is done touching `mpv`.
+                eventLoopStopped.signal()
             }
         }
 
@@ -462,19 +497,66 @@ public struct MpvMetalSurface: NSViewRepresentable {
             isRunning = false
             controller.onSeek = nil
             controller.onSetPause = nil
+            controller.onCycleAudioTrack = nil
+            controller.onCycleSubtitleTrack = nil
+            controller.onFetchTrackInfo = nil
             lastLoadedURL = nil
             pendingStreamURL = nil
             lastAnime4KState = nil
             controller.isBuffering = false
+            controller.bufferingPercent = nil
             controller.onPlaybackStopped?()
-            if let handle = mpv {
-                self.mpv = nil
-                mpv_command_string(handle, "stop")
-                mpv_command_string(handle, "quit 0")
-                mpv_wakeup(handle)
+
+            // The event-loop task (`startEventLoop`) polls `mpv` on its own
+            // thread and used to `mpv_destroy` it independently once it
+            // noticed `isRunning` go false, immediately above — a second
+            // thread able to touch `mpv`/`renderCtx` at the same moment this
+            // function does, with nothing ordering the two. Waiting here for
+            // that task to signal it's done fixed the resulting crash, but
+            // `stop()` runs synchronously on the main thread (SwiftUI calls
+            // it directly from `dismantleNSView`), and blocking the main
+            // thread for the wait's full ~50ms window stalled whatever
+            // Core Animation transaction was mid-flight at the same
+            // moment — the player's own `.transition(.opacity)` fade-out,
+            // almost always racing the native fullscreen-exit animation this
+            // same state change triggers. The visible result was the last
+            // composited frame (controls, gradient scrim, whatever was on
+            // screen) freezing in place instead of clearing. So the wait
+            // still has to happen before anything touches mpv again, but off
+            // the thread that owns the transaction, not on it.
+            let eventLoopStopped = eventLoopStopped
+            // `OpaquePointer` isn't `Sendable`, so it can't cross into the
+            // `@Sendable` closure below directly — boxed the same way the
+            // rest of this file already hands mpv handles to a detached
+            // task (see `startEventLoop`), except that closure gets away
+            // without a box because its capture list is inferred, not a
+            // plain `DispatchQueue.global().async` closure's stricter one.
+            let handles = UnsafeSendableBox((renderCtx: self.renderCtx, mpv: self.mpv, renderView: self.renderView))
+            self.renderCtx = nil
+            self.mpv = nil
+            // Plain GCD, not a Swift `Task`: `DispatchSemaphore.wait()` is a
+            // real thread block, and Swift's concurrency checker refuses to
+            // compile it inside an `async` closure (blocking a cooperative
+            // thread-pool thread can starve the pool) — a plain dispatch
+            // queue thread has no such rule.
+            DispatchQueue.global(qos: .userInitiated).async {
+                eventLoopStopped.wait()
+                // render.h: "You must free the context with
+                // mpv_render_context_free() before the mpv core is
+                // destroyed." The OpenGL context must be current for this
+                // call, which is the one piece of teardown that has to hop
+                // back to the main thread — briefly, not blocking it.
+                if let renderCtx = handles.value.renderCtx {
+                    DispatchQueue.main.sync {
+                        handles.value.renderView?.openGLContext?.makeCurrentContext()
+                        mpv_render_context_free(renderCtx)
+                    }
+                }
+                if let mpv = handles.value.mpv {
+                    mpv_destroy(mpv)
+                }
             }
         }
     }
 }
 #endif
-

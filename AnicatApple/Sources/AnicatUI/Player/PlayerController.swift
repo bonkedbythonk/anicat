@@ -1,6 +1,20 @@
 import Foundation
 import SwiftUI
 import Observation
+#if os(macOS)
+import AppKit
+
+/// The real AniCat content window, set once by `WindowConfigurator` in the
+/// app target the moment SwiftUI hands it a window. `NSApp.keyWindow` is
+/// racy during any transition where something else (mpv's render view, a
+/// sheet, a popover) could briefly hold key status — this is the one
+/// reference that's unambiguously "our window" for anything driving it from
+/// AnicatUI, like the player's auto-fullscreen.
+@MainActor
+public enum AppWindow {
+    public static weak var main: NSWindow?
+}
+#endif
 
 @Observable
 public final class PlayerController: @unchecked Sendable {
@@ -10,6 +24,11 @@ public final class PlayerController: @unchecked Sendable {
     public var title: String = ""
     public var episodeNumber: Int = 1
     public var isBuffering: Bool = false
+    // 0-100, or nil before mpv has reported anything — mirrors mpv's own
+    // "cache-buffering-state" property so the spinner can say something
+    // (buffering is driven by the torrent pre-buffer gate in core, which is
+    // seconds not milliseconds; a bare spinner reads as hung over that long).
+    public var bufferingPercent: Int? = nil
     public var volume: Double = 1.0 // 0 to 1
     public var isMuted: Bool = false
     
@@ -32,6 +51,15 @@ public final class PlayerController: @unchecked Sendable {
     public var onSeek: (@Sendable (_ seconds: Double) -> Void)?
     public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?
     public var isScrubbing: Bool = false
+
+    // Info / more-options menu: cycling audio/subtitle tracks is an mpv
+    // command (no separate track-picker UI to build against a full
+    // track-list yet), and reading back the current one is a synchronous
+    // mpv property read — both safe to call straight from the main thread,
+    // so these aren't state, just callbacks the menu invokes on demand.
+    public var onCycleAudioTrack: (@Sendable () -> Void)?
+    public var onCycleSubtitleTrack: (@Sendable () -> Void)?
+    public var onFetchTrackInfo: (@Sendable () -> (audio: String, subtitle: String))?
     
     // Autohide controls timer
     public var areControlsVisible: Bool = true
@@ -118,7 +146,7 @@ public final class PlayerController: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 3_500_000_000) // 3.5s
             if !Task.isCancelled && isPlaying {
                 await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.3)) {
+                    withAnimation(.easeOut(duration: 0.3)) {
                         self.areControlsVisible = false
                     }
                 }

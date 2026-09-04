@@ -7,12 +7,9 @@ public struct PlayerView: View {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
     public let onClose: () -> Void
-    #if os(macOS)
-    // Only exit fullscreen on close if we're the one who entered it — if the
-    // window was already fullscreen (user did it manually before pressing
-    // play), leave it that way when the player closes.
-    @State private var enteredFullscreen = false
-    #endif
+    @State private var showInfoMenu = false
+    @State private var audioTrackLabel = "-"
+    @State private var subtitleTrackLabel = "-"
 
     public init(controller: PlayerController, streamURL: URL? = nil, onClose: @escaping () -> Void) {
         self.controller = controller
@@ -55,10 +52,15 @@ public struct PlayerView: View {
             // stretch and any mid-playback stall, so the black canvas never
             // sits with nothing on screen while mpv is still working.
             if controller.isBuffering {
-                ProgressView()
-                    .scaleEffect(1.4)
-                    .tint(SumiTheme.indigo)
-                    .transition(.opacity)
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(1.4)
+                        .tint(SumiTheme.indigo)
+                    Text(bufferingLabel)
+                        .sumiTabularMono(size: 12)
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .transition(.opacity)
             }
 
             // Paused Overlay Icon
@@ -115,28 +117,26 @@ public struct PlayerView: View {
                     }
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.25), value: controller.isIntroActive)
+                .animation(.easeOut(duration: 0.25), value: controller.isIntroActive)
             }
         }
         #if os(macOS)
         .onContinuousHover { _ in
             controller.showControlsBriefly()
         }
-        .onAppear {
-            if let window = NSApp.keyWindow ?? NSApp.mainWindow, !window.styleMask.contains(.fullScreen) {
-                enteredFullscreen = true
-                window.toggleFullScreen(nil)
-            }
-        }
-        .onDisappear {
-            if enteredFullscreen, let window = NSApp.keyWindow ?? NSApp.mainWindow, window.styleMask.contains(.fullScreen) {
-                window.toggleFullScreen(nil)
-            }
-            enteredFullscreen = false
-        }
         #endif
-        .animation(.easeInOut(duration: 0.25), value: controller.areControlsVisible)
-        .animation(.easeInOut(duration: 0.15), value: controller.isBuffering)
+        .animation(.easeOut(duration: 0.3), value: controller.areControlsVisible)
+        .animation(.easeOut(duration: 0.2), value: controller.isBuffering)
+    }
+
+    // The torrent pre-buffer gate this waits on is a seconds-scale step in
+    // core, not something the player can shorten — showing a percentage
+    // (once mpv has reported one) is what keeps that wait from reading as hung.
+    private var bufferingLabel: String {
+        if let percent = controller.bufferingPercent, percent > 0 {
+            return "Buffering \(percent)%"
+        }
+        return "Buffering…"
     }
 
     // MARK: - Top Bar
@@ -184,7 +184,74 @@ public struct PlayerView: View {
             .buttonStyle(.plain)
             .help(controller.isAnime4KEnabled ? "Anime4K Upscaling: Active (Ctrl+1)" : "Anime4K Upscaling: Inactive (Ctrl+1)")
             .keyboardShortcut("1", modifiers: [.control])
+
+            // Info / More Options
+            Button(action: {
+                refreshTrackLabels()
+                showInfoMenu = true
+            }) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(SumiTheme.foreground)
+                    .frame(width: 36, height: 36)
+                    .background(Color.black.opacity(0.5))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Info & Options")
+            .popover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
+                infoMenu
+            }
         }
+    }
+
+    // MARK: - Info Menu
+    private var infoMenu: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(controller.title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Episode \(controller.episodeNumber) · \(controller.formattedCurrentTime) / \(controller.formattedDuration)")
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.muted)
+            }
+
+            Divider()
+
+            infoMenuRow(label: "Audio", value: audioTrackLabel) {
+                controller.onCycleAudioTrack?()
+                refreshTrackLabels()
+            }
+            infoMenuRow(label: "Subtitles", value: subtitleTrackLabel) {
+                controller.onCycleSubtitleTrack?()
+                refreshTrackLabels()
+            }
+        }
+        .padding(16)
+        .frame(width: 260)
+    }
+
+    private func infoMenuRow(label: String, value: String, onCycle: @escaping () -> Void) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(SumiTheme.muted)
+            Spacer()
+            Text(value)
+                .sumiTabularMono(size: 12)
+            Button(action: onCycle) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .help("Cycle \(label.lowercased())")
+        }
+    }
+
+    private func refreshTrackLabels() {
+        guard let info = controller.onFetchTrackInfo?() else { return }
+        audioTrackLabel = info.audio
+        subtitleTrackLabel = info.subtitle
     }
 
     // MARK: - Bottom Bar
@@ -259,14 +326,6 @@ public struct PlayerView: View {
                 .sumiTabularMono(size: 12)
 
                 Spacer()
-
-                // Picture-in-Picture
-                Button(action: {}) {
-                    Image(systemName: "pip.enter")
-                        .font(.system(size: 15))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                }
-                .buttonStyle(.plain)
 
                 // Fullscreen
                 Button(action: {

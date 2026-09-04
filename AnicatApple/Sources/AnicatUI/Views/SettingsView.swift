@@ -26,7 +26,6 @@ public struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
 
     // General: Appearance
-    @AppStorage("anicat_theme") private var selectedTheme: String = "System Default"
     @AppStorage("anicat_ui_style") private var selectedStyle: String = "ink-and-index"
     @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
 
@@ -54,8 +53,6 @@ public struct SettingsView: View {
     @State private var disconnectConfirming: Bool = false
     @State private var registryState: MaintenanceActionState = .idle
     @State private var onboardingResetState: MaintenanceActionState = .idle
-    @State private var checkingUpdate: Bool = false
-    @State private var updateMessage: String? = nil
     @State private var copyFeedback: String? = nil
 
     private enum MaintenanceActionState {
@@ -70,6 +67,8 @@ public struct SettingsView: View {
     public let avatarUrl: String?
     public let onSaveToken: (String) -> Void
     public let onDisconnectAniList: () -> Void
+    public let onClearRegistry: () async -> Bool
+    public let onOpenShortcuts: (() -> Void)?
 
     public init(
         isSignedIn: Bool = false,
@@ -77,14 +76,18 @@ public struct SettingsView: View {
         avatarUrl: String? = nil,
         initialTab: SettingsTab = .general,
         onSaveToken: @escaping (String) -> Void = { _ in },
-        onDisconnectAniList: @escaping () -> Void = {}
+        onDisconnectAniList: @escaping () -> Void = {},
+        onClearRegistry: @escaping () async -> Bool = { false },
+        onOpenShortcuts: (() -> Void)? = nil
     ) {
         self.isSignedIn = isSignedIn
         self.username = username
         self.avatarUrl = avatarUrl
+        self.onClearRegistry = onClearRegistry
         self._selectedTab = State(initialValue: initialTab)
         self.onSaveToken = onSaveToken
         self.onDisconnectAniList = onDisconnectAniList
+        self.onOpenShortcuts = onOpenShortcuts
     }
 
     public var body: some View {
@@ -157,7 +160,9 @@ public struct SettingsView: View {
             ForEach(SettingsTab.allCases) { tab in
                 let isActive = selectedTab == tab
                 Button {
-                    selectedTab = tab
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        selectedTab = tab
+                    }
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: tab.iconName)
@@ -190,24 +195,10 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Appearance Card
             SettingsCard(title: "Appearance") {
-                // Theme
-                SettingField(
-                    label: "Theme",
-                    description: "Choose your preferred visual theme."
-                ) {
-                    SumiDropdown(
-                        options: ["System Default", "Dark", "Light"],
-                        selected: $selectedTheme,
-                        minWidth: 160
-                    )
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
                 // Style
                 SettingField(
                     label: "Style",
+                    badge: "Coming soon",
                     description: "Choose a complete visual skin for the interface.",
                     isStacked: true
                 ) {
@@ -324,6 +315,7 @@ public struct SettingsView: View {
                 // Manga Provider
                 SettingField(
                     label: "Manga Provider",
+                    badge: "Coming soon",
                     description: "Source for manga chapters."
                 ) {
                     SumiDropdown(
@@ -339,6 +331,7 @@ public struct SettingsView: View {
                 // Novel Provider
                 SettingField(
                     label: "Light Novel Provider",
+                    badge: "Coming soon",
                     description: "Primary index and source for light novels. RanobeDB carries the richest metadata and published volumes; the rest are web-novel sources."
                 ) {
                     SumiDropdown(
@@ -362,6 +355,7 @@ public struct SettingsView: View {
                 // Search & Tracking API
                 SettingField(
                     label: "Search & Tracking API",
+                    badge: "Coming soon",
                     description: "Metadata and list sync source."
                 ) {
                     SumiDropdown(
@@ -373,7 +367,10 @@ public struct SettingsView: View {
             }
 
             // CrossPoint E-Reader Optimization Card
-            SettingsCard(title: "CrossPoint E-Reader Optimization") {
+            SettingsCard(
+                title: "CrossPoint E-Reader Optimization",
+                badge: "Coming soon"
+            ) {
                 SettingField(
                     label: "Default E-Reader Device",
                     description: "Pre-configures image dimensions and screen layout for your e-reader hardware."
@@ -478,6 +475,7 @@ public struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border, lineWidth: isSelected ? 2 : 1)
                 )
+                .contentShape(Rectangle())
 
                 // Blue Checkmark Badge
                 if isSelected {
@@ -519,7 +517,8 @@ public struct SettingsView: View {
                 // Auto-Skip Intros
                 SettingField(
                     label: "Auto-Skip Intros",
-                    description: "Automatically skip openings and endings using AniSkip. Press S in-player to skip manually when disabled."
+                    badge: "Coming soon",
+                    description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
                 ) {
                     SumiSwitch(isOn: $autoSkipIntro)
                 }
@@ -530,91 +529,74 @@ public struct SettingsView: View {
                 // GPU Upscaling
                 SettingField(
                     label: "GPU Upscaling",
-                    description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference. Ctrl+1 in-player toggles this too."
+                    description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
                 ) {
                     SumiSwitch(isOn: $gpuUpscaling)
                 }
 
+                Divider()
+                    .background(SumiTheme.border)
+
+                // Hardware Decoding
+                SettingField(
+                    label: "Hardware Decoding",
+                    badge: "Coming soon",
+                    description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
+                ) {
+                    SumiSwitch(isOn: $hardwareDecoding)
+                }
             }
 
             // Keyboard Shortcuts Card
             SettingsCard(title: "Keyboard Shortcuts") {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("While a video is playing, you can use these shortcuts:")
-                        .font(.system(size: 12))
-                        .foregroundColor(SumiTheme.muted)
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Cheat Sheet")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Settings — Ctrl + number")
-                            .sumiTabularMono(size: 10.5, weight: .semibold)
+                        Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
+                            .font(.system(size: 12))
                             .foregroundColor(SumiTheme.muted)
-
-                        VStack(spacing: 0) {
-                            shortcutLine(label: "Toggle Upscaling", key: "Ctrl + 1")
-                            Divider().background(SumiTheme.border)
-                            shortcutLine(label: "Toggle Auto-skip Intro", key: "Ctrl + 2")
-                            Divider().background(SumiTheme.border)
-                            shortcutLine(label: "Toggle Autoplay Next", key: "Ctrl + 4")
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.02))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Actions — Shift + letter")
-                            .sumiTabularMono(size: 10.5, weight: .semibold)
-                            .foregroundColor(SumiTheme.muted)
+                    Spacer()
 
-                        VStack(spacing: 0) {
-                            shortcutLine(label: "Reload Episode", key: "Shift + R")
-                            Divider().background(SumiTheme.border)
-                            shortcutLine(label: "Skip Segment", key: "Shift + S")
-                            Divider().background(SumiTheme.border)
-                            shortcutLine(label: "Toggle Sub/Dub", key: "Shift + T")
-                            Divider().background(SumiTheme.border)
-                            shortcutLine(label: "Rotate Video", key: "Shift + V")
+                    if let onOpenShortcuts {
+                        Button(action: onOpenShortcuts) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "keyboard")
+                                    .font(.system(size: 11))
+                                Text("View Shortcuts")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.02))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
+                        .buttonStyle(.plain)
+                    } else {
+                        Text("?")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(SumiTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
                     }
                 }
             }
         }
-    }
-
-    private func shortcutLine(label: String, key: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundColor(SumiTheme.foreground.opacity(0.75))
-
-            Spacer()
-
-            Text(key)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(SumiTheme.foreground)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(SumiTheme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-        }
-        .padding(.vertical, 8)
     }
 
     // MARK: - Account Tab
@@ -683,6 +665,7 @@ public struct SettingsView: View {
                                     RoundedRectangle(cornerRadius: 6)
                                         .stroke(disconnectConfirming ? SumiTheme.danger : SumiTheme.border, lineWidth: 1)
                                 )
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -761,6 +744,7 @@ public struct SettingsView: View {
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(SumiTheme.indigo.opacity(0.30), lineWidth: 1)
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -793,6 +777,7 @@ public struct SettingsView: View {
                                     .padding(.vertical, 6)
                                     .background(SumiTheme.indigo)
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .disabled(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -859,52 +844,25 @@ public struct SettingsView: View {
                         .foregroundColor(SumiTheme.foreground)
                 }
 
-                Button {
-                    checkingUpdate = true
-                    updateMessage = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        checkingUpdate = false
-                        updateMessage = "AniCat 1.0.0 is currently up to date."
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        if checkingUpdate {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-
-                        Text(checkingUpdate ? "Checking..." : "Check for Updates")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundColor(Color(hex: "#161310"))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                // No update mechanism exists in the native build yet — a
+                // fake "checking" spinner that always reports up to date is
+                // worse than no button, since it reads as a real check.
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.muted)
+                    Text("Update checking isn't available yet in the native build.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.muted)
                 }
-                .buttonStyle(.plain)
-                .disabled(checkingUpdate)
-
-                if let updateMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(SumiTheme.successLight)
-                        Text(updateMessage)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(SumiTheme.successLight)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(SumiTheme.success.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(SumiTheme.success.opacity(0.25), lineWidth: 1)
-                    )
-                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.02))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(SumiTheme.border, lineWidth: 1)
+                )
             }
 
             // Logs & Debugging Card
@@ -922,9 +880,13 @@ public struct SettingsView: View {
                     """
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(report, forType: .string)
-                    copyFeedback = "Debug report copied to clipboard!"
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        copyFeedback = "Debug report copied to clipboard!"
+                    }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        copyFeedback = nil
+                        withAnimation(.easeIn(duration: 0.2)) {
+                            copyFeedback = nil
+                        }
                     }
                     #endif
                 } label: {
@@ -943,24 +905,24 @@ public struct SettingsView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                // Log Window
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("[core::engine] Engine initialized with loopback range-server on 127.0.0.1")
-                        Text("[core::mpv] Metal layer attached to MPV surface (Apple Silicon VideoToolbox hwdec enabled)")
-                        Text("[core::shaders] Loaded Anime4K shader pipeline: Mode A (Fast)")
-                        Text("[auth::keychain] Loaded AniList credential state (\(isSignedIn ? "Signed In" : "Logged Out"))")
-                        Text("[network::proxy] Local stream multiplexer ready")
-                    }
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundColor(SumiTheme.muted)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Environment Snapshot. No live log stream is wired up in the
+                // native build — this used to be five hardcoded strings
+                // dressed up as a log window; only the sign-in line was ever
+                // real. Better to show the handful of values that ARE real
+                // than fabricate the rest.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Signed in: \(isSignedIn ? "yes" : "no")")
+                    Text("Anime4K upscaling: \(gpuUpscaling ? "enabled" : "disabled")")
+                    Text("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
                 }
-                .frame(height: 120)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundColor(SumiTheme.muted)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.white.opacity(0.02))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -978,8 +940,11 @@ public struct SettingsView: View {
                 Button {
                     if registryState == .confirming {
                         registryState = .working
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                            registryState = .done
+                        Task {
+                            let succeeded = await onClearRegistry()
+                            await MainActor.run {
+                                registryState = succeeded ? .done : .idle
+                            }
                         }
                     } else if registryState == .idle {
                         registryState = .confirming
@@ -1017,6 +982,7 @@ public struct SettingsView: View {
                                 lineWidth: 1
                             )
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(registryState == .working || registryState == .done)
@@ -1060,6 +1026,7 @@ public struct SettingsView: View {
                                 lineWidth: 1
                             )
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(onboardingResetState == .done)
@@ -1072,6 +1039,7 @@ public struct SettingsView: View {
 
 private struct SettingsCard<Content: View>: View {
     let title: String
+    var badge: String? = nil
     var description: String? = nil
     @ViewBuilder let content: () -> Content
 
@@ -1079,9 +1047,17 @@ private struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header Bar
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(SumiTheme.foreground)
+
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: 11).smallCaps())
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                }
 
                 if let description {
                     Text(description)
@@ -1116,6 +1092,7 @@ private struct SettingsCard<Content: View>: View {
 
 private struct SettingField<Trailing: View>: View {
     let label: String
+    var badge: String? = nil
     var description: String? = nil
     var isStacked: Bool = false
     @ViewBuilder let trailing: () -> Trailing
@@ -1124,9 +1101,17 @@ private struct SettingField<Trailing: View>: View {
         if isStacked {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
+                    HStack(spacing: 6) {
+                        Text(label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
+
+                        if let badge {
+                            Text(badge)
+                                .font(.system(size: 11).smallCaps())
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                    }
 
                     if let description {
                         Text(description)
@@ -1142,9 +1127,17 @@ private struct SettingField<Trailing: View>: View {
         } else {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
+                    HStack(spacing: 6) {
+                        Text(label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
+
+                        if let badge {
+                            Text(badge)
+                                .font(.system(size: 11).smallCaps())
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                    }
 
                     if let description {
                         Text(description)
@@ -1183,6 +1176,7 @@ private struct SumiSwitch: View {
                     .padding(2)
                     .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 1)
             }
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -1229,6 +1223,7 @@ private struct SumiDropdown: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
     }

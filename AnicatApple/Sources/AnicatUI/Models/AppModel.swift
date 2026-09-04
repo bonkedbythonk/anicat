@@ -9,14 +9,61 @@ public final class AppModel: @unchecked Sendable {
     public var isInitialized = false
     public var isLoading = false
     public var errorMessage: String?
+    public var isAniListDown: Bool = false
+    private(set) var aniListFailureTimestamps: [Date] = []
+    let aniListFailureThreshold = 3
+    let aniListFailureWindow: TimeInterval = 30
+
+    func isNetworkError(_ error: Error) -> Bool {
+        if let anicatError = error as? AnicatError {
+            if case .Network = anicatError {
+                return true
+            }
+        }
+        if error is URLError {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
+    }
+
+    func recordAniListFailure(_ error: Error, at date: Date = Date()) {
+        guard isNetworkError(error) else { return }
+
+        // Rust client tags GraphQL downtime responses with an explicit prefix
+        if let anicatError = error as? AnicatError, case .Network(let msg) = anicatError {
+            if msg.contains("anilist_down:") {
+                isAniListDown = true
+                return
+            }
+        }
+
+        aniListFailureTimestamps.append(date)
+        aniListFailureTimestamps.removeAll { date.timeIntervalSince($0) > aniListFailureWindow }
+        if aniListFailureTimestamps.count >= aniListFailureThreshold {
+            isAniListDown = true
+        }
+    }
+
+    func recordAniListSuccess() {
+        aniListFailureTimestamps.removeAll()
+        if isAniListDown {
+            isAniListDown = false
+        }
+    }
 
     // Active Navigation
     public var currentNavSection: SidebarView.NavSection = .upNext
     public var paletteOpen = false
+    public var shortcutsOpen = false
     public var searchQuery: String = ""
     public var selectedMediaDetails: HeroBanner.Details?
     public var selectedEpisodes: [MediaDetailView.EpisodeItem] = []
     public var selectedMangaChapters: [MediaDetailView.MangaChapterItem] = []
+    public var selectedCharacters: [MediaDetailView.CharacterItem] = []
+    public var selectedRelations: [MediaDetailView.RelationItem] = []
+    public var selectedRecommendations: [MediaDetailView.RecommendationItem] = []
+    public var selectedDiscussions: [MediaDetailView.DiscussionItem] = []
     public var activeStreamURL: URL?
 
     // PlayerController & Playback Tracking
@@ -194,6 +241,9 @@ public final class AppModel: @unchecked Sendable {
                 tmdbKey: tmdbKey
             )
             self.engine = coreEngine
+            if let token, !token.isEmpty {
+                self.isSignedIn = true
+            }
 
             let port = try await coreEngine.streamPort()
             print("AniCat Rust Engine ready! Dynamic stream server on port: \(port)")
@@ -262,6 +312,8 @@ public final class AppModel: @unchecked Sendable {
 
     /// Everything the signed-in views draw from, in one pass.
     public func refreshAll() async {
+        isLoading = true
+        defer { isLoading = false }
         await loadInitialCatalog()
         await loadLibrary()
         await loadReadingShelves()
@@ -290,6 +342,8 @@ public final class AppModel: @unchecked Sendable {
     /// fills out from it exactly like HomeView.tsx's `smartPicks` does.
     public func loadHomeDiscoverRows() async {
         guard let engine else { return }
+        isLoading = true
+        defer { isLoading = false }
         let planning = isSignedIn ? ((try? await engine.userList(status: "PLANNING", mediaType: "ANIME")) ?? []) : []
         let newlyReleasing = (try? await engine.discover(
             mediaType: "ANIME", status: "RELEASING", season: nil, seasonYear: nil, limit: 24
@@ -333,6 +387,10 @@ public final class AppModel: @unchecked Sendable {
             selectedMediaDetails = nil
             selectedEpisodes = []
             selectedMangaChapters = []
+            selectedCharacters = []
+            selectedRelations = []
+            selectedRecommendations = []
+            selectedDiscussions = []
             return
         }
         Task { await loadDetail(id: previous.id, isManga: previous.isManga) }
@@ -350,6 +408,10 @@ public final class AppModel: @unchecked Sendable {
         selectedMediaDetails = nil
         selectedEpisodes = []
         selectedMangaChapters = []
+        selectedCharacters = []
+        selectedRelations = []
+        selectedRecommendations = []
+        selectedDiscussions = []
         detailHistory = []
     }
 
@@ -361,8 +423,17 @@ public final class AppModel: @unchecked Sendable {
         guard let engine else { return }
         isLoading = true
         defer { isLoading = false }
+        // Episode numbers repeat across titles, so a stale entry here would
+        // show as "downloaded"/"downloading" on the wrong show's episode 1
+        // the moment the detail page switches.
+        downloadStates = [:]
         do {
-            let d = try await engine.mediaDetail(catalogId: id, isManga: isManga)
+            let d: MediaDetail
+            if let primary = try? await engine.mediaDetail(catalogId: id, isManga: isManga) {
+                d = primary
+            } else {
+                d = try await engine.mediaDetail(catalogId: id, isManga: !isManga)
+            }
             let episodes = d.episodes.map { e in
                 MediaDetailView.EpisodeItem(
                     id: Int64(e.number),
@@ -371,19 +442,59 @@ public final class AppModel: @unchecked Sendable {
                     thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
                     isWatched: e.isWatched,
                     progressPercent: e.progressPercent,
+                    synopsis: e.synopsis,
+                    airDate: e.airDate,
                     runtimeMinutes: e.runtimeMinutes.map(Int.init)
                 )
             }
             var chapters: [MediaDetailView.MangaChapterItem] = []
-            if isManga || d.chapterCount != nil || d.format == "MANGA" || d.format == "NOVEL" || d.format == "ONE_SHOT" {
-                let fetched = (try? await engine.mangaChapters(alId: id)) ?? []
+            // `mangaChapters` only ever searches MangaDex, which carries
+            // manga/manhwa/manhua — never prose light novels. Sending a
+            // NOVEL-format title through it wasn't just returning nothing:
+            // MangaDex's own title search would occasionally match an
+            // unrelated manga with a similar name and hand back ITS
+            // chapters, which the reader then opened as if they were the
+            // novel's own pages. There is no light-novel content source
+            // wired up in the native app yet — see `MediaDetailView`'s
+            // `.manga` tab case, which shows a distinct "not available"
+            // empty state for `format == "NOVEL"` rather than the generic
+            // "no chapters found" a real manga search failure gets.
+            if d.format != "NOVEL", isManga || d.chapterCount != nil || Self.isMangaFormat(d.format) {
+                let fetched = (try? await engine.mangaChapters(detail: d)) ?? []
                 chapters = fetched.map {
                     MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
                 }
             }
 
+            let relations = d.relations.map { r in
+                MediaDetailView.RelationItem(
+                    id: r.catalogId,
+                    relationType: r.relationType,
+                    title: r.title,
+                    format: r.format,
+                    coverURL: URL(string: r.coverImage),
+                    status: r.status,
+                    averageScore: r.averageScore.map(Int.init)
+                )
+            }
+
+            let recommendations = d.recommendations.map { rec in
+                MediaDetailView.RecommendationItem(
+                    id: rec.catalogId,
+                    title: rec.title,
+                    format: rec.format,
+                    coverURL: URL(string: rec.coverImage),
+                    averageScore: rec.averageScore.map(Int.init),
+                    rating: rec.rating.map(Int.init)
+                )
+            }
+
             self.selectedEpisodes = episodes.sorted(by: { $0.number < $1.number })
             self.selectedMangaChapters = chapters
+            self.selectedRelations = relations
+            self.selectedRecommendations = recommendations
+            self.selectedCharacters = []
+            self.selectedDiscussions = []
             self.selectedMediaDetails = HeroBanner.Details(
                 id: d.catalogId,
                 title: d.title,
@@ -409,7 +520,45 @@ public final class AppModel: @unchecked Sendable {
                 listProgress: d.listProgress.map(Int.init),
                 isFavourite: d.isFavourite
             )
+            recordAniListSuccess()
+
+            // Asynchronously load real Cast & Staff and Discussions from AniList
+            Task { [weak self, weak engine] in
+                guard let self, let engine else { return }
+                if let chars = try? await engine.mediaCharacters(catalogId: id) {
+                    let mapped = chars.map { c in
+                        MediaDetailView.CharacterItem(
+                            id: c.id,
+                            name: c.name,
+                            imageURL: c.imageUrl.flatMap(URL.init(string:)),
+                            role: c.role,
+                            voiceActorName: c.voiceActorName,
+                            voiceActorImageURL: c.voiceActorImageUrl.flatMap(URL.init(string:))
+                        )
+                    }
+                    if self.selectedMediaDetails?.id == id {
+                        self.selectedCharacters = mapped
+                    }
+                }
+                if let disc = try? await engine.mediaDiscussions(catalogId: id) {
+                    let mapped = disc.map { t in
+                        MediaDetailView.DiscussionItem(
+                            id: t.id,
+                            title: t.title,
+                            replyCount: Int(t.replyCount),
+                            viewCount: Int(t.viewCount),
+                            authorName: t.authorName,
+                            authorAvatarURL: t.authorAvatarUrl.flatMap(URL.init(string:)),
+                            repliedAt: t.repliedAt
+                        )
+                    }
+                    if self.selectedMediaDetails?.id == id {
+                        self.selectedDiscussions = mapped
+                    }
+                }
+            }
         } catch {
+            recordAniListFailure(error)
             errorMessage = "Could not open that title: \(error.localizedDescription)"
         }
     }
@@ -433,9 +582,98 @@ public final class AppModel: @unchecked Sendable {
         guard let engine, let details = selectedMediaDetails else { return }
         do {
             try await engine.updateListEntry(catalogId: details.id, status: status, score: score, progress: progress)
+            recordAniListSuccess()
             await openDetail(id: details.id, isManga: currentDetailIsManga())
         } catch {
+            recordAniListFailure(error)
             errorMessage = "Could not update AniList: \(error.localizedDescription)"
+        }
+    }
+
+    /// Keyed by episode number, scoped to whichever title's detail page is
+    /// open — episode numbers only need to be unique within one show, and
+    /// only one show's episode list is ever on screen at a time.
+    public var downloadStates: [Int: MediaDetailView.EpisodeDownloadState] = [:]
+
+    /// "Stream Servers": every release the indexers found for this episode.
+    public func loadReleaseCandidates(episode: Int) async -> [MediaDetailView.ReleaseCandidateItem] {
+        guard let engine, let details = selectedMediaDetails else { return [] }
+        do {
+            let choices = try await engine.listReleaseCandidates(
+                catalog: .anilist,
+                catalogId: details.id,
+                episode: Int64(episode),
+                title: details.title
+            )
+            return choices.map {
+                MediaDetailView.ReleaseCandidateItem(name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub)
+            }
+        } catch {
+            return []
+        }
+    }
+
+    /// Starts a "Download Episode" and polls its progress into
+    /// `downloadStates` until it finishes, one way or the other. The poll
+    /// loop is the only client of `episodeDownloadStatus` — the row itself
+    /// just reads `downloadStates[episode]`, same as every other piece of
+    /// reactive state this model exposes.
+    public func startDownload(episode: Int) async {
+        guard let engine, let details = selectedMediaDetails else { return }
+        guard downloadStates[episode] == nil || downloadStates[episode] == .notStarted else { return }
+        downloadStates[episode] = .downloading(percent: 0)
+        let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+        do {
+            try await engine.startEpisodeDownload(
+                catalog: .anilist,
+                catalogId: details.id,
+                episode: Int64(episode),
+                title: details.title,
+                preferDub: preferDub
+            )
+        } catch {
+            downloadStates[episode] = .failed(message: error.localizedDescription)
+            return
+        }
+
+        while true {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // The detail page can close (or move to a different title)
+            // mid-download — the Rust side keeps going regardless (it isn't
+            // tied to this Task), but polling a title that's no longer open
+            // would silently write into a dictionary nobody reads. Stop
+            // rather than leak a poll loop per abandoned download.
+            guard selectedMediaDetails?.id == details.id else { return }
+            let status = await engine.episodeDownloadStatus(
+                catalog: .anilist,
+                catalogId: details.id,
+                episode: Int64(episode)
+            )
+            switch status {
+            case .notStarted:
+                downloadStates[episode] = .notStarted
+            case .downloading(let percent):
+                downloadStates[episode] = .downloading(percent: percent)
+                continue
+            case .done(let path):
+                downloadStates[episode] = .done(path: path)
+            case .failed(let message):
+                downloadStates[episode] = .failed(message: message)
+            }
+            return
+        }
+    }
+
+    /// Wipes resume positions, provider overrides, and the offline list
+    /// mirror. Settings' "Clear Local Registry" action.
+    public func clearLocalRegistry() async -> Bool {
+        guard let engine else { return false }
+        do {
+            try engine.clearLocalRegistry()
+            return true
+        } catch {
+            errorMessage = "Could not clear local registry: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -443,8 +681,10 @@ public final class AppModel: @unchecked Sendable {
         guard let engine, let details = selectedMediaDetails else { return }
         do {
             try await engine.toggleFavourite(catalogId: details.id, isManga: currentDetailIsManga())
+            recordAniListSuccess()
             await openDetail(id: details.id, isManga: currentDetailIsManga())
         } catch {
+            recordAniListFailure(error)
             errorMessage = "Could not update favourite: \(error.localizedDescription)"
         }
     }
@@ -454,8 +694,10 @@ public final class AppModel: @unchecked Sendable {
         guard let engine, let details = selectedMediaDetails, let entryId = details.listEntryId else { return }
         do {
             try await engine.removeFromList(listEntryId: entryId)
+            recordAniListSuccess()
             await openDetail(id: details.id, isManga: currentDetailIsManga())
         } catch {
+            recordAniListFailure(error)
             errorMessage = "Could not remove from AniList: \(error.localizedDescription)"
         }
     }
@@ -566,11 +808,12 @@ public final class AppModel: @unchecked Sendable {
         let total = s.episodes ?? s.chapters
         let progress = s.progress.map { Int($0) }
         let released = s.nextEpisode.map { Int($0) - 1 } ?? total.map { Int($0) }
+        let isManga = isMangaFormat(s.format) || (s.episodes == nil && s.chapters != nil)
         return MediaCard.Item(
             id: s.catalogId,
             title: s.title,
             coverImageURL: URL(string: s.coverImage),
-            isManga: s.episodes == nil && s.chapters != nil,
+            isManga: isManga,
             score: s.averageScore.map { Int($0) },
             progress: progress,
             totalEpisodesOrChapters: total.map { Int($0) },
@@ -590,8 +833,10 @@ public final class AppModel: @unchecked Sendable {
         defer { isLoading = false }
         do {
             let rows = try await engine.userList(status: libraryStatus, mediaType: libraryType)
+            recordAniListSuccess()
             libraryItems = rows.map(Self.card)
         } catch {
+            recordAniListFailure(error)
             libraryItems = []
             print("Library load failed: \(error)")
         }
@@ -631,6 +876,8 @@ public final class AppModel: @unchecked Sendable {
     /// the search page can top it up without re-running the whole home load.
     public func loadTrending() async {
         guard let engine else { return }
+        isLoading = true
+        defer { isLoading = false }
         let trending = (try? await engine.trending(mediaType: "ANIME", format: nil, limit: 24)) ?? []
         trendingItems = trending.map(Self.card)
     }
@@ -638,29 +885,29 @@ public final class AppModel: @unchecked Sendable {
     /// Search anime, manga, or light novels across the AniList catalog.
     /// `mediaType` is "ANIME", "MANGA", or "NOVEL"; `isManga` is kept for
     /// existing callers that only distinguish anime from manga.
-    public func search(query: String, mediaType: String? = nil, isManga: Bool? = nil) async {
+    public func search(query: String, mediaType: String? = nil, isManga: Bool? = nil, filters: SearchFilters? = nil) async {
         guard let engine, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
         }
 
+        searchResults = []
         isLoading = true
         defer { isLoading = false }
 
         do {
             let resolvedType = mediaType ?? (isManga == true ? "MANGA" : (isManga == false ? "ANIME" : nil))
                 ?? (currentNavSection == .novels ? "NOVEL" : (currentNavSection == .manga ? "MANGA" : "ANIME"))
-            let summaries: [MediaSummary]
-            switch resolvedType {
-            case "NOVEL":
-                summaries = try await engine.searchNovel(query: query)
-            case "MANGA":
-                summaries = try await engine.searchMangaCatalog(query: query)
-            default:
-                summaries = try await engine.searchAnime(query: query)
-            }
+            // Goes through `searchCatalog` directly rather than the three
+            // type-specific wrappers (searchAnime/searchMangaCatalog/
+            // searchNovel) — those pass `filters: nil` unconditionally, so a
+            // caller with real filters has to reach the one entry point that
+            // actually threads them into the AniList query.
+            let summaries = try await engine.searchCatalog(query: query, mediaType: resolvedType, filters: filters)
+            recordAniListSuccess()
             self.searchResults = summaries.map { Self.card($0) }
         } catch {
+            recordAniListFailure(error)
             print("Search failed: \(error)")
         }
     }
@@ -700,7 +947,8 @@ public final class AppModel: @unchecked Sendable {
         catalog: FfiCatalog = .anilist,
         catalogId: Int64,
         episode: Int64,
-        title: String? = nil
+        title: String? = nil,
+        chosenName: String? = nil
     ) async throws -> URL {
         let effectiveTitle = title ?? self.selectedMediaDetails?.title ?? self.knownTitles[catalogId] ?? "Anime"
         self.playerController.title = effectiveTitle
@@ -758,7 +1006,7 @@ public final class AppModel: @unchecked Sendable {
             episode: episode,
             title: effectiveTitle,
             preferDub: preferDub,
-            chosenName: nil,
+            chosenName: chosenName,
             resumeFraction: resumeFraction
         )
 
@@ -820,12 +1068,17 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Handles dismissal hierarchy for ESC key:
-    /// 1. CommandPalette (topmost overlay)
-    /// 2. PlayerView (modal video playback)
-    /// 3. MangaReaderView (modal manga reading)
-    /// 4. MediaDetailView (detail page)
+    /// 1. KeyboardShortcutsOverlay (topmost help modal)
+    /// 2. CommandPalette (topmost overlay)
+    /// 3. PlayerView (modal video playback)
+    /// 4. MangaReaderView (modal manga reading)
+    /// 5. MediaDetailView (detail page)
     @discardableResult
     public func handleEscapeKey() -> Bool {
+        if shortcutsOpen {
+            shortcutsOpen = false
+            return true
+        }
         if paletteOpen {
             paletteOpen = false
             return true
@@ -847,6 +1100,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// Navigates to a specific section, closing any active playback, reader, or detail views.
     public func navigate(to section: SidebarView.NavSection) {
+        shortcutsOpen = false
         stopPlayback()
         closeReader()
         clearDetail()
@@ -868,6 +1122,9 @@ public final class AppModel: @unchecked Sendable {
 
         let watching = (try? await engine.userList(status: "CURRENT", mediaType: "ANIME")) ?? []
         let profile = try? await engine.viewerProfile()
+        if profile != nil || !trending.isEmpty || !watching.isEmpty {
+            recordAniListSuccess()
+        }
         isSignedIn = profile != nil
         viewer = profile
         watchingItems = watching.map(Self.card)
@@ -892,8 +1149,7 @@ public final class AppModel: @unchecked Sendable {
         // Only shows AniList actually has an airing time for. A show with no
         // `nextAiringEpisode` is not on the schedule; it is finished, or
         // between seasons.
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
+        let formatter = SumiTheme.timeFormatter()
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "EEEE, MMMM d"
         let watchingIds = Set(watching.map(\.catalogId))

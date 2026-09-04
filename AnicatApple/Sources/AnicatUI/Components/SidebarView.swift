@@ -145,6 +145,7 @@ public struct SidebarView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

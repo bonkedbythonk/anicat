@@ -4,6 +4,7 @@ import Foundation
 import AppKit
 #endif
 @testable import AnicatUI
+import AnicatCoreKit
 
 @Suite("Sumi Ledger & Anime4K Tests")
 struct AnicatUITests {
@@ -44,21 +45,23 @@ struct AnicatUITests {
     }
 
     #if os(macOS)
-    @Test("MpvVideoContainerView Subview Constraint and In-App Embedding")
+    // Renders via libmpv's render API into an owned OpenGL context rather
+    // than handing mpv a `wid` — see MpvMetalSurface.swift's doc comment.
+    // There is no subview reparenting to constrain any more (that was the
+    // wid/cocoa-cb design this replaced), so the test now covers what
+    // actually matters here: the view is a real, usable OpenGL surface
+    // before it's ever attached to a window, and mpv isn't touched until
+    // it is (`attachMpv` is only ever called from `viewDidMoveToWindow`).
+    @Test("MpvRenderView creates an accelerated OpenGL context before attaching to a window")
     @MainActor
-    func testMpvVideoContainerView() {
-        let container = MpvVideoContainerView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
-        #expect(container.window == nil)
+    func testMpvRenderView() {
+        let view = MpvRenderView(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        #expect(view.window == nil)
+        #expect(view.coordinator == nil)
+        #expect(view.openGLContext != nil)
 
-        // Adding subview should immediately receive container bounds and autoresizing masks
-        let dummyChild = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
-        container.addSubview(dummyChild)
-        #expect(dummyChild.frame == container.bounds)
-
-        // Resizing and layout must constrain all child views strictly to bounds
-        container.frame = NSRect(x: 0, y: 0, width: 1280, height: 720)
-        container.layout()
-        #expect(dummyChild.frame == NSRect(x: 0, y: 0, width: 1280, height: 720))
+        view.frame = NSRect(x: 0, y: 0, width: 1280, height: 720)
+        #expect(view.bounds.size == NSSize(width: 1280, height: 720))
     }
     #endif
 
@@ -174,7 +177,7 @@ struct AnicatUITests {
         #expect(closed == true)
     }
 
-    @Test("Dismissal hierarchy order: Palette -> Player -> Reader -> Detail via handleEscapeKey")
+    @Test("Dismissal hierarchy order: Shortcuts -> Palette -> Player -> Reader -> Detail via handleEscapeKey")
     @MainActor
     func testDismissalHierarchy() {
         let model = AppModel()
@@ -184,6 +187,7 @@ struct AnicatUITests {
             pageURLs: [], chapterIndex: 0, chapters: [], anilistId: nil
         )
         model.paletteOpen = true
+        model.shortcutsOpen = true
         model.selectedMediaDetails = HeroBanner.Details(
             id: 1, title: "Test", romajiTitle: nil, bannerURL: nil, coverURL: nil,
             format: "TV", year: 2023, studio: nil, synopsis: nil, genres: [],
@@ -191,33 +195,60 @@ struct AnicatUITests {
             episodeCount: nil, resumeEpisode: nil, resumeSeconds: nil, prequel: nil, sequel: nil
         )
 
-        // 1. First ESC must dismiss CommandPalette if open
+        // 1. First ESC must dismiss KeyboardShortcutsOverlay if open
+        #expect(model.shortcutsOpen == true)
+        let handled0 = model.handleEscapeKey()
+        #expect(handled0 == true)
+        #expect(model.shortcutsOpen == false)
+        #expect(model.paletteOpen == true)
+
+        // 2. Second ESC must dismiss CommandPalette if open
         #expect(model.paletteOpen == true)
         let handled1 = model.handleEscapeKey()
         #expect(handled1 == true)
         #expect(model.paletteOpen == false)
         #expect(model.activeStreamURL != nil) // video playback remains undisturbed!
 
-        // 2. Second ESC must dismiss PlayerView
+        // 3. Third ESC must dismiss PlayerView
         let handled2 = model.handleEscapeKey()
         #expect(handled2 == true)
         #expect(model.activeStreamURL == nil)
         #expect(model.activeReadingSession != nil)
 
-        // 3. Third ESC must dismiss MangaReaderView
+        // 4. Fourth ESC must dismiss MangaReaderView
         let handled3 = model.handleEscapeKey()
         #expect(handled3 == true)
         #expect(model.activeReadingSession == nil)
         #expect(model.selectedMediaDetails != nil)
 
-        // 4. Fourth ESC must dismiss MediaDetailView
+        // 5. Fifth ESC must dismiss MediaDetailView
         let handled4 = model.handleEscapeKey()
         #expect(handled4 == true)
         #expect(model.selectedMediaDetails == nil)
 
-        // 5. Fifth ESC has nothing to dismiss, returns false
+        // 6. Sixth ESC has nothing to dismiss, returns false
         let handled5 = model.handleEscapeKey()
         #expect(handled5 == false)
+    }
+
+    @Test("KeyboardShortcutsOverlay sections and default state")
+    @MainActor
+    func testKeyboardShortcutsOverlay() {
+        let model = AppModel()
+        #expect(model.shortcutsOpen == false)
+
+        model.shortcutsOpen = true
+        #expect(model.shortcutsOpen == true)
+
+        #expect(KeyboardShortcutsOverlay.defaultSections.count == 3)
+        #expect(KeyboardShortcutsOverlay.defaultSections[0].title == "Navigation")
+        #expect(KeyboardShortcutsOverlay.defaultSections[1].title == "Player")
+        #expect(KeyboardShortcutsOverlay.defaultSections[2].title == "Manga reader")
+
+        // Verify ESC closes shortcuts
+        let handled = model.handleEscapeKey()
+        #expect(handled == true)
+        #expect(model.shortcutsOpen == false)
     }
 
     @Test("PlayerController seeking and play/pause callbacks trigger correctly")
@@ -291,4 +322,130 @@ struct AnicatUITests {
         #expect(model.activeReadingSession == nil)
         #expect(model.selectedMediaDetails == nil)
     }
+
+    @Test("Time Formatting 12h and 24h Modes")
+    func testTimeFormatting() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 9
+        components.day = 4
+        components.hour = 14
+        components.minute = 30
+        components.second = 0
+        let date = calendar.date(from: components)!
+
+        let f24 = SumiTimeFormatter.timeFormatter(timeFormat: "24-hour")
+        f24.timeZone = TimeZone(secondsFromGMT: 0)!
+        #expect(f24.string(from: date) == "14:30")
+
+        let f12 = SumiTimeFormatter.timeFormatter(timeFormat: "12-hour (AM/PM)")
+        f12.timeZone = TimeZone(secondsFromGMT: 0)!
+        #expect(f12.string(from: date) == "2:30 PM")
+
+        let h24 = SumiTimeFormatter.historyDateFormatter(timeFormat: "24-hour")
+        h24.timeZone = TimeZone(secondsFromGMT: 0)!
+        #expect(h24.string(from: date).contains("14:30"))
+
+        let h12 = SumiTimeFormatter.historyDateFormatter(timeFormat: "12-hour (AM/PM)")
+        h12.timeZone = TimeZone(secondsFromGMT: 0)!
+        #expect(h12.string(from: date).contains("02:30 PM") || h12.string(from: date).contains("2:30 PM"))
+    }
+
+    @Test("AniList Outage Detection - Threshold and Reset")
+    func testAniListOutageThresholdAndReset() {
+        let model = AppModel()
+        #expect(model.isAniListDown == false)
+
+        let networkError = AnicatError.Network(msg: "Connection reset by peer")
+        model.recordAniListFailure(networkError)
+        #expect(model.isAniListDown == false)
+        #expect(model.aniListFailureTimestamps.count == 1)
+
+        model.recordAniListFailure(networkError)
+        #expect(model.isAniListDown == false)
+        #expect(model.aniListFailureTimestamps.count == 2)
+
+        model.recordAniListFailure(networkError)
+        #expect(model.isAniListDown == true)
+        #expect(model.aniListFailureTimestamps.count == 3)
+
+        model.recordAniListSuccess()
+        #expect(model.isAniListDown == false)
+        #expect(model.aniListFailureTimestamps.isEmpty)
+    }
+
+    @Test("AniList Outage Detection - Rolling Window Expiration")
+    func testAniListOutageRollingWindowExpiration() {
+        let model = AppModel()
+        let networkError = AnicatError.Network(msg: "Gateway timeout")
+
+        // Record an error outside the 30-second window
+        let oldDate = Date().addingTimeInterval(-35)
+        model.recordAniListFailure(networkError, at: oldDate)
+        #expect(model.isAniListDown == false)
+
+        // Two current errors + one expired error should not exceed threshold of 3
+        let now = Date()
+        model.recordAniListFailure(networkError, at: now)
+        model.recordAniListFailure(networkError, at: now)
+        #expect(model.isAniListDown == false)
+        #expect(model.aniListFailureTimestamps.count == 2)
+
+        // Third current error triggers outage
+        model.recordAniListFailure(networkError, at: now)
+        #expect(model.isAniListDown == true)
+    }
+
+    @Test("AniList Outage Detection - Explicit anilist_down Prefix")
+    func testAniListOutageExplicitPrefix() {
+        let model = AppModel()
+        let outageError = AnicatError.Network(msg: "anilist_down:AniList servers under maintenance")
+
+        model.recordAniListFailure(outageError)
+        #expect(model.isAniListDown == true)
+
+        model.recordAniListSuccess()
+        #expect(model.isAniListDown == false)
+    }
+
+    @Test("AniList Outage Detection - Non-Network Errors Ignored")
+    func testAniListOutageNonNetworkErrorsIgnored() {
+        let model = AppModel()
+        let notFound = AnicatError.NotFound(msg: "Media not found")
+        let storageError = AnicatError.Storage(msg: "Disk write error")
+
+        model.recordAniListFailure(notFound)
+        model.recordAniListFailure(storageError)
+        #expect(model.isAniListDown == false)
+        #expect(model.aniListFailureTimestamps.isEmpty)
+    }
+
+    @Test("MediaSkeleton Components and Layout Defaults")
+    @MainActor
+    func testMediaSkeletonComponents() {
+        let cardSkeleton = MediaCardSkeleton()
+        _ = cardSkeleton.body
+
+        let gridSkeleton = MediaGridSkeleton()
+        #expect(gridSkeleton.count == 12)
+        _ = gridSkeleton.body
+
+        let customGrid = MediaGridSkeleton(count: 6)
+        #expect(customGrid.count == 6)
+
+        let aliasSkeleton: LibrarySkeleton = MediaGridSkeleton(count: 12)
+        #expect(aliasSkeleton.count == 12)
+
+        let rowSkeleton = MediaRowSkeleton(title: "Trending Now")
+        #expect(rowSkeleton.title == "Trending Now")
+        #expect(rowSkeleton.count == 6)
+        _ = rowSkeleton.body
+
+        let customRow = MediaRowSkeleton(title: "Watching", count: 8)
+        #expect(customRow.title == "Watching")
+        #expect(customRow.count == 8)
+    }
 }
+

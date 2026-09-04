@@ -38,6 +38,7 @@ public struct ScheduleView: View {
     public let items: [ScheduleItem]
     public let onSelectItem: (ScheduleItem) -> Void
 
+    @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @State private var watchingOnly: Bool = false
 
     public init(
@@ -84,6 +85,7 @@ public struct ScheduleView: View {
                             .padding(.vertical, 6)
                             .background(!watchingOnly ? SumiTheme.card : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
 
@@ -98,6 +100,7 @@ public struct ScheduleView: View {
                             .padding(.vertical, 6)
                             .background(watchingOnly ? SumiTheme.card : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -153,7 +156,7 @@ public struct ScheduleView: View {
                                                     .sumiTabularMono(size: 11, weight: .medium)
                                                     .foregroundColor(SumiTheme.indigo)
 
-                                                Text(item.airingTimeText)
+                                                Text(item.airingAt > 0 ? SumiTheme.formatTime(Date(timeIntervalSince1970: TimeInterval(item.airingAt)), timeFormat: timeFormat) : item.airingTimeText)
                                                     .sumiTabularMono(size: 11)
                                                     .foregroundColor(SumiTheme.muted)
                                             }
@@ -171,6 +174,7 @@ public struct ScheduleView: View {
                                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                             .stroke(SumiTheme.border, lineWidth: 1)
                                     )
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }

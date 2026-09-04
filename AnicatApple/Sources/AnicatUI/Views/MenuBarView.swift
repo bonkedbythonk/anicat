@@ -44,20 +44,22 @@ public struct MenuBarView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header
-            HStack {
-                HStack(spacing: 6) {
+            HStack(spacing: 6) {
+                if let icon = BrandAssets.menuBarIcon {
+                    icon
+                        .renderingMode(.template)
+                        .foregroundColor(SumiTheme.indigo)
+                } else {
                     Image(systemName: "cat.fill")
                         .foregroundColor(SumiTheme.indigo)
-                    Text("ANICAT")
-                        .sumiTabularMono(size: 12, weight: .bold)
-                        .foregroundColor(SumiTheme.foreground)
                 }
+                Text("ANICAT")
+                    .sumiTabularMono(size: 12, weight: .bold)
+                    .foregroundColor(SumiTheme.foreground)
 
                 Spacer()
-
-                StatusBadge(.neutral("Local Engine Ready"))
             }
             .padding(.bottom, 2)
 
@@ -76,28 +78,28 @@ public struct MenuBarView: View {
                             ZStack {
                                 RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                                     .fill(SumiTheme.background)
-                                    .frame(width: 50, height: 35)
+                                    .frame(width: 44, height: 32)
 
                                 Image(systemName: "play.fill")
-                                    .font(.system(size: 12))
+                                    .font(.system(size: 11))
                                     .foregroundColor(SumiTheme.indigo)
                             }
-                            .frame(width: 50, height: 35)
+                            .frame(width: 44, height: 32)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(title)
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 12.5, weight: .semibold))
                                     .foregroundColor(SumiTheme.foreground)
                                     .lineLimit(1)
                                 Text("Episode \(ep)")
-                                    .sumiTabularMono(size: 10.5)
+                                    .sumiTabularMono(size: 10)
                                     .foregroundColor(SumiTheme.muted)
                             }
 
                             Spacer()
 
                             Image(systemName: "arrow.right.circle.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 15))
                                 .foregroundColor(SumiTheme.indigo)
                         }
                         .padding(8)
@@ -109,42 +111,6 @@ public struct MenuBarView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                }
-            }
-
-            // Section: Airing Today
-            if !airingItems.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("AIRING TODAY")
-                            .sumiTabularMono(size: 10, weight: .semibold)
-                            .foregroundColor(SumiTheme.muted.opacity(0.8))
-                        Spacer()
-                        Text("\(airingItems.count) SHOWS")
-                            .sumiTabularMono(size: 10)
-                            .foregroundColor(SumiTheme.muted)
-                    }
-
-                    VStack(spacing: 6) {
-                        ForEach(airingItems) { item in
-                            HStack {
-                                Text(item.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(SumiTheme.foreground)
-                                    .lineLimit(1)
-
-                                Spacer()
-
-                                Text(item.countdownText)
-                                    .sumiTabularMono(size: 10.5, weight: .semibold)
-                                    .foregroundColor(SumiTheme.indigo)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(SumiTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                        }
-                    }
                 }
             }
 
@@ -174,8 +140,8 @@ public struct MenuBarView: View {
             }
             .padding(.top, 2)
         }
-        .padding(14)
-        .frame(width: 320)
+        .padding(12)
+        .frame(width: 260)
         .background(SumiTheme.background)
     }
 }

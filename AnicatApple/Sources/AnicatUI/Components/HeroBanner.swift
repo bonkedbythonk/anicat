@@ -212,6 +212,7 @@ public struct HeroBanner: View {
                         .padding(.vertical, 10)
                         .background(SumiTheme.indigo)
                         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -232,6 +233,7 @@ public struct HeroBanner: View {
                                 RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                     .stroke(SumiTheme.border, lineWidth: 1)
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }

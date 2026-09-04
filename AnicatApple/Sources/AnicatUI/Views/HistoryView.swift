@@ -13,11 +13,21 @@ public struct HistoryView: View {
     /// already loaded. An id with no title still shows, with the id — losing
     /// the row entirely would misreport how much was watched.
     let titles: [Int64: String]
+    let onSelectFavourite: (MediaCard.Item) -> Void
 
-    public init(viewer: ViewerProfile?, activity: [ActivityRow], titles: [Int64: String]) {
+    @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
+    @State private var favouritesType: String = "ANIME"
+
+    public init(
+        viewer: ViewerProfile?,
+        activity: [ActivityRow],
+        titles: [Int64: String],
+        onSelectFavourite: @escaping (MediaCard.Item) -> Void = { _ in }
+    ) {
         self.viewer = viewer
         self.activity = activity
         self.titles = titles
+        self.onSelectFavourite = onSelectFavourite
     }
 
     /// SQLite writes `YYYY-MM-DD HH:MM:SS` in UTC.
@@ -93,6 +103,45 @@ public struct HistoryView: View {
                 }
             }
             .padding(.top, 12)
+
+            if let viewer, !viewer.favouriteAnime.isEmpty || !viewer.favouriteManga.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        SumiSectionHeader("Favorites")
+                        Spacer()
+                        SumiSegmentedControl(
+                            options: [("ANIME", "Anime"), ("MANGA", "Manga")],
+                            selection: $favouritesType
+                        )
+                    }
+                    favourites(for: viewer)
+                }
+                .padding(.top, 12)
+            }
+        }
+    }
+
+    private func favourites(for viewer: ViewerProfile) -> some View {
+        let items = (favouritesType == "MANGA" ? viewer.favouriteManga : viewer.favouriteAnime).map(AppModel.card)
+        return Group {
+            if items.isEmpty {
+                SumiEmptyState(
+                    headline: favouritesType == "MANGA" ? "No favorite manga yet" : "No favorite anime yet",
+                    detail: "Heart a title from its detail page and it shows up here."
+                )
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 20
+                ) {
+                    ForEach(items) { item in
+                        MediaCard(item: item) {
+                            onSelectFavourite(item)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -169,8 +218,7 @@ public struct HistoryView: View {
     }
 
     private var log: some View {
-        let stamp = DateFormatter()
-        stamp.dateFormat = "EEE hh:mm a"
+        let stamp = SumiTimeFormatter.historyDateFormatter(timeFormat: timeFormat)
         return VStack(spacing: 0) {
             ForEach(Array(activity.prefix(60).enumerated()), id: \.offset) { index, row in
                 HStack(spacing: 12) {

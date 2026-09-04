@@ -70,6 +70,7 @@ public struct SumiTabBar: View {
                 .buttonStyle(.plain)
             }
         }
+        .animation(.easeOut(duration: 0.15), value: selection)
     }
 }
 
@@ -105,6 +106,7 @@ public struct SumiSegmentedControl: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
+        .animation(.easeOut(duration: 0.15), value: selection)
     }
 }
 
@@ -141,6 +143,70 @@ public struct SumiOutlineButton: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A labelled dropdown for a filter row: "Any" plus a fixed option list,
+/// where the empty string means "no filter" rather than a real value — kept
+/// distinct from `SettingsView`'s private `SumiDropdown` because a filter
+/// needs a clearable "Any" state that a settings picker never does.
+public struct SumiFilterDropdown: View {
+    let label: String
+    let options: [(value: String, label: String)]
+    @Binding var selected: String
+
+    public init(label: String, options: [(value: String, label: String)], selected: Binding<String>) {
+        self.label = label
+        self.options = options
+        self._selected = selected
+    }
+
+    private var selectedLabel: String {
+        options.first(where: { $0.value == selected })?.label ?? "Any"
+    }
+
+    public var body: some View {
+        Menu {
+            ForEach(options, id: \.value) { option in
+                Button {
+                    selected = option.value
+                } label: {
+                    HStack {
+                        Text(option.label)
+                        if option.value == selected {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                // A `Menu` under `.menuStyle(.borderlessButton)` renders as an
+                // NSPopUpButton on macOS, which only honors the FIRST `Text`
+                // in the label — a second sibling `Text` (the selected value)
+                // silently never draws, so picking a filter looked like it
+                // did nothing even though the search itself re-ran correctly.
+                // `+` concatenates into one `Text` node instead of two, which
+                // NSPopUpButton's title extraction does pick up.
+                (Text(label).foregroundColor(SumiTheme.muted)
+                    + Text(" " + selectedLabel)
+                        .foregroundColor(selected.isEmpty ? SumiTheme.foreground.opacity(0.6) : SumiTheme.indigo))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(SumiTheme.muted)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(selected.isEmpty ? Color.clear : SumiTheme.indigo.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .stroke(selected.isEmpty ? SumiTheme.border : SumiTheme.indigo.opacity(0.4), lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }
 

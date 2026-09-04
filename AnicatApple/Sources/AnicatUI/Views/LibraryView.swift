@@ -64,55 +64,34 @@ public struct LibraryView: View {
 
             SumiTabBar(tabs: tabs, selection: $status)
 
-            if !isSignedIn {
-                SumiEmptyState(
-                    headline: "Not signed in",
-                    detail: "Connect AniList in Settings and your lists appear here."
-                )
-            } else if isLoading && items.isEmpty {
-                LibrarySkeleton()
-            } else if items.isEmpty {
-                SumiEmptyState(
-                    headline: "This list is empty",
-                    detail: "Search for \(mediaType.lowercased()) and add them to your list."
-                )
-            } else if layout == "grid" {
-                SumiPosterGrid(items: items, onSelect: onSelect)
-                    .opacity(isLoading ? 0.5 : 1)
-            } else {
-                LibraryTable(items: items, mediaType: mediaType, onSelect: onSelect)
-                    .opacity(isLoading ? 0.5 : 1)
+            Group {
+                if !isSignedIn {
+                    SumiEmptyState(
+                        headline: "Not signed in",
+                        detail: "Connect AniList in Settings and your lists appear here."
+                    )
+                } else if isLoading && items.isEmpty {
+                    LibrarySkeleton()
+                } else if items.isEmpty {
+                    SumiEmptyState(
+                        headline: "This list is empty",
+                        detail: "Search for \(mediaType.lowercased()) and add them to your list."
+                    )
+                } else if layout == "grid" {
+                    SumiPosterGrid(items: items, onSelect: onSelect)
+                        .opacity(isLoading ? 0.5 : 1)
+                } else {
+                    LibraryTable(items: items, mediaType: mediaType, onSelect: onSelect)
+                        .opacity(isLoading ? 0.5 : 1)
+                }
             }
+            .animation(.easeOut(duration: 0.2), value: isLoading)
+            .animation(.easeOut(duration: 0.25), value: status)
+            .animation(.easeOut(duration: 0.25), value: layout)
         }
     }
 }
 
-/// Placeholder cards during a tab switch. A spinner over an emptied grid reads
-/// as a failure; keeping the shape means only the content changed.
-private struct LibrarySkeleton: View {
-    var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
-            alignment: .leading,
-            spacing: 20
-        ) {
-            ForEach(0..<12, id: \.self) { _ in
-                VStack(alignment: .leading, spacing: 10) {
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                        .fill(SumiTheme.foregroundWash)
-                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(SumiTheme.foregroundWash)
-                        .frame(height: 14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(SumiTheme.foregroundWash)
-                        .frame(width: 70, height: 10)
-                }
-            }
-        }
-    }
-}
 
 private struct LibraryTable: View {
     let items: [MediaCard.Item]

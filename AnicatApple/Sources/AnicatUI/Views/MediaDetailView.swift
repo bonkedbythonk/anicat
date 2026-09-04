@@ -4,7 +4,6 @@ public struct MediaDetailView: View {
     public enum DetailTab: String, CaseIterable, Identifiable {
         case episodes = "Episodes"
         case manga = "Manga"
-        case novels = "Light Novels"
         case characters = "Cast & Staff"
         case related = "Related"
         case discussions = "Discussions"
@@ -21,6 +20,31 @@ public struct MediaDetailView: View {
     public enum EpisodeViewMode: String, CaseIterable {
         case cards = "Cards"
         case compact = "Compact"
+    }
+
+    /// One release from the indexers, for the "Stream Servers" picker.
+    public struct ReleaseCandidateItem: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let seeders: Int
+        public let isDub: Bool
+
+        public init(name: String, seeders: Int, isDub: Bool) {
+            self.id = name
+            self.seeders = seeders
+            self.isDub = isDub
+        }
+
+        public var name: String { id }
+    }
+
+    /// Progress of a "Download Episode" — mirrors the engine's
+    /// `FfiDownloadStatus` without this view needing to import
+    /// AnicatCoreKit for it.
+    public enum EpisodeDownloadState: Sendable, Equatable {
+        case notStarted
+        case downloading(percent: Double)
+        case done(path: String)
+        case failed(message: String)
     }
 
     public struct EpisodeItem: Identifiable, Sendable {
@@ -96,15 +120,100 @@ public struct MediaDetailView: View {
         }
     }
 
+    public struct RelationItem: Identifiable, Sendable {
+        public let id: Int64
+        public let relationType: String
+        public let title: String
+        public let format: String?
+        public let coverURL: URL?
+        public let status: String?
+        public let averageScore: Int?
+
+        public init(
+            id: Int64,
+            relationType: String,
+            title: String,
+            format: String? = nil,
+            coverURL: URL? = nil,
+            status: String? = nil,
+            averageScore: Int? = nil
+        ) {
+            self.id = id
+            self.relationType = relationType
+            self.title = title
+            self.format = format
+            self.coverURL = coverURL
+            self.status = status
+            self.averageScore = averageScore
+        }
+    }
+
+    public struct RecommendationItem: Identifiable, Sendable {
+        public let id: Int64
+        public let title: String
+        public let format: String?
+        public let coverURL: URL?
+        public let averageScore: Int?
+        public let rating: Int?
+
+        public init(
+            id: Int64,
+            title: String,
+            format: String? = nil,
+            coverURL: URL? = nil,
+            averageScore: Int? = nil,
+            rating: Int? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.format = format
+            self.coverURL = coverURL
+            self.averageScore = averageScore
+            self.rating = rating
+        }
+    }
+
+    public struct DiscussionItem: Identifiable, Sendable {
+        public let id: Int64
+        public let title: String
+        public let replyCount: Int
+        public let viewCount: Int
+        public let authorName: String?
+        public let authorAvatarURL: URL?
+        public let repliedAt: Int64?
+
+        public init(
+            id: Int64,
+            title: String,
+            replyCount: Int,
+            viewCount: Int,
+            authorName: String? = nil,
+            authorAvatarURL: URL? = nil,
+            repliedAt: Int64? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.replyCount = replyCount
+            self.viewCount = viewCount
+            self.authorName = authorName
+            self.authorAvatarURL = authorAvatarURL
+            self.repliedAt = repliedAt
+        }
+    }
+
     // Properties
     public let details: HeroBanner.Details
     public let episodes: [EpisodeItem]
     public let mangaChapters: [MangaChapterItem]
     public let characters: [CharacterItem]
+    public let relations: [RelationItem]
+    public let recommendations: [RecommendationItem]
+    public let discussions: [DiscussionItem]
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     public let onReadChapter: (MangaChapterItem) -> Void
     public let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
+    public let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
     public let onExportAppleBooks: () -> Void
     public let onClose: () -> Void
     /// `CURRENT`/`PLANNING`/`COMPLETED`/`PAUSED`/`DROPPED`/`REPEATING`.
@@ -114,6 +223,17 @@ public struct MediaDetailView: View {
     /// The mark-watched checkbox on an episode row: the episode number and
     /// its new watched state.
     public let onSetEpisodeWatched: (Int, Bool) -> Void
+    /// "Stream Servers": loads the release list for one episode number, for
+    /// the row's picker popover.
+    public let onLoadReleaseCandidates: (Int) async -> [ReleaseCandidateItem]
+    /// A release picked from that popover: the episode and the chosen
+    /// release's name (passed straight through to the engine as
+    /// `chosen_name`).
+    public let onPlayWithRelease: (EpisodeItem, String) -> Void
+    public let onDownloadEpisode: (EpisodeItem) -> Void
+    /// Keyed by episode number. An episode with no entry has never had a
+    /// download started — `EpisodeRow` treats that the same as `.notStarted`.
+    public let downloadStates: [Int: EpisodeDownloadState]
 
     @State private var selectedTab: DetailTab = .episodes
     @State private var selectedAudioType: AudioType = .sub
@@ -126,29 +246,45 @@ public struct MediaDetailView: View {
         episodes: [EpisodeItem] = [],
         mangaChapters: [MangaChapterItem] = [],
         characters: [CharacterItem] = [],
+        relations: [RelationItem] = [],
+        recommendations: [RecommendationItem] = [],
+        discussions: [DiscussionItem] = [],
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
         onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
+        onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)? = nil,
         onExportAppleBooks: @escaping () -> Void = {},
         onClose: @escaping () -> Void = {},
         onSetListStatus: @escaping (String) -> Void = { _ in },
         onToggleFavourite: @escaping () -> Void = {},
         onRemoveFromList: @escaping () -> Void = {},
-        onSetEpisodeWatched: @escaping (Int, Bool) -> Void = { _, _ in }
+        onSetEpisodeWatched: @escaping (Int, Bool) -> Void = { _, _ in },
+        onLoadReleaseCandidates: @escaping (Int) async -> [ReleaseCandidateItem] = { _ in [] },
+        onPlayWithRelease: @escaping (EpisodeItem, String) -> Void = { _, _ in },
+        onDownloadEpisode: @escaping (EpisodeItem) -> Void = { _ in },
+        downloadStates: [Int: EpisodeDownloadState] = [:]
     ) {
         self.details = details
         self.episodes = episodes
         self.mangaChapters = mangaChapters
         self.characters = characters
+        self.relations = relations
+        self.recommendations = recommendations
+        self.discussions = discussions
         self.onPlayEpisode = onPlayEpisode
         self.onReadChapter = onReadChapter
         self.onSelectRelation = onSelectRelation
+        self.onSelectMediaId = onSelectMediaId
         self.onExportAppleBooks = onExportAppleBooks
         self.onClose = onClose
         self.onSetListStatus = onSetListStatus
         self.onToggleFavourite = onToggleFavourite
         self.onRemoveFromList = onRemoveFromList
         self.onSetEpisodeWatched = onSetEpisodeWatched
+        self.onLoadReleaseCandidates = onLoadReleaseCandidates
+        self.onPlayWithRelease = onPlayWithRelease
+        self.onDownloadEpisode = onDownloadEpisode
+        self.downloadStates = downloadStates
 
         let initial: DetailTab
         if !episodes.isEmpty {
@@ -164,10 +300,9 @@ public struct MediaDetailView: View {
     }
 
 
-    /// Overlap of the content column onto the banner. The poster is meant to
-    /// straddle the two, which is what makes the page read as one image with
-    /// information laid over it rather than a header stacked above a list.
-    private let bannerOverlap: CGFloat = 112
+    /// Overlap of the content column onto the banner. Sized to match the Tauri app
+    /// where the poster sits lower and does not intrude too high into the banner artwork.
+    private let bannerOverlap: CGFloat = 50
 
     public var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -185,15 +320,31 @@ public struct MediaDetailView: View {
 
     private var banner: some View {
         ZStack(alignment: .topLeading) {
-            // The banner rides in an overlay on a zero-size base. A
-            // `.fill`-mode image reports its own intrinsic width no matter
-            // what `.frame(maxWidth:)` asks of it, and that width propagated
-            // all the way up the hierarchy and pushed the 200pt sidebar off
-            // the left edge of the window.
+            Color(hex: "#161310")
+
+            // AsyncImage given a directly-flexible `.frame(maxWidth: .infinity)`
+            // measured a specific banner (a portrait-leaning image scaled up
+            // via `.fill`) as needing ~1150pt of width regardless of the
+            // proposal, and being the outermost element of a freshly-`.id()`d
+            // view, that ideal width won the negotiation with RootView's
+            // HStack instead of losing to it — the page rendered 1150pt wide
+            // starting at the window's left edge, over the sidebar. Every
+            // other AsyncImage in this file (poster, episode thumbnails,
+            // character portraits) sidesteps this by overlaying the image
+            // onto an already-concretely-sized base instead of framing the
+            // image itself; matching that pattern here fixed it.
             Color.clear
-                .frame(height: 288)
                 .frame(maxWidth: .infinity)
-                .overlay {
+                .frame(height: 288)
+                // A source banner scaled to fill this frame is usually
+                // taller than 288pt once its width matches the column, so
+                // centering (the default alignment) crops evenly off both
+                // edges — cutting as much off the bottom, where an anime
+                // banner's characters actually are, as off the top, which is
+                // usually just sky or logo art. Bottom-aligning the overlay
+                // keeps the bottom of the source pinned and crops the top
+                // instead, so the image reads lower in the frame.
+                .overlay(alignment: .bottom) {
                     AsyncImage(url: details.bannerURL ?? details.coverURL) { phase in
                         if let image = phase.image {
                             image.resizable().aspectRatio(contentMode: .fill)
@@ -205,12 +356,11 @@ public struct MediaDetailView: View {
                 .clipped()
 
             // `.hero-gradient`: the page ground at the bottom, a 60% black at
-            // 40% up, clear at the top. The middle stop is what keeps the
-            // title legible over a bright banner without dimming the art.
+            // 40% up, clear at the top.
             LinearGradient(
                 stops: [
                     .init(color: SumiTheme.background, location: 0),
-                    .init(color: Color(red: 5/255, green: 5/255, blue: 5/255).opacity(0.6), location: 0.6),
+                    .init(color: Color(red: 5/255, green: 5/255, blue: 5/255).opacity(0.6), location: 0.40),
                     .init(color: .clear, location: 1),
                 ],
                 startPoint: .bottom,
@@ -218,7 +368,7 @@ public struct MediaDetailView: View {
             )
             .frame(height: 288)
 
-            // Top Left Back Button (positioned directly above poster card in 1150pt container)
+            // Top Left Back Button (positioned cleanly below window traffic lights zone)
             VStack(alignment: .leading) {
                 Button(action: onClose) {
                     HStack(spacing: 6) {
@@ -242,6 +392,7 @@ public struct MediaDetailView: View {
                 #if os(macOS)
                 .onHover { isBackHovered = $0 }
                 #endif
+                .animation(.easeOut(duration: 0.15), value: isBackHovered)
                 Spacer()
             }
             .padding(.horizontal, 56)
@@ -264,11 +415,6 @@ public struct MediaDetailView: View {
         .padding(.bottom, 64)
         .frame(maxWidth: 1150, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        // A negative top padding, not an offset. `.offset` moves the view
-        // without changing the height the stack reports, and pairing it with
-        // a negative bottom padding to compensate left the ScrollView
-        // believing its content fit — the page would not scroll at all and
-        // the episode list below the fold was unreachable.
         .padding(.top, -bannerOverlap)
     }
 
@@ -402,6 +548,7 @@ public struct MediaDetailView: View {
                     .background(SumiTheme.indigo)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .shadow(color: SumiTheme.indigo.opacity(0.2), radius: 8, y: 2)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(resumeTarget == nil)
@@ -421,6 +568,7 @@ public struct MediaDetailView: View {
                     .background(SumiTheme.indigo)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .shadow(color: SumiTheme.indigo.opacity(0.2), radius: 8, y: 2)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -444,6 +592,12 @@ public struct MediaDetailView: View {
                     RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
+                // `Menu`'s built-in hit target is computed from its label's
+                // drawn content, not its `.frame()` — the background fill
+                // reads as decoration, not a hit-testable shape, so only the
+                // text/chevron glyphs themselves were clickable and the
+                // pill's visible padding around them was dead space.
+                .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -459,6 +613,7 @@ public struct MediaDetailView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(details.isFavourite ? Color(hex: "#EC4899").opacity(0.4) : SumiTheme.border, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -478,6 +633,7 @@ public struct MediaDetailView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -553,7 +709,7 @@ public struct MediaDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) { isSynopsisExpanded.toggle() }
+                withAnimation(.easeInOut(duration: 0.2)) { isSynopsisExpanded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Text(isSynopsisExpanded ? "Show Less" : "Read Full Synopsis")
@@ -562,6 +718,8 @@ public struct MediaDetailView: View {
                 }
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(SumiTheme.foreground.opacity(0.5))
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -578,6 +736,7 @@ public struct MediaDetailView: View {
                     relationCard(sequel, label: "NEXT SEASON", leading: false)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -597,11 +756,13 @@ public struct MediaDetailView: View {
             Button {
                 onSelect?(relation)
             } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     if leading {
-                        Image(systemName: "chevron.left").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(SumiTheme.muted)
                         Color.clear
-                            .frame(width: 40, height: 56)
+                            .frame(width: 36, height: 48)
                             .overlay {
                                 AsyncImage(url: relation.coverURL) { phase in
                                     if let image = phase.image {
@@ -615,15 +776,15 @@ public struct MediaDetailView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(label)
-                                .sumiTabularMono(size: 11.5)
+                                .sumiTabularMono(size: 9.5, weight: .bold)
                                 .foregroundColor(SumiTheme.indigo)
                             Text(relation.title)
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
                             if let format = relation.format {
                                 Text(format)
-                                    .font(.system(size: 10))
+                                    .sumiTabularMono(size: 9.5)
                                     .foregroundColor(SumiTheme.muted)
                             }
                         }
@@ -631,21 +792,21 @@ public struct MediaDetailView: View {
                     } else {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(label)
-                                .sumiTabularMono(size: 11.5)
+                                .sumiTabularMono(size: 9.5, weight: .bold)
                                 .foregroundColor(SumiTheme.indigo)
                             Text(relation.title)
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
                             if let format = relation.format {
                                 Text(format)
-                                    .font(.system(size: 10))
+                                    .sumiTabularMono(size: 9.5)
                                     .foregroundColor(SumiTheme.muted)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         Color.clear
-                            .frame(width: 40, height: 56)
+                            .frame(width: 36, height: 48)
                             .overlay {
                                 AsyncImage(url: relation.coverURL) { phase in
                                     if let image = phase.image {
@@ -657,10 +818,14 @@ public struct MediaDetailView: View {
                             }
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(SumiTheme.muted)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(SumiTheme.muted)
                     }
                 }
-                .padding(10)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 290)
                 .background(isHovered ? SumiTheme.card : SumiTheme.foreground.opacity(0.02))
                 .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                 .overlay(
@@ -673,17 +838,31 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
+            .animation(.easeOut(duration: 0.15), value: isHovered)
         }
     }
 
     // MARK: - Tabs
 
+    private var isMangaMedia: Bool {
+        if let f = details.format, ["MANGA", "NOVEL", "ONE_SHOT"].contains(f) {
+            return true
+        }
+        return episodes.isEmpty && !mangaChapters.isEmpty
+    }
+
     private var availableTabs: [DetailTab] {
         var tabs: [DetailTab] = []
-        if !episodes.isEmpty {
-            tabs.append(.episodes)
-        } else if !mangaChapters.isEmpty {
+        if isMangaMedia {
             tabs.append(.manga)
+            if !episodes.isEmpty {
+                tabs.append(.episodes)
+            }
+        } else {
+            tabs.append(.episodes)
+            if !mangaChapters.isEmpty {
+                tabs.append(.manga)
+            }
         }
         tabs.append(.characters)
         tabs.append(.related)
@@ -695,14 +874,13 @@ public struct MediaDetailView: View {
     private func tabLabel(_ tab: DetailTab) -> String {
         switch tab {
         case .episodes: return episodes.isEmpty ? "EPISODES" : "EPISODES (\(episodes.count))"
-        case .manga: return "CHAPTERS (\(mangaChapters.count))"
-        case .characters: return "CAST & STAFF"
+        case .manga: return mangaChapters.isEmpty ? "CHAPTERS" : "CHAPTERS (\(mangaChapters.count))"
+        case .characters: return characters.isEmpty ? "CAST & STAFF" : "CAST & STAFF (\(characters.count))"
         case .related:
-            let count = (details.prequel != nil ? 1 : 0) + (details.sequel != nil ? 1 : 0)
+            let count = relations.isEmpty ? ((details.prequel != nil ? 1 : 0) + (details.sequel != nil ? 1 : 0)) : relations.count
             return count > 0 ? "RELATED (\(count))" : "RELATED"
-        case .novels: return "LIGHT NOVELS"
-        case .discussions: return "DISCUSSIONS"
-        case .more: return "MORE"
+        case .discussions: return discussions.isEmpty ? "DISCUSSIONS" : "DISCUSSIONS (\(discussions.count))"
+        case .more: return recommendations.isEmpty ? "MORE" : "MORE (\(recommendations.count))"
         }
     }
 
@@ -718,7 +896,9 @@ public struct MediaDetailView: View {
             HStack(spacing: 24) {
                 ForEach(availableTabs) { tab in
                     Button {
-                        selectedTab = tab
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            selectedTab = tab
+                        }
                     } label: {
                         VStack(spacing: 8) {
                             Text(tabLabel(tab))
@@ -729,6 +909,7 @@ public struct MediaDetailView: View {
                                 .frame(height: 2)
                         }
                         .fixedSize()
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -748,7 +929,9 @@ public struct MediaDetailView: View {
                         HStack(spacing: 2) {
                             ForEach(AudioType.allCases, id: \.self) { audio in
                                 Button {
-                                    selectedAudioType = audio
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        selectedAudioType = audio
+                                    }
                                 } label: {
                                     Text(audio.rawValue)
                                         .sumiTabularMono(size: 10.5, weight: selectedAudioType == audio ? .bold : .regular)
@@ -757,6 +940,7 @@ public struct MediaDetailView: View {
                                         .padding(.vertical, 3)
                                         .background(selectedAudioType == audio ? SumiTheme.indigo.opacity(0.18) : Color.clear)
                                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -771,7 +955,9 @@ public struct MediaDetailView: View {
                     HStack(spacing: 2) {
                         ForEach(EpisodeViewMode.allCases, id: \.self) { mode in
                             Button {
-                                selectedViewMode = mode
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    selectedViewMode = mode
+                                }
                             } label: {
                                 Text(mode.rawValue)
                                     .font(.system(size: 10.5, weight: selectedViewMode == mode ? .bold : .medium))
@@ -780,6 +966,7 @@ public struct MediaDetailView: View {
                                     .padding(.vertical, 3)
                                     .background(selectedViewMode == mode ? SumiTheme.foreground.opacity(0.12) : Color.clear)
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -820,17 +1007,28 @@ public struct MediaDetailView: View {
                             episode: episode,
                             isResumeTarget: episode.id == resumeTarget?.id,
                             resumeSeconds: episode.number == details.resumeEpisode ? details.resumeSeconds : nil,
+                            downloadState: downloadStates[episode.number] ?? .notStarted,
                             onPlay: { onPlayEpisode(episode) },
-                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
+                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) },
+                            onLoadReleaseCandidates: { await onLoadReleaseCandidates(episode.number) },
+                            onPlayWithRelease: { name in onPlayWithRelease(episode, name) },
+                            onDownload: { onDownloadEpisode(episode) }
                         )
                     }
                 }
             }
         case .manga:
             if mangaChapters.isEmpty {
-                SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
+                if details.format == "NOVEL" {
+                    SumiEmptyState(
+                        headline: "Light novel reading isn't available yet",
+                        detail: "There's no light-novel reader in the native app yet — this section is a placeholder, not a failed search."
+                    )
+                } else {
+                    SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
+                }
             } else {
-                VStack(spacing: 8) {
+                LazyVStack(spacing: 8) {
                     ForEach(mangaChapters) { chapter in
                         ChapterRowView(chapter: chapter) {
                             onReadChapter(chapter)
@@ -840,13 +1038,13 @@ public struct MediaDetailView: View {
             }
         case .characters:
             if characters.isEmpty {
-                SumiEmptyState(headline: "Cast & Staff", detail: "Cast and staff details for this title will appear here.")
+                SumiEmptyState(headline: "Cast & Staff", detail: "Loading cast & staff details for this title...")
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 16)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
                     ForEach(characters) { char in
                         VStack(alignment: .leading, spacing: 6) {
                             Color.clear
-                                .frame(height: 180)
+                                .aspectRatio(2/3, contentMode: .fit)
                                 .overlay {
                                     AsyncImage(url: char.imageURL) { phase in
                                         if let image = phase.image {
@@ -857,28 +1055,113 @@ public struct MediaDetailView: View {
                                     }
                                 }
                                 .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                                .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    ZStack(alignment: .topLeading) {
+                                        RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1)
+                                        Text(char.role.replacingOccurrences(of: "_", with: " ").capitalized)
+                                            .font(.system(size: 8.5, weight: .black))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(Color.black.opacity(0.75))
+                                            .foregroundColor(.white.opacity(0.9))
+                                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                                            .padding(5)
+                                    }
+                                )
 
-                            Text(char.name)
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(SumiTheme.foreground)
-                                .lineLimit(1)
-                            Text(char.role)
-                                .font(.system(size: 10))
-                                .foregroundColor(SumiTheme.muted)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(char.name)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(SumiTheme.foreground)
+                                    .lineLimit(1)
+                                if let va = char.voiceActorName, !va.isEmpty {
+                                    Text(va)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(SumiTheme.muted)
+                                        .lineLimit(1)
+                                }
+                            }
                         }
                     }
                 }
             }
         case .related:
-            if details.prequel == nil && details.sequel == nil {
-                SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, or related adaptations recorded.")
+            if relations.isEmpty && details.prequel == nil && details.sequel == nil {
+                SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
             } else {
-                seasonChain
+                VStack(alignment: .leading, spacing: 20) {
+                    let mainRels = relations.filter { ["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"].contains($0.relationType) }
+                    let otherRels = relations.filter { !["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"].contains($0.relationType) }
+
+                    if !mainRels.isEmpty || details.prequel != nil || details.sequel != nil {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("SEASONS & ADAPTATIONS")
+                                .sumiTabularMono(size: 11)
+                                .foregroundColor(SumiTheme.indigo)
+
+                            if !mainRels.isEmpty {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
+                                    ForEach(mainRels) { rel in
+                                        RelatedMediaCard(relation: rel) {
+                                            let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
+                                            onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
+                                        }
+                                    }
+                                }
+                            } else {
+                                seasonChain
+                            }
+                        }
+                    }
+
+                    if !otherRels.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("OTHER RELATIONS")
+                                .sumiTabularMono(size: 11)
+                                .foregroundColor(SumiTheme.muted)
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
+                                ForEach(otherRels) { rel in
+                                    RelatedMediaCard(relation: rel) {
+                                        let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
+                                        onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        default:
-            SumiEmptyState(headline: "Not available", detail: "This section is coming soon.")
+        case .discussions:
+            if discussions.isEmpty {
+                SumiEmptyState(headline: "Discussions", detail: "No community discussion threads found for this title.")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(discussions) { thread in
+                        DiscussionRowView(thread: thread)
+                    }
+                }
+            }
+        case .more:
+            if recommendations.isEmpty {
+                SumiEmptyState(headline: "No Additional Content", detail: "No community recommendations found.")
+            } else {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("RECOMMENDATIONS")
+                        .sumiTabularMono(size: 11)
+                        .foregroundColor(SumiTheme.indigo)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 130, maximum: 165), spacing: 14)], spacing: 14) {
+                        ForEach(recommendations) { rec in
+                            RecommendationCardView(rec: rec) {
+                                let isManga = rec.format == "MANGA" || rec.format == "NOVEL" || rec.format == "ONE_SHOT"
+                                onSelectMediaId?(rec.id, rec.title, rec.coverURL, isManga)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -914,6 +1197,189 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
+            .animation(.easeOut(duration: 0.15), value: isHovered)
+        }
+    }
+
+    private struct RelatedMediaCard: View {
+        let relation: MediaDetailView.RelationItem
+        let onSelect: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: onSelect) {
+                HStack(spacing: 12) {
+                    Color.clear
+                        .frame(width: 44, height: 60)
+                        .overlay {
+                            AsyncImage(url: relation.coverURL) { phase in
+                                if let image = phase.image {
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } else {
+                                    Rectangle().fill(SumiTheme.card)
+                                }
+                            }
+                        }
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(relation.relationType.replacingOccurrences(of: "_", with: " "))
+                            .sumiTabularMono(size: 9.5)
+                            .foregroundColor(SumiTheme.indigo)
+
+                        Text(relation.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(1)
+
+                        HStack(spacing: 6) {
+                            if let format = relation.format {
+                                Text(format)
+                                    .sumiTabularMono(size: 9.5)
+                                    .foregroundColor(SumiTheme.muted)
+                            }
+                            if let score = relation.averageScore, score > 0 {
+                                Text("· \(score)%")
+                                    .sumiTabularMono(size: 9.5)
+                                    .foregroundColor(SumiTheme.muted)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundColor(SumiTheme.muted.opacity(0.6))
+                }
+                .padding(10)
+                .background(isHovered ? SumiTheme.card : SumiTheme.foreground.opacity(0.02))
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        .stroke(isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
+            .animation(.easeOut(duration: 0.15), value: isHovered)
+        }
+    }
+
+    private struct DiscussionRowView: View {
+        let thread: MediaDetailView.DiscussionItem
+
+        @State private var isHovered = false
+
+        var body: some View {
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.indigo)
+                    Text("\(thread.replyCount)")
+                        .sumiTabularMono(size: 11, weight: .bold)
+                        .foregroundColor(SumiTheme.foreground)
+                }
+                .frame(width: 52, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(thread.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        if let author = thread.authorName {
+                            Text(author)
+                                .font(.system(size: 10.5))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        if thread.viewCount > 0 {
+                            Text("· \(thread.viewCount) views")
+                                .font(.system(size: 10.5))
+                                .foregroundColor(SumiTheme.muted.opacity(0.7))
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(isHovered ? SumiTheme.card : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .stroke(isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border.opacity(0.3), lineWidth: 1)
+            )
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
+            .animation(.easeOut(duration: 0.15), value: isHovered)
+        }
+    }
+
+    private struct RecommendationCardView: View {
+        let rec: MediaDetailView.RecommendationItem
+        let onSelect: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: onSelect) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Color.clear
+                        .aspectRatio(2/3, contentMode: .fit)
+                        .overlay {
+                            AsyncImage(url: rec.coverURL) { phase in
+                                if let image = phase.image {
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } else {
+                                    Rectangle().fill(SumiTheme.card)
+                                }
+                            }
+                        }
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            ZStack(alignment: .topTrailing) {
+                                RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1)
+                                if let rating = rec.rating, rating > 0 {
+                                    Text("\(rating)%")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(SumiTheme.indigo)
+                                        .foregroundColor(.black)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        .padding(5)
+                                }
+                            }
+                        )
+
+                    Text(rec.title)
+                        .font(.system(size: 11.5, weight: .bold))
+                        .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let format = rec.format {
+                        Text(format)
+                            .sumiTabularMono(size: 9.5)
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered = $0 }
+            #endif
+            .animation(.easeOut(duration: 0.15), value: isHovered)
         }
     }
 }
@@ -973,6 +1439,8 @@ private struct CompactEpisodeRow: View {
                 Image(systemName: episode.isWatched ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16))
                     .foregroundColor(episode.isWatched ? SumiTheme.indigo : SumiTheme.muted.opacity(0.3))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(episode.isWatched ? "Mark unwatched" : "Mark watched")
@@ -988,6 +1456,7 @@ private struct CompactEpisodeRow: View {
         #if os(macOS)
         .onHover { isHovered = $0 }
         #endif
+        .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 }
 
@@ -997,14 +1466,42 @@ private struct EpisodeRow: View {
     let episode: MediaDetailView.EpisodeItem
     let isResumeTarget: Bool
     let resumeSeconds: Int?
+    let downloadState: MediaDetailView.EpisodeDownloadState
     let onPlay: () -> Void
     /// Mark-watched checkbox. Nested inside a real `Button` here rather than
     /// as a second `Button` inside `onPlay`'s label — two buttons sharing one
     /// hit area is unreliable in SwiftUI; this one lives outside `onPlay`'s
     /// button entirely, alongside it in the row's `HStack`.
     let onToggleWatched: (Bool) -> Void
+    let onLoadReleaseCandidates: () async -> [MediaDetailView.ReleaseCandidateItem]
+    let onPlayWithRelease: (String) -> Void
+    let onDownload: () -> Void
 
     @State private var isHovered = false
+    @State private var showServerPicker = false
+    @State private var isLoadingServers = false
+    @State private var serverCandidates: [MediaDetailView.ReleaseCandidateItem] = []
+
+    /// AniZip's `airdate` is a plain `YYYY-MM-DD`. Parsed as UTC to match how
+    /// it was written — treating it as local time would roll the date for
+    /// anyone west of Greenwich.
+    private static let airDateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    private static let airDateDisplay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    static func formatAirDate(_ raw: String) -> String {
+        guard let date = airDateParser.date(from: raw) else { return raw }
+        return airDateDisplay.string(from: date)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1030,10 +1527,45 @@ private struct EpisodeRow: View {
             }
             .buttonStyle(.plain)
 
+            Button {
+                showServerPicker = true
+                guard serverCandidates.isEmpty else { return }
+                isLoadingServers = true
+                Task {
+                    let found = await onLoadReleaseCandidates()
+                    isLoadingServers = false
+                    serverCandidates = found
+                }
+            } label: {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 14))
+                    .foregroundColor(SumiTheme.muted.opacity(0.6))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Stream Servers")
+            .padding(.top, 3)
+            .popover(isPresented: $showServerPicker, arrowEdge: .top) {
+                ServerPickerView(
+                    isLoading: isLoadingServers,
+                    candidates: serverCandidates,
+                    onSelect: { name in
+                        showServerPicker = false
+                        onPlayWithRelease(name)
+                    }
+                )
+            }
+
+            downloadButton
+                .padding(.top, 3)
+
             Button(action: { onToggleWatched(!episode.isWatched) }) {
                 Image(systemName: episode.isWatched ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
                     .foregroundColor(episode.isWatched ? SumiTheme.indigo : SumiTheme.muted.opacity(0.4))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(episode.isWatched ? "Mark unwatched" : "Mark watched")
@@ -1049,6 +1581,49 @@ private struct EpisodeRow: View {
         #if os(macOS)
         .onHover { isHovered = $0 }
         #endif
+        .animation(.easeOut(duration: 0.15), value: isHovered)
+    }
+
+    @ViewBuilder
+    private var downloadButton: some View {
+        switch downloadState {
+        case .notStarted:
+            Button(action: onDownload) {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(SumiTheme.muted.opacity(0.6))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Download Episode")
+        case .downloading(let percent):
+            ZStack {
+                Circle()
+                    .stroke(SumiTheme.muted.opacity(0.25), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: max(0.03, percent / 100))
+                    .stroke(SumiTheme.indigo, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 15, height: 15)
+            .help("Downloading… \(Int(percent))%")
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15))
+                .foregroundColor(SumiTheme.successLight)
+                .help("Downloaded")
+        case .failed(let message):
+            Button(action: onDownload) {
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(SumiTheme.dangerLight)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Download failed: \(message) — click to retry")
+        }
     }
 
     private var metaLine: some View {
@@ -1058,7 +1633,7 @@ private struct EpisodeRow: View {
                 .fontWeight(.semibold)
             if let airDate = episode.airDate {
                 Text("·").foregroundColor(SumiTheme.muted.opacity(0.5))
-                Text(airDate).foregroundColor(SumiTheme.muted)
+                Text(Self.formatAirDate(airDate)).foregroundColor(SumiTheme.muted)
             }
             if let seconds = resumeSeconds, seconds > 0 {
                 Text("·").foregroundColor(SumiTheme.muted.opacity(0.5))
@@ -1142,5 +1717,87 @@ private struct EpisodeRow: View {
             .frame(height: 2.5)
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
+    }
+}
+
+/// "Stream Servers" popover content: every release the indexers found for
+/// this episode, best (highest seeders) first, so a stalled auto-pick can be
+/// swapped for a healthier one without leaving the episode list.
+private struct ServerPickerView: View {
+    let isLoading: Bool
+    let candidates: [MediaDetailView.ReleaseCandidateItem]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("STREAM SERVERS")
+                .sumiTabularMono(size: 10.5, weight: .semibold)
+                .foregroundColor(SumiTheme.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            Divider()
+
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Searching indexers…")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .padding(14)
+            } else if candidates.isEmpty {
+                Text("No releases found.")
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(14)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(candidates) { candidate in
+                            Button {
+                                onSelect(candidate.name)
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(candidate.name)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(SumiTheme.foreground)
+                                            .lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: 6) {
+                                            if candidate.isDub {
+                                                Text("DUB")
+                                                    .sumiTabularMono(size: 9, weight: .bold)
+                                                    .foregroundColor(SumiTheme.indigo)
+                                            }
+                                            Text("\(candidate.seeders) seeders")
+                                                .sumiTabularMono(size: 9.5)
+                                                .foregroundColor(SumiTheme.muted)
+                                        }
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(SumiTheme.muted.opacity(0.5))
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if candidate.id != candidates.last?.id {
+                                Divider().padding(.leading, 14)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .frame(width: 340)
+        .background(SumiTheme.card)
     }
 }

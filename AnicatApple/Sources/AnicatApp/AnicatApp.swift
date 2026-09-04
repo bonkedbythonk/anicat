@@ -35,6 +35,7 @@ struct WindowConfigurator: NSViewRepresentable {
 
     private func configure(_ window: NSWindow?) {
         guard let window else { return }
+        AppWindow.main = window
         // Overlay-style titlebar, like Tauri's `titleBarStyle: "Overlay"`:
         // the content runs under the traffic lights with no title text and no
         // background strip. Traffic lights stay (Tauri's `decorations: true`),
@@ -75,49 +76,64 @@ struct AnicatApp: App {
         #endif
 
         #if os(macOS)
-        MenuBarExtra("AniCat", systemImage: "cat.fill") {
-            MenuBarView(
-                lastWatchedTitle: model.upNextItems.first?.title,
-                lastWatchedEpisode: model.upNextItems.first?.nextEpisodeOrChapter,
-                lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
-                airingItems: model.scheduleItems.prefix(5).map {
-                    MenuBarView.AiringTodayItem(
-                        id: $0.id,
-                        title: $0.title,
-                        episodeNumber: $0.episodeNumber,
-                        countdownText: $0.countdownText
-                    )
-                },
-                onResumeLastWatched: {
-                    if let first = model.upNextItems.first {
-                        if first.unit != "CH" {
-                            Task {
-                                do {
-                                    _ = try await model.resolveAndPlay(
-                                        catalogId: first.id,
-                                        episode: Int64(first.nextEpisodeOrChapter),
-                                        title: first.title
-                                    )
-                                } catch {
-                                    model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
-                                }
-                            }
-                        } else {
-                            Task { @MainActor in
-                                await model.openDetail(id: first.id, isManga: true)
+        MenuBarExtra {
+            if model.activeStreamURL != nil, let title = model.currentPlaybackTitle ?? Optional(model.playerController.title), !title.isEmpty {
+                let ep = model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber)
+                Text("\(title) — Ep \(ep)")
+                Button(model.playerController.isPlaying ? "Pause" : "Play") {
+                    model.playerController.togglePlayPause()
+                }
+                Divider()
+            } else if let first = model.upNextItems.first {
+                Button("Resume \(first.title) (\(first.unit) \(first.nextEpisodeOrChapter))") {
+                    if first.unit != "CH" {
+                        Task {
+                            do {
+                                _ = try await model.resolveAndPlay(
+                                    catalogId: first.id,
+                                    episode: Int64(first.nextEpisodeOrChapter),
+                                    title: first.title
+                                )
+                            } catch {
+                                model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
                             }
                         }
+                    } else {
+                        Task { @MainActor in
+                            await model.openDetail(id: first.id, isManga: true)
+                        }
                     }
-                },
-                onOpenMainApp: {
-                    NSApp.activate(ignoringOtherApps: true)
-                },
-                onQuit: {
-                    NSApp.terminate(nil)
                 }
-            )
+                Divider()
+            }
+
+            Button("Open AniCat") {
+                NSApp.activate(ignoringOtherApps: true)
+                AppWindow.main?.makeKeyAndOrderFront(nil)
+            }
+            .keyboardShortcut("o")
+
+            Button("Settings...") {
+                NSApp.activate(ignoringOtherApps: true)
+                model.currentNavSection = .settings
+                AppWindow.main?.makeKeyAndOrderFront(nil)
+            }
+            .keyboardShortcut(",")
+
+            Divider()
+
+            Button("Quit AniCat") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q")
+        } label: {
+            if let icon = BrandAssets.menuBarIcon {
+                icon
+            } else {
+                Image(systemName: "cat.fill")
+            }
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
         #endif
     }
 }

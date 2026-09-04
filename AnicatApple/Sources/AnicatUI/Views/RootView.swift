@@ -1,9 +1,19 @@
 import SwiftUI
 import AnicatCoreKit
+#if os(macOS)
+import AppKit
+#endif
 
 public struct RootView: View {
     @Bindable public var model: AppModel
     @State private var showHomeCustomize = false
+    @State private var showPicker = false
+    #if os(macOS)
+    // Only exit fullscreen on close if we're the one who entered it — if the
+    // window was already fullscreen (user did it manually before pressing
+    // play), leave it that way when the player closes.
+    @State private var enteredFullscreenForPlayback = false
+    #endif
 
     public init(model: AppModel) {
         self.model = model
@@ -37,15 +47,45 @@ public struct RootView: View {
                     ),
                     onOpenSearchPalette: { model.paletteOpen = true }
                 )
+                .frame(width: 200)
+                .layoutPriority(1)
 
                 // Hairline Divider
                 Rectangle()
                     .fill(SumiTheme.border)
                     .frame(width: 1)
+                    .layoutPriority(1)
                     .ignoresSafeArea()
 
                 // Dynamic Main Content Area
                 VStack(spacing: 0) {
+                    if model.isAniListDown {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(SumiTheme.warning)
+                                .font(.system(size: 14))
+
+                            Text("AniList is temporarily down — tracking and library sync are paused.")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(2)
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
                     // Active Section Switcher
                     Group {
                     // The detail page replaces the section, inside the
@@ -57,7 +97,10 @@ public struct RootView: View {
                             details: details,
                             episodes: model.selectedEpisodes,
                             mangaChapters: model.selectedMangaChapters,
-                            characters: [],
+                            characters: model.selectedCharacters,
+                            relations: model.selectedRelations,
+                            recommendations: model.selectedRecommendations,
+                            discussions: model.selectedDiscussions,
                             onPlayEpisode: { ep in
                                 Task {
                                     do {
@@ -89,9 +132,17 @@ public struct RootView: View {
                                     isManga: rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
                                 )
                             },
+                            onSelectMediaId: { id, title, coverURL, isManga in
+                                openDetailFor(
+                                    id: id,
+                                    title: title,
+                                    coverURL: coverURL,
+                                    isManga: isManga
+                                )
+                            },
                             onExportAppleBooks: {},
                             onClose: {
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(.easeOut(duration: 0.25)) {
                                     model.closeDetail()
                                 }
                             },
@@ -106,25 +157,63 @@ public struct RootView: View {
                             },
                             onSetEpisodeWatched: { episode, watched in
                                 Task { await model.setEpisodeWatched(episode, watched: watched) }
-                            }
+                            },
+                            onLoadReleaseCandidates: { episode in
+                                await model.loadReleaseCandidates(episode: episode)
+                            },
+                            onPlayWithRelease: { ep, releaseName in
+                                Task {
+                                    do {
+                                        _ = try await model.resolveAndPlay(
+                                            catalogId: details.id,
+                                            episode: Int64(ep.number),
+                                            title: details.title,
+                                            chosenName: releaseName
+                                        )
+                                    } catch {
+                                        model.errorMessage = "Failed to play episode \(ep.number): \(error.localizedDescription)"
+                                    }
+                                }
+                            },
+                            onDownloadEpisode: { ep in
+                                Task { await model.startDownload(episode: ep.number) }
+                            },
+                            downloadStates: model.downloadStates
                         )
                         .id(details.id)
                         .transition(.opacity)
                     } else {
                         sectionContent
+                            .id(model.currentNavSection)
+                            .transition(.opacity)
                     }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .animation(.easeOut(duration: 0.25), value: model.currentNavSection)
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             }
             .ignoresSafeArea()
 
             // Command palette. Above sections, player, and reader so navigation is accessible anywhere.
             if model.paletteOpen {
                 CommandPalette(commands: paletteCommands) {
-                    model.paletteOpen = false
+                    withAnimation(.easeIn(duration: 0.18)) {
+                        model.paletteOpen = false
+                    }
                 }
                 .zIndex(50)
+                .transition(.opacity)
+            }
+
+            // Keyboard shortcuts overlay. Above palette and modal views.
+            if model.shortcutsOpen {
+                KeyboardShortcutsOverlay {
+                    withAnimation(.easeIn(duration: 0.2)) {
+                        model.shortcutsOpen = false
+                    }
+                }
+                .zIndex(60)
                 .transition(.opacity)
             }
 
@@ -135,7 +224,7 @@ public struct RootView: View {
                     controller: model.playerController,
                     streamURL: streamURL,
                     onClose: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        withAnimation(.easeOut(duration: 0.25)) {
                             model.stopPlayback()
                         }
                     }
@@ -165,7 +254,7 @@ public struct RootView: View {
                         Task { await model.prevChapter() }
                     },
                     onClose: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        withAnimation(.easeOut(duration: 0.25)) {
                             model.closeReader()
                         }
                     }
@@ -190,7 +279,7 @@ public struct RootView: View {
                         Spacer()
 
                         Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
+                            withAnimation(.easeIn(duration: 0.2)) {
                                 model.errorMessage = nil
                             }
                         }) {
@@ -198,6 +287,7 @@ public struct RootView: View {
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(SumiTheme.muted)
                                 .padding(4)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -232,12 +322,32 @@ public struct RootView: View {
                 .zIndex(70)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: model.activeStreamURL != nil)
-        .animation(.easeInOut(duration: 0.25), value: model.activeReadingSession != nil)
-        .animation(.easeInOut(duration: 0.25), value: model.selectedMediaDetails != nil)
-        .animation(.easeInOut(duration: 0.25), value: model.errorMessage != nil)
-        .animation(.easeInOut(duration: 0.2), value: model.isLoading)
+        .animation(.easeOut(duration: 0.25), value: model.activeStreamURL != nil)
+        .animation(.easeOut(duration: 0.25), value: model.activeReadingSession != nil)
+        .animation(.easeOut(duration: 0.25), value: model.selectedMediaDetails != nil)
+        .animation(.easeOut(duration: 0.2), value: model.errorMessage != nil)
+        .animation(.easeOut(duration: 0.35), value: model.isAniListDown)
+        .animation(.easeOut(duration: 0.2), value: model.isLoading)
+        .animation(.easeOut(duration: 0.18), value: model.paletteOpen)
+        .animation(.easeOut(duration: 0.2), value: model.shortcutsOpen)
         .globalKeyboardShortcuts(model: model)
+        #if os(macOS)
+        // Driven off activeStreamURL's nil<->value edge rather than
+        // PlayerView's onAppear/onDisappear: that view can be reused or
+        // recreated across the transition (it's SwiftUI's call, not ours),
+        // so its own appear/disappear isn't a reliable one-shot signal. This
+        // edge is unambiguous and fires exactly once per playback session.
+        .onChange(of: model.activeStreamURL != nil) { wasPlaying, isPlaying in
+            guard let window = AppWindow.main else { return }
+            if isPlaying, !wasPlaying, !window.styleMask.contains(.fullScreen) {
+                enteredFullscreenForPlayback = true
+                window.toggleFullScreen(nil)
+            } else if !isPlaying, wasPlaying, enteredFullscreenForPlayback, window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+                enteredFullscreenForPlayback = false
+            }
+        }
+        #endif
     }
 
     // MARK: - Section Content Switcher
@@ -256,8 +366,8 @@ public struct RootView: View {
                 results: model.searchResults,
                 discoverItems: model.trendingItems,
                 isLoading: model.isLoading,
-                onSearchCommit: { q, mediaType in
-                    Task { await model.search(query: q, mediaType: mediaType) }
+                onSearchCommit: { q, mediaType, filters in
+                    Task { await model.search(query: q, mediaType: mediaType, filters: filters) }
                 },
                 onSelectMedia: { item in
                     openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
@@ -278,6 +388,12 @@ public struct RootView: View {
                 },
                 onDisconnectAniList: {
                     model.signOut()
+                },
+                onClearRegistry: {
+                    await model.clearLocalRegistry()
+                },
+                onOpenShortcuts: {
+                    model.shortcutsOpen = true
                 }
             )
         case .library:
@@ -319,7 +435,10 @@ public struct RootView: View {
             HistoryView(
                 viewer: model.viewer,
                 activity: model.activity,
-                titles: model.knownTitles
+                titles: model.knownTitles,
+                onSelectFavourite: { item in
+                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                }
             )
         case .downloads:
             DownloadsView()
@@ -349,11 +468,7 @@ public struct RootView: View {
                         Spacer()
 
                         // "Pick for me" Random Episode Selector
-                        Button(action: {
-                            if let random = model.trendingItems.randomElement() {
-                                openDetailFor(id: random.id, title: random.title, coverURL: random.coverImageURL, isManga: random.isManga)
-                            }
-                        }) {
+                        Button(action: { showPicker = true }) {
                             // Hairline only, no fill: the web button is
                             // `border border-border` over the page ground. A
                             // filled version reads as a macOS push button and
@@ -370,6 +485,7 @@ public struct RootView: View {
                                     RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                         .stroke(SumiTheme.border, lineWidth: 1)
                                  )
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
 
@@ -392,6 +508,7 @@ public struct RootView: View {
                                 RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                                     .stroke(SumiTheme.border, lineWidth: 1)
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -438,11 +555,19 @@ public struct RootView: View {
                     }
                 }
 
+                if !model.scheduleItems.filter({ $0.isWatching }).isEmpty {
+                    WeekStrip(items: model.scheduleItems) { item in
+                        openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
+                    }
+                }
+
                 // Watching is fixed, not configurable — same split as
                 // HomeView.tsx (queue + Watching are the front page; the rest
                 // are rows the user can reorder or hide).
                 if !model.watchingItems.isEmpty {
                     mediaRow(title: "Watching", count: model.watchingItems.count, items: model.watchingItems)
+                } else if model.isSignedIn && model.isLoading {
+                    MediaRowSkeleton(title: "Watching")
                 }
 
                 // Configurable rows, in the user's saved order; hidden ones
@@ -465,34 +590,55 @@ public struct RootView: View {
         .sheet(isPresented: $showHomeCustomize) {
             HomeCustomizeSheet(model: model, isPresented: $showHomeCustomize)
         }
+        .sheet(isPresented: $showPicker) {
+            PickerSheet(
+                model: model,
+                isPresented: $showPicker,
+                onCommit: { item in
+                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                }
+            )
+        }
     }
 
-    /// One configurable row, by id. `nil` (rendered as `EmptyView`) means the
-    /// row has nothing to show yet — not signed in for Planning, or still
-    /// empty for everything else — mirroring `renderRow` in HomeView.tsx,
-    /// which returns `null` rather than an empty shelf.
+    /// One configurable row, by id. Skeletons preserve the shelf layout
+    /// while queries are in flight, preventing sudden reflows.
     @ViewBuilder
     private func homeDiscoverRow(id: String, title: String) -> some View {
         switch id {
         case "planning":
-            if model.isSignedIn && !model.planningItems.isEmpty {
-                mediaRow(title: title, count: model.planningItems.count, items: model.planningItems)
+            if model.isSignedIn {
+                if !model.planningItems.isEmpty {
+                    mediaRow(title: title, count: model.planningItems.count, items: model.planningItems)
+                } else if model.isLoading {
+                    MediaRowSkeleton(title: title)
+                }
             }
         case "smartPlaylist":
-            if model.isSignedIn && !model.smartPicks.isEmpty {
-                mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks)
+            if model.isSignedIn {
+                if !model.smartPicks.isEmpty {
+                    mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks)
+                } else if model.isLoading {
+                    MediaRowSkeleton(title: title)
+                }
             }
         case "trending":
             if !model.trendingItems.isEmpty {
                 mediaRow(title: title, count: model.trendingItems.count, items: model.trendingItems)
+            } else if model.isLoading {
+                MediaRowSkeleton(title: title)
             }
         case "newlyReleasing":
             if !model.newlyReleasingItems.isEmpty {
                 mediaRow(title: title, count: model.newlyReleasingItems.count, items: model.newlyReleasingItems)
+            } else if model.isLoading {
+                MediaRowSkeleton(title: title)
             }
         case "seasonal":
             if !model.seasonalItems.isEmpty {
                 mediaRow(title: title, count: model.seasonalItems.count, items: model.seasonalItems)
+            } else if model.isLoading {
+                MediaRowSkeleton(title: title)
             }
         default:
             EmptyView()
@@ -593,6 +739,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
     @Bindable var model: AppModel
     @State private var monitor: Any?
     @State private var scrollMonitor: Any?
+    @State private var mouseMonitor: Any?
     @State private var accumulatedDeltaX: CGFloat = 0
     @State private var accumulatedDeltaY: CGFloat = 0
     @State private var gestureSampleCount = 0
@@ -670,7 +817,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 accumulatedDeltaY = 0
                 gestureSampleCount = 0
                 isCooling = true
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.easeOut(duration: 0.25)) {
                     model.closeDetail()
                 }
                 return nil
@@ -680,6 +827,16 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 accumulatedDeltaY = 0
                 gestureSampleCount = 0
                 gestureDisqualified = false
+            }
+            return event
+        }
+        // Button 3 is the standard back side-button on 5-button mice in AppKit (0=left, 1=right, 2=middle).
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [self] event in
+            if event.buttonNumber == 3 && model.selectedMediaDetails != nil {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    model.closeDetail()
+                }
+                return nil
             }
             return event
         }
@@ -694,6 +851,10 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             NSEvent.removeMonitor(m)
             scrollMonitor = nil
         }
+        if let m = mouseMonitor {
+            NSEvent.removeMonitor(m)
+            mouseMonitor = nil
+        }
     }
 
     @MainActor
@@ -701,26 +862,40 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         let isCmd = event.modifierFlags.contains(.command)
         let isCtrl = event.modifierFlags.contains(.control)
         let isAlt = event.modifierFlags.contains(.option)
+        let isShift = event.modifierFlags.contains(.shift)
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        let rawChars = event.characters ?? ""
 
         // 1. Cmd+K: Toggle Command Palette (even while typing)
         if isCmd && !isCtrl && !isAlt && chars == "k" {
-            model.paletteOpen.toggle()
+            withAnimation(.easeOut(duration: 0.18)) {
+                model.paletteOpen.toggle()
+            }
             return nil
         }
 
         // 2. ESC key (keyCode 53):
         // Order of dismissal:
-        // 1. CommandPalette (topmost overlay)
-        // 2. PlayerView (modal video overlay)
-        // 3. MangaReaderView (modal reader overlay)
-        // 4. MediaDetailView (detail page)
+        // 1. KeyboardShortcutsOverlay (topmost help modal)
+        // 2. CommandPalette (topmost overlay)
+        // 3. PlayerView (modal video overlay)
+        // 4. MangaReaderView (modal reader overlay)
+        // 5. MediaDetailView (detail page)
         if event.keyCode == 53 {
             var handled = false
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withAnimation(.easeOut(duration: 0.25)) {
                 handled = model.handleEscapeKey()
             }
             return handled ? nil : event
+        }
+
+        // Arrow keys in AppKit automatically include `.numericPad` and `.function`
+        // flags, so we exclude explicit modifiers instead of checking a raw flag mask.
+        if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 123 && model.selectedMediaDetails != nil {
+            withAnimation(.easeOut(duration: 0.25)) {
+                model.closeDetail()
+            }
+            return nil
         }
 
         // Guard: Don't intercept single-key navigation when typing in an input field
@@ -729,7 +904,15 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             return event
         }
 
-        // 3. Player-specific shortcuts when PlayerView is active
+        // 3. '?': Toggle Keyboard Shortcuts overlay
+        if !isCmd && !isCtrl && !isAlt && (rawChars == "?" || chars == "?") {
+            withAnimation(.easeOut(duration: 0.2)) {
+                model.shortcutsOpen.toggle()
+            }
+            return nil
+        }
+
+        // 4. Player-specific shortcuts when PlayerView is active
         if model.activeStreamURL != nil && !isCmd && !isCtrl && !isAlt {
             // Spacebar: play / pause
             if event.keyCode == 49 {
@@ -748,17 +931,19 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
         }
 
-        // 4. Navigation shortcuts (only when no modifier keys are held)
+        // 5. Navigation shortcuts (only when no modifier keys are held)
         if !isCmd && !isCtrl && !isAlt {
             // '/': Open Command Palette / focus search
             if chars == "/" {
-                model.paletteOpen = true
+                withAnimation(.easeOut(duration: 0.18)) {
+                    model.paletteOpen = true
+                }
                 return nil
             }
 
             // Numbers 1-9: Switch views
             if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num) {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.easeOut(duration: 0.25)) {
                     model.navigate(to: targetSection)
                 }
                 return nil
@@ -766,7 +951,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
             // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), D (Downloads)
             if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar) {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.easeOut(duration: 0.25)) {
                     model.navigate(to: targetSection)
                 }
                 return nil
@@ -810,6 +995,8 @@ private struct HomeCustomizeSheet: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -831,6 +1018,8 @@ private struct HomeCustomizeSheet: View {
                         Button(action: { model.moveHomeRow(at: index, by: -1) }) {
                             Image(systemName: "chevron.up")
                                 .foregroundColor(index == 0 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(index == 0)
@@ -838,6 +1027,8 @@ private struct HomeCustomizeSheet: View {
                         Button(action: { model.moveHomeRow(at: index, by: 1) }) {
                             Image(systemName: "chevron.down")
                                 .foregroundColor(index == model.homeRowConfig.count - 1 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(index == model.homeRowConfig.count - 1)
@@ -845,6 +1036,8 @@ private struct HomeCustomizeSheet: View {
                         Button(action: { model.toggleHomeRow(id: row.id) }) {
                             Image(systemName: row.visible ? "eye" : "eye.slash")
                                 .foregroundColor(row.visible ? SumiTheme.indigo : SumiTheme.muted.opacity(0.5))
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }

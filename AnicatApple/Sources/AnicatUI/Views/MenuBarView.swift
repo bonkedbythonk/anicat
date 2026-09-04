@@ -122,7 +122,7 @@ public struct MenuBarView: View {
                 Button(action: onOpenMainApp) {
                     HStack(spacing: 6) {
                         Image(systemName: "macwindow")
-                        Text("Open AniCat")
+                        Text("Open Anicat")
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(SumiTheme.foreground)

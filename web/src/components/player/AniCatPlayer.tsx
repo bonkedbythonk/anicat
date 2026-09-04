@@ -898,7 +898,7 @@ export function AniCatPlayer(props: AniCatPlayerProps) {
           </button>
           <div className="min-w-0">
             <h2 className="text-sm sm:text-base font-bold text-foreground truncate">
-              {props.title || "AniCat Player"}
+              {props.title || "Anicat Player"}
             </h2>
             <p className="font-mono text-[11px] text-muted-foreground truncate">
               {currentEpTitle}

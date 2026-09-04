@@ -23,15 +23,15 @@ public final class iCloudSyncService: @unchecked Sendable {
 
     private var configJSONURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("AniCat", isDirectory: true).appendingPathComponent("config.json")
+        return appSupport.appendingPathComponent("Anicat", isDirectory: true).appendingPathComponent("config.json")
     }
 
     private var configTOMLURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("AniCat", isDirectory: true).appendingPathComponent("config.toml")
+        return appSupport.appendingPathComponent("Anicat", isDirectory: true).appendingPathComponent("config.toml")
     }
 
-    /// Saves the AniList OAuth token to local Keychain and persists to ~/Library/Application Support/AniCat/config.json.
+    /// Saves the AniList OAuth token to local Keychain and persists to ~/Library/Application Support/Anicat/config.json.
     public func saveAniListToken(_ token: String) -> Bool {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return false }
@@ -67,7 +67,7 @@ public final class iCloudSyncService: @unchecked Sendable {
             print("[iCloudSyncService] Local keychain write returned status: \(status)")
         }
 
-        // 2. Persist to ~/Library/Application Support/AniCat/config.json (matching Tauri config.rs)
+        // 2. Persist to ~/Library/Application Support/Anicat/config.json (matching Tauri config.rs)
         saveTokenToConfigFile(trimmed)
         saveTokenToTOMLFile(trimmed)
 
@@ -79,7 +79,7 @@ public final class iCloudSyncService: @unchecked Sendable {
     /// The Keychain used to be the first stop. That item is access-controlled to
     /// the code signature that created it, and a debug binary is re-signed on
     /// every `swift build` — so each launch presented macOS with an app it did
-    /// not recognise and popped "AniCat wants to use your confidential information
+    /// not recognise and popped "Anicat wants to use your confidential information
     /// stored in \"com.anicat.auth\"" every time. Reading the config file first
     /// (which `saveAniListToken` always writes) skips the Keychain at startup and
     /// the prompt with it; the Keychain stays as a last-resort fallback only.

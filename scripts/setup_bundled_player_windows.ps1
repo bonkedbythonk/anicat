@@ -1,5 +1,5 @@
 # setup_bundled_player_windows.ps1
-# Automates downloading, extracting, and configuring the portable MPV player for AniCat on Windows.
+# Automates downloading, extracting, and configuring the portable MPV player for Anicat on Windows.
 #
 # MPV is obtained via Chocolatey (pre-installed on CI), Winget, or SourceForge fallback.
 # 7-Zip is only needed for the SourceForge fallback path.
@@ -196,7 +196,7 @@ Get-ChildItem -Path "$env:TEMP\anime4k_extract" -Recurse -Filter "*.glsl" | ForE
 Remove-Item -Recurse -Force "$env:TEMP\anime4k_extract" -ErrorAction SilentlyContinue
 Remove-Item -Force $Anime4kZip -ErrorAction SilentlyContinue
 
-Write-Host "=== 7. Generating customized mpv.conf styled for AniCat ==="
+Write-Host "=== 7. Generating customized mpv.conf styled for Anicat ==="
 if (-not (Test-Path "$ConfigDir\mpv.conf")) {
 @"
 # Video Quality Settings

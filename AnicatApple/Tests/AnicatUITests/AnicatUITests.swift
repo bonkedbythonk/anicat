@@ -17,7 +17,7 @@ struct AnicatUITests {
 
     @Test("Anime4K Single Toggle and 6-Shader Chain Exact Matching")
     func testAnime4KSingleToggle() {
-        // Verify official 6-shader chain from Tauri AniCat
+        // Verify official 6-shader chain from Tauri Anicat
         let expectedShaders = [
             "Anime4K_Clamp_Highlights.glsl",
             "Anime4K_Restore_CNN_M.glsl",
@@ -115,7 +115,7 @@ struct AnicatUITests {
 
         // Verify config.json was created
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let configURL = appSupport.appendingPathComponent("AniCat", isDirectory: true).appendingPathComponent("config.json")
+        let configURL = appSupport.appendingPathComponent("Anicat", isDirectory: true).appendingPathComponent("config.json")
         #expect(FileManager.default.fileExists(atPath: configURL.path))
 
         // Clean up

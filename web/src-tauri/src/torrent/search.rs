@@ -1372,7 +1372,7 @@ async fn search_animetosho(
         const TOSHO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
         let request = client
             .get(&url)
-            .header("User-Agent", "AniCat/5.8.0")
+            .header("User-Agent", "Anicat/5.8.0")
             .timeout(TOSHO_TIMEOUT);
         match request.send().await {
             Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {

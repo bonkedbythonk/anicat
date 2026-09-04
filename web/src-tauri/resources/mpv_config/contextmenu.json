@@ -1,5 +1,5 @@
 [
-  { "type": "menu", "title": "AniCat Actions", "items": [
+  { "type": "menu", "title": "Anicat Actions", "items": [
     { "command": "script-message anicat-next-episode", "title": "⏭️ Next Episode" },
     { "command": "script-message anicat-previous-episode", "title": "⏮️ Previous Episode" },
     { "command": "script-message anicat-toggle-auto-next", "title": "🔄 Toggle Auto-Play" },

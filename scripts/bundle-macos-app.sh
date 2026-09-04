@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT/AniCat.app"
+APP_DIR="$ROOT/Anicat.app"
 BIN="$ROOT/AnicatApple/.build/debug/Anicat"
 RESOURCES="$ROOT/AnicatApple/.build/debug/AnicatApple_AnicatUI.bundle"
 ICON="$ROOT/web/src-tauri/icons/icon.icns"
@@ -37,9 +37,9 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <key>CFBundleIdentifier</key>
     <string>com.anicat.desktop</string>
     <key>CFBundleName</key>
-    <string>AniCat</string>
+    <string>Anicat</string>
     <key>CFBundleDisplayName</key>
-    <string>AniCat</string>
+    <string>Anicat</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>

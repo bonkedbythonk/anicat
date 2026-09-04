@@ -1,4 +1,4 @@
-//! AniCat's engine, as a headless library.
+//! Anicat's engine, as a headless library.
 //!
 //! Everything that decides *what to play and where it comes from* lives here:
 //! the catalog clients, the torrent indexer race, the pack layout parser, the

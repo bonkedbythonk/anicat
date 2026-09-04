@@ -119,10 +119,10 @@ local user_opts = {
     shuffle_button = false,                -- show shuffle button
     speed_button = true,                   -- show speed control button
 
-    anicat_skip_button = true,             -- show AniCat skip intro/outro button
-    anicat_upscale_button = true,          -- show AniCat Anime4K upscale toggle button
-    anicat_autoskip_button = true,         -- show AniCat autoskip toggle button
-    anicat_subdub_button = true,           -- show AniCat sub/dub toggle button
+    anicat_skip_button = true,             -- show Anicat skip intro/outro button
+    anicat_upscale_button = true,          -- show Anicat Anime4K upscale toggle button
+    anicat_autoskip_button = true,         -- show Anicat autoskip toggle button
+    anicat_subdub_button = true,           -- show Anicat sub/dub toggle button
 
     buttons_always_active = "none",        -- force buttons to always be active. can add: playlist_prev, playlist_next
 

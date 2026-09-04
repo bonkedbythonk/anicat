@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents the Anime4K real-time neural upscaling state.
-/// Tauri AniCat uses a single toggle (On / Off) backed by the official 6-shader chain.
+/// Tauri Anicat uses a single toggle (On / Off) backed by the official 6-shader chain.
 public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     case off = "Off"
     case on = "On"
@@ -12,7 +12,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     public var displayName: String { rawValue }
 
-    /// Official 6-shader chain from Tauri AniCat (Mode A - Fast)
+    /// Official 6-shader chain from Tauri Anicat (Mode A - Fast)
     /// Source: github.com/bloc97/Anime4K
     public static let shaderFileNames: [String] = [
         "Anime4K_Clamp_Highlights.glsl",
@@ -57,7 +57,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     /// `Bundle.module`'s generated accessor only ever checks `Bundle.main`'s
     /// bundle root (correct for a bare `swift run` executable, where that
     /// root *is* the directory next to the binary) or the `.build` tree — it
-    /// has no case for a real signed `AniCat.app`, and would fatalError
+    /// has no case for a real signed `Anicat.app`, and would fatalError
     /// there before any of this function's own fallbacks ran. A signed app
     /// bundle can only hold the resource bundle under `Contents/Resources`
     /// (codesign refuses anything else sitting loose at the bundle root:

@@ -107,7 +107,7 @@ struct AnicatApp: App {
                 Divider()
             }
 
-            Button("Open AniCat") {
+            Button("Open Anicat") {
                 NSApp.activate(ignoringOtherApps: true)
                 AppWindow.main?.makeKeyAndOrderFront(nil)
             }
@@ -122,7 +122,7 @@ struct AnicatApp: App {
 
             Divider()
 
-            Button("Quit AniCat") {
+            Button("Quit Anicat") {
                 NSApp.terminate(nil)
             }
             .keyboardShortcut("q")

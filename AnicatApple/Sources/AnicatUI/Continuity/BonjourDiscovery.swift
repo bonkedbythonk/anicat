@@ -52,7 +52,7 @@ public final class BonjourDiscovery: @unchecked Sendable {
                     switch state {
                     case .ready:
                         self?.isAdvertising = true
-                        print("[Bonjour] Advertising AniCat local stream node on port \(port)")
+                        print("[Bonjour] Advertising Anicat local stream node on port \(port)")
                     case .failed(let error):
                         self?.isAdvertising = false
                         print("[Bonjour] Advertising failed: \(error)")
@@ -77,7 +77,7 @@ public final class BonjourDiscovery: @unchecked Sendable {
 
     // MARK: - iOS: Browse for Running Mac Node on Local Wi-Fi
 
-    /// Starts scanning local Wi-Fi for an active AniCat Mac instance to offload torrent streaming.
+    /// Starts scanning local Wi-Fi for an active Anicat Mac instance to offload torrent streaming.
     public func startBrowsing() {
         guard browser == nil else { return }
 

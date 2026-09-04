@@ -2,7 +2,7 @@
 set -e
 
 # setup_bundled_player.sh
-# Automates downloading, extracting, and configuring the portable MPV companion player for AniCat.
+# Automates downloading, extracting, and configuring the portable MPV companion player for Anicat.
 
 RESOURCES_DIR="web/src-tauri/resources"
 CONFIG_DIR="$RESOURCES_DIR/mpv_config"
@@ -106,7 +106,7 @@ echo "=== 5. Fetching Anime4K real-time upscaling shaders ==="
 curl -L -o /tmp/anime4k.zip https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip
 unzip -q -o /tmp/anime4k.zip "*.glsl" -d "$CONFIG_DIR/shaders/"
 
-echo "=== 6. Generating customized mpv.conf styled for AniCat ==="
+echo "=== 6. Generating customized mpv.conf styled for Anicat ==="
 # Only a fallback: the real mpv.conf is committed at this path and is the
 # source of truth, so this heredoc normally never runs. Keep it in sync with
 # the committed file (audio-buffer / audio-stream-silence / hwdec choices are
@@ -162,7 +162,7 @@ fi
 [ -f "$CONFIG_DIR/scripts/anicat_ui/main.lua" ] || cp web/src-tauri/resources/mpv_config/scripts/anicat_ui/main.lua "$CONFIG_DIR/scripts/anicat_ui/main.lua" 2>/dev/null || true
 [ -f "$CONFIG_DIR/input.conf" ] || cp web/src-tauri/resources/mpv_config/input.conf "$CONFIG_DIR/input.conf" 2>/dev/null || true
 
-echo "=== 8. Deploying customized modernz.conf styled with AniCat accents ==="
+echo "=== 8. Deploying customized modernz.conf styled with Anicat accents ==="
 [ -f "$CONFIG_DIR/script-opts/modernz.conf" ] || cp web/src-tauri/resources/mpv_config/script-opts/modernz.conf "$CONFIG_DIR/script-opts/modernz.conf" 2>/dev/null || true
 
 echo "=== Cleaning up temporary files ==="

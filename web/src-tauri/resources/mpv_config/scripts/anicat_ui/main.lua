@@ -578,14 +578,14 @@ notify_backend = function(action, sync, manual)
   local function report(success, result, err)
     if not success then
       msg.error("Failed to notify backend: " .. tostring(err or "unknown error"))
-      mp.osd_message('AniCat connection failed.', 3.0)
+      mp.osd_message('Anicat connection failed.', 3.0)
       return
     end
     local status = type(result) == "table" and result.status or 0
     if status ~= 0 then
       msg.error(string.format(
         "Backend callback '%s' failed: curl exited %s for %s", tostring(action), tostring(status), url))
-      mp.osd_message('AniCat connection failed.', 3.0)
+      mp.osd_message('Anicat connection failed.', 3.0)
     end
   end
 
@@ -874,7 +874,7 @@ local function register_script_messages()
   end)
 
   -- Force bind action keys directly so other scripts / user input.conf can't
-  -- shadow the AniCat next/prev/skip bindings.
+  -- shadow the Anicat next/prev/skip bindings.
   if mp.add_forced_key_binding then
     mp.add_forced_key_binding('N', 'anicat-next-key', function() play_next(nil, true) end)
     mp.add_forced_key_binding('P', 'anicat-prev-key', function() play_prev(nil) end)

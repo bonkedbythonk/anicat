@@ -1,5 +1,6 @@
 # Apple / macOS
 *.app/
+Anicat.app/
 AniCat.app/
 
 # Python

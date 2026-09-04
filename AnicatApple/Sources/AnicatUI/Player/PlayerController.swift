@@ -4,7 +4,7 @@ import Observation
 #if os(macOS)
 import AppKit
 
-/// The real AniCat content window, set once by `WindowConfigurator` in the
+/// The real Anicat content window, set once by `WindowConfigurator` in the
 /// app target the moment SwiftUI hands it a window. `NSApp.keyWindow` is
 /// racy during any transition where something else (mpv's render view, a
 /// sheet, a popover) could briefly hold key status — this is the one

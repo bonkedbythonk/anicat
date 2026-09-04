@@ -1191,7 +1191,7 @@ impl TorrentManager {
 
             let dest_dir = dirs::download_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join("AniCat")
+                .join("Anicat")
                 .join(sanitize_path_component(&display_title));
             let file_name = relative_filename
                 .file_name()

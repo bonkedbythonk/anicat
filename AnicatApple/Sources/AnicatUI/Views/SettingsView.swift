@@ -870,7 +870,7 @@ public struct SettingsView: View {
                 Button {
                     #if os(macOS)
                     let report = """
-                    AniCat Version: 1.0.0 (Native Apple Silicon ARM64)
+                    Anicat Version: 1.0.0 (Native Apple Silicon ARM64)
                     Platform: macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
                     Architecture: arm64
                     Signed In: \(isSignedIn)
@@ -884,7 +884,7 @@ public struct SettingsView: View {
                         copyFeedback = "Debug report copied to clipboard!"
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        withAnimation(.easeIn(duration: 0.2)) {
+                        withAnimation(.snappy) {
                             copyFeedback = nil
                         }
                     }
@@ -1161,7 +1161,7 @@ private struct SumiSwitch: View {
 
     var body: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
+            withAnimation(.snappy) {
                 isOn.toggle()
             }
         } label: {

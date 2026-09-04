@@ -12,6 +12,18 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
+
+/// AniZip is a small JSON payload and normally answers in well under a
+/// second (measured against the live API: 50-150ms). This bounds the rare
+/// slow/hanging case rather than leaving it unbounded like a plain
+/// `.send()` would — every other network client in this codebase sets a
+/// request timeout for exactly this reason (see `anilist/client.rs`'s
+/// comment on why an untimed call can wedge the whole request queue behind
+/// it). Without one here, a degraded AniZip host turned "open an anime" into
+/// an indefinite spinner even though the episode list it enriches doesn't
+/// need it to load at all.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AniZipEpisode {
@@ -27,7 +39,7 @@ pub struct AniZipEpisode {
 /// episode list fails to load.
 pub async fn fetch(http: &reqwest::Client, anilist_id: i64) -> HashMap<i32, AniZipEpisode> {
     let url = format!("https://api.ani.zip/mappings?anilist_id={anilist_id}");
-    let Ok(res) = http.get(&url).send().await else {
+    let Ok(res) = http.get(&url).timeout(REQUEST_TIMEOUT).send().await else {
         return HashMap::new();
     };
     if !res.status().is_success() {

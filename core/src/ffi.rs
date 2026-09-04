@@ -794,11 +794,21 @@ impl AnicatEngine {
 
     /// One title, with its episode list and this device's progress folded in.
     pub async fn media_detail(&self, catalog_id: i64, is_manga: bool) -> FfiResult<MediaDetail> {
-        let res = self
-            .catalogs
-            .media_detail(catalog_id, is_manga)
-            .await
-            .map_err(|msg| AnicatError::Network { msg })?;
+        // AniZip only needs `catalog_id`, not anything from the AniList
+        // response, so it doesn't have to wait for AniList to answer first —
+        // running them together instead of one-after-the-other cuts a
+        // detail-page open down to whichever of the two is slower, not their
+        // sum. A manga entry has no episodes to enrich, so it skips straight
+        // to an empty map rather than spending a request on AniZip's 404.
+        let anizip_fut = async {
+            if is_manga {
+                std::collections::HashMap::new()
+            } else {
+                self.anizip_meta(catalog_id).await
+            }
+        };
+        let (detail_res, anizip) = tokio::join!(self.catalogs.media_detail(catalog_id, is_manga), anizip_fut);
+        let res = detail_res.map_err(|msg| AnicatError::Network { msg })?;
         let m = res.media.ok_or_else(|| AnicatError::NotFound {
             msg: format!("AniList has no media {catalog_id}"),
         })?;
@@ -842,14 +852,6 @@ impl AnicatEngine {
                 }
             }
         }
-
-        // AniZip is anime-episode metadata; a manga entry has no episodes to
-        // enrich and would just spend a request on a 404.
-        let anizip = if is_manga {
-            std::collections::HashMap::new()
-        } else {
-            self.anizip_meta(catalog_id).await
-        };
 
         let mut episodes = Vec::new();
         for number in 1..=episode_count {

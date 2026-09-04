@@ -392,8 +392,32 @@ query ($mediaId: Int, $page: Int, $perPage: Int) {
 }
 "#;
 
+pub const MEDIA_DISCUSSIONS_QUERY: &str = r#"
+query ($id: Int) {
+  Page(page: 1, perPage: 25) {
+    threads(mediaCategoryId: $id, sort: [REPLIED_AT_DESC]) {
+      id
+      title
+      replyCount
+      viewCount
+      repliedAt
+      createdAt
+      user {
+        id
+        name
+        avatar {
+          medium
+          large
+        }
+      }
+    }
+  }
+}
+"#;
+
 #[derive(Debug, Serialize)]
 pub struct GraphQLRequest {
     pub query: String,
     pub variables: HashMap<String, serde_json::Value>,
 }
+

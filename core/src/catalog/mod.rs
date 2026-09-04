@@ -5,6 +5,7 @@
 //! after AniList is history, not a claim about where a row came from.
 
 pub mod anilist;
+pub mod anizip;
 pub mod cache;
 pub mod tmdb;
 
@@ -220,6 +221,40 @@ impl Catalogs {
             self.cache.set(key, v, "media_detail");
         }
         Ok(result)
+    }
+
+    /// Fetches the cast and staff (characters and voice actors) for an AniList media id.
+    pub async fn media_characters(
+        &self,
+        media_id: i64,
+    ) -> Result<Vec<anilist::types::CharacterEdge>, String> {
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(media_id));
+        vars.insert("page".to_string(), serde_json::json!(1));
+        vars.insert("perPage".to_string(), serde_json::json!(30));
+        let res: anilist::responses::CharacterResponse = self
+            .anilist
+            .execute(anilist::queries::MEDIA_CHARACTERS_QUERY, vars)
+            .await?;
+        Ok(res
+            .media
+            .and_then(|m| m.characters)
+            .and_then(|c| c.edges)
+            .unwrap_or_default())
+    }
+
+    /// Fetches community discussion threads for an AniList media id.
+    pub async fn media_discussions(
+        &self,
+        media_id: i64,
+    ) -> Result<Vec<anilist::responses::DiscussionThreadItem>, String> {
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(media_id));
+        let res: anilist::responses::DiscussionResponse = self
+            .anilist
+            .execute(anilist::queries::MEDIA_DISCUSSIONS_QUERY, vars)
+            .await?;
+        Ok(res.page.threads.unwrap_or_default())
     }
 
     /// Creates or updates the signed-in user's list entry for a title.

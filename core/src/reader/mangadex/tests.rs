@@ -20,6 +20,12 @@ fn an_anilist_linked_result_outranks_a_better_title_match() {
     assert_eq!(ranked[0].id, "right");
     assert_eq!(ranked[0].cover_image, "https://uploads.mangadex.org/covers/right/c.jpg.512.jpg");
     assert_eq!(ranked.len(), 2);
+    // The caller's whole reason for wanting this field: distinguishing "this
+    // IS the manga, AniList said so" from "this just matched the search
+    // text" so it knows an empty chapter list on the linked one is the real
+    // answer, not a cue to keep trying other results.
+    assert!(ranked[0].matches_anilist);
+    assert!(!ranked[1].matches_anilist);
 }
 
 #[test]

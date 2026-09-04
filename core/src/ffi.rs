@@ -18,6 +18,7 @@ use crate::catalog::{anilist, Catalogs};
 use crate::db::{Catalog, Registry};
 use crate::media::MediaKey;
 use crate::reader::mangadex::MangaDexClient;
+use crate::reader::mangakatana::MangaKatanaClient;
 use crate::torrent::{layout, ResolveTarget, TorrentManager};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -102,6 +103,10 @@ pub struct MangaSummary {
     pub id: String,
     pub title: String,
     pub cover_image: String,
+    /// MangaDex's own `links.al` confirms this result IS the searched-for
+    /// AniList entry, not merely a plausible title match. See
+    /// `reader::mangadex::MangaSummary` for why the caller needs this.
+    pub matches_anilist: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -148,6 +153,8 @@ pub struct ViewerProfile {
     pub manga_mean_score: Option<f64>,
     /// Most-watched genres, already ordered by count.
     pub top_genres: Vec<String>,
+    pub favourite_anime: Vec<MediaSummary>,
+    pub favourite_manga: Vec<MediaSummary>,
 }
 
 /// A neighbouring entry in a franchise, for the detail page's season chain.
@@ -175,6 +182,53 @@ pub struct EpisodeRow {
     /// 0-100 through the episode, from the local registry.
     pub progress_percent: f64,
     pub runtime_minutes: Option<i32>,
+    /// From AniZip. AniList has no per-episode synopsis at all, so this is
+    /// `None` for any episode AniZip has no mapping for.
+    pub synopsis: Option<String>,
+    /// From AniZip, `YYYY-MM-DD`. Same caveat as `synopsis`.
+    pub air_date: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCharacter {
+    pub id: i64,
+    pub name: String,
+    pub role: String,
+    pub image_url: Option<String>,
+    pub voice_actor_name: Option<String>,
+    pub voice_actor_image_url: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiRelation {
+    pub catalog_id: i64,
+    pub relation_type: String,
+    pub title: String,
+    pub format: Option<String>,
+    pub cover_image: String,
+    pub status: Option<String>,
+    pub average_score: Option<i32>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiRecommendation {
+    pub catalog_id: i64,
+    pub title: String,
+    pub format: Option<String>,
+    pub cover_image: String,
+    pub average_score: Option<i32>,
+    pub rating: Option<i32>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDiscussion {
+    pub id: i64,
+    pub title: String,
+    pub reply_count: i32,
+    pub view_count: i32,
+    pub author_name: Option<String>,
+    pub author_avatar_url: Option<String>,
+    pub replied_at: Option<i64>,
 }
 
 /// Everything the detail page draws.
@@ -202,6 +256,8 @@ pub struct MediaDetail {
     pub resume_seconds: Option<i32>,
     pub prequel: Option<RelatedTitle>,
     pub sequel: Option<RelatedTitle>,
+    pub relations: Vec<FfiRelation>,
+    pub recommendations: Vec<FfiRecommendation>,
     pub episodes: Vec<EpisodeRow>,
     /// `CURRENT`, `PLANNING`, `COMPLETED`, `DROPPED`, `PAUSED`, `REPEATING`,
     /// or `None` when this title isn't on the signed-in user's list at all.
@@ -247,6 +303,48 @@ pub struct StreamRequest {
     pub resume_fraction: Option<f64>,
 }
 
+/// Status of a "Download Episode" — mirrors `torrent::EpisodeDownloadStatus`,
+/// which has no uniffi derive for the same reason `FfiTorrentChoice` doesn't
+/// share one with `TorrentChoice`.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiDownloadStatus {
+    NotStarted,
+    Downloading { percent: f64 },
+    Done { path: String },
+    Failed { message: String },
+}
+
+impl From<crate::torrent::EpisodeDownloadStatus> for FfiDownloadStatus {
+    fn from(s: crate::torrent::EpisodeDownloadStatus) -> Self {
+        match s {
+            crate::torrent::EpisodeDownloadStatus::NotStarted => Self::NotStarted,
+            crate::torrent::EpisodeDownloadStatus::Downloading { percent } => Self::Downloading { percent },
+            crate::torrent::EpisodeDownloadStatus::Done { path } => Self::Done { path },
+            crate::torrent::EpisodeDownloadStatus::Failed { message } => Self::Failed { message },
+        }
+    }
+}
+
+/// One release from the indexers, for the "Stream Servers" picker. Mirrors
+/// `torrent::TorrentChoice` — a separate type because that one is a plain
+/// crate-internal struct with no uniffi derive, and adding one there would
+/// pull uniffi into a module that has no other reason to know about FFI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTorrentChoice {
+    pub name: String,
+    pub seeders: u64,
+    pub is_dub: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SearchFilters {
+    pub genre: Option<String>,
+    pub year: Option<i32>,
+    pub min_score: Option<i32>,
+    pub status: Option<String>,
+    pub sort: Option<String>,
+}
+
 /// The engine. One per app launch.
 #[derive(uniffi::Object)]
 pub struct AnicatEngine {
@@ -255,6 +353,7 @@ pub struct AnicatEngine {
     registry: Registry,
     torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
+    mangakatana: MangaKatanaClient,
     /// Started on the first resolve rather than in the constructor, which is
     /// sync and so has no runtime to bind a listener on. `OnceCell` rather
     /// than a flag: two resolves racing must produce one server, not two.
@@ -282,6 +381,7 @@ impl AnicatEngine {
             registry,
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
+            mangakatana: MangaKatanaClient::new(http.clone()),
             http,
             stream_port: tokio::sync::OnceCell::new(),
         }))
@@ -317,15 +417,35 @@ impl AnicatEngine {
     }
 
     pub async fn search_anime(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(query, "ANIME").await
+        self.search_catalog(Some(query), Some("ANIME".to_string()), None).await
     }
 
     pub async fn search_manga_catalog(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(query, "MANGA").await
+        self.search_catalog(Some(query), Some("MANGA".to_string()), None).await
     }
 
     pub async fn search_novel(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog_with_format(query, "MANGA", "NOVEL").await
+        self.search_catalog(Some(query), Some("NOVEL".to_string()), None).await
+    }
+
+    pub async fn search_catalog(
+        &self,
+        query: Option<String>,
+        media_type: Option<String>,
+        filters: Option<SearchFilters>,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        let vars = build_search_variables(
+            query.as_deref(),
+            media_type.as_deref(),
+            filters.as_ref(),
+        );
+        let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
+            .catalogs
+            .anilist
+            .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
     }
 
     /// Find a torrent for an episode and hand back what the player opens.
@@ -397,6 +517,160 @@ impl AnicatEngine {
         })
     }
 
+    /// Every release the indexers found for one episode, best first — the
+    /// "Stream Servers" picker's list. A separate call from `resolve_stream`
+    /// rather than a byproduct of it: the auto-pick only races the top two
+    /// and keeps two more as fallbacks (see `torrent/search.rs`'s header
+    /// comment), so it never even looks at most of what a full search turns
+    /// up, and doesn't need to — the picker is the one place that does.
+    pub async fn list_release_candidates(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        title: Option<String>,
+    ) -> FfiResult<Vec<FfiTorrentChoice>> {
+        if catalog != FfiCatalog::Anilist {
+            return Err(AnicatError::NotFound {
+                msg: format!("{:?} playback is not wired up yet", catalog),
+            });
+        }
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title).await;
+        if info.titles.is_empty() {
+            return Err(AnicatError::NotFound {
+                msg: format!("no search titles for {media}"),
+            });
+        }
+
+        let preview_dub = false;
+        let choices = self
+            .torrents
+            .list_candidates(
+                &self.http,
+                ResolveTarget {
+                    media,
+                    episode,
+                    titles: &info.titles,
+                    allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
+                    episode_count: info.episode_count,
+                    // The picker shows every release regardless of dub
+                    // preference — that choice belongs to whoever is
+                    // picking, not to the same default the auto-pick uses.
+                    prefer_dub: preview_dub,
+                    browser_client: false,
+                    chosen_name: None,
+                    movie: None,
+                    series: None,
+                    entry: info.hint,
+                    sibling_titles: &info.siblings,
+                    resume_fraction: None,
+                },
+            )
+            .await;
+
+        Ok(choices
+            .into_iter()
+            .map(|c| FfiTorrentChoice {
+                name: c.name,
+                seeders: c.seeders,
+                is_dub: c.is_dub,
+            })
+            .collect())
+    }
+
+    /// Starts downloading one episode to the user's Downloads folder,
+    /// resolving it exactly like a play would (same candidate search, same
+    /// release). Returns once the download has *started*, not once it's
+    /// done — poll `episode_download_status` for progress. Calling this
+    /// again for the same episode while a download is already running or
+    /// finished is a no-op on the core side (`spawn_episode_download`
+    /// dedupes on `(torrent_id, file_id)`), so a second tap of the button
+    /// before the first status poll lands doesn't start a second copy.
+    pub async fn start_episode_download(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        title: Option<String>,
+        prefer_dub: bool,
+    ) -> FfiResult<()> {
+        if catalog != FfiCatalog::Anilist {
+            return Err(AnicatError::NotFound {
+                msg: format!("{:?} downloads are not wired up yet", catalog),
+            });
+        }
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title.clone()).await;
+        if info.titles.is_empty() {
+            return Err(AnicatError::NotFound {
+                msg: format!("no search titles for {media}"),
+            });
+        }
+        // The proxy port is irrelevant to a download (nothing streams it
+        // over HTTP), but `resolve` builds its return value from it
+        // regardless — cheaper to hand it a real one than to special-case a
+        // download-only resolve path.
+        let port = self.ensure_stream_server().await?;
+        self.torrents
+            .resolve(
+                &self.http,
+                ResolveTarget {
+                    media,
+                    episode,
+                    titles: &info.titles,
+                    allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
+                    episode_count: info.episode_count,
+                    prefer_dub,
+                    browser_client: false,
+                    chosen_name: None,
+                    movie: None,
+                    series: None,
+                    entry: info.hint,
+                    sibling_titles: &info.siblings,
+                    resume_fraction: None,
+                },
+                port,
+            )
+            .await
+            .map_err(|msg| AnicatError::NotFound { msg })?;
+
+        let (torrent_id, file_id) = self
+            .torrents
+            .resolved_ids(media, episode)
+            .await
+            .ok_or_else(|| AnicatError::Internal {
+                msg: "resolve returned nothing to download".into(),
+            })?;
+
+        let session = self.torrents.session().await.map_err(|msg| AnicatError::Internal { msg })?;
+        let display_title = title.unwrap_or_else(|| info.titles[0].clone());
+        self.torrents.spawn_episode_download(&session, torrent_id, file_id, display_title);
+        Ok(())
+    }
+
+    /// Progress of a download started with `start_episode_download`, or
+    /// `NotStarted` if this episode was never resolved at all (before any
+    /// play or download attempt) — a caller can't tell that case apart from
+    /// "resolved but no download running" without an extra round trip, but
+    /// the episode row only ever polls this after it has already shown a
+    /// download in progress, so the distinction doesn't reach the UI.
+    pub async fn episode_download_status(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+    ) -> FfiDownloadStatus {
+        if catalog != FfiCatalog::Anilist {
+            return FfiDownloadStatus::NotStarted;
+        }
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        let Some((torrent_id, file_id)) = self.torrents.resolved_ids(media, episode).await else {
+            return FfiDownloadStatus::NotStarted;
+        };
+        self.torrents.download_status(torrent_id, file_id).await.into()
+    }
+
     /// One status bucket of the user's AniList list.
     ///
     /// `status` is an AniList `MediaListStatus` (`CURRENT`, `COMPLETED`,
@@ -464,6 +738,20 @@ impl AnicatEngine {
         })?;
         let anime = v.statistics.as_ref().and_then(|s| s.anime.as_ref());
         let manga = v.statistics.as_ref().and_then(|s| s.manga.as_ref());
+        let favourite_anime = v
+            .favourites
+            .as_ref()
+            .and_then(|f| f.anime.as_ref())
+            .and_then(|c| c.nodes.as_ref())
+            .map(|nodes| nodes.iter().map(summarize).collect())
+            .unwrap_or_default();
+        let favourite_manga = v
+            .favourites
+            .as_ref()
+            .and_then(|f| f.manga.as_ref())
+            .and_then(|c| c.nodes.as_ref())
+            .map(|nodes| nodes.iter().map(summarize).collect())
+            .unwrap_or_default();
         Ok(ViewerProfile {
             name: v.name.unwrap_or_default(),
             avatar_url: v.avatar.as_ref().and_then(|a| a.large.clone().or_else(|| a.medium.clone())),
@@ -479,6 +767,8 @@ impl AnicatEngine {
                 .and_then(|a| a.genres.as_ref())
                 .map(|g| g.iter().filter_map(|x| x.genre.clone()).collect())
                 .unwrap_or_default(),
+            favourite_anime,
+            favourite_manga,
         })
     }
 
@@ -520,6 +810,16 @@ impl AnicatEngine {
 
         let episode_count = m.episodes.unwrap_or(0);
         let streaming = m.streaming_episodes.clone().unwrap_or_default();
+        // AniList's own progress on this title's list entry. The local
+        // watch-history registry is per-device — a fresh install (or a
+        // second Mac) has none of it even for a title watched to episode 10
+        // elsewhere, and every episode read back as unwatched with the
+        // primary button offering "Start Episode 1". `is_watched` below
+        // treats an episode as watched when EITHER source says so, so the
+        // device that actually played it keeps its precise resume-seconds
+        // behavior while every other device still opens on the right
+        // episode.
+        let list_progress = m.media_list_entry.as_ref().and_then(|e| e.progress);
 
         // AniList streaming_episodes often lists episodes in reverse order (e.g. Ep 12 down to 1).
         // Map each streaming episode by parsing the episode number from its title:
@@ -543,6 +843,14 @@ impl AnicatEngine {
             }
         }
 
+        // AniZip is anime-episode metadata; a manga entry has no episodes to
+        // enrich and would just spend a request on a 404.
+        let anizip = if is_manga {
+            std::collections::HashMap::new()
+        } else {
+            self.anizip_meta(catalog_id).await
+        };
+
         let mut episodes = Vec::new();
         for number in 1..=episode_count {
             let entry = history.iter().find(|e| e.episode_number == number as i64);
@@ -557,6 +865,8 @@ impl AnicatEngine {
             let from_stream = stream_by_num.get(&number).copied().or_else(|| {
                 streaming.get((number - 1) as usize)
             });
+
+            let az = anizip.get(&number);
 
             let raw_title = from_stream
                 .and_then(|s| s.title.clone())
@@ -580,13 +890,26 @@ impl AnicatEngine {
                 }
             };
 
+            // AniZip is keyed by episode number and carries real titles and
+            // stills; AniList's streamingEpisodes is a positional array
+            // scraped from streaming sites that drifts on shows with
+            // specials or numbering gaps. AniZip wins wherever it has an
+            // answer for this number.
+            let title = az.and_then(|a| a.title.clone()).unwrap_or(clean_title);
+            let thumbnail = az
+                .and_then(|a| a.thumbnail.clone())
+                .or_else(|| from_stream.and_then(|s| s.thumbnail.clone()));
+            let runtime_minutes = az.and_then(|a| a.runtime_minutes).or(m.duration);
+
             episodes.push(EpisodeRow {
                 number,
-                title: clean_title,
-                thumbnail: from_stream.and_then(|s| s.thumbnail.clone()),
-                is_watched: percent >= 85.0,
+                title,
+                thumbnail,
+                is_watched: episode_is_watched(number, percent, list_progress),
                 progress_percent: percent,
-                runtime_minutes: m.duration,
+                runtime_minutes,
+                synopsis: az.and_then(|a| a.overview.clone()),
+                air_date: az.and_then(|a| a.air_date.clone()),
             });
         }
 
@@ -599,6 +922,60 @@ impl AnicatEngine {
             .max_by_key(|e| e.episode_number);
 
         let (prequel, sequel) = relations(&m);
+
+        let mut relations_list = Vec::new();
+        if let Some(edges) = m.relations.as_ref().and_then(|r| r.edges.as_ref()) {
+            for edge in edges {
+                if let Some(ref node) = edge.node {
+                    let rel_type = edge.relation_type.clone().unwrap_or_else(|| "RELATED".to_string());
+                    let title = node
+                        .title
+                        .as_ref()
+                        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                        .unwrap_or_default();
+                    let cover = node
+                        .cover_image
+                        .as_ref()
+                        .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                        .unwrap_or_default();
+                    relations_list.push(FfiRelation {
+                        catalog_id: node.id,
+                        relation_type: rel_type,
+                        title,
+                        format: node.format.clone(),
+                        cover_image: cover,
+                        status: node.status.clone(),
+                        average_score: node.average_score,
+                    });
+                }
+            }
+        }
+
+        let mut recommendations_list = Vec::new();
+        if let Some(nodes) = m.recommendations.as_ref().and_then(|r| r.nodes.as_ref()) {
+            for node in nodes {
+                if let Some(ref rec) = node.media_recommendation {
+                    let title = rec
+                        .title
+                        .as_ref()
+                        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                        .unwrap_or_default();
+                    let cover = rec
+                        .cover_image
+                        .as_ref()
+                        .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                        .unwrap_or_default();
+                    recommendations_list.push(FfiRecommendation {
+                        catalog_id: rec.id,
+                        title,
+                        format: rec.format.clone(),
+                        cover_image: cover,
+                        average_score: rec.average_score,
+                        rating: node.rating,
+                    });
+                }
+            }
+        }
 
         Ok(MediaDetail {
             catalog_id,
@@ -633,6 +1010,8 @@ impl AnicatEngine {
             resume_seconds: resume.map(|e| e.stop_time as i32),
             prequel,
             sequel,
+            relations: relations_list,
+            recommendations: recommendations_list,
             episodes,
             list_status: m.media_list_entry.as_ref().and_then(|e| e.status.clone()),
             user_score: m.media_list_entry.as_ref().and_then(|e| e.score),
@@ -691,16 +1070,18 @@ impl AnicatEngine {
                 id: m.id,
                 title: m.title,
                 cover_image: m.cover_image,
+                matches_anilist: m.matches_anilist,
             })
             .collect())
     }
 
     pub async fn get_manga_chapters(&self, manga_id: String) -> FfiResult<Vec<MangaChapter>> {
-        let detail = self
-            .mangadex
-            .detail(&manga_id)
-            .await
-            .map_err(|msg| AnicatError::Network { msg })?;
+        let detail = if is_mangakatana_id(&manga_id) {
+            self.mangakatana.detail(&manga_id).await
+        } else {
+            self.mangadex.detail(&manga_id).await
+        }
+        .map_err(|msg| AnicatError::Network { msg })?;
         Ok(detail
             .chapters
             .into_iter()
@@ -714,10 +1095,34 @@ impl AnicatEngine {
     }
 
     pub async fn get_manga_pages(&self, chapter_id: String) -> FfiResult<Vec<String>> {
-        self.mangadex
-            .chapter_pages(&chapter_id)
+        if is_mangakatana_id(&chapter_id) {
+            self.mangakatana.chapter_pages(&chapter_id).await
+        } else {
+            self.mangadex.chapter_pages(&chapter_id).await
+        }
+        .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// Fallback search against MangaKatana, tried only after MangaDex has
+    /// confirmed the AniList match but come up with no readable chapters —
+    /// see `reader::mangakatana`'s module comment for why. MangaKatana has
+    /// no AniList cross-reference, so every result comes back with
+    /// `matches_anilist: false`.
+    pub async fn search_manga_katana(&self, query: String) -> FfiResult<Vec<MangaSummary>> {
+        let out = self
+            .mangakatana
+            .search(&query)
             .await
-            .map_err(|msg| AnicatError::Network { msg })
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(out
+            .into_iter()
+            .map(|m| MangaSummary {
+                id: m.id,
+                title: m.title,
+                cover_image: m.cover_image,
+                matches_anilist: m.matches_anilist,
+            })
+            .collect())
     }
 
     pub fn record_progress(
@@ -731,6 +1136,12 @@ impl AnicatEngine {
         self.registry
             .record_progress(catalog.into(), catalog_id, episode_number, stop_time, duration)
             .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// Wipes resume positions, provider overrides, the offline list mirror,
+    /// and per-show prefs. Settings' "Clear Local Registry" action.
+    pub fn clear_local_registry(&self) -> FfiResult<()> {
+        self.registry.clear_all().map_err(|msg| AnicatError::Storage { msg })
     }
 
     pub fn get_progress(
@@ -749,6 +1160,54 @@ impl AnicatEngine {
             duration: e.duration,
         }))
     }
+
+    /// Fetches the cast and staff for an AniList media id.
+    pub async fn media_characters(&self, catalog_id: i64) -> FfiResult<Vec<FfiCharacter>> {
+        let edges = self
+            .catalogs
+            .media_characters(catalog_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(edges
+            .into_iter()
+            .filter_map(|e| {
+                let node = e.node?;
+                let va = e.voice_actors.as_ref().and_then(|vas| {
+                    vas.iter().find(|v| v.language.as_deref() == Some("JAPANESE"))
+                        .or_else(|| vas.first())
+                });
+                Some(FfiCharacter {
+                    id: node.id,
+                    name: node.name.and_then(|n| n.full.or(n.native)).unwrap_or_default(),
+                    role: e.role.unwrap_or_else(|| "MAIN".to_string()),
+                    image_url: node.image.and_then(|i| i.large.or(i.medium)),
+                    voice_actor_name: va.and_then(|v| v.name.as_ref().and_then(|n| n.full.clone())),
+                    voice_actor_image_url: va.and_then(|v| v.image.as_ref().and_then(|i| i.large.clone().or_else(|| i.medium.clone()))),
+                })
+            })
+            .collect())
+    }
+
+    /// Fetches community discussions for an AniList media id.
+    pub async fn media_discussions(&self, catalog_id: i64) -> FfiResult<Vec<FfiDiscussion>> {
+        let threads = self
+            .catalogs
+            .media_discussions(catalog_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(threads
+            .into_iter()
+            .map(|t| FfiDiscussion {
+                id: t.id,
+                title: t.title,
+                reply_count: t.reply_count.unwrap_or(0),
+                view_count: t.view_count.unwrap_or(0),
+                author_name: t.user.as_ref().and_then(|u| u.name.clone()),
+                author_avatar_url: t.user.as_ref().and_then(|u| u.avatar.as_ref().and_then(|a| a.large.clone().or_else(|| a.medium.clone()))),
+                replied_at: t.replied_at.or(t.created_at),
+            })
+            .collect())
+    }
 }
 
 impl AnicatEngine {
@@ -760,41 +1219,112 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Internal { msg })
     }
 
-    async fn search_catalog(&self, query: String, media_type: &str) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog_impl(query, media_type, None).await
-    }
-
-    async fn search_catalog_with_format(
-        &self,
-        query: String,
-        media_type: &str,
-        format: &str,
-    ) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog_impl(query, media_type, Some(format)).await
-    }
-
-    async fn search_catalog_impl(
-        &self,
-        query: String,
-        media_type: &str,
-        format: Option<&str>,
-    ) -> FfiResult<Vec<MediaSummary>> {
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("search".to_string(), serde_json::json!(query));
-        vars.insert("type".to_string(), serde_json::json!(media_type));
-        vars.insert("page".to_string(), serde_json::json!(1));
-        vars.insert("perPage".to_string(), serde_json::json!(25));
-        if let Some(f) = format {
-            vars.insert("format".to_string(), serde_json::json!([f]));
+    /// Cached wrapper around `catalog::anizip::fetch`. Not part of the
+    /// `#[uniffi::export]` impl block above — `AniZipEpisode`/`HashMap`
+    /// have no uniffi `Lower` impl, and nothing outside this crate needs to
+    /// call it directly. `anizip::fetch` itself never errors (a failed or
+    /// unmapped id just returns empty), so there is nothing here to
+    /// propagate — only a cache to check and fill.
+    async fn anizip_meta(&self, anilist_id: i64) -> std::collections::HashMap<i32, crate::catalog::anizip::AniZipEpisode> {
+        let key = crate::catalog::cache::AniListCache::key("anizip_meta", &[("id", &anilist_id.to_string())]);
+        if let Some(cached) = self.catalogs.cache.get(&key) {
+            if let Ok(map) = serde_json::from_value(cached) {
+                return map;
+            }
         }
-        let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
-            .catalogs
-            .anilist
-            .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
-            .await
-            .map_err(|msg| AnicatError::Network { msg })?;
-        Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
+        let map = crate::catalog::anizip::fetch(&self.http, anilist_id).await;
+        if let Ok(v) = serde_json::to_value(&map) {
+            self.catalogs.cache.set(key, v, "anizip_meta");
+        }
+        map
     }
+}
+
+/// An episode counts as watched when EITHER source says so: the local
+/// watch-history registry (>=85%, the same threshold the player itself uses
+/// to advance AniList progress) or AniList's own list progress. The registry
+/// is per-device — a title watched to episode 10 on another Mac, or through
+/// the Tauri build, has zero rows in a fresh install's SQLite file, and
+/// checking only that source read every episode back as unwatched with the
+/// primary button offering "Start Episode 1" regardless of what AniList
+/// said. AniList has no per-second position, so it can only ever confirm
+/// whole episodes — the local source still owns `resume_seconds`.
+fn episode_is_watched(number: i32, local_percent: f64, anilist_progress: Option<i32>) -> bool {
+    local_percent >= 85.0 || anilist_progress.is_some_and(|p| number <= p)
+}
+
+/// MangaKatana ids are the site's own page URLs (it has no numeric id of its
+/// own); MangaDex ids are UUIDs. That is enough to route a manga/chapter id
+/// back to the client that produced it without adding a second
+/// provider-tagging field to `MangaSummary`/`MangaChapter`.
+fn is_mangakatana_id(id: &str) -> bool {
+    id.starts_with("http")
+}
+
+fn build_search_variables(
+    query: Option<&str>,
+    media_type: Option<&str>,
+    filters: Option<&SearchFilters>,
+) -> std::collections::HashMap<String, serde_json::Value> {
+    let mut vars = std::collections::HashMap::new();
+
+    let trimmed_query = query.map(str::trim).filter(|s| !s.is_empty());
+    vars.insert(
+        "search".to_string(),
+        match trimmed_query {
+            Some(q) => serde_json::json!(q),
+            // Explicit null, not an empty string: AniList treats null as "no filter",
+            // while an empty string is a real search term and returns zero results.
+            None => serde_json::json!(null),
+        },
+    );
+
+    let mtype = media_type.unwrap_or("ANIME");
+    if mtype == "NOVEL" {
+        vars.insert("type".to_string(), serde_json::json!("MANGA"));
+        vars.insert("format".to_string(), serde_json::json!(["NOVEL"]));
+    } else if mtype != "ALL" {
+        vars.insert("type".to_string(), serde_json::json!(mtype));
+    }
+
+    vars.insert("page".to_string(), serde_json::json!(1));
+    vars.insert("perPage".to_string(), serde_json::json!(25));
+    vars.insert("isAdult".to_string(), serde_json::json!(false));
+
+    if let Some(f) = filters {
+        if let Some(ref g) = f.genre {
+            let trimmed = g.trim();
+            if !trimmed.is_empty() {
+                vars.insert("genre".to_string(), serde_json::json!(vec![trimmed]));
+            }
+        }
+        if let Some(y) = f.year {
+            vars.insert("seasonYear".to_string(), serde_json::json!(y));
+        }
+        if let Some(s) = f.min_score {
+            vars.insert("averageScoreGreater".to_string(), serde_json::json!(s));
+        }
+        if let Some(ref st) = f.status {
+            let trimmed = st.trim();
+            if !trimmed.is_empty() {
+                vars.insert("status".to_string(), serde_json::json!(trimmed));
+            }
+        }
+        if let Some(ref sort) = f.sort {
+            let trimmed = sort.trim();
+            if !trimmed.is_empty() {
+                vars.insert("sort".to_string(), serde_json::json!([trimmed]));
+            }
+        }
+    }
+
+    // Default sort when searching without a text query so AniList returns
+    // popular titles rather than arbitrary ID ordering.
+    if trimmed_query.is_none() && !vars.contains_key("sort") {
+        vars.insert("sort".to_string(), serde_json::json!(["POPULARITY_DESC"]));
+    }
+
+    vars
 }
 
 /// AniList descriptions are HTML fragments — `<br>`, `<i>`, the odd `<b>`.
@@ -886,3 +1416,78 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
         next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anilist_progress_marks_episodes_watched_with_no_local_history() {
+        // The exact scenario this existed to fix: AniList says 10, this
+        // device's registry has nothing at all.
+        assert!(episode_is_watched(1, 0.0, Some(10)));
+        assert!(episode_is_watched(10, 0.0, Some(10)));
+        assert!(!episode_is_watched(11, 0.0, Some(10)));
+    }
+
+    #[test]
+    fn local_history_alone_still_marks_watched_with_no_anilist_entry() {
+        assert!(episode_is_watched(3, 90.0, None));
+        assert!(!episode_is_watched(3, 40.0, None));
+    }
+
+    #[test]
+    fn either_source_is_enough() {
+        // Watched locally on this device (past 85%) but AniList hasn't
+        // synced yet — still watched.
+        assert!(episode_is_watched(5, 86.0, Some(2)));
+        // Synced on AniList from elsewhere but not finished locally.
+        assert!(episode_is_watched(5, 20.0, Some(5)));
+    }
+
+    #[test]
+    fn plain_anime_query_leaves_sort_unset_for_relevance() {
+        let vars = build_search_variables(Some("Frieren"), Some("ANIME"), None);
+        assert_eq!(vars.get("search"), Some(&serde_json::json!("Frieren")));
+        assert_eq!(vars.get("type"), Some(&serde_json::json!("ANIME")));
+        assert_eq!(vars.get("sort"), None);
+    }
+
+    #[test]
+    fn empty_query_defaults_search_to_null_and_sort_to_popularity() {
+        let vars = build_search_variables(Some("   "), Some("ANIME"), None);
+        assert_eq!(vars.get("search"), Some(&serde_json::json!(null)));
+        assert_eq!(vars.get("sort"), Some(&serde_json::json!(["POPULARITY_DESC"])));
+    }
+
+    #[test]
+    fn novel_sets_type_manga_and_format_novel() {
+        let vars = build_search_variables(Some("Slime"), Some("NOVEL"), None);
+        assert_eq!(vars.get("type"), Some(&serde_json::json!("MANGA")));
+        assert_eq!(vars.get("format"), Some(&serde_json::json!(["NOVEL"])));
+    }
+
+    #[test]
+    fn all_media_type_omits_type_variable() {
+        let vars = build_search_variables(Some("Naruto"), Some("ALL"), None);
+        assert_eq!(vars.get("type"), None);
+    }
+
+    #[test]
+    fn filters_thread_into_variables() {
+        let filters = SearchFilters {
+            genre: Some("Action".to_string()),
+            year: Some(2024),
+            min_score: Some(80),
+            status: Some("RELEASING".to_string()),
+            sort: Some("SCORE_DESC".to_string()),
+        };
+        let vars = build_search_variables(None, Some("ANIME"), Some(&filters));
+        assert_eq!(vars.get("genre"), Some(&serde_json::json!(["Action"])));
+        assert_eq!(vars.get("seasonYear"), Some(&serde_json::json!(2024)));
+        assert_eq!(vars.get("averageScoreGreater"), Some(&serde_json::json!(80)));
+        assert_eq!(vars.get("status"), Some(&serde_json::json!("RELEASING")));
+        assert_eq!(vars.get("sort"), Some(&serde_json::json!(["SCORE_DESC"])));
+    }
+}
+

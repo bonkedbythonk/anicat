@@ -183,6 +183,23 @@ impl Registry {
         .optional()
         .map_err(|e| e.to_string())
     }
+
+    /// Wipes every table: resume positions, provider-slug overrides, the
+    /// offline list mirror, and per-show prefs. Schema/migrations are left
+    /// alone — only rows go, not structure — so the next write just refills
+    /// an empty database rather than re-running `migrate`.
+    pub fn clear_all(&self) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+            DELETE FROM watch_history;
+            DELETE FROM provider_slugs;
+            DELETE FROM local_library;
+            DELETE FROM media_prefs;
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +249,24 @@ mod tests {
             [(2, 4), (1, 2), (1, 1)]
         );
         assert_eq!(db.recent_activity(2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn clear_all_empties_every_table_and_stays_usable() {
+        let db = Registry::open_in_memory().unwrap();
+        db.record_progress(Catalog::Anilist, 21, 1, 100, 1400).unwrap();
+        db.set_provider_slug(Catalog::Anilist, 21, "nyaa", "One Piece").unwrap();
+
+        db.clear_all().unwrap();
+
+        assert_eq!(db.get_progress(Catalog::Anilist, 21, 1).unwrap(), None);
+        assert_eq!(db.get_provider_slug(Catalog::Anilist, 21, "nyaa").unwrap(), None);
+        assert_eq!(db.recent_activity(10).unwrap().len(), 0);
+
+        // A write after clearing must not hit a dropped table — clear_all
+        // deletes rows, it must never touch schema.
+        db.record_progress(Catalog::Anilist, 21, 1, 50, 1400).unwrap();
+        assert_eq!(db.get_progress(Catalog::Anilist, 21, 1).unwrap().unwrap().stop_time, 50);
     }
 
     #[test]

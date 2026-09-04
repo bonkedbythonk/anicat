@@ -254,6 +254,20 @@ pub struct TorrentManager {
     /// across a binge, each one a permanent extra selected file — the exact
     /// bandwidth leak `SELECTED_FILES_KEPT` exists to stop.
     playing_file: std::sync::Mutex<Option<(usize, usize)>>,
+    /// One in-flight or finished "Download Episode" per (torrent, file).
+    /// Session-only — nothing here survives a relaunch, on purpose: there is
+    /// no queue to resume, only a status the episode row polls while it's
+    /// open.
+    downloads: tokio::sync::Mutex<HashMap<(usize, usize), EpisodeDownloadStatus>>,
+}
+
+/// Status of one "Download Episode" — see `TorrentManager::spawn_episode_download`.
+#[derive(Debug, Clone)]
+pub enum EpisodeDownloadStatus {
+    NotStarted,
+    Downloading { percent: f64 },
+    Done { path: String },
+    Failed { message: String },
 }
 
 /// How many files stay selected inside one torrent: the one playing, and the
@@ -281,6 +295,19 @@ fn retain_recent(recent: &mut Vec<usize>, file_id: usize, pinned: Option<usize>)
             None => break,
         }
     }
+}
+
+/// Strips characters a filesystem path component can't hold. Episode/series
+/// titles come from AniList free text and routinely carry `/` (a season
+/// subtitle written "Show / Subtitle") and other separators that would
+/// otherwise be read as directory boundaries or fail outright on APFS.
+fn sanitize_path_component(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':') { '-' } else { c })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() { "Untitled".to_string() } else { trimmed.to_string() }
 }
 
 impl Default for TorrentManager {
@@ -319,6 +346,7 @@ impl TorrentManager {
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
             playing_file: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
+            downloads: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -1055,6 +1083,144 @@ impl TorrentManager {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .remove(&torrent_id);
+        });
+    }
+
+    pub async fn download_status(&self, torrent_id: usize, file_id: usize) -> EpisodeDownloadStatus {
+        self.downloads
+            .lock()
+            .await
+            .get(&(torrent_id, file_id))
+            .cloned()
+            .unwrap_or(EpisodeDownloadStatus::NotStarted)
+    }
+
+    /// Downloads one already-resolved episode to completion and copies it out
+    /// of the stream cache into the user's Downloads folder. A no-op if this
+    /// (torrent, file) already has a status recorded — the episode row calls
+    /// this on every tap of the download button, and a second tap while the
+    /// first download is still running must not start a second copy racing
+    /// the first.
+    ///
+    /// Deliberately outside the eviction system `playing_file` protects: that
+    /// pin is one slot, already spoken for by whatever is actually playing.
+    /// Instead this re-asserts the file's selection on every poll tick via
+    /// `ensure_selected` — the same call `resolve`'s reuse path makes — so a
+    /// download surviving a different episode of the same pack being watched
+    /// costs one extra `update_only_files` call a second rather than a
+    /// dedicated second pin.
+    pub fn spawn_episode_download(self: &Arc<Self>, session: &Arc<Session>, torrent_id: usize, file_id: usize, display_title: String) {
+        let mgr = self.clone();
+        let session = session.clone();
+        tokio::spawn(async move {
+            {
+                let mut downloads = mgr.downloads.lock().await;
+                if downloads.contains_key(&(torrent_id, file_id)) {
+                    return;
+                }
+                downloads.insert((torrent_id, file_id), EpisodeDownloadStatus::Downloading { percent: 0.0 });
+            }
+
+            async fn fail(mgr: &TorrentManager, torrent_id: usize, file_id: usize, msg: String) {
+                mgr.downloads.lock().await.insert(
+                    (torrent_id, file_id),
+                    EpisodeDownloadStatus::Failed { message: msg },
+                );
+            }
+
+            let Some(handle) = session.get(torrent_id.into()) else {
+                fail(&mgr, torrent_id, file_id, "torrent is no longer in the session".into()).await;
+                return;
+            };
+            let Ok((relative_filename, expected_len)) = handle.with_metadata(|m| {
+                let info = &m.file_infos[file_id];
+                (info.relative_filename.clone(), info.len)
+            }) else {
+                fail(&mgr, torrent_id, file_id, "could not read file metadata".into()).await;
+                return;
+            };
+            // `ManagedTorrentShared.options` (which holds the resolved
+            // per-torrent output folder) is `pub(crate)` inside librqbit —
+            // invisible from here. `Api::api_torrent_details` is librqbit's
+            // own public wrapper around that same field, built fresh and
+            // cheaply since `Api` is just a session handle plus two `None`s.
+            let output_folder = match librqbit::Api::new(session.clone(), None)
+                .api_torrent_details(librqbit::api::TorrentIdOrHash::Id(torrent_id))
+            {
+                Ok(details) => PathBuf::from(details.output_folder),
+                Err(e) => {
+                    fail(&mgr, torrent_id, file_id, format!("could not read output folder: {e}")).await;
+                    return;
+                }
+            };
+            let source_path = output_folder.join(&relative_filename);
+
+            const POLL: std::time::Duration = std::time::Duration::from_secs(1);
+            // Bounded the same way spawn_stall_logger is: a dead swarm must
+            // eventually report failure rather than leave the row spinning
+            // forever. 40 minutes is generous for a 1080p episode even on a
+            // slow swarm — the pre-buffer gate elsewhere is seconds-scale
+            // because it only proves the swarm is *delivering*, but this has
+            // to prove the whole file landed.
+            const MAX_SAMPLES: u32 = 2400;
+            let mut finished = false;
+            for _ in 0..MAX_SAMPLES {
+                mgr.ensure_selected(&session, torrent_id, file_id).await;
+                let on_disk = tokio::fs::metadata(&source_path).await.map(|m| m.len()).unwrap_or(0);
+                if expected_len > 0 {
+                    let percent = (on_disk as f64 / expected_len as f64 * 100.0).min(100.0);
+                    mgr.downloads.lock().await.insert(
+                        (torrent_id, file_id),
+                        EpisodeDownloadStatus::Downloading { percent },
+                    );
+                }
+                if on_disk >= expected_len && expected_len > 0 {
+                    finished = true;
+                    break;
+                }
+                if session.get(torrent_id.into()).is_none() {
+                    break;
+                }
+                tokio::time::sleep(POLL).await;
+            }
+
+            if !finished {
+                fail(&mgr, torrent_id, file_id, "download did not complete (swarm stalled or torrent was removed)".into()).await;
+                return;
+            }
+
+            let dest_dir = dirs::download_dir()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("AniCat")
+                .join(sanitize_path_component(&display_title));
+            let file_name = relative_filename
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{display_title}.mkv"));
+            let dest_path = dest_dir.join(sanitize_path_component(&file_name));
+
+            let copy_result = tokio::task::spawn_blocking({
+                let source_path = source_path.clone();
+                let dest_dir = dest_dir.clone();
+                let dest_path = dest_path.clone();
+                move || -> std::io::Result<()> {
+                    std::fs::create_dir_all(&dest_dir)?;
+                    std::fs::copy(&source_path, &dest_path)?;
+                    Ok(())
+                }
+            })
+            .await;
+
+            match copy_result {
+                Ok(Ok(())) => {
+                    mgr.downloads.lock().await.insert(
+                        (torrent_id, file_id),
+                        EpisodeDownloadStatus::Done { path: dest_path.to_string_lossy().to_string() },
+                    );
+                }
+                Ok(Err(e)) => fail(&mgr, torrent_id, file_id, format!("could not copy file to Downloads: {e}")).await,
+                Err(e) => fail(&mgr, torrent_id, file_id, format!("copy task panicked: {e}")).await,
+            }
         });
     }
 

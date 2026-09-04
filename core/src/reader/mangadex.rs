@@ -40,6 +40,16 @@ pub struct MangaSummary {
     pub id: String,
     pub title: String,
     pub cover_image: String,
+    /// Whether MangaDex's own `links.al` on this result equals the AniList
+    /// id we searched for — an identity confirmation, not a title guess.
+    /// The caller uses this to know when it has found *the* manga rather
+    /// than merely *a* plausible one: once a result is AL-confirmed, an
+    /// empty chapter list on it means the title just has no English
+    /// chapters on MangaDex, not "try the next search result" — falling
+    /// through past a confirmed match onto an unrelated title that happens
+    /// to share some words is how a completely different manga's chapters
+    /// ended up being served under another title's name.
+    pub matches_anilist: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,7 +112,7 @@ impl MangaDexClient {
     /// note on `links.al`.
     pub async fn search(&self, query: &str, anilist_id: Option<i64>) -> Result<Vec<MangaSummary>, String> {
         let url = format!(
-            "{BASE_URL}/manga?title={}&limit=25&includes[]=cover_art&{CONTENT_RATING}&order[relevance]=desc",
+            "{BASE_URL}/manga?title={}&limit=100&includes[]=cover_art&{CONTENT_RATING}&order[relevance]=desc",
             urlencode(query)
         );
         let data: MangaListResponse = self.get_json(&url).await?;
@@ -181,6 +191,33 @@ impl MangaDexClient {
 
 // --- pure helpers, unit-tested against captured payload shapes ---------------
 
+fn parse_chapter_number(title: &str) -> Option<(String, f64)> {
+    let lower = title.to_lowercase();
+    let trimmed = lower.trim();
+    let rest = if let Some(r) = trimmed.strip_prefix("chapter ") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("ch. ") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("ch.") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("ch ") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("ep. ") {
+        r
+    } else if let Some(r) = trimmed.strip_prefix("ep ") {
+        r
+    } else {
+        trimmed
+    };
+
+    let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    if let Ok(val) = num_str.parse::<f64>() {
+        Some((num_str, val))
+    } else {
+        None
+    }
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
@@ -216,11 +253,6 @@ fn cover_url(manga_id: &str, rels: &[Relationship]) -> String {
 fn rank_search_results(items: &[MangaEntity], anilist_id: Option<i64>) -> Vec<MangaSummary> {
     let (mut matched, mut rest) = (Vec::new(), Vec::new());
     for item in items {
-        let entry = MangaSummary {
-            id: item.id.clone(),
-            title: pick_title(&item.attributes.title),
-            cover_image: cover_url(&item.id, &item.relationships),
-        };
         let linked = anilist_id.is_some_and(|want| {
             item.attributes
                 .links
@@ -229,6 +261,12 @@ fn rank_search_results(items: &[MangaEntity], anilist_id: Option<i64>) -> Vec<Ma
                 .and_then(|al| al.trim().parse::<i64>().ok())
                 == Some(want)
         });
+        let entry = MangaSummary {
+            id: item.id.clone(),
+            title: pick_title(&item.attributes.title),
+            cover_image: cover_url(&item.id, &item.relationships),
+            matches_anilist: linked,
+        };
         if linked {
             matched.push(entry);
         } else {
@@ -248,23 +286,38 @@ fn collapse_feed(feed: &[ChapterEntity]) -> Vec<ChapterRow> {
         if a.pages == 0 || a.external_url.is_some() {
             continue;
         }
-        let Some(num_str) = a.chapter.as_deref() else { continue };
-        let Ok(num) = num_str.trim().parse::<f64>() else { continue };
+        let (num_str, num) = match a.chapter.as_deref() {
+            Some(s) => match s.trim().parse::<f64>() {
+                Ok(n) => (s.trim().to_string(), n),
+                Err(_) => continue,
+            },
+            None => {
+                if let Some(ref t) = a.title {
+                    if let Some(parsed) = parse_chapter_number(t) {
+                        parsed
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+        };
 
         let title = match a.title.as_deref().filter(|t| !t.trim().is_empty()) {
             Some(t) => format!("Chapter {num_str}: {t}"),
             None => format!("Chapter {num_str}"),
         };
         let row = ChapterRow {
-            number: num_str.trim().to_string(),
+            number: num_str.clone(),
             title,
             id: ch.id.clone(),
             pages: a.pages,
         };
-        match best.get(num_str) {
+        match best.get(&num_str) {
             Some((_, prev)) if prev.pages >= a.pages => {}
             _ => {
-                best.insert(num_str.to_string(), (num, row));
+                best.insert(num_str, (num, row));
             }
         }
     }

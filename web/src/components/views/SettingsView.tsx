@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useId } from "react";
 import { invoke } from "@/lib/transport";
 import { listen } from "@tauri-apps/api/event";
-import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy } from "lucide-react";
+import { Loader2, CheckCircle2, Save, Cpu, PlayCircle, HardDrive, Globe, RotateCcw, XCircle, AlertCircle, Download, Copy, Keyboard } from "lucide-react";
 import { mediaApi, type HealthStatus, apiOrigin, dispatchRefresh } from "@/lib/api";
 import { useAppStore, useSettingsStore } from "@/stores/app";
 import type { UiStyle } from "@/hooks/useTheme";
@@ -676,7 +676,7 @@ export function SettingsView({ health }: SettingsViewProps) {
 
                 <SettingField
                   label="GPU Upscaling"
-                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. External MPV window only; the built-in in-app player doesn't upscale. Best on screens above 1080p; smaller displays won't show much difference. Ctrl+1 in-player toggles this too."
+                  description="Anime4K — sharpens lines and adds depth with minimal battery impact. Best on screens above 1080p; smaller displays won't show much difference."
                 >
                   <SettingToggle
                     on={(config.stream?.shader_profile || "on") !== "off"}
@@ -700,25 +700,21 @@ export function SettingsView({ health }: SettingsViewProps) {
               </CardSection>
 
               <CardSection title="Keyboard Shortcuts">
-                <div className="space-y-4 text-xs leading-relaxed">
-                  <p className="text-muted-foreground">When playing media in the external MPV window, you can use these shortcuts:</p>
-                  <div>
-                    <p className="meta-mono text-muted-foreground mb-2">Settings — Ctrl + number</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border p-4 rounded-lg bg-foreground/[0.02]">
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Upscaling</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 1</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Auto-skip Intro</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 2</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Autoplay Next</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Ctrl + 4</kbd></div>
-                    </div>
+                <div className="flex items-center justify-between py-1">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium text-foreground">Cheat Sheet</p>
+                    <p className="text-xs text-muted-foreground">
+                      Press <kbd className="px-1.5 py-0.5 rounded bg-foreground/10 text-[10px] font-mono font-semibold">?</kbd> anywhere in the app to view the keyboard shortcuts cheat sheet.
+                    </p>
                   </div>
-                  <div>
-                    <p className="meta-mono text-muted-foreground mb-2">Actions — Shift + letter</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border p-4 rounded-lg bg-foreground/[0.02]">
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Reload Episode</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + R</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Skip Segment</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + S</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Toggle Sub/Dub</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + T</kbd></div>
-                      <div className="flex justify-between py-1.5"><span className="text-foreground/70">Rotate Video</span><kbd className="px-2 py-0.5 border border-border rounded text-[10px] text-foreground font-mono">Shift + V</kbd></div>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent("anicat_open_shortcuts"))}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-foreground/[0.04] hover:bg-foreground/[0.08] text-xs font-medium text-foreground transition-colors cursor-pointer shrink-0 ml-4"
+                  >
+                    <Keyboard size={13} className="text-muted-foreground" />
+                    View Shortcuts
+                  </button>
                 </div>
               </CardSection>
             </div>

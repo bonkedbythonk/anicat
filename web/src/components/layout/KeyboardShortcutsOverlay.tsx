@@ -91,6 +91,12 @@ export function KeyboardShortcutsOverlay() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [open]);
 
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener("anicat_open_shortcuts", onOpen);
+    return () => window.removeEventListener("anicat_open_shortcuts", onOpen);
+  }, []);
+
   if (!open) return null;
 
   return (

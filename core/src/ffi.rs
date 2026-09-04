@@ -787,14 +787,12 @@ impl AnicatEngine {
         if let Some(f) = format {
             vars.insert("format".to_string(), serde_json::json!([f]));
         }
-        eprintln!("DEBUG search_catalog_impl vars={:?}", vars);
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
             .catalogs
             .anilist
             .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
-        eprintln!("DEBUG search_catalog_impl got {} items", page.page.media.as_ref().map(|v| v.len()).unwrap_or(0));
         Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
     }
 }

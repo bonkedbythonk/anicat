@@ -144,12 +144,10 @@ public struct ScheduleView: View {
                                         Button(action: { onSelectItem(item) }) {
                                             HStack(spacing: 12) {
                                                 // Poster Thumbnail
-                                                AsyncImage(url: item.coverImageURL) { phase in
-                                                    if let img = phase.image {
-                                                        img.resizable().aspectRatio(contentMode: .fill)
-                                                    } else {
-                                                        Rectangle().fill(SumiTheme.card)
-                                                    }
+                                                CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 150) { img in
+                                                    img.resizable().aspectRatio(contentMode: .fill)
+                                                } placeholder: {
+                                                    Rectangle().fill(SumiTheme.card)
                                                 }
                                                 .frame(width: 55, height: 75)
                                                 .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))

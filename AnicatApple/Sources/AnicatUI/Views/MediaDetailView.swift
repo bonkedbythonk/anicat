@@ -767,12 +767,10 @@ public struct MediaDetailView: View {
                         Color.clear
                             .frame(width: 36, height: 48)
                             .overlay {
-                                AsyncImage(url: relation.coverURL) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().aspectRatio(contentMode: .fill)
-                                    } else {
-                                        Rectangle().fill(SumiTheme.card)
-                                    }
+                                CachedAsyncImage(url: relation.coverURL, maxPixelSize: 96) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Rectangle().fill(SumiTheme.card)
                                 }
                             }
                             .clipped()
@@ -811,12 +809,10 @@ public struct MediaDetailView: View {
                         Color.clear
                             .frame(width: 36, height: 48)
                             .overlay {
-                                AsyncImage(url: relation.coverURL) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().aspectRatio(contentMode: .fill)
-                                    } else {
-                                        Rectangle().fill(SumiTheme.card)
-                                    }
+                                CachedAsyncImage(url: relation.coverURL, maxPixelSize: 96) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Rectangle().fill(SumiTheme.card)
                                 }
                             }
                             .clipped()
@@ -1227,12 +1223,10 @@ public struct MediaDetailView: View {
                     Color.clear
                         .frame(width: 44, height: 60)
                         .overlay {
-                            AsyncImage(url: relation.coverURL) { phase in
-                                if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                } else {
-                                    Rectangle().fill(SumiTheme.card)
-                                }
+                            CachedAsyncImage(url: relation.coverURL, maxPixelSize: 120) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Rectangle().fill(SumiTheme.card)
                             }
                         }
                         .clipped()
@@ -1370,12 +1364,10 @@ public struct MediaDetailView: View {
                     Color.clear
                         .aspectRatio(2/3, contentMode: .fit)
                         .overlay {
-                            AsyncImage(url: rec.coverURL) { phase in
-                                if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                } else {
-                                    Rectangle().fill(SumiTheme.card)
-                                }
+                            CachedAsyncImage(url: rec.coverURL, maxPixelSize: 400) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Rectangle().fill(SumiTheme.card)
                             }
                         }
                         .clipped()
@@ -1685,18 +1677,16 @@ private struct EpisodeRow: View {
             Color.clear
                 .frame(width: 128, height: 72)
                 .overlay {
-                    AsyncImage(url: episode.thumbnailURL) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                // A watched episode's still is dimmed rather
-                                // than removed: the list stays scannable by
-                                // picture.
-                                .opacity(episode.isWatched ? 0.5 : 1)
-                        } else {
-                            Rectangle().fill(SumiTheme.foreground.opacity(0.05))
-                        }
+                    CachedAsyncImage(url: episode.thumbnailURL, maxPixelSize: 256) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            // A watched episode's still is dimmed rather
+                            // than removed: the list stays scannable by
+                            // picture.
+                            .opacity(episode.isWatched ? 0.5 : 1)
+                    } placeholder: {
+                        Rectangle().fill(SumiTheme.foreground.opacity(0.05))
                     }
                 }
                 .clipped()

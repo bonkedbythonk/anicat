@@ -50,7 +50,7 @@ public struct MediaDetailView: View {
         case failed(message: String)
     }
 
-    public struct EpisodeItem: Identifiable, Sendable {
+    public struct EpisodeItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let number: Int
         public let title: String
@@ -84,7 +84,7 @@ public struct MediaDetailView: View {
         }
     }
 
-    public struct MangaChapterItem: Identifiable, Sendable {
+    public struct MangaChapterItem: Identifiable, Sendable, Codable {
         public let id: String
         public let number: String
         public let title: String
@@ -98,7 +98,7 @@ public struct MediaDetailView: View {
         }
     }
 
-    public struct CharacterItem: Identifiable, Sendable {
+    public struct CharacterItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let name: String
         public let imageURL: URL?
@@ -123,7 +123,7 @@ public struct MediaDetailView: View {
         }
     }
 
-    public struct RelationItem: Identifiable, Sendable {
+    public struct RelationItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let relationType: String
         public let title: String
@@ -151,7 +151,7 @@ public struct MediaDetailView: View {
         }
     }
 
-    public struct RecommendationItem: Identifiable, Sendable {
+    public struct RecommendationItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let title: String
         public let format: String?
@@ -176,7 +176,7 @@ public struct MediaDetailView: View {
         }
     }
 
-    public struct DiscussionItem: Identifiable, Sendable {
+    public struct DiscussionItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let title: String
         public let replyCount: Int

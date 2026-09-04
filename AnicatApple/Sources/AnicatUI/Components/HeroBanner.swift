@@ -1,7 +1,7 @@
 import SwiftUI
 
 public struct HeroBanner: View {
-    public struct Details: Sendable, Identifiable {
+    public struct Details: Sendable, Identifiable, Codable {
         public let id: Int64
         public let title: String
         public let romajiTitle: String?
@@ -37,7 +37,7 @@ public struct HeroBanner: View {
         public let isFavourite: Bool
 
         /// A neighbouring season, as the detail page's chain cards draw it.
-        public struct Relation: Sendable, Identifiable {
+        public struct Relation: Sendable, Identifiable, Codable {
             public let id: Int64
             public let title: String
             public let format: String?

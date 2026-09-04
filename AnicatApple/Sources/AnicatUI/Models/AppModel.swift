@@ -111,6 +111,13 @@ public final class AppModel: @unchecked Sendable {
     public var watchingItems: [MediaCard.Item] = []
     public var trendingItems: [MediaCard.Item] = []
     public var searchResults: [MediaCard.Item] = []
+    // Pagination for `search`: `search` itself doesn't get told AniList's
+    // `hasNextPage` (the FFI call returns a bare list), so "more pages
+    // exist" is inferred from a full page having come back — a page short of
+    // 25 is necessarily the last one.
+    public var searchCurrentPage: Int32 = 1
+    public var searchHasMorePages: Bool = true
+    public var isLoadingMoreSearchResults: Bool = false
     public var scheduleItems: [ScheduleView.ScheduleItem] = []
 
     // Home's configurable rows (below the fixed Up Next / Watching shelves).
@@ -229,7 +236,7 @@ public final class AppModel: @unchecked Sendable {
 
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let dataDir = appSupport.appendingPathComponent("AniCat", isDirectory: true)
+            let dataDir = appSupport.appendingPathComponent("Anicat", isDirectory: true)
             try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
 
             // Zero-Login iCloud Sync: retrieve token from iCloud Keychain if not explicitly provided
@@ -246,7 +253,7 @@ public final class AppModel: @unchecked Sendable {
             }
 
             let port = try await coreEngine.streamPort()
-            print("AniCat Rust Engine ready! Dynamic stream server on port: \(port)")
+            print("Anicat Rust Engine ready! Dynamic stream server on port: \(port)")
             self.isInitialized = true
 
             // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS
@@ -263,7 +270,7 @@ public final class AppModel: @unchecked Sendable {
             // until the user pasted a token again.
             await refreshAll()
         } catch {
-            self.errorMessage = "Failed to start AniCat Engine: \(error.localizedDescription)"
+            self.errorMessage = "Failed to start Anicat Engine: \(error.localizedDescription)"
             print(errorMessage!)
         }
     }
@@ -421,12 +428,32 @@ public final class AppModel: @unchecked Sendable {
     /// rather than navigate to a new one.
     private func loadDetail(id: Int64, isManga: Bool) async {
         guard let engine else { return }
-        isLoading = true
-        defer { isLoading = false }
         // Episode numbers repeat across titles, so a stale entry here would
         // show as "downloaded"/"downloading" on the wrong show's episode 1
         // the moment the detail page switches.
         downloadStates = [:]
+
+        // A cached snapshot renders immediately and the real fetch below
+        // still runs and replaces it — this only skips the blank spinner,
+        // never the refresh. Without it, every open (even a title seen many
+        // times) paid AniList's full round trip up front, and a session
+        // that had already made a few other AniList calls could be sitting
+        // behind that client's own proactive rate-limit backoff on top of
+        // it (see `anilist/client.rs`) — invisible as a "why is this only
+        // sometimes slow" spinner instead of the load it actually was.
+        let cached = DetailCache.load(id: id, isManga: isManga)
+        if let cached {
+            selectedEpisodes = cached.episodes
+            selectedMangaChapters = cached.mangaChapters
+            selectedRelations = cached.relations
+            selectedRecommendations = cached.recommendations
+            selectedCharacters = cached.characters
+            selectedDiscussions = cached.discussions
+            selectedMediaDetails = cached.details
+        } else {
+            isLoading = true
+        }
+        defer { isLoading = false }
         do {
             let d: MediaDetail
             if let primary = try? await engine.mediaDetail(catalogId: id, isManga: isManga) {
@@ -493,8 +520,13 @@ public final class AppModel: @unchecked Sendable {
             self.selectedMangaChapters = chapters
             self.selectedRelations = relations
             self.selectedRecommendations = recommendations
-            self.selectedCharacters = []
-            self.selectedDiscussions = []
+            // Characters/discussions are fetched separately below and
+            // weren't part of this response — falling back to whatever the
+            // cache already had (rather than always clearing to empty) is
+            // what stops the cast grid this function just rendered from
+            // cache flashing empty the instant this fresh fetch lands.
+            self.selectedCharacters = cached?.characters ?? []
+            self.selectedDiscussions = cached?.discussions ?? []
             self.selectedMediaDetails = HeroBanner.Details(
                 id: d.catalogId,
                 title: d.title,
@@ -521,6 +553,7 @@ public final class AppModel: @unchecked Sendable {
                 isFavourite: d.isFavourite
             )
             recordAniListSuccess()
+            persistDetailCache(id: id, isManga: isManga)
 
             // Asynchronously load real Cast & Staff and Discussions from AniList
             Task { [weak self, weak engine] in
@@ -538,6 +571,7 @@ public final class AppModel: @unchecked Sendable {
                     }
                     if self.selectedMediaDetails?.id == id {
                         self.selectedCharacters = mapped
+                        self.persistDetailCache(id: id, isManga: isManga)
                     }
                 }
                 if let disc = try? await engine.mediaDiscussions(catalogId: id) {
@@ -554,13 +588,41 @@ public final class AppModel: @unchecked Sendable {
                     }
                     if self.selectedMediaDetails?.id == id {
                         self.selectedDiscussions = mapped
+                        self.persistDetailCache(id: id, isManga: isManga)
                     }
                 }
             }
         } catch {
             recordAniListFailure(error)
-            errorMessage = "Could not open that title: \(error.localizedDescription)"
+            // A cached snapshot is already on screen (from the top of this
+            // function) — a failed refresh shouldn't blank it out from under
+            // the viewer, just quietly leave what's already showing.
+            if cached == nil {
+                errorMessage = "Could not open that title: \(error.localizedDescription)"
+            }
         }
+    }
+
+    /// Snapshots the detail page's current in-memory state to disk under
+    /// `(id, isManga)`. Called after each piece of the page lands (initial
+    /// detail, then characters, then discussions) so a cache read later gets
+    /// whatever was available last time, not just what happened to be ready
+    /// at the very first save.
+    private func persistDetailCache(id: Int64, isManga: Bool) {
+        guard let details = selectedMediaDetails, details.id == id else { return }
+        DetailCache.save(
+            DetailCache.Snapshot(
+                details: details,
+                episodes: selectedEpisodes,
+                mangaChapters: selectedMangaChapters,
+                relations: selectedRelations,
+                recommendations: selectedRecommendations,
+                characters: selectedCharacters,
+                discussions: selectedDiscussions
+            ),
+            id: id,
+            isManga: isManga
+        )
     }
 
     public func openDetail(catalogId: Int64, isManga: Bool = false) async {
@@ -884,16 +946,44 @@ public final class AppModel: @unchecked Sendable {
 
     /// Search anime, manga, or light novels across the AniList catalog.
     /// `mediaType` is "ANIME", "MANGA", or "NOVEL"; `isManga` is kept for
-    /// existing callers that only distinguish anime from manga.
-    public func search(query: String, mediaType: String? = nil, isManga: Bool? = nil, filters: SearchFilters? = nil) async {
-        guard let engine, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    /// existing callers that only distinguish anime from manga. A blank
+    /// `query` is allowed as long as a filter is set — AniList's `Page.media`
+    /// returns a plain popularity-sorted browse when `search` is null, which
+    /// is what lets picking a genre alone (no typed text) filter the results
+    /// grid instead of doing nothing.
+    ///
+    /// `page`/`append` add pagination: `append: true` adds a page onto
+    /// `searchResults` instead of replacing it, and `searchHasMorePages` is
+    /// inferred from page size — the FFI call returns a bare list with no
+    /// `hasNextPage`, so a page short of 25 is necessarily the last one.
+    public func search(
+        query: String,
+        mediaType: String? = nil,
+        isManga: Bool? = nil,
+        filters: SearchFilters? = nil,
+        page: Int32 = 1,
+        append: Bool = false
+    ) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasActiveFilter = filters.map {
+            $0.genre != nil || $0.year != nil || $0.minScore != nil || $0.status != nil || $0.sort != nil
+        } ?? false
+        guard let engine, !trimmedQuery.isEmpty || hasActiveFilter else {
             searchResults = []
+            searchHasMorePages = true
             return
         }
 
-        searchResults = []
-        isLoading = true
-        defer { isLoading = false }
+        if append {
+            isLoadingMoreSearchResults = true
+        } else {
+            searchResults = []
+            searchHasMorePages = true
+            isLoading = true
+        }
+        defer {
+            if append { isLoadingMoreSearchResults = false } else { isLoading = false }
+        }
 
         do {
             let resolvedType = mediaType ?? (isManga == true ? "MANGA" : (isManga == false ? "ANIME" : nil))
@@ -903,9 +993,12 @@ public final class AppModel: @unchecked Sendable {
             // searchNovel) — those pass `filters: nil` unconditionally, so a
             // caller with real filters has to reach the one entry point that
             // actually threads them into the AniList query.
-            let summaries = try await engine.searchCatalog(query: query, mediaType: resolvedType, filters: filters)
+            let summaries = try await engine.searchCatalog(query: trimmedQuery, mediaType: resolvedType, filters: filters, page: page)
             recordAniListSuccess()
-            self.searchResults = summaries.map { Self.card($0) }
+            let cards = summaries.map { Self.card($0) }
+            searchResults = append ? searchResults + cards : cards
+            searchCurrentPage = page
+            searchHasMorePages = cards.count >= 25
         } catch {
             recordAniListFailure(error)
             print("Search failed: \(error)")
@@ -956,7 +1049,7 @@ public final class AppModel: @unchecked Sendable {
         self.playerController.isPlaying = true
 
         guard let engine else {
-            throw NSError(domain: "AniCat", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
+            throw NSError(domain: "Anicat", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
         }
 
         isLoading = true
@@ -1012,7 +1105,7 @@ public final class AppModel: @unchecked Sendable {
 
         let handle = try await engine.resolveStream(req: req)
         guard let streamURL = URL(string: handle.url) else {
-            throw NSError(domain: "AniCat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handle.url)"])
+            throw NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handle.url)"])
         }
 
         // Before returning streamURL, configure playerController with actual title, episode number, and duration

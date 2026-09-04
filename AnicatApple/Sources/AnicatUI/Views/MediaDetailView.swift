@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 public struct MediaDetailView: View {
     public enum DetailTab: String, CaseIterable, Identifiable {
@@ -709,7 +712,7 @@ public struct MediaDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { isSynopsisExpanded.toggle() }
+                withAnimation(.snappy) { isSynopsisExpanded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Text(isSynopsisExpanded ? "Show Less" : "Read Full Synopsis")
@@ -929,7 +932,7 @@ public struct MediaDetailView: View {
                         HStack(spacing: 2) {
                             ForEach(AudioType.allCases, id: \.self) { audio in
                                 Button {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                    withAnimation(.snappy) {
                                         selectedAudioType = audio
                                     }
                                 } label: {
@@ -955,7 +958,7 @@ public struct MediaDetailView: View {
                     HStack(spacing: 2) {
                         ForEach(EpisodeViewMode.allCases, id: \.self) { mode in
                             Button {
-                                withAnimation(.easeInOut(duration: 0.18)) {
+                                withAnimation(.snappy) {
                                     selectedViewMode = mode
                                 }
                             } label: {
@@ -1042,16 +1045,24 @@ public struct MediaDetailView: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
                     ForEach(characters) { char in
+                        Button {
+                            #if os(macOS)
+                            // AniList's character page carries the bio and
+                            // every other role/show this voice actor has —
+                            // there's no reason to rebuild that here.
+                            if let url = URL(string: "https://anilist.co/character/\(char.id)") {
+                                NSWorkspace.shared.open(url)
+                            }
+                            #endif
+                        } label: {
                         VStack(alignment: .leading, spacing: 6) {
                             Color.clear
                                 .aspectRatio(2/3, contentMode: .fit)
                                 .overlay {
-                                    AsyncImage(url: char.imageURL) { phase in
-                                        if let image = phase.image {
-                                            image.resizable().aspectRatio(contentMode: .fill)
-                                        } else {
-                                            Rectangle().fill(SumiTheme.card)
-                                        }
+                                    CachedAsyncImage(url: char.imageURL, maxPixelSize: 320) { image in
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Rectangle().fill(SumiTheme.card)
                                     }
                                 }
                                 .clipped()
@@ -1083,6 +1094,9 @@ public struct MediaDetailView: View {
                                 }
                             }
                         }
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                     }
                 }
             }
@@ -1274,7 +1288,28 @@ public struct MediaDetailView: View {
 
         @State private var isHovered = false
 
+        // AniList's numeric thread id round-trips into its own forum URL —
+        // there's no in-app thread reader, and there doesn't need to be one
+        // just to make this tappable.
+        private var threadURL: URL? {
+            URL(string: "https://anilist.co/forum/thread/\(thread.id)")
+        }
+
         var body: some View {
+            Button {
+                #if os(macOS)
+                if let threadURL {
+                    NSWorkspace.shared.open(threadURL)
+                }
+                #endif
+            } label: {
+                rowContent
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+        }
+
+        private var rowContent: some View {
             HStack(spacing: 12) {
                 HStack(spacing: 4) {
                     Image(systemName: "bubble.left.and.bubble.right")

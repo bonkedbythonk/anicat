@@ -59,28 +59,18 @@ public struct MediaCard: View {
                     Color.clear
                         .aspectRatio(2.0 / 3.0, contentMode: .fit)
                         .overlay {
-                            AsyncImage(url: item.coverImageURL) { phase in
-                                switch phase {
-                                case .empty:
-                                    Rectangle()
-                                        .fill(SumiTheme.card)
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .scaleEffect(isHovered ? 1.03 : 1.0)
-                                        .animation(.snappy, value: isHovered)
-                                case .failure:
-                                    Rectangle()
-                                        .fill(SumiTheme.card)
-                                        .overlay(
-                                            Image(systemName: "photo")
-                                                .font(.system(size: 24))
-                                                .foregroundColor(SumiTheme.muted)
-                                        )
-                                @unknown default:
-                                    Rectangle().fill(SumiTheme.card)
-                                }
+                            // 200pt is this grid's widest card column; ×2 covers
+                            // Retina without decoding at a size no cell here
+                            // ever draws.
+                            CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 400) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .scaleEffect(isHovered ? 1.03 : 1.0)
+                                    .animation(.snappy, value: isHovered)
+                            } placeholder: {
+                                Rectangle()
+                                    .fill(SumiTheme.card)
                             }
                         }
                         .background(SumiTheme.card)

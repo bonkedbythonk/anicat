@@ -75,7 +75,7 @@ public struct ScheduleView: View {
                     // Global vs Watching Only Toggle
                     HStack(spacing: 2) {
                         Button(action: {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.snappy) {
                                 watchingOnly = false
                             }
                         }) {
@@ -94,7 +94,7 @@ public struct ScheduleView: View {
                         .buttonStyle(.plain)
 
                         Button(action: {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.snappy) {
                                 watchingOnly = true
                             }
                         }) {
@@ -112,7 +112,7 @@ public struct ScheduleView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .animation(.easeOut(duration: 0.15), value: watchingOnly)
+                    .animation(.snappy, value: watchingOnly)
                     .padding(3)
                     .background(SumiTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
@@ -194,7 +194,7 @@ public struct ScheduleView: View {
                         }
                     }
                 }
-                .animation(.easeOut(duration: 0.25), value: watchingOnly)
+                .animation(.smooth, value: watchingOnly)
             }
             .padding(.vertical, SumiTheme.spaceLg)
         }

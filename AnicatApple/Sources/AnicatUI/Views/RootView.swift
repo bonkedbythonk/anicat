@@ -142,7 +142,7 @@ public struct RootView: View {
                             },
                             onExportAppleBooks: {},
                             onClose: {
-                                withAnimation(.easeOut(duration: 0.25)) {
+                                withAnimation(.smooth) {
                                     model.closeDetail()
                                 }
                             },
@@ -188,7 +188,7 @@ public struct RootView: View {
                             .transition(.opacity)
                     }
                     }
-                    .animation(.easeOut(duration: 0.25), value: model.currentNavSection)
+                    .animation(.smooth, value: model.currentNavSection)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -224,7 +224,7 @@ public struct RootView: View {
                     controller: model.playerController,
                     streamURL: streamURL,
                     onClose: {
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.smooth) {
                             model.stopPlayback()
                         }
                     }
@@ -254,7 +254,7 @@ public struct RootView: View {
                         Task { await model.prevChapter() }
                     },
                     onClose: {
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.smooth) {
                             model.closeReader()
                         }
                     }
@@ -322,14 +322,14 @@ public struct RootView: View {
                 .zIndex(70)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: model.activeStreamURL != nil)
-        .animation(.easeOut(duration: 0.25), value: model.activeReadingSession != nil)
-        .animation(.easeOut(duration: 0.25), value: model.selectedMediaDetails != nil)
-        .animation(.easeOut(duration: 0.2), value: model.errorMessage != nil)
-        .animation(.easeOut(duration: 0.35), value: model.isAniListDown)
-        .animation(.easeOut(duration: 0.2), value: model.isLoading)
-        .animation(.easeOut(duration: 0.18), value: model.paletteOpen)
-        .animation(.easeOut(duration: 0.2), value: model.shortcutsOpen)
+        .animation(.smooth, value: model.activeStreamURL != nil)
+        .animation(.smooth, value: model.activeReadingSession != nil)
+        .animation(.smooth, value: model.selectedMediaDetails != nil)
+        .animation(.snappy, value: model.errorMessage != nil)
+        .animation(.smooth, value: model.isAniListDown)
+        .animation(.snappy, value: model.isLoading)
+        .animation(.snappy, value: model.paletteOpen)
+        .animation(.snappy, value: model.shortcutsOpen)
         .globalKeyboardShortcuts(model: model)
         #if os(macOS)
         // Driven off activeStreamURL's nil<->value edge rather than
@@ -817,7 +817,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 accumulatedDeltaY = 0
                 gestureSampleCount = 0
                 isCooling = true
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     model.closeDetail()
                 }
                 return nil
@@ -833,7 +833,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // Button 3 is the standard back side-button on 5-button mice in AppKit (0=left, 1=right, 2=middle).
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [self] event in
             if event.buttonNumber == 3 && model.selectedMediaDetails != nil {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     model.closeDetail()
                 }
                 return nil
@@ -868,7 +868,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
         // 1. Cmd+K: Toggle Command Palette (even while typing)
         if isCmd && !isCtrl && !isAlt && chars == "k" {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(.snappy) {
                 model.paletteOpen.toggle()
             }
             return nil
@@ -883,7 +883,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // 5. MediaDetailView (detail page)
         if event.keyCode == 53 {
             var handled = false
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(.smooth) {
                 handled = model.handleEscapeKey()
             }
             return handled ? nil : event
@@ -892,7 +892,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // Arrow keys in AppKit automatically include `.numericPad` and `.function`
         // flags, so we exclude explicit modifiers instead of checking a raw flag mask.
         if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 123 && model.selectedMediaDetails != nil {
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(.smooth) {
                 model.closeDetail()
             }
             return nil
@@ -906,7 +906,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
         // 3. '?': Toggle Keyboard Shortcuts overlay
         if !isCmd && !isCtrl && !isAlt && (rawChars == "?" || chars == "?") {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(.snappy) {
                 model.shortcutsOpen.toggle()
             }
             return nil
@@ -935,7 +935,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         if !isCmd && !isCtrl && !isAlt {
             // '/': Open Command Palette / focus search
             if chars == "/" {
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(.snappy) {
                     model.paletteOpen = true
                 }
                 return nil
@@ -943,7 +943,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
             // Numbers 1-9: Switch views
             if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }
                 return nil
@@ -951,7 +951,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
             // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), D (Downloads)
             if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }
                 return nil

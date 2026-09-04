@@ -85,9 +85,9 @@ public struct LibraryView: View {
                         .opacity(isLoading ? 0.5 : 1)
                 }
             }
-            .animation(.easeOut(duration: 0.2), value: isLoading)
-            .animation(.easeOut(duration: 0.25), value: status)
-            .animation(.easeOut(duration: 0.25), value: layout)
+            .animation(.snappy, value: isLoading)
+            .animation(.smooth, value: status)
+            .animation(.smooth, value: layout)
         }
     }
 }

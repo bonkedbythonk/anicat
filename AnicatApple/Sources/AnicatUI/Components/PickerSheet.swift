@@ -166,7 +166,7 @@ public struct PickerSheet: View {
                             .buttonStyle(.plain)
 
                             Button(action: {
-                                withAnimation(.easeOut(duration: 0.25)) {
+                                withAnimation(.smooth) {
                                     cursor += 1
                                 }
                             }) {
@@ -188,7 +188,7 @@ public struct PickerSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .animation(.easeOut(duration: 0.25), value: pick.id)
+                .animation(.smooth, value: pick.id)
             } else {
                 VStack(spacing: 16) {
                     Spacer()
@@ -210,31 +210,31 @@ public struct PickerSheet: View {
     private var filterChipsRow: some View {
         HStack(spacing: 6) {
             PickerChip(title: "Continue", isActive: mood == .continue) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     mood = .continue
                     cursor = 0
                 }
             }
             PickerChip(title: "Something new", isActive: mood == .somethingNew) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     mood = .somethingNew
                     cursor = 0
                 }
             }
             PickerChip(title: "Short", isActive: filterShort) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     filterShort.toggle()
                     cursor = 0
                 }
             }
             PickerChip(title: "Comfy", isActive: filterComfy) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     filterComfy.toggle()
                     cursor = 0
                 }
             }
             PickerChip(title: "Intense", isActive: filterIntense) {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     filterIntense.toggle()
                     cursor = 0
                 }
@@ -465,6 +465,6 @@ private struct PickerChip: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.15), value: isActive)
+        .animation(.snappy, value: isActive)
     }
 }

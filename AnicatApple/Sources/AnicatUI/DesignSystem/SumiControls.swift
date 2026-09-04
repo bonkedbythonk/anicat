@@ -70,7 +70,7 @@ public struct SumiTabBar: View {
                 .buttonStyle(.plain)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: selection)
+        .animation(.snappy, value: selection)
     }
 }
 
@@ -106,7 +106,7 @@ public struct SumiSegmentedControl: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
-        .animation(.easeOut(duration: 0.15), value: selection)
+        .animation(.snappy, value: selection)
     }
 }
 

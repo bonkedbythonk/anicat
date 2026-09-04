@@ -143,7 +143,7 @@ public struct HistoryView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: favouritesType)
+        .animation(.smooth, value: favouritesType)
     }
 
     private func profileHeader(_ viewer: ViewerProfile) -> some View {

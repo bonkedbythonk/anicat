@@ -131,7 +131,7 @@ public struct WeekStrip: View {
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
                                     .scaleEffect(isHovered ? 1.04 : 1.0)
-                                    .animation(.easeOut(duration: 0.2), value: isHovered)
+                                    .animation(.snappy, value: isHovered)
                             case .failure:
                                 Rectangle()
                                     .fill(SumiTheme.card)
@@ -174,7 +174,7 @@ public struct WeekStrip: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.2), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 }

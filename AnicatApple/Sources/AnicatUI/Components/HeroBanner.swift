@@ -248,6 +248,6 @@ public struct HeroBanner: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
-        .animation(.easeOut(duration: 0.25), value: details.id)
+        .animation(.smooth, value: details.id)
     }
 }

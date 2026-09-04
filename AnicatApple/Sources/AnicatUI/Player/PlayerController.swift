@@ -146,7 +146,7 @@ public final class PlayerController: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 3_500_000_000) // 3.5s
             if !Task.isCancelled && isPlaying {
                 await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.3)) {
+                    withAnimation(.smooth) {
                         self.areControlsVisible = false
                     }
                 }

@@ -160,7 +160,7 @@ public struct SettingsView: View {
             ForEach(SettingsTab.allCases) { tab in
                 let isActive = selectedTab == tab
                 Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
+                    withAnimation(.smooth) {
                         selectedTab = tab
                     }
                 } label: {
@@ -880,7 +880,7 @@ public struct SettingsView: View {
                     """
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(report, forType: .string)
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(.snappy) {
                         copyFeedback = "Debug report copied to clipboard!"
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {

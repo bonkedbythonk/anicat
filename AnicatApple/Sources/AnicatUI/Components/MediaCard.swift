@@ -69,7 +69,7 @@ public struct MediaCard: View {
                                         .resizable()
                                         .aspectRatio(contentMode: .fill)
                                         .scaleEffect(isHovered ? 1.03 : 1.0)
-                                        .animation(.easeOut(duration: 0.2), value: isHovered)
+                                        .animation(.snappy, value: isHovered)
                                 case .failure:
                                     Rectangle()
                                         .fill(SumiTheme.card)
@@ -104,7 +104,7 @@ public struct MediaCard: View {
                                 .transition(.scale(scale: 0.85).combined(with: .opacity))
                         }
                     }
-                    .animation(.easeOut(duration: 0.2), value: isHovered)
+                    .animation(.snappy, value: isHovered)
 
                     // `.poster-tick` (index.css:549): 3px, an accent fill over a
                     // black 45% track. The track is what makes it legible on a

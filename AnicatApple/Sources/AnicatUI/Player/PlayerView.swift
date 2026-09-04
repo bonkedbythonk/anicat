@@ -94,7 +94,7 @@ public struct PlayerView: View {
                     HStack {
                         Spacer()
                         Button(action: {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.snappy) {
                                 controller.skipIntro()
                             }
                         }) {
@@ -117,7 +117,7 @@ public struct PlayerView: View {
                     }
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
-                .animation(.easeOut(duration: 0.25), value: controller.isIntroActive)
+                .animation(.smooth, value: controller.isIntroActive)
             }
         }
         #if os(macOS)
@@ -125,8 +125,8 @@ public struct PlayerView: View {
             controller.showControlsBriefly()
         }
         #endif
-        .animation(.easeOut(duration: 0.3), value: controller.areControlsVisible)
-        .animation(.easeOut(duration: 0.2), value: controller.isBuffering)
+        .animation(.smooth, value: controller.areControlsVisible)
+        .animation(.snappy, value: controller.isBuffering)
     }
 
     // The torrent pre-buffer gate this waits on is a seconds-scale step in

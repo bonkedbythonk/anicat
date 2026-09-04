@@ -178,7 +178,7 @@ public struct SearchView: View {
 
                         if hasActiveFilters {
                             Button {
-                                withAnimation(.easeOut(duration: 0.2)) {
+                                withAnimation(.snappy) {
                                     genreFilter = ""
                                     yearFilter = ""
                                     minScoreFilter = ""
@@ -198,7 +198,7 @@ public struct SearchView: View {
 
                         Spacer()
                     }
-                    .animation(.easeOut(duration: 0.2), value: hasActiveFilters)
+                    .animation(.snappy, value: hasActiveFilters)
                 }
                 .onChange(of: searchType) { _, _ in commitSearch() }
                 // One handler on the combined value rather than five on the
@@ -248,7 +248,7 @@ public struct SearchView: View {
                             }
                             .padding(.horizontal, 40)
                             .opacity(isLoading ? 0.5 : 1)
-                            .animation(.easeOut(duration: 0.2), value: isLoading)
+                            .animation(.snappy, value: isLoading)
                         }
                     } else if isLoading {
                         VStack(alignment: .leading, spacing: 16) {
@@ -296,7 +296,7 @@ public struct SearchView: View {
                         }
                         .padding(.horizontal, 40)
                         .opacity(isLoading ? 0.5 : 1)
-                        .animation(.easeOut(duration: 0.2), value: isLoading)
+                        .animation(.snappy, value: isLoading)
                     } else if isLoading {
                         MediaGridSkeleton(count: 12)
                             .padding(.horizontal, 40)
@@ -312,7 +312,7 @@ public struct SearchView: View {
                         .frame(maxWidth: .infinity, minHeight: 200)
                     }
                 }
-                .animation(.easeOut(duration: 0.25), value: results.isEmpty)
+                .animation(.smooth, value: results.isEmpty)
             }
             .padding(.top, 40)
             .padding(.bottom, 32)

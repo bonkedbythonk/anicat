@@ -392,7 +392,7 @@ public struct MediaDetailView: View {
                 #if os(macOS)
                 .onHover { isBackHovered = $0 }
                 #endif
-                .animation(.easeOut(duration: 0.15), value: isBackHovered)
+                .animation(.snappy, value: isBackHovered)
                 Spacer()
             }
             .padding(.horizontal, 56)
@@ -838,7 +838,7 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 
@@ -896,7 +896,7 @@ public struct MediaDetailView: View {
             HStack(spacing: 24) {
                 ForEach(availableTabs) { tab in
                     Button {
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.smooth) {
                             selectedTab = tab
                         }
                     } label: {
@@ -1197,7 +1197,7 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 
@@ -1265,7 +1265,7 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 
@@ -1319,7 +1319,7 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 
@@ -1379,7 +1379,7 @@ public struct MediaDetailView: View {
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.snappy, value: isHovered)
         }
     }
 }
@@ -1456,7 +1456,7 @@ private struct CompactEpisodeRow: View {
         #if os(macOS)
         .onHover { isHovered = $0 }
         #endif
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(.snappy, value: isHovered)
     }
 }
 
@@ -1581,7 +1581,7 @@ private struct EpisodeRow: View {
         #if os(macOS)
         .onHover { isHovered = $0 }
         #endif
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(.snappy, value: isHovered)
     }
 
     @ViewBuilder

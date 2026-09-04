@@ -173,7 +173,7 @@ public struct SidebarView: View {
 
     private func navItemButton(_ item: NavSection) -> some View {
         NavItemButton(item: item, isActive: currentView == item) {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(.snappy) {
                 currentView = item
             }
         }
@@ -226,8 +226,8 @@ public struct SidebarView: View {
                         .frame(width: 2),
                     alignment: .leading
                 )
-                .animation(.easeOut(duration: 0.15), value: isHovered)
-                .animation(.easeOut(duration: 0.2), value: isActive)
+                .animation(.snappy, value: isHovered)
+                .animation(.snappy, value: isActive)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

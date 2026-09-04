@@ -178,11 +178,13 @@ public struct SearchView: View {
 
                         if hasActiveFilters {
                             Button {
-                                genreFilter = ""
-                                yearFilter = ""
-                                minScoreFilter = ""
-                                statusFilter = ""
-                                sortFilter = ""
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    genreFilter = ""
+                                    yearFilter = ""
+                                    minScoreFilter = ""
+                                    statusFilter = ""
+                                    sortFilter = ""
+                                }
                             } label: {
                                 Text("Clear filters")
                                     .font(.system(size: 12, weight: .medium))
@@ -191,10 +193,12 @@ public struct SearchView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .transition(.opacity)
                         }
 
                         Spacer()
                     }
+                    .animation(.easeOut(duration: 0.2), value: hasActiveFilters)
                 }
                 .onChange(of: searchType) { _, _ in commitSearch() }
                 // One handler on the combined value rather than five on the
@@ -244,6 +248,7 @@ public struct SearchView: View {
                             }
                             .padding(.horizontal, 40)
                             .opacity(isLoading ? 0.5 : 1)
+                            .animation(.easeOut(duration: 0.2), value: isLoading)
                         }
                     } else if isLoading {
                         VStack(alignment: .leading, spacing: 16) {
@@ -265,45 +270,49 @@ public struct SearchView: View {
                 }
 
                 // Results Count
-                if !results.isEmpty {
-                    HStack {
-                        Text("\(results.count) results")
-                            .sumiTabularMono(size: 11.5)
-                            .foregroundColor(SumiTheme.muted)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 40)
+                Group {
+                    if !results.isEmpty {
+                        HStack {
+                            Text("\(results.count) results")
+                                .sumiTabularMono(size: 11.5)
+                                .foregroundColor(SumiTheme.muted)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 40)
 
-                    // `gap-5` (20pt) both ways, five to six columns wide. The
-                    // adaptive range brackets the poster width the shelves on
-                    // the home page use so a card is the same size in both.
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
-                        alignment: .leading,
-                        spacing: 20
-                    ) {
-                        ForEach(results) { item in
-                            MediaCard(item: item) {
-                                onSelectMedia(item)
+                        // `gap-5` (20pt) both ways, five to six columns wide. The
+                        // adaptive range brackets the poster width the shelves on
+                        // the home page use so a card is the same size in both.
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
+                            alignment: .leading,
+                            spacing: 20
+                        ) {
+                            ForEach(results) { item in
+                                MediaCard(item: item) {
+                                    onSelectMedia(item)
+                                }
                             }
                         }
-                    }
-                    .padding(.horizontal, 40)
-                    .opacity(isLoading ? 0.5 : 1)
-                } else if isLoading {
-                    MediaGridSkeleton(count: 12)
                         .padding(.horizontal, 40)
-                } else if !searchText.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "questionmark.folder")
-                            .font(.system(size: 36))
-                            .foregroundColor(SumiTheme.muted.opacity(0.4))
-                        Text("No titles found for \"\(searchText)\"")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(SumiTheme.foreground)
+                        .opacity(isLoading ? 0.5 : 1)
+                        .animation(.easeOut(duration: 0.2), value: isLoading)
+                    } else if isLoading {
+                        MediaGridSkeleton(count: 12)
+                            .padding(.horizontal, 40)
+                    } else if !searchText.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "questionmark.folder")
+                                .font(.system(size: 36))
+                                .foregroundColor(SumiTheme.muted.opacity(0.4))
+                            Text("No titles found for \"\(searchText)\"")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 200)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 200)
                 }
+                .animation(.easeOut(duration: 0.25), value: results.isEmpty)
             }
             .padding(.top, 40)
             .padding(.bottom, 32)

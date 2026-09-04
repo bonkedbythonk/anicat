@@ -7,10 +7,10 @@ import AppKit
 /// bar icon is set from `AnicatApp`, a different target than the sidebar
 /// mark that already does this lookup — see `SidebarView`'s private `mark`).
 public enum BrandAssets {
-    /// The authentic AniCat cat silhouette mark for the macOS status bar.
+    /// The authentic Anicat mark for the macOS status bar.
     public static let menuBarIcon: Image? = {
         #if os(macOS)
-        let targetSize = NSSize(width: 14, height: 20)
+        let targetSize = NSSize(width: 16, height: 15)
 
         // 1. Try pre-bundled multi-resolution TIFF containing both 1x and 2x Retina representations
         let tiffCandidates = [

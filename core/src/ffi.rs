@@ -417,15 +417,15 @@ impl AnicatEngine {
     }
 
     pub async fn search_anime(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(Some(query), Some("ANIME".to_string()), None).await
+        self.search_catalog(Some(query), Some("ANIME".to_string()), None, None).await
     }
 
     pub async fn search_manga_catalog(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(Some(query), Some("MANGA".to_string()), None).await
+        self.search_catalog(Some(query), Some("MANGA".to_string()), None, None).await
     }
 
     pub async fn search_novel(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(Some(query), Some("NOVEL".to_string()), None).await
+        self.search_catalog(Some(query), Some("NOVEL".to_string()), None, None).await
     }
 
     pub async fn search_catalog(
@@ -433,11 +433,13 @@ impl AnicatEngine {
         query: Option<String>,
         media_type: Option<String>,
         filters: Option<SearchFilters>,
+        page: Option<i32>,
     ) -> FfiResult<Vec<MediaSummary>> {
         let vars = build_search_variables(
             query.as_deref(),
             media_type.as_deref(),
             filters.as_ref(),
+            page.unwrap_or(1),
         );
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
             .catalogs
@@ -1267,6 +1269,7 @@ fn build_search_variables(
     query: Option<&str>,
     media_type: Option<&str>,
     filters: Option<&SearchFilters>,
+    page: i32,
 ) -> std::collections::HashMap<String, serde_json::Value> {
     let mut vars = std::collections::HashMap::new();
 
@@ -1289,7 +1292,7 @@ fn build_search_variables(
         vars.insert("type".to_string(), serde_json::json!(mtype));
     }
 
-    vars.insert("page".to_string(), serde_json::json!(1));
+    vars.insert("page".to_string(), serde_json::json!(page));
     vars.insert("perPage".to_string(), serde_json::json!(25));
     vars.insert("isAdult".to_string(), serde_json::json!(false));
 
@@ -1449,7 +1452,7 @@ mod tests {
 
     #[test]
     fn plain_anime_query_leaves_sort_unset_for_relevance() {
-        let vars = build_search_variables(Some("Frieren"), Some("ANIME"), None);
+        let vars = build_search_variables(Some("Frieren"), Some("ANIME"), None, 1);
         assert_eq!(vars.get("search"), Some(&serde_json::json!("Frieren")));
         assert_eq!(vars.get("type"), Some(&serde_json::json!("ANIME")));
         assert_eq!(vars.get("sort"), None);
@@ -1457,21 +1460,21 @@ mod tests {
 
     #[test]
     fn empty_query_defaults_search_to_null_and_sort_to_popularity() {
-        let vars = build_search_variables(Some("   "), Some("ANIME"), None);
+        let vars = build_search_variables(Some("   "), Some("ANIME"), None, 1);
         assert_eq!(vars.get("search"), Some(&serde_json::json!(null)));
         assert_eq!(vars.get("sort"), Some(&serde_json::json!(["POPULARITY_DESC"])));
     }
 
     #[test]
     fn novel_sets_type_manga_and_format_novel() {
-        let vars = build_search_variables(Some("Slime"), Some("NOVEL"), None);
+        let vars = build_search_variables(Some("Slime"), Some("NOVEL"), None, 1);
         assert_eq!(vars.get("type"), Some(&serde_json::json!("MANGA")));
         assert_eq!(vars.get("format"), Some(&serde_json::json!(["NOVEL"])));
     }
 
     #[test]
     fn all_media_type_omits_type_variable() {
-        let vars = build_search_variables(Some("Naruto"), Some("ALL"), None);
+        let vars = build_search_variables(Some("Naruto"), Some("ALL"), None, 1);
         assert_eq!(vars.get("type"), None);
     }
 
@@ -1484,7 +1487,7 @@ mod tests {
             status: Some("RELEASING".to_string()),
             sort: Some("SCORE_DESC".to_string()),
         };
-        let vars = build_search_variables(None, Some("ANIME"), Some(&filters));
+        let vars = build_search_variables(None, Some("ANIME"), Some(&filters), 1);
         assert_eq!(vars.get("genre"), Some(&serde_json::json!(["Action"])));
         assert_eq!(vars.get("seasonYear"), Some(&serde_json::json!(2024)));
         assert_eq!(vars.get("averageScoreGreater"), Some(&serde_json::json!(80)));

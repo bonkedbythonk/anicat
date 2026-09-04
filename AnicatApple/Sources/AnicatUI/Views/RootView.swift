@@ -181,7 +181,10 @@ public struct RootView: View {
                             downloadStates: model.downloadStates
                         )
                         .id(details.id)
-                        .transition(.opacity)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.97).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     } else {
                         sectionContent
                             .id(model.currentNavSection)
@@ -189,6 +192,7 @@ public struct RootView: View {
                     }
                     }
                     .animation(.smooth, value: model.currentNavSection)
+                    .animation(.smooth, value: model.selectedMediaDetails?.id)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -198,7 +202,7 @@ public struct RootView: View {
             // Command palette. Above sections, player, and reader so navigation is accessible anywhere.
             if model.paletteOpen {
                 CommandPalette(commands: paletteCommands) {
-                    withAnimation(.easeIn(duration: 0.18)) {
+                    withAnimation(.snappy) {
                         model.paletteOpen = false
                     }
                 }
@@ -209,7 +213,7 @@ public struct RootView: View {
             // Keyboard shortcuts overlay. Above palette and modal views.
             if model.shortcutsOpen {
                 KeyboardShortcutsOverlay {
-                    withAnimation(.easeIn(duration: 0.2)) {
+                    withAnimation(.snappy) {
                         model.shortcutsOpen = false
                     }
                 }
@@ -279,7 +283,7 @@ public struct RootView: View {
                         Spacer()
 
                         Button(action: {
-                            withAnimation(.easeIn(duration: 0.2)) {
+                            withAnimation(.snappy) {
                                 model.errorMessage = nil
                             }
                         }) {
@@ -377,6 +381,16 @@ public struct RootView: View {
                 },
                 onShuffle: {
                     Task { await model.loadTrending() }
+                },
+                hasMorePages: model.searchHasMorePages,
+                isLoadingMore: model.isLoadingMoreSearchResults,
+                onLoadMore: { q, mediaType, filters in
+                    Task {
+                        await model.search(
+                            query: q, mediaType: mediaType, filters: filters,
+                            page: model.searchCurrentPage + 1, append: true
+                        )
+                    }
                 }
             )
         case .settings:

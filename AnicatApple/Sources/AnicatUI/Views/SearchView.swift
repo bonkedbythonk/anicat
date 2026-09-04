@@ -14,6 +14,9 @@ public struct SearchView: View {
     public let onSelectMedia: (MediaCard.Item) -> Void
     public let onLoadDiscover: () -> Void
     public let onShuffle: () -> Void
+    public var hasMorePages: Bool = true
+    public var isLoadingMore: Bool = false
+    public var onLoadMore: (String, String, SearchFilters) -> Void = { _, _, _ in }
 
     @State private var searchType: String = "ANIME"
 
@@ -35,7 +38,10 @@ public struct SearchView: View {
         onSearchCommit: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in },
         onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
         onLoadDiscover: @escaping () -> Void = {},
-        onShuffle: @escaping () -> Void = {}
+        onShuffle: @escaping () -> Void = {},
+        hasMorePages: Bool = true,
+        isLoadingMore: Bool = false,
+        onLoadMore: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in }
     ) {
         self._searchText = searchText
         self.results = results
@@ -45,6 +51,9 @@ public struct SearchView: View {
         self.onSelectMedia = onSelectMedia
         self.onLoadDiscover = onLoadDiscover
         self.onShuffle = onShuffle
+        self.hasMorePages = hasMorePages
+        self.isLoadingMore = isLoadingMore
+        self.onLoadMore = onLoadMore
     }
 
     private var searchPlaceholder: String {
@@ -99,8 +108,19 @@ public struct SearchView: View {
 
     private func commitSearch() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        // A blank query with a filter set is a legitimate browse ("show me
+        // Action anime"), not a no-op — AniList's `Page.media` accepts a
+        // null `search` and just returns a filtered, popularity-sorted list.
+        // Requiring text here is what made picking a genre alone do nothing.
+        guard !trimmed.isEmpty || hasActiveFilters else { return }
         onSearchCommit(trimmed, searchType, activeFilters)
+    }
+
+    private func loadMore() {
+        guard hasMorePages, !isLoadingMore else { return }
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || hasActiveFilters else { return }
+        onLoadMore(trimmed, searchType, activeFilters)
     }
 
     public var body: some View {
@@ -220,8 +240,13 @@ public struct SearchView: View {
                 }
                 .padding(.horizontal, 40)
 
-                // Discover Section (shown when search query is empty)
-                if searchText.isEmpty {
+                // Discover Section — trending, unfiltered. Shown only when
+                // there's neither a typed query nor an active filter; a
+                // filter alone now drives a real (filtered) search via
+                // `commitSearch`, so leaving this condition at `searchText.
+                // isEmpty` used to show trending nonsense right underneath a
+                // picked genre that silently did nothing.
+                if searchText.isEmpty && !hasActiveFilters {
                     if !discoverItems.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
@@ -288,24 +313,42 @@ public struct SearchView: View {
                             alignment: .leading,
                             spacing: 20
                         ) {
-                            ForEach(results) { item in
+                            ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
                                 MediaCard(item: item) {
                                     onSelectMedia(item)
+                                }
+                                // Firing the next page a few cards before the
+                                // true end means the next row is already
+                                // loading by the time the viewer scrolls to
+                                // it, instead of hitting a dead stop and then
+                                // a pop-in once the request lands.
+                                .onAppear {
+                                    if index == results.count - 6 {
+                                        loadMore()
+                                    }
                                 }
                             }
                         }
                         .padding(.horizontal, 40)
                         .opacity(isLoading ? 0.5 : 1)
                         .animation(.snappy, value: isLoading)
+
+                        if isLoadingMore {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(SumiTheme.indigo)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
                     } else if isLoading {
                         MediaGridSkeleton(count: 12)
                             .padding(.horizontal, 40)
-                    } else if !searchText.isEmpty {
+                    } else if !searchText.isEmpty || hasActiveFilters {
                         VStack(spacing: 8) {
                             Image(systemName: "questionmark.folder")
                                 .font(.system(size: 36))
                                 .foregroundColor(SumiTheme.muted.opacity(0.4))
-                            Text("No titles found for \"\(searchText)\"")
+                            Text(searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                         }

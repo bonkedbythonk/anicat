@@ -88,7 +88,7 @@ public struct MangaReaderView: View {
                     }
             )
             .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.smooth) {
                     showControls.toggle()
                 }
             }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packages the AnicatApple SwiftPM executable into a real AniCat.app bundle
+# Packages the AnicatApple SwiftPM executable into a real Anicat.app bundle
 # with libmpv and its full dependency closure vendored in-bundle, so the app
 # runs without Homebrew installed and without silently falling back to
 # /opt/homebrew at runtime.
@@ -16,7 +16,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/AnicatApple"
 CONFIG="${1:-release}"
-APP="$SRC/dist/AniCat.app"
+APP="$SRC/dist/Anicat.app"
 EXE_NAME="Anicat"
 
 if ! command -v dylibbundler >/dev/null; then
@@ -53,7 +53,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>
     <string>com.anicat.app</string>
     <key>CFBundleName</key>
-    <string>AniCat</string>
+    <string>Anicat</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

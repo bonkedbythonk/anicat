@@ -82,30 +82,34 @@ public struct WeekStrip: View {
                         dayColumn(day)
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private func dayColumn(_ day: DayBucket) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(day.label)
-                .sumiTabularMono(size: 10, weight: day.isToday ? .semibold : .regular)
+                .sumiTabularMono(size: 9.5, weight: day.isToday ? .semibold : .regular)
                 .foregroundColor(day.isToday ? SumiTheme.indigo : SumiTheme.muted)
 
             if !day.items.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(day.items) { item in
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(day.items.prefix(3)) { item in
                         ShowItemView(item: item, onSelect: { onSelect(item) })
                     }
                 }
             } else {
-                // Preserves uniform column width and grid slotting when nothing airs.
-                Spacer(minLength: 0)
+                Text("—")
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
             }
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(day.isToday ? SumiTheme.card.opacity(0.6) : SumiTheme.card.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
         .overlay(
@@ -120,57 +124,41 @@ public struct WeekStrip: View {
 
         @State private var isHovered = false
 
+        private var displayTitle: String {
+            // Cut franchise subtitles after colon to prevent overflow in narrow day columns,
+            // matching the web WeekStrip ("Sousou no Frieren: ..." -> "Sousou no Frieren").
+            let parts = item.title.split(separator: ":", maxSplits: 1)
+            if parts.count > 1 && parts[0].count > 3 {
+                return String(parts[0]).trimmingCharacters(in: .whitespaces)
+            }
+            return item.title
+        }
+
         var body: some View {
             Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 5) {
-                    ZStack(alignment: .bottomLeading) {
-                        AsyncImage(url: item.coverImageURL) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .scaleEffect(isHovered ? 1.04 : 1.0)
-                                    .animation(.snappy, value: isHovered)
-                            case .failure:
-                                Rectangle()
-                                    .fill(SumiTheme.card)
-                                    .overlay(
-                                        Image(systemName: "photo")
-                                            .font(.system(size: 13))
-                                            .foregroundColor(SumiTheme.muted)
-                                    )
-                            case .empty:
-                                Rectangle()
-                                    .fill(SumiTheme.card)
-                            @unknown default:
-                                Rectangle().fill(SumiTheme.card)
-                            }
-                        }
-                        .frame(height: 68)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-
-                        Text("EP \(item.episodeNumber)")
-                            .sumiTabularMono(size: 9, weight: .semibold)
-                            .foregroundColor(SumiTheme.foreground)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.75))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .padding(4)
-                    }
-
-                    Text(item.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.85))
-                        .lineLimit(1)
-                }
+                (
+                    Text(displayTitle)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
+                    + Text(" ")
+                    + Text("EP \(item.episodeNumber)")
+                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(SumiTheme.muted)
+                )
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(item.title)
+            .background(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                    .fill(SumiTheme.indigo.opacity(isHovered ? 0.12 : 0))
+            )
+            .scaleEffect(isHovered ? 1.03 : 1.0, anchor: .leading)
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif

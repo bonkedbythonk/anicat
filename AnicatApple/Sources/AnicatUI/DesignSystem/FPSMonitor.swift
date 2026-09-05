@@ -248,7 +248,7 @@ public final class FPSMonitor: NSObject {
 
 public struct FPSHUDView: View {
     @State private var monitor = FPSMonitor.shared
-    @AppStorage("anicat_show_fps_hud") private var isVisible: Bool = true
+    @AppStorage("anicat_show_fps_hud") private var isVisible: Bool = false
 
     public init() {}
 

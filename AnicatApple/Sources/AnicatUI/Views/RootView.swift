@@ -1148,7 +1148,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // Cmd+Shift+D: Toggle FPS / Performance Debugger HUD
         if isCmd && isShift && !isCtrl && !isAlt && chars == "d" {
             let key = "anicat_show_fps_hud"
-            let current = UserDefaults.standard.object(forKey: key) as? Bool ?? true
+            let current = UserDefaults.standard.object(forKey: key) as? Bool ?? false
             UserDefaults.standard.set(!current, forKey: key)
             return nil
         }

@@ -55,7 +55,20 @@ public final class MpvRenderView: NSOpenGLView {
         super.init(frame: frameRect, pixelFormat: pixelFormat)!
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        wantsBestResolutionOpenGLSurface = true
+        // Vsync on the swap. `flushBuffer` runs on the render thread (see
+        // `MpvRenderTarget`), so the block it implies paces that thread to
+        // the display and costs the main thread nothing. mpv gets the swap
+        // time through `report_swap` and schedules the next frame off it.
         openGLContext?.setValues([1], for: .swapInterval)
+    }
+
+    /// The backing-pixel size mpv renders at, pushed to the render thread
+    /// whenever it changes. Computed here because `convertToBacking` and
+    /// `bounds` are main-thread properties the render thread must not read.
+    private func publishDrawableSize() {
+        let px = convertToBacking(bounds).size
+        coordinator?.renderTarget?.setPixelSize(width: Int32(px.width), height: Int32(px.height))
     }
 
     public required init?(coder: NSCoder) {
@@ -106,18 +119,33 @@ public final class MpvRenderView: NSOpenGLView {
         window?.acceptsMouseMovedEvents = true
         coordinator?.attachMpv(to: self)
         reportContainerSize()
+        publishDrawableSize()
     }
 
     public override func reshape() {
         super.reshape()
-        openGLContext?.update()
-        needsDisplay = true
+        // `update()` touches the drawable while the render thread may be
+        // mid-frame on the same context; CGL's context lock is the one
+        // serialization AppKit documents for a multithreaded NSOpenGLView.
+        if let context = openGLContext {
+            CGLLockContext(context.cglContextObj!)
+            context.update()
+            CGLUnlockContext(context.cglContextObj!)
+        }
         reportContainerSize()
+        publishDrawableSize()
+        needsDisplay = true
+    }
+
+    public override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        publishDrawableSize()
     }
 
     public override func layout() {
         super.layout()
         reportContainerSize()
+        publishDrawableSize()
     }
 
     /// The chrome bars need to know exactly how large the video's own
@@ -134,15 +162,191 @@ public final class MpvRenderView: NSOpenGLView {
         coordinator?.controller.videoContainerSize = bounds.size
     }
 
+    /// Video is not drawn here. Frames are rendered by `MpvRenderTarget` on
+    /// its own thread, driven by mpv's update callback. Doing it here made
+    /// every frame wait for the main run loop and every SwiftUI layout pass
+    /// wait for the frame: `needsDisplay` coalesced 24fps content to
+    /// AppKit's display cycle, `mpv_render_context_render` blocked the main
+    /// thread until the frame's target time, and the FPS HUD counted the
+    /// result as main-thread stalls during playback. AppKit still calls this
+    /// on resize and first appearance, so it clears to black while no render
+    /// context exists (the surface is undefined before the first frame) and
+    /// otherwise asks the render thread to repaint the last frame at the new
+    /// size.
     public override func draw(_ dirtyRect: NSRect) {
         guard let context = openGLContext else { return }
+        if let target = coordinator?.renderTarget {
+            target.requestRedraw()
+            return
+        }
+        CGLLockContext(context.cglContextObj!)
         context.makeCurrentContext()
-        let scale = window?.backingScaleFactor ?? 1
-        coordinator?.renderFrame(
-            width: Int32(bounds.width * scale),
-            height: Int32(bounds.height * scale)
-        )
+        glClearColor(0, 0, 0, 1)
+        glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
         context.flushBuffer()
+        CGLUnlockContext(context.cglContextObj!)
+    }
+}
+
+/// Owns everything that touches `mpv_render_context`: a serial queue whose
+/// single thread is the only one that ever calls create, update, render or
+/// free, the `NSOpenGLContext` it makes current there, and the drawable's
+/// pixel size as last published by the view on the main thread.
+///
+/// render.h's contract is that the OpenGL context is current on whichever
+/// thread makes a render-context call and that, with `advanced_control` on,
+/// `mpv_render_context_update` is called for every update callback. Keeping
+/// all of it on one queue satisfies both without a lock around each call,
+/// and `advanced_control` in turn lets mpv render videotoolbox frames
+/// directly into GL textures instead of copying them.
+///
+/// The update callback (which mpv fires from its own threads) only enqueues;
+/// the closure retains this object, so a callback that lands after the
+/// coordinator has let go still has something valid to run against and
+/// finds `renderCtx` nil once `destroy()` has run ahead of it on the same
+/// serial queue.
+public final class MpvRenderTarget: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "app.anicat.mpv.render", qos: .userInteractive)
+    private let glContext: NSOpenGLContext
+    /// Queue-confined after `create`.
+    private var renderCtx: OpaquePointer?
+    private let sizeLock = NSLock()
+    private var pixelWidth: Int32 = 0
+    private var pixelHeight: Int32 = 0
+
+    init(glContext: NSOpenGLContext) {
+        self.glContext = glContext
+    }
+
+    var isCreated: Bool { queue.sync { renderCtx != nil } }
+
+    /// Creates the render context on the render thread. Blocks the caller
+    /// (setup, on the main thread) for the one-time creation only.
+    func create(mpv: OpaquePointer) -> Int32 {
+        queue.sync {
+            CGLLockContext(glContext.cglContextObj!)
+            defer { CGLUnlockContext(glContext.cglContextObj!) }
+            glContext.makeCurrentContext()
+
+            var glInitParams = mpv_opengl_init_params(
+                get_proc_address: { _, name in
+                    guard let name else { return nil }
+                    // render_gl.h: "macOS: CGL is required
+                    // (CGLGetCurrentContext() returning non-NULL)". The
+                    // OpenGL framework's symbols are already loaded into the
+                    // process by NSOpenGLContext, so dlsym against the
+                    // global namespace resolves them without linking CGL.
+                    return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name)
+                },
+                get_proc_address_ctx: nil
+            )
+            var advanced: CInt = 1
+            let apiType = strdup(MPV_RENDER_API_TYPE_OPENGL)
+            defer { free(apiType) }
+
+            var status: Int32 = -1
+            withUnsafeMutablePointer(to: &glInitParams) { initPtr in
+                withUnsafeMutablePointer(to: &advanced) { advPtr in
+                    var params: [mpv_render_param] = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiType),
+                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: UnsafeMutableRawPointer(initPtr)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_ADVANCED_CONTROL, data: UnsafeMutableRawPointer(advPtr)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                    ]
+                    status = mpv_render_context_create(&renderCtx, mpv, &params)
+                }
+            }
+            guard status >= 0, let renderCtx else {
+                self.renderCtx = nil
+                return status
+            }
+            let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+            mpv_render_context_set_update_callback(renderCtx, { ctx in
+                guard let ctx else { return }
+                // Retained across the hop: see the type's doc comment.
+                let target = Unmanaged<MpvRenderTarget>.fromOpaque(ctx).takeUnretainedValue()
+                target.queue.async { target.handleUpdate() }
+            }, selfPtr)
+            return status
+        }
+    }
+
+    /// Main thread. Stores the size for the render thread and repaints the
+    /// current frame at it, so a live resize tracks the window instead of
+    /// waiting for the next decoded frame.
+    func setPixelSize(width: Int32, height: Int32) {
+        sizeLock.lock()
+        let changed = width != pixelWidth || height != pixelHeight
+        pixelWidth = width
+        pixelHeight = height
+        sizeLock.unlock()
+        if changed { requestRedraw() }
+    }
+
+    func requestRedraw() {
+        queue.async { self.render() }
+    }
+
+    /// One update callback's worth of work. `mpv_render_context_update`
+    /// must be called once per callback with `advanced_control` on, whether
+    /// or not a frame follows.
+    private func handleUpdate() {
+        guard let renderCtx else { return }
+        let flags = mpv_render_context_update(renderCtx)
+        if flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0 {
+            render()
+        }
+    }
+
+    private func render() {
+        guard let renderCtx else { return }
+        sizeLock.lock()
+        let width = pixelWidth
+        let height = pixelHeight
+        sizeLock.unlock()
+        guard width > 0, height > 0 else { return }
+
+        CGLLockContext(glContext.cglContextObj!)
+        defer { CGLUnlockContext(glContext.cglContextObj!) }
+        glContext.makeCurrentContext()
+
+        var fbo = mpv_opengl_fbo(fbo: 0, w: width, h: height, internal_format: 0)
+        // The default framebuffer's origin is bottom-left; mpv's frames are
+        // top-left. Without this the picture renders upside down.
+        var flip: CInt = 1
+        withUnsafeMutablePointer(to: &fbo) { fboPtr in
+            withUnsafeMutablePointer(to: &flip) { flipPtr in
+                var params: [mpv_render_param] = [
+                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(fboPtr)),
+                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPtr)),
+                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                ]
+                mpv_render_context_render(renderCtx, &params)
+            }
+        }
+        // Swap first, then report: `report_swap` is how mpv learns when the
+        // frame actually hit the display, and it was previously called
+        // before the swap so every timing sample it took was early by a
+        // vsync.
+        glContext.flushBuffer()
+        mpv_render_context_report_swap(renderCtx)
+    }
+
+    /// Frees the render context on the render thread with the GL context
+    /// current, as render.h requires, and detaches the update callback
+    /// first so mpv stops enqueueing. Blocks the caller; call it from the
+    /// teardown worker, never from the main thread, since a frame in flight
+    /// may be blocking on its target time.
+    func destroy() {
+        queue.sync {
+            guard let renderCtx else { return }
+            mpv_render_context_set_update_callback(renderCtx, nil, nil)
+            CGLLockContext(glContext.cglContextObj!)
+            glContext.makeCurrentContext()
+            mpv_render_context_free(renderCtx)
+            CGLUnlockContext(glContext.cglContextObj!)
+            self.renderCtx = nil
+        }
     }
 }
 
@@ -198,7 +402,9 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
     public final class Coordinator: NSObject, @unchecked Sendable {
         private var mpv: OpaquePointer?
-        private var renderCtx: OpaquePointer?
+        /// Everything render-context related lives here, on its own thread.
+        /// Set once in `setupMpv`, released by the teardown worker in `stop()`.
+        public private(set) var renderTarget: MpvRenderTarget?
         private var isRunning = false
         fileprivate var controller: PlayerController
         fileprivate weak var renderView: MpvRenderView?
@@ -212,7 +418,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
         // handle. Waiting on `isRunning` alone was not enough — the flag
         // flipping false and the loop noticing it are two different threads
         // observing the same field with no ordering between them and
-        // whoever's `mpv`/`renderCtx` call landed first.
+        // whoever's `mpv`/render-context call landed first.
         private let eventLoopStopped = DispatchSemaphore(value: 0)
 
         public var mpvHandle: OpaquePointer? { mpv }
@@ -276,58 +482,31 @@ public struct MpvMetalSurface: NSViewRepresentable {
                 return
             }
 
-            let hasGLContext = MainActor.assumeIsolated { () -> Bool in
-                guard let ctx = view.openGLContext else { return false }
-                ctx.makeCurrentContext()
-                return true
+            // `NSOpenGLContext` is explicitly non-Sendable, so the target
+            // that owns it is built inside the main-actor block rather than
+            // handing the context out of it.
+            let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
+                view.openGLContext.map { MpvRenderTarget(glContext: $0) }
             }
-            guard hasGLContext else {
+            guard let target else {
                 print("[libmpv] No OpenGL context on render view")
                 mpv_destroy(handle)
                 return
             }
 
-            var glInitParams = mpv_opengl_init_params(
-                get_proc_address: { _, name in
-                    guard let name else { return nil }
-                    // Render.h/render_gl.h: "macOS: CGL is required
-                    // (CGLGetCurrentContext() returning non-NULL)". The
-                    // OpenGL framework's symbols are already loaded into the
-                    // process by NSOpenGLContext at this point, so a plain
-                    // dlsym against the global (RTLD_DEFAULT) namespace
-                    // resolves them without linking against CGL directly.
-                    return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name)
-                },
-                get_proc_address_ctx: nil
-            )
-
-            let apiTypeCString = strdup(MPV_RENDER_API_TYPE_OPENGL)
-            defer { free(apiTypeCString) }
-
-            var createStatus: Int32 = -1
-            withUnsafeMutablePointer(to: &glInitParams) { initParamsPtr in
-                var params: [mpv_render_param] = [
-                    mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiTypeCString),
-                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: UnsafeMutableRawPointer(initParamsPtr)),
-                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
-                ]
-                createStatus = mpv_render_context_create(&renderCtx, handle, &params)
-            }
-
-            if createStatus < 0 || renderCtx == nil {
+            // Created on the render thread, which is the only thread that
+            // will ever touch it again.
+            let createStatus = target.create(mpv: handle)
+            if createStatus < 0 {
                 print("[libmpv] Failed to create render context: \(createStatus)")
                 mpv_destroy(handle)
                 return
             }
-
-            let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-            mpv_render_context_set_update_callback(renderCtx, { ctx in
-                guard let ctx else { return }
-                let coordinator = Unmanaged<Coordinator>.fromOpaque(ctx).takeUnretainedValue()
-                DispatchQueue.main.async {
-                    coordinator.renderView?.needsDisplay = true
-                }
-            }, selfPtr)
+            self.renderTarget = target
+            MainActor.assumeIsolated {
+                let px = view.convertToBacking(view.bounds).size
+                target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
+            }
 
             self.mpv = handle
             self.isRunning = true
@@ -382,27 +561,6 @@ public struct MpvMetalSurface: NSViewRepresentable {
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
             }
-        }
-
-        /// Called from `MpvRenderView.draw(_:)` with its OpenGL context
-        /// already current, on every update-callback-triggered redraw.
-        func renderFrame(width: Int32, height: Int32) {
-            guard let renderCtx, width > 0, height > 0 else { return }
-            var fbo = mpv_opengl_fbo(fbo: 0, w: width, h: height, internal_format: 0)
-            // The default framebuffer's origin is bottom-left; mpv's video
-            // frames are top-left — without this the picture renders upside down.
-            var flip: CInt = 1
-            withUnsafeMutablePointer(to: &fbo) { fboPtr in
-                withUnsafeMutablePointer(to: &flip) { flipPtr in
-                    var params: [mpv_render_param] = [
-                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(fboPtr)),
-                        mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPtr)),
-                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
-                    ]
-                    mpv_render_context_render(renderCtx, &params)
-                }
-            }
-            mpv_render_context_report_swap(renderCtx)
         }
 
         func runCommand(_ args: [String]) {
@@ -658,7 +816,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
             // The event-loop task (`startEventLoop`) polls `mpv` on its own
             // thread and used to `mpv_destroy` it independently once it
             // noticed `isRunning` go false, immediately above — a second
-            // thread able to touch `mpv`/`renderCtx` at the same moment this
+            // thread able to touch `mpv`/the render context at the same moment this
             // function does, with nothing ordering the two. Waiting here for
             // that task to signal it's done fixed the resulting crash, but
             // `stop()` runs synchronously on the main thread (SwiftUI calls
@@ -679,8 +837,8 @@ public struct MpvMetalSurface: NSViewRepresentable {
             // task (see `startEventLoop`), except that closure gets away
             // without a box because its capture list is inferred, not a
             // plain `DispatchQueue.global().async` closure's stricter one.
-            let handles = UnsafeSendableBox((renderCtx: self.renderCtx, mpv: self.mpv, renderView: self.renderView))
-            self.renderCtx = nil
+            let handles = UnsafeSendableBox((target: self.renderTarget, mpv: self.mpv))
+            self.renderTarget = nil
             self.mpv = nil
             // Plain GCD, not a Swift `Task`: `DispatchSemaphore.wait()` is a
             // real thread block, and Swift's concurrency checker refuses to
@@ -691,15 +849,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
                 eventLoopStopped.wait()
                 // render.h: "You must free the context with
                 // mpv_render_context_free() before the mpv core is
-                // destroyed." The OpenGL context must be current for this
-                // call, which is the one piece of teardown that has to hop
-                // back to the main thread — briefly, not blocking it.
-                if let renderCtx = handles.value.renderCtx {
-                    DispatchQueue.main.sync {
-                        handles.value.renderView?.openGLContext?.makeCurrentContext()
-                        mpv_render_context_free(renderCtx)
-                    }
-                }
+                // destroyed." `destroy()` does that on the render thread with
+                // the GL context current there, so teardown no longer needs
+                // the main thread at all: the old `DispatchQueue.main.sync`
+                // hop here could land while the main thread was inside
+                // `reshape()` holding the same CGL lock.
+                handles.value.target?.destroy()
                 if let mpv = handles.value.mpv {
                     mpv_destroy(mpv)
                 }

@@ -161,4 +161,7 @@ AnicatApple/AnicatCore.xcframework/
 AnicatApple/Sources/AnicatCoreKit/anicat_core.swift
 AnicatApple/Frameworks/
 AnicatApple/Sources/anicat_coreFFI/include/
-.aider*
+# SwiftPM IDE state and the URLCache that lands in cwd when the binary is run
+# outside a bundle (swift run / swift test) — never source.
+AnicatApple/.swiftpm/
+AnicatApple/anicat_image_cache/

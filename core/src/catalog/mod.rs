@@ -69,9 +69,20 @@ impl Catalogs {
         if !self.anilist.has_token() {
             return Err("not signed in to AniList".to_string());
         }
-        self.anilist
+        let key = "get_user_profile|viewer".to_string();
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let res: anilist::responses::ViewerResponse = self
+            .anilist
             .execute(anilist::queries::USER_PROFILE_QUERY, HashMap::new())
-            .await
+            .await?;
+        if let Ok(v) = serde_json::to_value(&res) {
+            self.cache.set(key, v, "get_user_profile");
+        }
+        Ok(res)
     }
 
     /// One status bucket of the user's list, flattened out of AniList's
@@ -86,6 +97,15 @@ impl Catalogs {
         media_type: &str,
     ) -> Result<Vec<anilist::types::MediaItem>, String> {
         let user_name = self.viewer_name().await?;
+        let key = AniListCache::key(
+            "get_user_list",
+            &[("user", &user_name), ("type", media_type), ("status", status)],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
         let mut vars = HashMap::new();
         vars.insert("userName".to_string(), serde_json::json!(user_name));
         vars.insert("type".to_string(), serde_json::json!(media_type));
@@ -122,6 +142,9 @@ impl Catalogs {
                 out.push(media);
             }
         }
+        if let Ok(v) = serde_json::to_value(&out) {
+            self.cache.set(key, v, "get_user_list");
+        }
         Ok(out)
     }
 
@@ -138,6 +161,20 @@ impl Catalogs {
         format: Option<&str>,
         per_page: i64,
     ) -> Result<Vec<anilist::types::MediaItem>, String> {
+        let per_page_str = per_page.to_string();
+        let key = AniListCache::key(
+            "get_trending",
+            &[
+                ("type", media_type),
+                ("format", format.unwrap_or("")),
+                ("limit", &per_page_str),
+            ],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
         let mut vars = HashMap::new();
         vars.insert("page".to_string(), serde_json::json!(1));
         vars.insert("perPage".to_string(), serde_json::json!(per_page));
@@ -152,7 +189,11 @@ impl Catalogs {
             }
             None => self.anilist.execute(anilist::queries::MEDIA_TRENDING_QUERY, vars).await?,
         };
-        Ok(page.page.media.unwrap_or_default())
+        let items = page.page.media.unwrap_or_default();
+        if let Ok(v) = serde_json::to_value(&items) {
+            self.cache.set(key, v, "get_trending");
+        }
+        Ok(items)
     }
 
     /// Filtered discovery: a release-status row ("Newly Releasing") or a
@@ -168,6 +209,23 @@ impl Catalogs {
         season_year: Option<i32>,
         per_page: i64,
     ) -> Result<Vec<anilist::types::MediaItem>, String> {
+        let year_str = season_year.map(|y| y.to_string()).unwrap_or_default();
+        let per_page_str = per_page.to_string();
+        let key = AniListCache::key(
+            "get_discover",
+            &[
+                ("type", media_type),
+                ("status", status.unwrap_or("")),
+                ("season", season.unwrap_or("")),
+                ("year", &year_str),
+                ("limit", &per_page_str),
+            ],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
         let mut vars = HashMap::new();
         vars.insert("page".to_string(), serde_json::json!(1));
         vars.insert("perPage".to_string(), serde_json::json!(per_page));
@@ -191,7 +249,11 @@ impl Catalogs {
         }
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> =
             self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await?;
-        Ok(page.page.media.unwrap_or_default())
+        let items = page.page.media.unwrap_or_default();
+        if let Ok(v) = serde_json::to_value(&items) {
+            self.cache.set(key, v, "get_discover");
+        }
+        Ok(items)
     }
 
     /// One AniList entry, served from the response cache when it is warm.
@@ -206,6 +268,17 @@ impl Catalogs {
             &[("id", &anilist_id.to_string()), ("type", media_type)],
         );
         if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        // Also check if the alternative type is cached for this ID to prevent redundant requests
+        let alt_type = if is_manga { "ANIME" } else { "MANGA" };
+        let alt_key = AniListCache::key(
+            "media_detail",
+            &[("id", &anilist_id.to_string()), ("type", alt_type)],
+        );
+        if let Some(hit) = self.cache.get(&alt_key) {
             if let Ok(parsed) = serde_json::from_value(hit) {
                 return Ok(parsed);
             }
@@ -228,6 +301,12 @@ impl Catalogs {
         &self,
         media_id: i64,
     ) -> Result<Vec<anilist::types::CharacterEdge>, String> {
+        let key = AniListCache::key("get_media_characters", &[("id", &media_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
         let mut vars = HashMap::new();
         vars.insert("id".to_string(), serde_json::json!(media_id));
         vars.insert("page".to_string(), serde_json::json!(1));
@@ -236,11 +315,15 @@ impl Catalogs {
             .anilist
             .execute(anilist::queries::MEDIA_CHARACTERS_QUERY, vars)
             .await?;
-        Ok(res
+        let edges = res
             .media
             .and_then(|m| m.characters)
             .and_then(|c| c.edges)
-            .unwrap_or_default())
+            .unwrap_or_default();
+        if let Ok(v) = serde_json::to_value(&edges) {
+            self.cache.set(key, v, "get_media_characters");
+        }
+        Ok(edges)
     }
 
     /// Fetches community discussion threads for an AniList media id.
@@ -248,13 +331,23 @@ impl Catalogs {
         &self,
         media_id: i64,
     ) -> Result<Vec<anilist::responses::DiscussionThreadItem>, String> {
+        let key = AniListCache::key("get_media_discussions", &[("id", &media_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
         let mut vars = HashMap::new();
         vars.insert("id".to_string(), serde_json::json!(media_id));
         let res: anilist::responses::DiscussionResponse = self
             .anilist
             .execute(anilist::queries::MEDIA_DISCUSSIONS_QUERY, vars)
             .await?;
-        Ok(res.page.threads.unwrap_or_default())
+        let threads = res.page.threads.unwrap_or_default();
+        if let Ok(v) = serde_json::to_value(&threads) {
+            self.cache.set(key, v, "get_media_discussions");
+        }
+        Ok(threads)
     }
 
     /// Creates or updates the signed-in user's list entry for a title.
@@ -285,6 +378,7 @@ impl Catalogs {
         // so a status/score/progress edit that isn't invalidated here reads
         // back as unchanged the moment the detail page reopens.
         self.cache.invalidate("media_detail");
+        self.cache.invalidate("get_user_list");
         Ok(())
     }
 
@@ -296,6 +390,7 @@ impl Catalogs {
         let _: serde_json::Value =
             self.anilist.execute(anilist::queries::TOGGLE_FAVOURITE_MUTATION, vars).await?;
         self.cache.invalidate("media_detail");
+        self.cache.invalidate("get_user_profile");
         Ok(())
     }
 
@@ -308,6 +403,7 @@ impl Catalogs {
         let _: serde_json::Value =
             self.anilist.execute(anilist::queries::DELETE_MEDIA_LIST_ENTRY_MUTATION, vars).await?;
         self.cache.invalidate("media_detail");
+        self.cache.invalidate("get_user_list");
         Ok(())
     }
 }

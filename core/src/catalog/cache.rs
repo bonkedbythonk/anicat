@@ -45,9 +45,11 @@ impl AniListCache {
 
     fn ttl(cmd: &str) -> Duration {
         match cmd {
-            "get_trending" | "get_seasonal" | "get_upcoming" | "get_smart_playlist" => {
-                Duration::from_secs(6 * 3600)
-            }
+            "get_trending"
+            | "get_seasonal"
+            | "get_upcoming"
+            | "get_smart_playlist"
+            | "get_discover" => Duration::from_secs(6 * 3600),
             "get_user_list" => Duration::from_secs(15 * 60),
             "get_airing_schedule" => Duration::from_secs(15 * 60),
             "get_user_profile" => Duration::from_secs(3600),
@@ -60,6 +62,7 @@ impl AniListCache {
             // changes on the same cadence (a new episode airing).
             "anizip_meta" => Duration::from_secs(60 * 60),
             "get_media_characters" => Duration::from_secs(6 * 3600),
+            "get_media_discussions" => Duration::from_secs(30 * 60),
             // A voice actor's filmography changes about as often as a
             // season announcement, and one modal can page through it.
             "get_staff" => Duration::from_secs(6 * 3600),
@@ -422,6 +425,9 @@ mod tests {
         // making these caches nearly useless. Assert they got real TTLs.
         assert!(AniListCache::ttl("media_detail") >= Duration::from_secs(30 * 60));
         assert!(AniListCache::ttl("get_media_characters") >= Duration::from_secs(3600));
+        assert!(AniListCache::ttl("get_media_discussions") >= Duration::from_secs(15 * 60));
+        assert!(AniListCache::ttl("get_discover") >= Duration::from_secs(3600));
+        assert!(AniListCache::ttl("get_user_list") >= Duration::from_secs(10 * 60));
         assert!(AniListCache::ttl("search_media") >= Duration::from_secs(5 * 60));
         // Unknown commands still fall back to the short default.
         assert_eq!(AniListCache::ttl("something_else"), Duration::from_secs(60));

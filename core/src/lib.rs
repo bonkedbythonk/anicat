@@ -8,6 +8,7 @@
 
 pub mod catalog;
 pub mod db;
+pub mod discord;
 pub mod media;
 pub mod reader;
 pub mod torrent;

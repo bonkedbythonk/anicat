@@ -31,6 +31,7 @@ thiserror = "2"
 regex-lite = "0.1"
 dirs = "6"
 tokio-util = { version = "0.7", features = ["io"] }
+discord-rich-presence = "0.2"
 # disable-upload: this is a personal streaming client, not a seedbox — we
 # download to watch and never upload. Also silences the bulk of the peer
 # churn that librqbit logs.

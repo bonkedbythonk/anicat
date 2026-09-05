@@ -22,20 +22,22 @@ fi
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Cross-platform sed in-place: macOS uses `-i ''`, Linux uses `-i`
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    SED_INPLACE=(sed -i '')
-else
-    SED_INPLACE=(sed -i)
-fi
-
 echo "$NEW_VERSION" > version.txt
 echo "[1/2] version.txt  -> $NEW_VERSION"
 
 # Only the first `version =` line: dependency tables further down also
-# carry the key.
-"${SED_INPLACE[@]}" "0,/^version = .*/s//version = \"$NEW_VERSION\"/" core/Cargo.toml
+# carry the key. awk rather than sed's `0,/re/` range, which is a GNU
+# extension: on macOS's BSD sed it matched nothing and this script
+# reported a bump it had not made.
+awk -v v="$NEW_VERSION" '
+    /^version = / && !done { sub(/"[^"]*"/, "\"" v "\""); done = 1 }
+    { print }
+' core/Cargo.toml > core/Cargo.toml.tmp && mv core/Cargo.toml.tmp core/Cargo.toml
+grep -q "^version = \"$NEW_VERSION\"" core/Cargo.toml || { echo "core/Cargo.toml was not updated" >&2; exit 1; }
 echo "[2/2] core/Cargo.toml  -> $NEW_VERSION"
+
+# Cargo records the crate version in the lock file too.
+(cd core && cargo update -p anicat-core --offline >/dev/null 2>&1 || cargo update -p anicat-core >/dev/null)
 
 echo ""
 echo "All files bumped to $NEW_VERSION."

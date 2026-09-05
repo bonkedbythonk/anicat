@@ -591,6 +591,11 @@ public struct MpvMetalSurface: NSViewRepresentable {
         }
 
         func loadFile(url: String) {
+            // Not the place to touch `awaitingNewFile`: `updateNSView` calls
+            // this on every SwiftUI update, so during a resolve it arrives
+            // repeatedly with the *outgoing* file's URL, and clearing the
+            // gate here let the old file's ticks through (and started the
+            // next episode at the previous one's position).
             guard url != lastLoadedURL else { return }
             pendingStreamURL = url
             guard let mpv = mpv else { return }
@@ -811,9 +816,21 @@ public struct MpvMetalSurface: NSViewRepresentable {
                         break
                     }
 
+                    if ev.event_id == MPV_EVENT_FILE_LOADED {
+                        await MainActor.run { self.controller.awaitingNewFile = false }
+                        continue
+                    }
+
                     if ev.event_id == MPV_EVENT_PROPERTY_CHANGE {
                         let prop = ev.data.assumingMemoryBound(to: mpv_event_property.self).pointee
                         guard let name = prop.name.map({ String(cString: $0) }) else { continue }
+
+                        // Still the previous file's numbers: see
+                        // `PlayerController.awaitingNewFile`.
+                        let stale = await MainActor.run { self.controller.awaitingNewFile }
+                        if stale, ["time-pos", "duration", "pause"].contains(name) {
+                            continue
+                        }
 
                         if name == "time-pos", let data = prop.data {
                             let pos = data.assumingMemoryBound(to: Double.self).pointee

@@ -126,6 +126,16 @@ public final class PlayerController: @unchecked Sendable {
 
     // Progress & Playback callbacks for real SQLite recording and libmpv sync
     public var onPositionChange: (@Sendable (_ currentTime: Double, _ duration: Double) -> Void)?
+    /// True from the moment `AppModel.resolveAndPlay` commits to a new
+    /// episode until mpv reports `MPV_EVENT_FILE_LOADED` for it. mpv keeps
+    /// emitting the *outgoing* file's time-pos for the whole resolve (0 to
+    /// 10 s, at its last second), and `resolveAndPlay` has already reset
+    /// the per-episode flags and moved `episodeNumber` on. Delivered, that
+    /// tick read as "episode N+1 is at 99.8%": the 85% line marked the new
+    /// episode watched on AniList and the 75% line preloaded N+2, both
+    /// within a second of N+1 starting. Position, duration and pause
+    /// updates are dropped while this is set.
+    public var awaitingNewFile: Bool = false
     public var onPlaybackStopped: (@Sendable () -> Void)?
     public var onSeek: (@Sendable (_ seconds: Double) -> Void)?
     public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?

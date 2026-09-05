@@ -2089,9 +2089,17 @@ public final class AppModel: @unchecked Sendable {
         isLoading = true
         defer { isLoading = false }
 
+        // From here on, anything mpv reports belongs to the outgoing file,
+        // unless this is the same episode being asked for again: then no
+        // new file will load, no FILE_LOADED will clear the gate, and the
+        // numbers mpv is emitting are the right file's already.
+        let replayingCurrent = activeStreamURL != nil
+            && currentPlaybackCatalogId == catalogId
+            && currentPlaybackEpisode == episode
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode
+        self.playerController.awaitingNewFile = !replayingCurrent
         ensurePlaybackEpisodes(for: catalogId, engine: engine)
         self.currentPlaybackTitle = effectiveTitle
         // A fresh play always opens full-screen, not stuck minimized from
@@ -2170,15 +2178,24 @@ public final class AppModel: @unchecked Sendable {
         // resolves — likely exactly what happened resuming episode 9 here:
         // picking a specific release manually skips the fallback chain
         // entirely and went straight to a release that worked, instantly.
-        let handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
-        // The Cancel button (`cancelResolve`) only cancels *waiting* on this
-        // Task, not the FFI call itself mid-flight — check here so a resolve
-        // that finishes after the viewer already gave up doesn't start
-        // playback anyway.
-        guard !Task.isCancelled else {
-            throw CancellationError()
+        let handleURL: String
+        do {
+            handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
+            // The Cancel button (`cancelResolve`) only cancels *waiting* on
+            // this Task, not the FFI call itself mid-flight — check here so
+            // a resolve that finishes after the viewer already gave up
+            // doesn't start playback anyway.
+            guard !Task.isCancelled else {
+                throw CancellationError()
+            }
+        } catch {
+            // No new file is coming; whatever is still playing owns the
+            // position again.
+            self.playerController.awaitingNewFile = false
+            throw error
         }
         guard let streamURL = URL(string: handleURL) else {
+            self.playerController.awaitingNewFile = false
             throw NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handleURL)"])
         }
 

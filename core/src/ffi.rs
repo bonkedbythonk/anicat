@@ -436,7 +436,7 @@ impl AnicatEngine {
         // librqbit and the DHT are chatty at info and say nothing a viewer
         // of this log can act on, so they sit at warn unless asked for.
         let _ = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("info,librqbit=warn,librqbit_dht=warn,librqbit_core=warn,hyper=warn,reqwest=warn"),
+            env_logger::Env::default().default_filter_or("info,librqbit=warn,librqbit_dht=warn,librqbit_core=warn,hyper=warn,reqwest=warn,tracing::span=off"),
         )
         .format_timestamp_millis()
         .try_init();

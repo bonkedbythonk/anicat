@@ -62,16 +62,76 @@ public final class MpvRenderView: NSOpenGLView {
         fatalError("init(coder:) is not used — MpvRenderView is always constructed programmatically")
     }
 
+    private var trackingArea: NSTrackingArea?
+
+    /// Every click toggles play/pause immediately, no waiting to see if a
+    /// second click is coming — `clickCount` on this same event already
+    /// tells us that. A double click also carries a fullscreen toggle, at
+    /// the cost of two play/pause flips netting out to no state change
+    /// (the same trade-off YouTube's own player makes) rather than making
+    /// every single click wait ~300ms to find out whether it's a double.
+    public override func mouseDown(with event: NSEvent) {
+        coordinator?.controller.togglePlayPause()
+        if event.clickCount >= 2 {
+            if let window = AppWindow.main ?? NSApp.keyWindow {
+                AppWindow.setToolbarVisible(false)
+                window.toggleFullScreen(nil)
+            }
+        }
+    }
+
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        self.trackingArea = area
+    }
+
+    public override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        coordinator?.controller.showControlsBriefly()
+    }
+
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
+        window?.acceptsMouseMovedEvents = true
         coordinator?.attachMpv(to: self)
+        reportContainerSize()
     }
 
     public override func reshape() {
         super.reshape()
         openGLContext?.update()
         needsDisplay = true
+        reportContainerSize()
+    }
+
+    public override func layout() {
+        super.layout()
+        reportContainerSize()
+    }
+
+    /// The chrome bars need to know exactly how large the video's own
+    /// letterboxed rect is, and doing that math against a second, separate
+    /// SwiftUI `GeometryReader` measurement invited a mismatch: this view's
+    /// `.ignoresSafeArea()` lets it bleed to the window's true edges in a
+    /// way a sibling `GeometryReader` reading the same hierarchy isn't
+    /// guaranteed to agree with (sidebar-claimed HStack space, safe-area
+    /// nesting) — the bars fit against a *different* rect than the one the
+    /// video actually rendered into. Reporting this view's own real `bounds`
+    /// (the same value `draw(_:)` already trusts for `renderFrame`) removes
+    /// the second source of truth entirely.
+    private func reportContainerSize() {
+        coordinator?.controller.videoContainerSize = bounds.size
     }
 
     public override func draw(_ dirtyRect: NSRect) {
@@ -145,6 +205,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
+        private var sidewaysSavedHwdec: String?
         // Signaled once by the event-loop task's own thread when it has
         // actually stopped touching `mpv`, so `stop()` can block until that
         // happens before it frees the render context or destroys the
@@ -286,17 +347,37 @@ public struct MpvMetalSurface: NSViewRepresentable {
             controller.onFetchTrackInfo = { [weak self] in
                 self?.fetchTrackInfo() ?? (audio: "-", subtitle: "-")
             }
+            controller.onSetVolume = { [weak self] volume in
+                self?.setVolume(volume)
+            }
+            controller.onSetMuted = { [weak self] muted in
+                self?.setMuted(muted)
+            }
+            controller.onSetSpeed = { [weak self] rate in
+                self?.setSpeed(rate)
+            }
+            controller.onCycleSideways = { [weak self] in
+                self?.cycleSideways()
+            }
 
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 4, "paused-for-cache", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 5, "cache-buffering-state", MPV_FORMAT_INT64)
+            // Decoded display size (post-rotation, post-pixel-aspect-ratio) —
+            // what the overlay chrome needs to know where the letterboxed
+            // video rect actually sits, as opposed to the window's own size.
+            mpv_observe_property(handle, 6, "video-params/dw", MPV_FORMAT_INT64)
+            mpv_observe_property(handle, 7, "video-params/dh", MPV_FORMAT_INT64)
 
             startEventLoop()
 
             applyAnime4K(enabled: controller.isAnime4KEnabled)
             setPaused(!controller.isPlaying)
+            setVolume(controller.volume)
+            setMuted(controller.isMuted)
+            setSpeed(controller.playbackRate)
 
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
@@ -376,6 +457,61 @@ public struct MpvMetalSurface: NSViewRepresentable {
 
         func seek(to seconds: Double) {
             runCommand(["seek", String(format: "%.2f", seconds), "absolute"])
+        }
+
+        func setVolume(_ volume: Double) {
+            guard let mpv = mpv else { return }
+            var value = volume * 100
+            mpv_set_property(mpv, "volume", MPV_FORMAT_DOUBLE, &value)
+        }
+
+        func setMuted(_ muted: Bool) {
+            guard let mpv = mpv else { return }
+            var flag: Int32 = muted ? 1 : 0
+            mpv_set_property(mpv, "mute", MPV_FORMAT_FLAG, &flag)
+        }
+
+        func setSpeed(_ rate: Double) {
+            guard let mpv = mpv else { return }
+            var value = rate
+            mpv_set_property(mpv, "speed", MPV_FORMAT_DOUBLE, &value)
+        }
+
+        /// Cycles off / 90 CW / 90 CCW, same three states and same reasoning
+        /// as the Lua script's `toggle_sideways` in the Tauri build: `vf`
+        /// with the `sub` filter ahead of `lavfi=[transpose=...]` bakes
+        /// subtitles into the frame before the rotation (so they turn with
+        /// the picture) rather than leaving them on the unrotated OSD like a
+        /// bare `--video-rotate` would. Hardware decode is turned off first
+        /// — with videotoolbox frames the `sub` filter silently renders
+        /// nothing and lavfi fails to configure at all ("Impossible to
+        /// convert between the formats"), verified against mpv/macOS in the
+        /// Tauri build — and restored once back to the off state.
+        func cycleSideways() {
+            guard let mpv = mpv else { return }
+            let next = (controller.sidewaysState + 1) % 3
+            controller.sidewaysState = next
+
+            if next == 1 && sidewaysSavedHwdec == nil {
+                if let cstr = mpv_get_property_string(mpv, "hwdec") {
+                    sidewaysSavedHwdec = String(cString: cstr)
+                    mpv_free(cstr)
+                }
+                mpv_set_option_string(mpv, "hwdec", "no")
+            }
+
+            switch next {
+            case 0:
+                runCommand(["vf", "clr", ""])
+                if let saved = sidewaysSavedHwdec {
+                    mpv_set_option_string(mpv, "hwdec", saved)
+                    sidewaysSavedHwdec = nil
+                }
+            case 1:
+                runCommand(["vf", "set", "sub,lavfi=[transpose=clock]"])
+            default:
+                runCommand(["vf", "set", "sub,lavfi=[transpose=cclock]"])
+            }
         }
 
         func applyAnime4K(enabled: Bool) {
@@ -475,6 +611,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
                                 self.controller.duration = dur
                                 self.controller.onPositionChange?(self.controller.currentTime, dur)
                             }
+                        } else if name == "video-params/dw", let data = prop.data {
+                            let w = data.assumingMemoryBound(to: Int64.self).pointee
+                            await MainActor.run { self.controller.videoDisplayWidth = Double(w) }
+                        } else if name == "video-params/dh", let data = prop.data {
+                            let h = data.assumingMemoryBound(to: Int64.self).pointee
+                            await MainActor.run { self.controller.videoDisplayHeight = Double(h) }
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {
@@ -500,6 +642,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
             controller.onCycleAudioTrack = nil
             controller.onCycleSubtitleTrack = nil
             controller.onFetchTrackInfo = nil
+            controller.onSetVolume = nil
+            controller.onSetMuted = nil
+            controller.onSetSpeed = nil
+            controller.onCycleSideways = nil
+            controller.sidewaysState = 0
+            sidewaysSavedHwdec = nil
             lastLoadedURL = nil
             pendingStreamURL = nil
             lastAnime4KState = nil

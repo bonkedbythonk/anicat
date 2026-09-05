@@ -7,29 +7,122 @@ public struct PlayerView: View {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
     public let onClose: () -> Void
+    /// Backgrounds this view without stopping playback — see
+    /// `AppModel.isPlayerMinimized`. Distinct from `onClose`, which actually
+    /// tears playback down.
+    public let onMinimize: () -> Void
+    /// Whether this view is currently shrunk to the corner mini-player.
+    /// `MpvMetalSurface` must stay mounted at the exact same call site
+    /// regardless of this — SwiftUI tears down (and, per `dismantleNSView`'s
+    /// `stop()`, actually stops playback) an `NSViewRepresentable` that
+    /// moves between different branches of an `if`/`else`, even when both
+    /// branches look the same on screen. Minimizing used to wrap the whole
+    /// player in `if !isPlayerMinimized` at the call site, which is exactly
+    /// that mistake: it looked like "hide the player" but was actually
+    /// "destroy and recreate mpv every time", which is why minimizing read
+    /// as the stream just exiting. Only the *frame* (size/position/corner
+    /// radius) and the surrounding chrome change here; the video surface
+    /// itself is unconditional.
+    public let isMinimized: Bool
+    public let onRestore: () -> Void
     @State private var showInfoMenu = false
+    @State private var showEpisodeList = false
     @State private var audioTrackLabel = "-"
     @State private var subtitleTrackLabel = "-"
 
-    public init(controller: PlayerController, streamURL: URL? = nil, onClose: @escaping () -> Void) {
+    private static let miniSize = CGSize(width: 320, height: 180)
+
+    public init(
+        controller: PlayerController,
+        streamURL: URL? = nil,
+        onClose: @escaping () -> Void,
+        onMinimize: @escaping () -> Void = {},
+        isMinimized: Bool = false,
+        onRestore: @escaping () -> Void = {}
+    ) {
         self.controller = controller
         self.streamURL = streamURL
         self.onClose = onClose
+        self.onMinimize = onMinimize
+        self.isMinimized = isMinimized
+        self.onRestore = onRestore
+    }
+
+    /// The video's actual on-screen rect once letterboxed/pillarboxed to fit
+    /// `container` — a MacBook's screen aspect ratio essentially never
+    /// matches the video's, so the visible frame is a sub-rect of the window,
+    /// not the window itself. Overlay chrome padded from the window's own
+    /// edges instead of this rect's used to sit half over a black bar.
+    /// `nil` aspect ratio (mpv hasn't reported the decoded size yet) falls
+    /// back to the full container rather than leaving the overlay collapsed.
+    static func aspectFitRect(in container: CGSize, aspectRatio: Double?) -> CGRect {
+        guard let aspectRatio, aspectRatio > 0, container.width > 0, container.height > 0 else {
+            return CGRect(origin: .zero, size: container)
+        }
+        let containerAspect = container.width / container.height
+        let size: CGSize
+        if aspectRatio > containerAspect {
+            // Video is relatively wider than the window — letterboxed
+            // (bars top/bottom), full width.
+            size = CGSize(width: container.width, height: container.width / aspectRatio)
+        } else {
+            // Pillarboxed (bars left/right), full height.
+            size = CGSize(width: container.height * aspectRatio, height: container.height)
+        }
+        let origin = CGPoint(x: (container.width - size.width) / 2, y: (container.height - size.height) / 2)
+        return CGRect(origin: origin, size: size)
     }
 
     public var body: some View {
+        GeometryReader { windowGeo in
+        // `controller.videoContainerSize` — `MpvRenderView`'s own real
+        // `bounds`, reported straight from the view itself (see
+        // `reportContainerSize`) — not a second, separate `GeometryReader`
+        // measurement of this same hierarchy. The two disagreed: this view
+        // bleeds to the window's true edges via `.ignoresSafeArea()` in a way
+        // a sibling `GeometryReader` wasn't guaranteed to see the same size
+        // for (sidebar-claimed HStack space, nested safe-area insets), so the
+        // chrome sized itself against a different rect than the one the
+        // video actually rendered into — bars that didn't quite fit,
+        // overlapped the picture, or ran past the true window edge depending
+        // on which way the two frames disagreed. (`windowGeo` above is a
+        // different, legitimate use — just placing the mini-player box
+        // within the window, not fitting the letterbox.)
+        let videoRect = Self.aspectFitRect(in: controller.videoContainerSize, aspectRatio: controller.videoAspectRatio)
+        let miniCenter = CGPoint(
+            x: windowGeo.size.width - Self.miniSize.width / 2 - 24,
+            y: windowGeo.size.height - Self.miniSize.height / 2 - 24
+        )
         ZStack {
-            // Background Canvas (Black)
-            Color.black
-                .ignoresSafeArea()
+            // Background Canvas (Black) — only when full-size. Painting this
+            // unconditionally would black out the entire window even while
+            // minimized, defeating the whole point of minimizing: seeing and
+            // using the rest of the app behind the small mini-player box.
+            if !isMinimized {
+                Color.black
+                    .ignoresSafeArea()
+            }
 
             #if os(macOS)
+            // Click handling lives in MpvRenderView.mouseDown, not a SwiftUI
+            // tap gesture — stacking onTapGesture(count: 1) alongside
+            // onTapGesture(count: 2) makes SwiftUI hold every single click
+            // for ~300ms to see whether a second one is coming before it
+            // fires, which read as exactly the "click has a lot of delay"
+            // lag reported against this screen. AppKit's mouseDown already
+            // carries `clickCount` with no such wait.
+            //
+            // Frame/position/corner-radius vary with `isMinimized`, but this
+            // is always the same call site — see the doc comment on
+            // `isMinimized` for why that distinction is exactly what keeps
+            // mpv alive across a minimize/restore instead of restarting it.
             MpvMetalSurface(controller: controller, streamURL: streamURL)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    controller.togglePlayPause()
-                }
+                .ignoresSafeArea(isMinimized ? [] : .all)
+                .frame(width: isMinimized ? Self.miniSize.width : nil, height: isMinimized ? Self.miniSize.height : nil)
+                .clipShape(RoundedRectangle(cornerRadius: isMinimized ? 12 : 0))
+                .shadow(color: .black.opacity(isMinimized ? 0.45 : 0), radius: isMinimized ? 18 : 0, y: isMinimized ? 8 : 0)
+                .position(isMinimized ? miniCenter : CGPoint(x: windowGeo.size.width / 2, y: windowGeo.size.height / 2))
+                .animation(.easeInOut(duration: 0.28), value: isMinimized)
             #else
             VStack {
                 Spacer()
@@ -48,85 +141,151 @@ public struct PlayerView: View {
             }
             #endif
 
-            // Buffering Spinner — covers both the initial resolve-to-first-frame
-            // stretch and any mid-playback stall, so the black canvas never
-            // sits with nothing on screen while mpv is still working.
-            if controller.isBuffering {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(1.4)
-                        .tint(SumiTheme.indigo)
-                    Text(bufferingLabel)
-                        .sumiTabularMono(size: 12)
-                        .foregroundColor(SumiTheme.muted)
-                }
-                .transition(.opacity)
-            }
-
-            // Paused Overlay Icon
-            if !controller.isBuffering && !controller.isPlaying && controller.areControlsVisible {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 72))
-                    .foregroundColor(SumiTheme.indigo.opacity(0.9))
-                    .transition(.scale.combined(with: .opacity))
-            }
-
-            // Controls Overlay
-            if controller.areControlsVisible {
-                VStack {
-                    // Top Bar
-                    topBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
-
-                    Spacer()
-
-                    // Bottom Bar
-                    bottomBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                .padding(SumiTheme.spaceLg)
-            }
-
-            // AniSkip Floating Action Pill (Bottom Right)
-            if controller.isIntroActive {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            withAnimation(.snappy) {
-                                controller.skipIntro()
-                            }
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 12))
-                                Text("Skip Opening")
-                                    .sumiTabularMono(size: 12, weight: .bold)
-                            }
-                            .foregroundColor(SumiTheme.background)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(SumiTheme.indigo)
-                            .clipShape(Capsule())
-                            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 24)
-                        .padding(.bottom, controller.areControlsVisible ? 80 : 24)
+            if !isMinimized {
+                // Buffering Spinner — covers both the initial resolve-to-first-frame
+                // stretch and any mid-playback stall, so the black canvas never
+                // sits with nothing on screen while mpv is still working.
+                if controller.isBuffering {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.4)
+                            .tint(SumiTheme.indigo)
+                        Text(bufferingLabel)
+                            .sumiTabularMono(size: 12)
+                            .foregroundColor(SumiTheme.muted)
                     }
+                    .transition(.opacity)
                 }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-                .animation(.smooth, value: controller.isIntroActive)
+
+                // Paused Overlay Icon
+                if !controller.isBuffering && !controller.isPlaying && controller.areControlsVisible {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 72))
+                        .foregroundColor(SumiTheme.indigo.opacity(0.9))
+                        .transition(.scale.combined(with: .opacity))
+                }
+
+                // Top/bottom chrome, fit exactly to the real letterbox gap
+                // (`videoRect`'s own top/bottom margins) rather than a fixed
+                // guessed height or a plain edge-pinned overlay — a MacBook's
+                // screen is taller than 16:9 content, so that gap already
+                // exists; this puts the chrome inside it precisely instead of
+                // approximately, so it never floats over picture nor sits with
+                // dead space of its own within the bar.
+                // The gap's own size doesn't depend on whether controls are
+                // shown (the video's letterboxing is constant) — only the
+                // content drawn inside it does, so the height is reserved
+                // unconditionally and the bar/scrubber just fades in and out.
+                let topGap = max(0, videoRect.minY)
+                let bottomGap = max(0, controller.videoContainerSize.height - videoRect.maxY)
+                VStack(spacing: 0) {
+                    Group {
+                        if controller.areControlsVisible {
+                            topBar.padding(.horizontal, SumiTheme.spaceLg)
+                        }
+                    }
+                    .frame(height: topGap)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black)
+
+                    Spacer(minLength: 0)
+
+                    Group {
+                        if controller.areControlsVisible {
+                            PlayerBottomBar(controller: controller).padding(.horizontal, SumiTheme.spaceLg)
+                        }
+                    }
+                    .frame(height: bottomGap)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black)
+                }
+                .animation(.smooth, value: controller.areControlsVisible)
+
+                // AniSkip Floating Action Pill (Bottom Right). Kept floating
+                // over the video itself, unlike the rest of the chrome — it's a
+                // contextual action tied to what's playing right now, meant to
+                // be seen right where the eye already is, the way
+                // Netflix/Crunchyroll place it.
+                if controller.isIntroActive {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                withAnimation(.snappy) {
+                                    controller.skipIntro()
+                                }
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "forward.fill")
+                                        .font(.system(size: 12))
+                                    Text("Skip Opening")
+                                        .sumiTabularMono(size: 12, weight: .bold)
+                                }
+                                .foregroundColor(SumiTheme.background)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(SumiTheme.indigo)
+                                .clipShape(Capsule())
+                                .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            }
+                            .buttonStyle(.sumiPressable)
+                            .padding(.trailing, 24)
+                            .padding(.bottom, controller.areControlsVisible ? 100 : 24)
+                        }
+                    }
+                    .frame(width: videoRect.width, height: videoRect.height)
+                    .position(x: videoRect.midX, y: videoRect.midY)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .animation(.smooth, value: controller.isIntroActive)
+                }
+            } else {
+                // Mini-player chrome: a transparent tap-to-restore catcher
+                // over the whole small video (it sits above `MpvMetalSurface`
+                // in this ZStack, so it intercepts clicks before AppKit's own
+                // mouseDown-toggles-play/pause reaches the view underneath —
+                // exactly what should happen while minimized, not another
+                // play/pause toggle) plus a small close button.
+                ZStack(alignment: .topTrailing) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: onRestore)
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                            .background(Circle().fill(Color.black.opacity(0.55)))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                }
+                .frame(width: Self.miniSize.width, height: Self.miniSize.height)
+                .position(miniCenter)
             }
         }
+        .background(isMinimized ? Color.clear : Color.black)
+        .ignoresSafeArea(isMinimized ? [] : .all)
         #if os(macOS)
+        .toolbar(.hidden, for: .windowToolbar)
         .onContinuousHover { _ in
             controller.showControlsBriefly()
+        }
+        .onDisappear {
+            controller.cancelAutohide()
+        }
+        .onChange(of: showEpisodeList || showInfoMenu) { _, isOpen in
+            controller.isMenuOpen = isOpen
+            if isOpen {
+                controller.areControlsVisible = true
+                NSCursor.setHiddenUntilMouseMoves(false)
+            } else {
+                controller.showControlsBriefly()
+            }
         }
         #endif
         .animation(.smooth, value: controller.areControlsVisible)
         .animation(.snappy, value: controller.isBuffering)
+        }
     }
 
     // The torrent pre-buffer gate this waits on is a seconds-scale step in
@@ -140,67 +299,151 @@ public struct PlayerView: View {
     }
 
     // MARK: - Top Bar
+    //
+    // A plain flat row, not a floating capsule: this bar sits in the video's
+    // own natural letterbox gap (see `PlayerView.body`'s `topGap`), which is
+    // already solid black — a translucent "glass" pill blurring pure black
+    // is indistinguishable from a flat one, so the capsule/shadow treatment
+    // this used to have was pure dead weight once the chrome moved off the
+    // video and into the gap. A single hairline at the bottom is what
+    // separates it from the picture instead.
     private var topBar: some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .center, spacing: 12) {
             Button(action: onClose) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black.opacity(0.5))
-                    .clipShape(Circle())
+                    .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(controller.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
-                Text("Episode \(controller.episodeNumber)")
-                    .sumiTabularMono(size: 11)
-                    .foregroundColor(SumiTheme.muted)
-            }
-
-            Spacer()
-
-            // Anime4K Single Toggle Button (On / Off)
-            Button(action: { controller.toggleAnime4K() }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 11))
-                    Text("Anime4K")
-                        .sumiTabularMono(size: 11, weight: .semibold)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text("Episode \(controller.episodeNumber)")
+                        .sumiTabularMono(size: 10, weight: .medium)
+                        .foregroundColor(SumiTheme.indigo)
+                    if !controller.episodeTitle.isEmpty {
+                        Text("·")
+                            .foregroundColor(SumiTheme.muted.opacity(0.5))
+                        Text(controller.episodeTitle)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(SumiTheme.muted)
+                            .lineLimit(1)
+                    }
                 }
-                .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : SumiTheme.muted)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(controller.isAnime4KEnabled ? SumiTheme.indigo.opacity(0.15) : Color.black.opacity(0.5))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(controller.isAnime4KEnabled ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border, lineWidth: 1)
-                )
             }
-            .buttonStyle(.plain)
-            .help(controller.isAnime4KEnabled ? "Anime4K Upscaling: Active (Ctrl+1)" : "Anime4K Upscaling: Inactive (Ctrl+1)")
-            .keyboardShortcut("1", modifiers: [.control])
+            .frame(maxWidth: 420, alignment: .leading)
 
-            // Info / More Options
-            Button(action: {
-                refreshTrackLabels()
-                showInfoMenu = true
-            }) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 15))
-                    .foregroundColor(SumiTheme.foreground)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black.opacity(0.5))
-                    .clipShape(Circle())
+            Spacer(minLength: 12)
+
+            HStack(spacing: 2) {
+                // Minimize — backgrounds playback so the rest of the app is
+                // reachable again, rather than the player sitting over
+                // everything until it's stopped outright.
+                Button(action: onMinimize) {
+                    Image(systemName: "pip.enter")
+                        .font(.system(size: 13))
+                        .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Minimize Player")
+
+                // Auto-Play Next
+                Button(action: { controller.toggleAutoPlayNext() }) {
+                    Image(systemName: controller.autoPlayNextEnabled ? "play.square.stack.fill" : "play.square.stack")
+                        .font(.system(size: 13))
+                        .foregroundColor(controller.autoPlayNextEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.85))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.sumiPressable)
+                .help(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
+
+                // Episode List
+                if !controller.episodeList.isEmpty {
+                    Button(action: { showEpisodeList = true }) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 13))
+                            .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .help("Episodes")
+                    .popover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
+                        episodeListMenu
+                    }
+                }
+
+                // Info / More Options
+                Button(action: {
+                    refreshTrackLabels()
+                    showInfoMenu = true
+                }) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Info & Options")
+                .popover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
+                    infoMenu
+                }
             }
-            .buttonStyle(.plain)
-            .help("Info & Options")
-            .popover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
-                infoMenu
+        }
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(SumiTheme.border.opacity(0.6))
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - Episode List Menu
+    private var episodeListMenu: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(controller.episodeList, id: \.number) { episode in
+                        let isCurrent = episode.number == controller.episodeNumber
+                        Button(action: {
+                            showEpisodeList = false
+                            controller.selectEpisode(episode.number)
+                        }) {
+                            HStack(spacing: 10) {
+                                Text("\(episode.number)")
+                                    .sumiTabularMono(size: 12, weight: isCurrent ? .bold : .regular)
+                                    .foregroundColor(isCurrent ? SumiTheme.indigo : SumiTheme.muted)
+                                    .frame(width: 28, alignment: .trailing)
+                                Text(episode.title.isEmpty ? "Episode \(episode.number)" : episode.title)
+                                    .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
+                                    .foregroundColor(isCurrent ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
+                                    .lineLimit(1)
+                                Spacer()
+                                if episode.isWatched {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(SumiTheme.muted)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(isCurrent ? SumiTheme.indigo.opacity(0.12) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.sumiPressable)
+                        .id(episode.number)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(width: 280, height: 360)
+            .onAppear {
+                proxy.scrollTo(controller.episodeNumber, anchor: .center)
             }
         }
     }
@@ -226,9 +469,35 @@ public struct PlayerView: View {
                 controller.onCycleSubtitleTrack?()
                 refreshTrackLabels()
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Speed")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(SumiTheme.muted)
+                HStack(spacing: 6) {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button(action: { controller.setPlaybackRate(rate) }) {
+                            Text(speedLabel(rate))
+                                .sumiTabularMono(size: 11, weight: controller.playbackRate == rate ? .bold : .regular)
+                                .foregroundColor(controller.playbackRate == rate ? SumiTheme.indigo : SumiTheme.foreground)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(controller.playbackRate == rate ? SumiTheme.indigo.opacity(0.15) : Color.clear)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.sumiPressable)
+                    }
+                }
+            }
         }
         .padding(16)
-        .frame(width: 260)
+        .frame(width: 300)
+    }
+
+    private func speedLabel(_ rate: Double) -> String {
+        rate == rate.rounded() ? "\(Int(rate))x" : String(format: "%.2gx", rate)
     }
 
     private func infoMenuRow(label: String, value: String, onCycle: @escaping () -> Void) -> some View {
@@ -243,7 +512,7 @@ public struct PlayerView: View {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 11))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help("Cycle \(label.lowercased())")
         }
     }
@@ -253,99 +522,196 @@ public struct PlayerView: View {
         audioTrackLabel = info.audio
         subtitleTrackLabel = info.subtitle
     }
+}
 
-    // MARK: - Bottom Bar
-    private var bottomBar: some View {
-        VStack(spacing: 12) {
-            // Scrubber Bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    // Track
-                    Capsule()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(height: 4)
+private struct PlayerBottomBar: View {
+    @Bindable var controller: PlayerController
 
-                    // Fill
-                    Capsule()
-                        .fill(SumiTheme.indigo)
-                        .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 4)
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            controller.isScrubbing = true
-                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                            controller.currentTime = Double(fraction) * controller.duration
-                        }
-                        .onEnded { value in
-                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                            let target = Double(fraction) * controller.duration
-                            controller.isScrubbing = false
-                            controller.seek(to: target)
-                        }
-                )
+    private var volumeIcon: String {
+        if controller.isMuted || controller.volume == 0 { return "speaker.slash.fill" }
+        if controller.volume < 0.5 { return "speaker.wave.1.fill" }
+        return "speaker.wave.2.fill"
+    }
+
+    private var rotateHelpText: String {
+        switch controller.sidewaysState {
+            case 1: return "Rotate: 90 CW (Shift+V)"
+            case 2: return "Rotate: 90 CCW (Shift+V)"
+            default: return "Rotate Video (Shift+V)"
+        }
+    }
+
+    /// The scrubber, extracted so it can sit in the middle of the single
+    /// transport row below instead of its own stacked row above it — the
+    /// two-row layout this used to be needed more vertical height than the
+    /// video's own letterbox gap reliably has, and got clipped at the
+    /// bottom in windowed sizes with a smaller gap.
+    private var scrubber: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(height: 4)
+                Capsule()
+                    .fill(SumiTheme.indigo)
+                    .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 4)
             }
-            .frame(height: 12)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        controller.isScrubbing = true
+                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                        controller.currentTime = Double(fraction) * controller.duration
+                    }
+                    .onEnded { value in
+                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                        let target = Double(fraction) * controller.duration
+                        controller.isScrubbing = false
+                        controller.seek(to: target)
+                    }
+            )
+        }
+    }
 
-            // Transport Controls Row
-            HStack(spacing: 20) {
-                // Play / Pause
-                Button(action: { controller.togglePlayPause() }) {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(SumiTheme.foreground)
-                }
-                .buttonStyle(.plain)
+    var body: some View {
+        HStack(spacing: 16) {
+            // Previous Episode
+            Button(action: { controller.previousEpisode() }) {
+                Image(systemName: "backward.end.fill")
+                .font(.system(size: 14))
+                .foregroundColor(controller.hasPreviousEpisode ? SumiTheme.foreground.opacity(0.8) : SumiTheme.muted.opacity(0.4))
+            }
+            .buttonStyle(.sumiPressable)
+            .disabled(!controller.hasPreviousEpisode)
+            .help("Previous Episode (P)")
 
-                // Seek -10s
-                Button(action: { controller.seekRelative(by: -10) }) {
-                    Image(systemName: "gobackward.10")
-                        .font(.system(size: 16))
+            // Play / Pause — the one filled, colored control in the row:
+            // everything else here is a bare icon, and a transport bar
+            // with no visual hierarchy at all read as flatter than the
+            // rest of the app, which always gives its one primary action
+            // real weight (the detail page's "Play Episode" button, the
+            // AniSkip pill).
+            Button(action: { controller.togglePlayPause() }) {
+                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(SumiTheme.background)
+                    .frame(width: 30, height: 30)
+                    .background(SumiTheme.indigo)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.sumiPressable)
+
+            // Seek -10s
+            Button(action: { controller.seekRelative(by: -10) }) {
+                Image(systemName: "gobackward.10")
+                .font(.system(size: 15))
+                .foregroundColor(SumiTheme.foreground.opacity(0.8))
+            }
+            .buttonStyle(.sumiPressable)
+
+            // Seek +10s
+            Button(action: { controller.seekRelative(by: 10) }) {
+                Image(systemName: "goforward.10")
+                .font(.system(size: 15))
+                .foregroundColor(SumiTheme.foreground.opacity(0.8))
+            }
+            .buttonStyle(.sumiPressable)
+
+            // Next Episode
+            Button(action: { controller.nextEpisode() }) {
+                Image(systemName: "forward.end.fill")
+                .font(.system(size: 14))
+                .foregroundColor(controller.hasNextEpisode ? SumiTheme.foreground.opacity(0.8) : SumiTheme.muted.opacity(0.4))
+            }
+            .buttonStyle(.sumiPressable)
+            .disabled(!controller.hasNextEpisode)
+            .help("Next Episode (N)")
+
+            // Time Display
+            HStack(spacing: 4) {
+                Text(controller.formattedCurrentTime)
+                .foregroundColor(SumiTheme.foreground)
+                Text("/")
+                .foregroundColor(SumiTheme.muted)
+                Text(controller.formattedDuration)
+                .foregroundColor(SumiTheme.muted)
+            }
+            .sumiTabularMono(size: 11.5)
+            .fixedSize()
+
+            // Progress bar fills the middle, between the transport cluster
+            // (left) and the options cluster (right) rather than a whole
+            // separate row of its own.
+            scrubber
+                .frame(height: 12)
+                .frame(maxWidth: .infinity)
+
+            // Volume
+                HStack(spacing: 6) {
+                    Button(action: { controller.toggleMute() }) {
+                        Image(systemName: volumeIcon)
+                        .font(.system(size: 14))
                         .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                }
-                .buttonStyle(.plain)
+                        .frame(width: 16)
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .help(controller.isMuted ? "Unmute (M)" : "Mute (M)")
 
-                // Seek +10s
-                Button(action: { controller.seekRelative(by: 10) }) {
-                    Image(systemName: "goforward.10")
-                        .font(.system(size: 16))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                    Slider(value: Binding(
+                            get: { controller.isMuted ? 0 : controller.volume },
+                            set: { controller.setVolume($0) }
+                        ), in: 0...1)
+                    .frame(width: 80)
+                    .tint(SumiTheme.indigo)
                 }
-                .buttonStyle(.plain)
 
-                // Time Display
-                HStack(spacing: 4) {
-                    Text(controller.formattedCurrentTime)
-                        .foregroundColor(SumiTheme.foreground)
-                    Text("/")
-                        .foregroundColor(SumiTheme.muted)
-                    Text(controller.formattedDuration)
-                        .foregroundColor(SumiTheme.muted)
+                // Upscaling (Anime4K)
+                Button(action: { controller.toggleAnime4K() }) {
+                    Image(systemName: "sparkles")
+                    .font(.system(size: 14))
+                    .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
                 }
-                .sumiTabularMono(size: 12)
+                .buttonStyle(.sumiPressable)
+                .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
 
-                Spacer()
+                // Rotate 90 degrees (off / CW / CCW)
+                Button(action: { controller.cycleSideways() }) {
+                    Image(systemName: "rotate.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+                }
+                .buttonStyle(.sumiPressable)
+                .help(rotateHelpText)
 
                 // Fullscreen
                 Button(action: {
-                    #if os(macOS)
-                    NSApp.keyWindow?.toggleFullScreen(nil)
-                    #endif
+                        #if os(macOS)
+                        if let window = AppWindow.main ?? NSApp.keyWindow {
+                            AppWindow.setToolbarVisible(false)
+                            window.toggleFullScreen(nil)
+                        }
+                        #endif
                 }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 14))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                    .font(.system(size: 14))
+                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
                 }
-                .buttonStyle(.plain)
-            }
+                .buttonStyle(.sumiPressable)
+                .help("Toggle Fullscreen (F)")
         }
-        .padding(16)
-        .background(Color.black.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
+        // Flat, not a floating panel — same reasoning as `topBar`: this bar
+        // sits in the video's own bottom letterbox gap (already solid
+        // black), so the material/shadow "panel" treatment it used to have
+        // added nothing but a border and padding. A single top hairline is
+        // what actually separates it from the picture.
+        .padding(.horizontal, 4)
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(SumiTheme.border.opacity(0.6))
+                .frame(height: 1)
+        }
     }
 }

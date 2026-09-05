@@ -6,3 +6,4 @@
 
 pub mod mangadex;
 pub mod mangakatana;
+pub mod syosetu;

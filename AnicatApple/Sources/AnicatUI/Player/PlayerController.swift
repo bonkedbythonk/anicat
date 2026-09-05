@@ -168,6 +168,40 @@ public final class PlayerController: @unchecked Sendable {
         if UserDefaults.standard.object(forKey: "anicat_autoskip") != nil {
             self.autoSkipEnabled = UserDefaults.standard.bool(forKey: "anicat_autoskip")
         }
+        // Settings writes the same three keys through @AppStorage. This
+        // controller lives for the whole app, so a copy taken at init was
+        // the value for the rest of the session: flipping auto-skip or
+        // auto-play in Settings mid-episode changed nothing in the player
+        // until relaunch. Mirror the store back in when it changes; the
+        // guards keep the didSet writes from ping-ponging.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let d = UserDefaults.standard
+            if d.object(forKey: "anicat_autoplay_next") != nil,
+               d.bool(forKey: "anicat_autoplay_next") != self.autoPlayNextEnabled {
+                self.autoPlayNextEnabled = d.bool(forKey: "anicat_autoplay_next")
+            }
+            if d.object(forKey: "anicat_autoskip") != nil,
+               d.bool(forKey: "anicat_autoskip") != self.autoSkipEnabled {
+                self.autoSkipEnabled = d.bool(forKey: "anicat_autoskip")
+            }
+            if d.object(forKey: "anicat_gpu_upscaling") != nil,
+               d.bool(forKey: "anicat_gpu_upscaling") != self.isAnime4KEnabled {
+                self.isAnime4KEnabled = d.bool(forKey: "anicat_gpu_upscaling")
+            }
+        }
+    }
+
+    private var defaultsObserver: NSObjectProtocol?
+
+    deinit {
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
     }
 
     public func togglePlayPause() {

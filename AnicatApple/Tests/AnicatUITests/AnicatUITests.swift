@@ -529,5 +529,35 @@ struct AnicatUITests {
         // Closing to home must clear forward stack so home scrolling is never hijacked
         #expect(model.canGoForward == false)
     }
-}
 
+    // The video is never shrunk for the chrome. On a MacBook window the
+    // bars fit inside the letterbox; on a 16:9 window they overlay the
+    // picture by exactly the shortfall, and the picture still fills the
+    // window edge to edge.
+    @Test("Player chrome fits the letterbox on a MacBook and overlays on 16:9")
+    @MainActor
+    func testPlayerChromeGeometry() {
+        let sixteenNine = 16.0 / 9.0
+
+        let macbook = PlayerView.chromeGeometry(windowSize: CGSize(width: 1512, height: 982), aspectRatio: sixteenNine)
+        #expect(macbook.videoRect.width == 1512)
+        #expect(macbook.naturalTop > PlayerView.minTopBarHeight)
+        #expect(macbook.naturalBottom > PlayerView.minBottomBarHeight)
+        #expect(macbook.topOverlay == 0)
+        #expect(macbook.bottomOverlay == 0)
+
+        let monitor = PlayerView.chromeGeometry(windowSize: CGSize(width: 1920, height: 1080), aspectRatio: sixteenNine)
+        #expect(monitor.videoRect == CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        #expect(monitor.naturalTop == 0)
+        #expect(monitor.topGap == PlayerView.minTopBarHeight)
+        #expect(monitor.bottomGap == PlayerView.minBottomBarHeight)
+        #expect(monitor.topOverlay == PlayerView.minTopBarHeight)
+        #expect(monitor.bottomOverlay == PlayerView.minBottomBarHeight)
+
+        // Pillarboxed (4:3 content on 16:9): bars overlay top and bottom,
+        // and the picture keeps its full height.
+        let fourThree = PlayerView.chromeGeometry(windowSize: CGSize(width: 1920, height: 1080), aspectRatio: 4.0 / 3.0)
+        #expect(fourThree.videoRect.height == 1080)
+        #expect(fourThree.topOverlay == PlayerView.minTopBarHeight)
+    }
+}

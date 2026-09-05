@@ -79,19 +79,46 @@ public struct PlayerView: View {
         return CGRect(origin: origin, size: size)
     }
 
-    /// Minimum chrome heights, used only when the natural letterbox gap is
-    /// smaller than this (most obviously: zero, an exactly 16:9 video on an
-    /// exactly 16:9 window/display — a MacBook's own screen is taller than
-    /// 16:9 so this never bites there, but an external monitor or a resized
-    /// window can genuinely match). Below this the video's height (and, to
-    /// keep its aspect ratio, its width too — an unavoidable side effect,
-    /// not a bug) shrinks by just the deficit so the chrome still has room:
-    /// "prefer the free letterbox space, only take from the video when
-    /// there truly isn't any" rather than either always reserving fixed
-    /// space (shrinks the video needlessly on the common MacBook case) or
-    /// never reserving any (chrome disappears entirely at exactly 16:9).
-    private static let minTopBarHeight: CGFloat = 48
-    private static let minBottomBarHeight: CGFloat = 64
+    /// Minimum chrome heights. On a MacBook the screen is taller than 16:9
+    /// content, so the natural letterbox gap is bigger than these and the
+    /// bars live entirely in black. On an exactly-16:9 display the gap is
+    /// zero, and the bars overlay the picture by the shortfall instead,
+    /// with a gradient scrim under the controls while they are shown and
+    /// nothing at all while they are hidden. The video is never shrunk to
+    /// make room: an earlier version did that, and a 16:9 monitor then
+    /// never showed the picture full-screen even with the chrome faded out.
+    static let minTopBarHeight: CGFloat = 48
+    static let minBottomBarHeight: CGFloat = 64
+
+    /// Where the picture lands and how tall each bar is for a window of
+    /// `windowSize`. Pure so it can be checked for the two geometries that
+    /// matter without a running player: a MacBook window, where both bars
+    /// fit inside the letterbox, and a 16:9 window, where they overlay.
+    struct ChromeGeometry: Equatable {
+        var videoRect: CGRect
+        /// Black above/below the picture, from letterboxing alone.
+        var naturalTop: CGFloat
+        var naturalBottom: CGFloat
+        /// Bar heights: at least the minimums, never less than the gap.
+        var topGap: CGFloat
+        var bottomGap: CGFloat
+        /// How far each bar extends over the picture. Zero on a MacBook.
+        var topOverlay: CGFloat { max(0, topGap - naturalTop) }
+        var bottomOverlay: CGFloat { max(0, bottomGap - naturalBottom) }
+    }
+
+    static func chromeGeometry(windowSize: CGSize, aspectRatio: Double?) -> ChromeGeometry {
+        let videoRect = aspectFitRect(in: windowSize, aspectRatio: aspectRatio)
+        let naturalTop = max(0, videoRect.minY)
+        let naturalBottom = max(0, windowSize.height - videoRect.maxY)
+        return ChromeGeometry(
+            videoRect: videoRect,
+            naturalTop: naturalTop,
+            naturalBottom: naturalBottom,
+            topGap: max(naturalTop, minTopBarHeight),
+            bottomGap: max(naturalBottom, minBottomBarHeight)
+        )
+    }
 
     public var body: some View {
         GeometryReader { windowGeo in
@@ -100,20 +127,15 @@ public struct PlayerView: View {
         // no chrome reservation at all — this is what tells us how big the
         // natural letterbox gap actually is, independent of whatever we end
         // up constraining `MpvMetalSurface` to below.
-        let naturalRect = Self.aspectFitRect(in: windowSize, aspectRatio: controller.videoAspectRatio)
-        let topGap = max(naturalRect.minY, Self.minTopBarHeight)
-        let bottomGap = max(windowSize.height - naturalRect.maxY, Self.minBottomBarHeight)
-        let videoBandHeight = max(0, windowSize.height - topGap - bottomGap)
-        // The video's actual rect once it's letterboxed/pillarboxed a second
-        // time *within* the reduced band (only different from `naturalRect`
-        // when the band's own aspect ratio no longer matches the video's —
-        // i.e. exactly the deficit case above) — this, not `naturalRect`, is
-        // where things actually laid out against the video (the AniSkip
-        // pill) need to sit.
-        let videoRect = Self.aspectFitRect(
-            in: CGSize(width: windowSize.width, height: videoBandHeight),
-            aspectRatio: controller.videoAspectRatio
-        ).offsetBy(dx: 0, dy: topGap)
+        // The video always gets the whole window; this is where it lands
+        // once letterboxed, and where the chrome and the AniSkip pill lay
+        // out against.
+        let geometry = Self.chromeGeometry(windowSize: windowSize, aspectRatio: controller.videoAspectRatio)
+        let videoRect = geometry.videoRect
+        let naturalTop = geometry.naturalTop
+        let naturalBottom = geometry.naturalBottom
+        let topGap = geometry.topGap
+        let bottomGap = geometry.bottomGap
         let miniCenter = CGPoint(
             x: windowSize.width - Self.miniSize.width / 2 - 24,
             y: windowSize.height - Self.miniSize.height / 2 - 24
@@ -145,11 +167,11 @@ public struct PlayerView: View {
                 .ignoresSafeArea(isMinimized ? [] : .all)
                 .frame(
                     width: isMinimized ? Self.miniSize.width : windowSize.width,
-                    height: isMinimized ? Self.miniSize.height : videoBandHeight
+                    height: isMinimized ? Self.miniSize.height : windowSize.height
                 )
                 .clipShape(RoundedRectangle(cornerRadius: isMinimized ? 12 : 0))
                 .shadow(color: .black.opacity(isMinimized ? 0.45 : 0), radius: isMinimized ? 18 : 0, y: isMinimized ? 8 : 0)
-                .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: topGap + videoBandHeight / 2))
+                .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
                 .animation(.easeInOut(duration: 0.28), value: isMinimized)
             #else
             VStack {
@@ -193,19 +215,12 @@ public struct PlayerView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
 
-                // Top/bottom chrome, fit exactly to `topGap`/`bottomGap`
-                // (computed above, already `max(natural, minimum)`) rather
-                // than a fixed guessed height or a plain edge-pinned overlay
-                // — a MacBook's screen is taller than 16:9 content, so a
-                // natural gap usually already exists and this puts the
-                // chrome inside it precisely instead of approximately; the
-                // minimum floor is what keeps it visible at all on a window
-                // whose aspect ratio happens to exactly match the video's,
-                // where the natural gap is zero.
-                // The gap's own size doesn't depend on whether controls are
-                // shown (the video's letterboxing is constant) — only the
-                // content drawn inside it does, so the height is reserved
-                // unconditionally and the bar/scrubber just fades in and out.
+                // Top/bottom chrome, `topGap`/`bottomGap` tall. Where that
+                // is natural letterbox the background is the same black the
+                // picture is already framed in; where it exceeds the gap
+                // (a 16:9 window) the excess is a gradient scrim that exists
+                // only while the controls do, so a hidden chrome leaves the
+                // picture untouched and a click there reaches the video.
                 VStack(spacing: 0) {
                     Group {
                         if controller.areControlsVisible {
@@ -214,7 +229,20 @@ public struct PlayerView: View {
                     }
                     .frame(height: topGap)
                     .frame(maxWidth: .infinity)
-                    .background(Color.black)
+                    .background(alignment: .top) {
+                        VStack(spacing: 0) {
+                            Color.black.frame(height: naturalTop)
+                            if topGap > naturalTop, controller.areControlsVisible {
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0.78), Color.black.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: topGap - naturalTop)
+                            }
+                        }
+                    }
+                    .allowsHitTesting(controller.areControlsVisible)
 
                     Spacer(minLength: 0)
 
@@ -225,7 +253,20 @@ public struct PlayerView: View {
                     }
                     .frame(height: bottomGap)
                     .frame(maxWidth: .infinity)
-                    .background(Color.black)
+                    .background(alignment: .bottom) {
+                        VStack(spacing: 0) {
+                            if bottomGap > naturalBottom, controller.areControlsVisible {
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0), Color.black.opacity(0.82)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: bottomGap - naturalBottom)
+                            }
+                            Color.black.frame(height: naturalBottom)
+                        }
+                    }
+                    .allowsHitTesting(controller.areControlsVisible)
                 }
                 .animation(.smooth, value: controller.areControlsVisible)
 
@@ -328,13 +369,14 @@ public struct PlayerView: View {
 
     // MARK: - Top Bar
     //
-    // A plain flat row, not a floating capsule: this bar sits in the video's
-    // own natural letterbox gap (see `PlayerView.body`'s `topGap`), which is
-    // already solid black — a translucent "glass" pill blurring pure black
-    // is indistinguishable from a flat one, so the capsule/shadow treatment
-    // this used to have was pure dead weight once the chrome moved off the
-    // video and into the gap. A single hairline at the bottom is what
-    // separates it from the picture instead.
+    // A plain flat row, not a floating capsule: on a MacBook this bar sits
+    // in the video's own natural letterbox gap (see `PlayerView.body`'s
+    // `topGap`), which is already solid black — a translucent "glass" pill
+    // blurring pure black is indistinguishable from a flat one, so the
+    // capsule/shadow treatment this used to have was pure dead weight. On a
+    // 16:9 window the same row sits on the gradient scrim the body draws
+    // under it. A single hairline at the bottom separates it from the
+    // picture either way.
     private var topBar: some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: onClose) {

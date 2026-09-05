@@ -36,7 +36,7 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
 /// what embedders predating cocoa-cb (and IINA's advanced/embedded mode) use.
 @MainActor
 public final class MpvRenderView: NSOpenGLView {
-    public weak var coordinator: MpvMetalSurface.Coordinator?
+    public weak var coordinator: MpvSurface.Coordinator?
 
     public override init(frame frameRect: NSRect) {
         let attrs: [NSOpenGLPixelFormatAttribute] = [
@@ -350,7 +350,7 @@ public final class MpvRenderTarget: @unchecked Sendable {
     }
 }
 
-public struct MpvMetalSurface: NSViewRepresentable {
+public struct MpvSurface: NSViewRepresentable {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
 
@@ -526,8 +526,13 @@ public struct MpvMetalSurface: NSViewRepresentable {
             controller.onCycleAudioTrack = { [weak self] in
                 self?.runCommand(["cycle", "audio"])
             }
-            controller.onSelectAudioLanguage = { [weak self] preferDub in
-                self?.selectAudioLanguage(preferDub: preferDub) ?? false
+            controller.onSelectAudioLanguage = { [weak self] preferDub, completion in
+                // Off the main thread: `selectAudioLanguage` walks
+                // `track-list/N/...` with blocking property reads.
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let switched = self?.selectAudioLanguage(preferDub: preferDub) ?? false
+                    Task { @MainActor in completion(switched) }
+                }
             }
             controller.onCycleSubtitleTrack = { [weak self] in
                 self?.runCommand(["cycle", "sub"])

@@ -250,7 +250,7 @@ public struct RootView: View {
             // In-App Video Player Overlay — always mounted once a stream is
             // active, minimized or not. See `PlayerView.isMinimized`'s doc
             // comment: wrapping this in `if !model.isPlayerMinimized` (the
-            // previous version) unmounted `MpvMetalSurface` entirely on
+            // previous version) unmounted `MpvSurface` entirely on
             // minimize, and its `dismantleNSView` path stops playback — so
             // "Minimize" was indistinguishable from closing the player.
             if let streamURL = model.activeStreamURL {

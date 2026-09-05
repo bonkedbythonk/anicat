@@ -12,7 +12,7 @@ public struct PlayerView: View {
     /// tears playback down.
     public let onMinimize: () -> Void
     /// Whether this view is currently shrunk to the corner mini-player.
-    /// `MpvMetalSurface` must stay mounted at the exact same call site
+    /// `MpvSurface` must stay mounted at the exact same call site
     /// regardless of this — SwiftUI tears down (and, per `dismantleNSView`'s
     /// `stop()`, actually stops playback) an `NSViewRepresentable` that
     /// moves between different branches of an `if`/`else`, even when both
@@ -126,7 +126,7 @@ public struct PlayerView: View {
         // What the video would render at if given the *whole* window with
         // no chrome reservation at all — this is what tells us how big the
         // natural letterbox gap actually is, independent of whatever we end
-        // up constraining `MpvMetalSurface` to below.
+        // up constraining `MpvSurface` to below.
         // The video always gets the whole window; this is where it lands
         // once letterboxed, and where the chrome and the AniSkip pill lay
         // out against.
@@ -163,7 +163,7 @@ public struct PlayerView: View {
             // is always the same call site — see the doc comment on
             // `isMinimized` for why that distinction is exactly what keeps
             // mpv alive across a minimize/restore instead of restarting it.
-            MpvMetalSurface(controller: controller, streamURL: streamURL)
+            MpvSurface(controller: controller, streamURL: streamURL)
                 .ignoresSafeArea(isMinimized ? [] : .all)
                 .frame(
                     width: isMinimized ? Self.miniSize.width : windowSize.width,
@@ -310,7 +310,7 @@ public struct PlayerView: View {
                 }
             } else {
                 // Mini-player chrome: a transparent tap-to-restore catcher
-                // over the whole small video (it sits above `MpvMetalSurface`
+                // over the whole small video (it sits above `MpvSurface`
                 // in this ZStack, so it intercepts clicks before AppKit's own
                 // mouseDown-toggles-play/pause reaches the view underneath —
                 // exactly what should happen while minimized, not another
@@ -422,6 +422,7 @@ public struct PlayerView: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Minimize Player")
+                .accessibilityLabel("Minimize Player")
 
                 // Auto-Play Next
                 Button(action: { controller.toggleAutoPlayNext() }) {
@@ -432,6 +433,7 @@ public struct PlayerView: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
+                .accessibilityLabel(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
 
                 // Auto-Skip Intro/Outro — Settings has had a toggle for this
                 // since AniSkip was built, but nothing in the player itself
@@ -445,6 +447,7 @@ public struct PlayerView: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
+                .accessibilityLabel(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
 
                 // Episode List
                 if !controller.episodeList.isEmpty {
@@ -456,6 +459,7 @@ public struct PlayerView: View {
                     }
                     .buttonStyle(.sumiPressable)
                     .help("Episodes")
+                    .accessibilityLabel("Episodes")
                     .popover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
                         episodeListMenu
                     }
@@ -473,6 +477,7 @@ public struct PlayerView: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Info & Options")
+                .accessibilityLabel("Info & Options")
                 .popover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
                     infoMenu
                 }
@@ -567,11 +572,16 @@ public struct PlayerView: View {
                         Button {
                             let wantsDub = option == "Dubbed"
                             storedSubDub = option
-                            let switched = controller.onSelectAudioLanguage?(wantsDub) ?? false
-                            audioSwitchNote = switched
-                                ? nil
-                                : "No \(wantsDub ? "English" : "Japanese") audio track in this release — applies from the next episode."
-                            refreshTrackLabels()
+                            guard let select = controller.onSelectAudioLanguage else {
+                                audioSwitchNote = nil
+                                return
+                            }
+                            select(wantsDub) { switched in
+                                audioSwitchNote = switched
+                                    ? nil
+                                    : "No \(wantsDub ? "English" : "Japanese") audio track in this release — applies from the next episode."
+                                refreshTrackLabels()
+                            }
                         } label: {
                             Text(option == "Dubbed" ? "Dub" : "Sub")
                                 .sumiTabularMono(size: 11, weight: storedSubDub == option ? .bold : .regular)
@@ -636,6 +646,7 @@ public struct PlayerView: View {
             }
             .buttonStyle(.sumiPressable)
             .help("Cycle \(label.lowercased())")
+            .accessibilityLabel("Cycle \(label.lowercased())")
         }
     }
 
@@ -720,6 +731,7 @@ private struct PlayerBottomBar: View {
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasPreviousEpisode)
             .help("Previous Episode (P)")
+            .accessibilityLabel("Previous Episode (P)")
 
             // Play / Pause — the one filled, colored control in the row:
             // everything else here is a bare icon, and a transport bar
@@ -736,6 +748,8 @@ private struct PlayerBottomBar: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.sumiPressable)
+            .help(controller.isPlaying ? "Pause (Space)" : "Play (Space)")
+            .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
 
             // Seek -10s
             Button(action: { controller.seekRelative(by: -10) }) {
@@ -744,6 +758,8 @@ private struct PlayerBottomBar: View {
                 .foregroundColor(SumiTheme.foreground.opacity(0.8))
             }
             .buttonStyle(.sumiPressable)
+            .help("Back 10 seconds")
+            .accessibilityLabel("Back 10 seconds")
 
             // Seek +10s
             Button(action: { controller.seekRelative(by: 10) }) {
@@ -752,6 +768,8 @@ private struct PlayerBottomBar: View {
                 .foregroundColor(SumiTheme.foreground.opacity(0.8))
             }
             .buttonStyle(.sumiPressable)
+            .help("Forward 10 seconds")
+            .accessibilityLabel("Forward 10 seconds")
 
             // Next Episode
             Button(action: { controller.nextEpisode() }) {
@@ -762,6 +780,7 @@ private struct PlayerBottomBar: View {
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasNextEpisode)
             .help("Next Episode (N)")
+            .accessibilityLabel("Next Episode (N)")
 
             // Time Display
             HStack(spacing: 4) {
@@ -792,6 +811,7 @@ private struct PlayerBottomBar: View {
                     }
                     .buttonStyle(.sumiPressable)
                     .help(controller.isMuted ? "Unmute (M)" : "Mute (M)")
+                    .accessibilityLabel(controller.isMuted ? "Unmute (M)" : "Mute (M)")
 
                     Slider(value: Binding(
                             get: { controller.isMuted ? 0 : controller.volume },
@@ -809,6 +829,7 @@ private struct PlayerBottomBar: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
+                .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
 
                 // Rotate 90 degrees (off / CW / CCW)
                 Button(action: { controller.cycleSideways() }) {
@@ -818,6 +839,7 @@ private struct PlayerBottomBar: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help(rotateHelpText)
+                .accessibilityLabel(rotateHelpText)
 
                 // Fullscreen
                 Button(action: {
@@ -834,6 +856,7 @@ private struct PlayerBottomBar: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Toggle Fullscreen (F)")
+                .accessibilityLabel("Toggle Fullscreen (F)")
         }
         // Flat, not a floating panel — same reasoning as `topBar`: this bar
         // sits in the video's own bottom letterbox gap (already solid

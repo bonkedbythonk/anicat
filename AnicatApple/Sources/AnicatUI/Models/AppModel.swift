@@ -1893,7 +1893,7 @@ public final class AppModel: @unchecked Sendable {
     /// and once a second during playback. A single slow Discord write froze
     /// the whole player: mpv had already paused internally, but the redraw
     /// mpv's update callback queues onto the main thread (see
-    /// `MpvMetalSurface`'s render callback) couldn't run until the blocked
+    /// `MpvSurface`'s render callback) couldn't run until the blocked
     /// call returned, so the screen and the play/pause button both sat
     /// frozen for however long that took. Both calls are dispatched off the
     /// main thread below; only the cheap bookkeeping (dedup flags,

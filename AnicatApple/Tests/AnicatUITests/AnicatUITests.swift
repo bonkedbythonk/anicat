@@ -46,7 +46,7 @@ struct AnicatUITests {
 
     #if os(macOS)
     // Renders via libmpv's render API into an owned OpenGL context rather
-    // than handing mpv a `wid` — see MpvMetalSurface.swift's doc comment.
+    // than handing mpv a `wid` — see MpvSurface.swift's doc comment.
     // There is no subview reparenting to constrain any more (that was the
     // wid/cocoa-cb design this replaced), so the test now covers what
     // actually matters here: the view is a real, usable OpenGL surface

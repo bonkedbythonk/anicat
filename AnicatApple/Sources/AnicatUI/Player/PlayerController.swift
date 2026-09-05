@@ -97,7 +97,7 @@ public final class PlayerController: @unchecked Sendable {
 
     // Volume/mute/speed callbacks — mirror onSeek/onSetPause: state lives
     // here so the UI can bind to it, the actual mpv property set is wired by
-    // MpvMetalSurface's coordinator once it has a live handle.
+    // MpvSurface's coordinator once it has a live handle.
     public var onSetVolume: (@Sendable (_ volume: Double) -> Void)?
     public var onSetMuted: (@Sendable (_ muted: Bool) -> Void)?
     public var onSetSpeed: (@Sendable (_ rate: Double) -> Void)?
@@ -159,7 +159,11 @@ public final class PlayerController: @unchecked Sendable {
     /// of those is "nothing here to switch to" — a caller that assumed
     /// success would light its Dub button up over unchanged Japanese audio,
     /// which is the bug this whole path exists to fix.
-    public var onSelectAudioLanguage: (@Sendable (_ preferDub: Bool) -> Bool)?
+    /// Answers through `completion`, on the main actor, because the track
+    /// walk behind it is a couple of dozen synchronous mpv property reads,
+    /// each of which waits on mpv's core lock; done inline on the main
+    /// thread that was a visible hitch on every press of the Sub/Dub row.
+    public var onSelectAudioLanguage: (@Sendable (_ preferDub: Bool, _ completion: @escaping @Sendable @MainActor (Bool) -> Void) -> Void)?
     
     // Autohide controls timer & state
     public var areControlsVisible: Bool = true

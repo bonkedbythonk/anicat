@@ -136,7 +136,6 @@ docs/
 
 # Compiled JS from .tsx/.ts (not build output)
 
-scraper-bin/
 mpv-shot*.jpg
 
 # Editor/tooling artifacts

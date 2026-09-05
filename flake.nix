@@ -31,9 +31,6 @@
               cargo
               pkg-config
 
-              # Python scraper sidecar (scraper/ has its own uv project)
-              uv
-
               # Media player
               mpv
             ]

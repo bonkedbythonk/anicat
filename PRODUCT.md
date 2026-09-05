@@ -26,7 +26,7 @@ First run: theme/preference setup, AniList authorization (browser page, token pa
 
 - macOS only today, built from source. iOS is declared in Package.swift but AnicatUI still depends on AppKit; that gap is the main open engineering item.
 - No hosted content — scrapes public third-party sites / streams from torrent swarms; legal exposure is the user's own (see DISCLAIMER.md).
-- Anime comes from torrents only. Manga comes from MangaDex with MangaKatana as fallback, both in the Rust engine. Light novels are Syosetu only; the other novel providers exist in the retired Python scraper and are not ported.
+- Anime comes from torrents only. Manga comes from MangaDex with MangaKatana as fallback, both in the Rust engine. Light novels are Syosetu only; more providers are a someday item, not a current goal.
 - Cinema (TMDB) has a catalog but no playback path in the Swift build yet.
 - libmpv is the only player, rendered inside the window.
 - Keyboard: command palette, shortcuts overlay, Escape dismissal hierarchy. The web app's spatial-navigation focus system was not ported.

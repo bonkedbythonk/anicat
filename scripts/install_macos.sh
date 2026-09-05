@@ -10,6 +10,13 @@ APP_NAME="Anicat.app"
 INSTALL_PATH="/Applications/$APP_NAME"
 
 
+# Every published release is still the retired Tauri app. Until the native
+# Swift app has a release of its own, installing "latest" would install
+# software that is no longer maintained, so this refuses instead.
+echo "Anicat is being rebuilt as a native app and has no installer release yet."
+echo "Build it from source: https://github.com/bonkedbythonk/anicat#building-from-source"
+exit 1
+
 echo "Step 1: Finding the latest version..."
 # Deliberately no python3 here. A stock macOS has no usable interpreter --
 # /usr/bin/python3 is a stub that prompts for a multi-GB Xcode Command Line

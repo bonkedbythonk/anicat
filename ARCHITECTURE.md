@@ -7,8 +7,8 @@ against [TMDB](https://themoviedb.org) on the way. It is a Swift package
 [UniFFI](https://mozilla.github.io/uniffi-rs/). Video plays through libmpv
 inside the process.
 
-The Tauri/React app that preceded it was removed in September 2026. The Python
-scraper in `scraper/` served that app; nothing in the current build spawns it.
+The Tauri/React app that preceded it, and the Python scraper that served it,
+were removed in September 2026; the `legacy/tauri` tag marks their last commit.
 
 Today only the macOS product builds. `Package.swift` declares iOS 17 and the
 xcframework carries iOS slices, but `AnicatUI` depends on AppKit directly (13
@@ -43,7 +43,7 @@ work rather than a second target.
  └───────────────┬────────────────────┘
                  │
       ~/Library/Application Support/Anicat/
-        registry.sqlite     torrent-streams/
+        registry.sqlite   catalog-cache.sqlite   torrent-streams/
 ```
 
 ### Swift package
@@ -80,10 +80,10 @@ lives here, and nothing here knows there is a UI.
   The compiled library is the only complete description of the interface,
   which is why `scripts/build-xcframework.sh` generates bindings in library
   mode from the built `.dylib` rather than from a `.udl`.
-- **`catalog/`** — AniList over GraphQL, TMDB over REST, and an in-memory TTL
-  cache keyed per call. An AniList outage is reported with an
-  `anilist_down:` prefix so the UI can show its banner instead of a generic
-  error.
+- **`catalog/`** — AniList over GraphQL, TMDB over REST, and a TTL cache
+  keyed per call that writes through to `catalog-cache.sqlite` and reloads
+  on launch. An AniList outage is reported with an `anilist_down:` prefix so
+  the UI can show its banner instead of a generic error.
 - **`media.rs`** — `MediaKey(catalog, id)`. The Tauri build shifted TMDB ids
   into numeric bands inside one `i64`; the pair is now explicit and a new
   catalog is a new enum variant.

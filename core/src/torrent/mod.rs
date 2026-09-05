@@ -36,6 +36,14 @@ struct Resolved {
     /// Hi10P batch mpv was happy with. A browser caller re-resolves in that
     /// case instead of reusing it.
     browser_playable: bool,
+    /// The dub preference this resolution was made under. The cache is keyed
+    /// by `(media, episode)` alone, so flipping Sub/Dub and replaying an
+    /// episode already resolved this session used to hand back the release
+    /// picked under the *old* preference — the setting looked dead. Stored
+    /// as the preference rather than the release's own dub-ness: a show with
+    /// no dub at all resolves to a sub release under `prefer_dub`, and
+    /// comparing dub-ness there would miss the cache on every single play.
+    prefer_dub: bool,
 }
 
 /// What to find a torrent stream for. Grouped (rather than passed as five
@@ -112,6 +120,9 @@ struct CandidateContext<'a> {
     allow_episodeless: bool,
     /// See `ResolveTarget::resume_fraction`.
     resume_fraction: Option<f64>,
+    /// Stamped onto the `Resolved` this attempt produces, so the reuse
+    /// early-return can tell which preference picked it.
+    prefer_dub: bool,
 }
 
 /// Elapsed time of each stage of one candidate's attempt, logged as a single
@@ -593,6 +604,7 @@ impl TorrentManager {
             resolved
                 .get(&(media, episode))
                 .filter(|r| r.browser_playable || !browser_client)
+                .filter(|r| r.prefer_dub == prefer_dub)
                 .copied()
         };
         if let Some(r) = reusable {
@@ -762,7 +774,7 @@ impl TorrentManager {
         // bounded by whichever candidate actually works, not by however long
         // the first pick takes to fail.
         if let [cand_a, cand_b, ..] = shortlist[..] {
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction };
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub };
             let added_a = std::sync::Mutex::new(None);
             let added_b = std::sync::Mutex::new(None);
             let fut_a = self.try_candidate(client, &session, cand_a, &ctx, &added_a);
@@ -841,7 +853,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub },
                     // Sequential: each attempt is awaited to completion, so its
                     // own error path cleans up after it and nothing is left for
                     // the caller to tear down.
@@ -885,7 +897,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub },
                     &std::sync::Mutex::new(None),
                 )
                 .await
@@ -1854,6 +1866,7 @@ impl TorrentManager {
             // Judged from the release name, the same text the scorer used, so
             // the cache agrees with the ranking that picked this candidate.
             browser_playable: !search::browser_incompatible_codec(&search::normalize(&cand.name)),
+            prefer_dub: ctx.prefer_dub,
         })
     }
 }
@@ -3108,6 +3121,7 @@ mod tests {
                 episode_count: Some(28),
                 allow_episodeless: false,
                 resume_fraction: None,
+                prefer_dub: false,
             };
             let resolved = mgr
                 .try_candidate(&http, &session, batch, &ctx, &std::sync::Mutex::new(None))

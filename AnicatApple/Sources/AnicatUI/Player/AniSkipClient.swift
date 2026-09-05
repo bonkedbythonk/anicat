@@ -45,13 +45,31 @@ public enum AniSkipClient {
             URLQueryItem(name: "types", value: "ed"),
             URLQueryItem(name: "episodeLength", value: String(Int(episodeLengthSeconds.rounded()))),
         ]
-        guard let url = components?.url else { return nil }
+        guard let url = components?.url else {
+            print("[AniSkip] malformed URL for MAL id \(malId) episode \(episode)")
+            return nil
+        }
 
         do {
             let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            guard let http = response as? HTTPURLResponse else {
+                print("[AniSkip] no HTTP response for \(url.absoluteString)")
+                return nil
+            }
+            guard http.statusCode == 200 else {
+                // 404 here means "no skip times for this episode", which is
+                // the common, expected case for anything not popular enough
+                // to have community-submitted timestamps — not a failure
+                // worth alarming about, just worth being able to see when
+                // debugging "why didn't this skip".
+                print("[AniSkip] HTTP \(http.statusCode) for \(url.absoluteString)")
+                return nil
+            }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
-            guard decoded.found, let results = decoded.results, !results.isEmpty else { return nil }
+            guard decoded.found, let results = decoded.results, !results.isEmpty else {
+                print("[AniSkip] no skip times found for MAL id \(malId) episode \(episode)")
+                return nil
+            }
 
             var introStart: Double?
             var introEnd: Double?
@@ -72,6 +90,7 @@ public enum AniSkipClient {
             guard introStart != nil || outroStart != nil else { return nil }
             return SkipTimes(introStart: introStart, introEnd: introEnd, outroStart: outroStart, outroEnd: outroEnd)
         } catch {
+            print("[AniSkip] request failed for MAL id \(malId) episode \(episode): \(error)")
             return nil
         }
     }

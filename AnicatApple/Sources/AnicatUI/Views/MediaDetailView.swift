@@ -18,6 +18,17 @@ public struct MediaDetailView: View {
     public enum AudioType: String, CaseIterable {
         case sub = "Sub (JP)"
         case dub = "Dub (EN)"
+
+        /// The vocabulary `anicat_sub_dub` is stored in — Settings' own
+        /// picker writes these strings and `AppModel` compares against
+        /// "Dubbed" verbatim. The display raw values above are not the same
+        /// words, so storing those would leave the toggle looking wired
+        /// while every reader still saw a sub preference.
+        var storedValue: String { self == .dub ? "Dubbed" : "Subtitled" }
+
+        init(stored: String) {
+            self = stored == "Dubbed" ? .dub : .sub
+        }
     }
 
     public enum EpisodeViewMode: String, CaseIterable {
@@ -247,7 +258,12 @@ public struct MediaDetailView: View {
 
     @State private var selectedTab: DetailTab = .episodes
     let onTabChanged: (DetailTab) -> Void
-    @State private var selectedAudioType: AudioType = .sub
+    // Backed by the same defaults key Settings writes and `AppModel` reads
+    // when building a `StreamRequest`, rather than view-local state nothing
+    // ever looked at — picking Dub here changed nothing about which release
+    // was resolved.
+    @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
+    private var selectedAudioType: AudioType { AudioType(stored: storedSubDub) }
     @State private var selectedViewMode: EpisodeViewMode = .cards
     @State private var isSynopsisExpanded = false
     @State private var isBackHovered = false
@@ -1022,7 +1038,7 @@ public struct MediaDetailView: View {
                                     if selectedAudioType != audio {
                                         SumiHaptics.selection()
                                         withAnimation(.snappy) {
-                                            selectedAudioType = audio
+                                            storedSubDub = audio.storedValue
                                         }
                                     }
                                 } label: {

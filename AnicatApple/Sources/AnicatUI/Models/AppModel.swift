@@ -1416,6 +1416,69 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
+    /// The progress/status pair a mark-watched implies. Shared by the
+    /// episode list's checkbox and the player's 85% auto-advance rather than
+    /// written twice: the two disagreeing is how a binge that finished a
+    /// season left the list entry on CURRENT at `total`.
+    static func listEntryUpdate(
+        episode: Int,
+        watched: Bool,
+        episodeCount: Int?,
+        listStatus: String?
+    ) -> (progress: Int, status: String?) {
+        var progress = watched ? episode : episode - 1
+        var status: String?
+        if let total = episodeCount, total > 0, progress >= total {
+            progress = total
+            status = "COMPLETED"
+        } else if progress > 0, listStatus == nil || listStatus == "PLANNING" {
+            status = "CURRENT"
+        }
+        return (progress, status)
+    }
+
+    /// The player's 85% auto-advance, which cannot go through
+    /// `setEpisodeWatched`/`updateListEntry` unconditionally: both open with
+    /// `guard let details = selectedMediaDetails`, and playback started from
+    /// a home shelf has no detail page open at all — so bingeing from the
+    /// home screen advanced the local watch registry on every episode while
+    /// AniList silently never moved. With the page open this still routes
+    /// through the checkbox's own path so the list updates optimistically
+    /// under the viewer; without it, the entry's current state is fetched
+    /// (one call, once per episode, only on the threshold crossing) and the
+    /// mutation is sent directly.
+    func advanceAniListProgress(catalogId: Int64, episode: Int) async {
+        if let details = selectedMediaDetails, details.id == catalogId {
+            guard (details.listProgress ?? 0) < episode else { return }
+            await setEpisodeWatched(episode, watched: true)
+            return
+        }
+        guard let engine else { return }
+        do {
+            let detail = try await engine.mediaDetail(catalogId: catalogId, isManga: false)
+            // Read from AniList rather than assumed 0: without the detail
+            // page there is no local copy of the entry, and re-sending a
+            // progress the list already passed would drag it backwards on a
+            // rewatch.
+            guard Int(detail.listProgress ?? 0) < episode else { return }
+            let (progress, status) = Self.listEntryUpdate(
+                episode: episode,
+                watched: true,
+                episodeCount: (detail.episodeCount ?? detail.chapterCount).map(Int.init),
+                listStatus: detail.listStatus
+            )
+            try await engine.updateListEntry(
+                catalogId: catalogId,
+                status: status,
+                score: nil,
+                progress: Int64(progress)
+            )
+            await recordAniListSuccess()
+        } catch {
+            await recordAniListFailure(error)
+        }
+    }
+
     /// The episode list's mark-watched checkbox. Mirrors
     /// `handleUpdateProgress` in MediaDetail.tsx: watching episode N sets
     /// progress to N; un-watching it sets progress to N-1. Unlike the web
@@ -1426,14 +1489,12 @@ public final class AppModel: @unchecked Sendable {
     /// counted as `total+1`) without a second round trip.
     public func setEpisodeWatched(_ episode: Int, watched: Bool) async {
         guard let details = selectedMediaDetails else { return }
-        var progress = watched ? episode : episode - 1
-        var status: String?
-        if let total = details.episodeCount, total > 0, progress >= total {
-            progress = total
-            status = "COMPLETED"
-        } else if progress > 0, details.listStatus == nil || details.listStatus == "PLANNING" {
-            status = "CURRENT"
-        }
+        let (progress, status) = Self.listEntryUpdate(
+            episode: episode,
+            watched: watched,
+            episodeCount: details.episodeCount,
+            listStatus: details.listStatus
+        )
         // Optimistic: `updateListEntry` below is a real AniList mutation
         // followed by a full re-fetch to reconcile — two sequential network
         // round trips before the checkbox would otherwise show anything.
@@ -1807,13 +1868,11 @@ public final class AppModel: @unchecked Sendable {
             let percent = Double(stopTime) / Double(dur) * 100
             if percent >= Self.watchedThresholdPct {
                 hasAdvancedAniListForCurrentEpisode = true
-                let currentListProgress = selectedMediaDetails?.listProgress ?? 0
-                if Int64(currentListProgress) < episode {
-                    // Reuses the episode list's own mark-watched path (status
-                    // transitions, COMPLETED-on-last-episode clamp) instead
-                    // of duplicating that logic here.
-                    Task { await self.setEpisodeWatched(Int(episode), watched: true) }
-                }
+                // Reuses the episode list's own mark-watched path (status
+                // transitions, COMPLETED-on-last-episode clamp) when the
+                // detail page is open, and sends the same mutation itself
+                // when it isn't — see `advanceAniListProgress`.
+                Task { await self.advanceAniListProgress(catalogId: catalogId, episode: Int(episode)) }
             }
         }
 
@@ -2067,6 +2126,12 @@ public final class AppModel: @unchecked Sendable {
                 guard self.currentPlaybackCatalogId == catalogId, self.currentPlaybackEpisode == episode else { return }
                 self.playerController.setAniSkipTimes(times)
             }
+        } else if catalog == .anilist {
+            // Was silent — "AniSkip doesn't work" with nothing to say why is
+            // exactly this case: AniList has no MAL cross-reference for this
+            // title at all, so there was never going to be a request to
+            // begin with, not a failed one.
+            print("[AniSkip] no MAL id for AniList id \(catalogId) — skip times unavailable for this title")
         }
 
         // Apple Handoff: broadcast current playback activity to iPhone / iPad / Mac

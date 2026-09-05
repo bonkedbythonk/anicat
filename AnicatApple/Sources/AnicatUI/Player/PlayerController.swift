@@ -139,6 +139,17 @@ public final class PlayerController: @unchecked Sendable {
     public var onCycleAudioTrack: (@Sendable () -> Void)?
     public var onCycleSubtitleTrack: (@Sendable () -> Void)?
     public var onFetchTrackInfo: (@Sendable () -> (audio: String, subtitle: String))?
+    /// Picks the audio track matching a Sub/Dub choice on the *loaded* file.
+    /// Distinct from `onCycleAudioTrack`: `alang` only applies at file load,
+    /// so switching the preference mid-episode has to select the track by
+    /// language itself, and a blind cycle lands on whatever track is next
+    /// rather than on the language that was asked for. Answers whether a
+    /// track in that language existed at all: most nyaa releases carry a
+    /// single audio track, so the honest outcome of asking for a dub on one
+    /// of those is "nothing here to switch to" — a caller that assumed
+    /// success would light its Dub button up over unchanged Japanese audio,
+    /// which is the bug this whole path exists to fix.
+    public var onSelectAudioLanguage: (@Sendable (_ preferDub: Bool) -> Bool)?
     
     // Autohide controls timer & state
     public var areControlsVisible: Bool = true
@@ -153,6 +164,9 @@ public final class PlayerController: @unchecked Sendable {
         }
         if UserDefaults.standard.object(forKey: "anicat_autoplay_next") != nil {
             self.autoPlayNextEnabled = UserDefaults.standard.bool(forKey: "anicat_autoplay_next")
+        }
+        if UserDefaults.standard.object(forKey: "anicat_autoskip") != nil {
+            self.autoSkipEnabled = UserDefaults.standard.bool(forKey: "anicat_autoskip")
         }
     }
 
@@ -284,10 +298,17 @@ public final class PlayerController: @unchecked Sendable {
 
     /// Whether the auto-skip setting should act the moment `currentTime`
     /// enters a skip window, rather than just surfacing the manual "Skip"
-    /// button. Read fresh each check instead of cached at init — Settings can
-    /// toggle it mid-episode.
-    private var autoSkipEnabled: Bool {
-        UserDefaults.standard.object(forKey: "anicat_autoskip") as? Bool ?? true
+    /// button. A real stored property (mirrored to `UserDefaults`, same
+    /// pattern as `autoPlayNextEnabled`) rather than a computed read of
+    /// `UserDefaults` on every check — Settings' own toggle still writes the
+    /// same key, but the player's own toggle button (there wasn't one before)
+    /// needs something it can bind to and flip directly.
+    public var autoSkipEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(autoSkipEnabled, forKey: "anicat_autoskip") }
+    }
+
+    public func toggleAutoSkip() {
+        autoSkipEnabled.toggle()
     }
 
     /// Despite the name (kept to avoid touching every call site), this

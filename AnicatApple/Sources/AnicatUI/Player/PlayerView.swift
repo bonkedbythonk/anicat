@@ -29,6 +29,12 @@ public struct PlayerView: View {
     @State private var showEpisodeList = false
     @State private var audioTrackLabel = "-"
     @State private var subtitleTrackLabel = "-"
+    @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
+    /// Set when the loaded release has no track in the language just asked
+    /// for. The preference still changed — it is what the next resolve
+    /// searches with — but this episode's audio did not, and saying nothing
+    /// is how the old control read as broken.
+    @State private var audioSwitchNote: String?
 
     private static let miniSize = CGSize(width: 320, height: 180)
 
@@ -73,25 +79,44 @@ public struct PlayerView: View {
         return CGRect(origin: origin, size: size)
     }
 
+    /// Minimum chrome heights, used only when the natural letterbox gap is
+    /// smaller than this (most obviously: zero, an exactly 16:9 video on an
+    /// exactly 16:9 window/display — a MacBook's own screen is taller than
+    /// 16:9 so this never bites there, but an external monitor or a resized
+    /// window can genuinely match). Below this the video's height (and, to
+    /// keep its aspect ratio, its width too — an unavoidable side effect,
+    /// not a bug) shrinks by just the deficit so the chrome still has room:
+    /// "prefer the free letterbox space, only take from the video when
+    /// there truly isn't any" rather than either always reserving fixed
+    /// space (shrinks the video needlessly on the common MacBook case) or
+    /// never reserving any (chrome disappears entirely at exactly 16:9).
+    private static let minTopBarHeight: CGFloat = 48
+    private static let minBottomBarHeight: CGFloat = 64
+
     public var body: some View {
         GeometryReader { windowGeo in
-        // `controller.videoContainerSize` — `MpvRenderView`'s own real
-        // `bounds`, reported straight from the view itself (see
-        // `reportContainerSize`) — not a second, separate `GeometryReader`
-        // measurement of this same hierarchy. The two disagreed: this view
-        // bleeds to the window's true edges via `.ignoresSafeArea()` in a way
-        // a sibling `GeometryReader` wasn't guaranteed to see the same size
-        // for (sidebar-claimed HStack space, nested safe-area insets), so the
-        // chrome sized itself against a different rect than the one the
-        // video actually rendered into — bars that didn't quite fit,
-        // overlapped the picture, or ran past the true window edge depending
-        // on which way the two frames disagreed. (`windowGeo` above is a
-        // different, legitimate use — just placing the mini-player box
-        // within the window, not fitting the letterbox.)
-        let videoRect = Self.aspectFitRect(in: controller.videoContainerSize, aspectRatio: controller.videoAspectRatio)
+        let windowSize = windowGeo.size
+        // What the video would render at if given the *whole* window with
+        // no chrome reservation at all — this is what tells us how big the
+        // natural letterbox gap actually is, independent of whatever we end
+        // up constraining `MpvMetalSurface` to below.
+        let naturalRect = Self.aspectFitRect(in: windowSize, aspectRatio: controller.videoAspectRatio)
+        let topGap = max(naturalRect.minY, Self.minTopBarHeight)
+        let bottomGap = max(windowSize.height - naturalRect.maxY, Self.minBottomBarHeight)
+        let videoBandHeight = max(0, windowSize.height - topGap - bottomGap)
+        // The video's actual rect once it's letterboxed/pillarboxed a second
+        // time *within* the reduced band (only different from `naturalRect`
+        // when the band's own aspect ratio no longer matches the video's —
+        // i.e. exactly the deficit case above) — this, not `naturalRect`, is
+        // where things actually laid out against the video (the AniSkip
+        // pill) need to sit.
+        let videoRect = Self.aspectFitRect(
+            in: CGSize(width: windowSize.width, height: videoBandHeight),
+            aspectRatio: controller.videoAspectRatio
+        ).offsetBy(dx: 0, dy: topGap)
         let miniCenter = CGPoint(
-            x: windowGeo.size.width - Self.miniSize.width / 2 - 24,
-            y: windowGeo.size.height - Self.miniSize.height / 2 - 24
+            x: windowSize.width - Self.miniSize.width / 2 - 24,
+            y: windowSize.height - Self.miniSize.height / 2 - 24
         )
         ZStack {
             // Background Canvas (Black) — only when full-size. Painting this
@@ -118,10 +143,13 @@ public struct PlayerView: View {
             // mpv alive across a minimize/restore instead of restarting it.
             MpvMetalSurface(controller: controller, streamURL: streamURL)
                 .ignoresSafeArea(isMinimized ? [] : .all)
-                .frame(width: isMinimized ? Self.miniSize.width : nil, height: isMinimized ? Self.miniSize.height : nil)
+                .frame(
+                    width: isMinimized ? Self.miniSize.width : windowSize.width,
+                    height: isMinimized ? Self.miniSize.height : videoBandHeight
+                )
                 .clipShape(RoundedRectangle(cornerRadius: isMinimized ? 12 : 0))
                 .shadow(color: .black.opacity(isMinimized ? 0.45 : 0), radius: isMinimized ? 18 : 0, y: isMinimized ? 8 : 0)
-                .position(isMinimized ? miniCenter : CGPoint(x: windowGeo.size.width / 2, y: windowGeo.size.height / 2))
+                .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: topGap + videoBandHeight / 2))
                 .animation(.easeInOut(duration: 0.28), value: isMinimized)
             #else
             VStack {
@@ -165,19 +193,19 @@ public struct PlayerView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
 
-                // Top/bottom chrome, fit exactly to the real letterbox gap
-                // (`videoRect`'s own top/bottom margins) rather than a fixed
-                // guessed height or a plain edge-pinned overlay — a MacBook's
-                // screen is taller than 16:9 content, so that gap already
-                // exists; this puts the chrome inside it precisely instead of
-                // approximately, so it never floats over picture nor sits with
-                // dead space of its own within the bar.
+                // Top/bottom chrome, fit exactly to `topGap`/`bottomGap`
+                // (computed above, already `max(natural, minimum)`) rather
+                // than a fixed guessed height or a plain edge-pinned overlay
+                // — a MacBook's screen is taller than 16:9 content, so a
+                // natural gap usually already exists and this puts the
+                // chrome inside it precisely instead of approximately; the
+                // minimum floor is what keeps it visible at all on a window
+                // whose aspect ratio happens to exactly match the video's,
+                // where the natural gap is zero.
                 // The gap's own size doesn't depend on whether controls are
                 // shown (the video's letterboxing is constant) — only the
                 // content drawn inside it does, so the height is reserved
                 // unconditionally and the bar/scrubber just fades in and out.
-                let topGap = max(0, videoRect.minY)
-                let bottomGap = max(0, controller.videoContainerSize.height - videoRect.maxY)
                 VStack(spacing: 0) {
                     Group {
                         if controller.areControlsVisible {
@@ -363,6 +391,19 @@ public struct PlayerView: View {
                 .buttonStyle(.sumiPressable)
                 .help(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
 
+                // Auto-Skip Intro/Outro — Settings has had a toggle for this
+                // since AniSkip was built, but nothing in the player itself
+                // did, which read as "the feature doesn't have a switch" even
+                // though one existed a page away.
+                Button(action: { controller.toggleAutoSkip() }) {
+                    Image(systemName: controller.autoSkipEnabled ? "forward.circle.fill" : "forward.circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(controller.autoSkipEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.85))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.sumiPressable)
+                .help(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
+
                 // Episode List
                 if !controller.episodeList.isEmpty {
                     Button(action: { showEpisodeList = true }) {
@@ -470,6 +511,45 @@ public struct PlayerView: View {
                 refreshTrackLabels()
             }
 
+            // The cycle button above steps to whatever track is next, which
+            // on a dual-audio release is not a way to ask for a language.
+            // This row is the actual Sub/Dub choice, shared with Settings
+            // and the detail page through `anicat_sub_dub`.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Sub / Dub")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.muted)
+                    Spacer()
+                    ForEach(["Subtitled", "Dubbed"], id: \.self) { option in
+                        Button {
+                            let wantsDub = option == "Dubbed"
+                            storedSubDub = option
+                            let switched = controller.onSelectAudioLanguage?(wantsDub) ?? false
+                            audioSwitchNote = switched
+                                ? nil
+                                : "No \(wantsDub ? "English" : "Japanese") audio track in this release — applies from the next episode."
+                            refreshTrackLabels()
+                        } label: {
+                            Text(option == "Dubbed" ? "Dub" : "Sub")
+                                .sumiTabularMono(size: 11, weight: storedSubDub == option ? .bold : .regular)
+                                .foregroundColor(storedSubDub == option ? SumiTheme.indigo : SumiTheme.foreground)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(storedSubDub == option ? SumiTheme.indigo.opacity(0.15) : Color.clear)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.sumiPressable)
+                    }
+                }
+                if let audioSwitchNote {
+                    Text(audioSwitchNote)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(SumiTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
@@ -517,7 +597,19 @@ public struct PlayerView: View {
         }
     }
 
+    /// Read once now and once after a beat: `mpv_command` returning is not
+    /// the track reconfig having finished, so the immediate read reports the
+    /// track that was playing *before* the switch and the row looked stuck
+    /// on the old language.
     private func refreshTrackLabels() {
+        readTrackLabels()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            readTrackLabels()
+        }
+    }
+
+    private func readTrackLabels() {
         guard let info = controller.onFetchTrackInfo?() else { return }
         audioTrackLabel = info.audio
         subtitleTrackLabel = info.subtitle

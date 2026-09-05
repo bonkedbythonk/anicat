@@ -473,6 +473,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
             mpv_set_option_string(handle, "ytdl", "no")
             mpv_set_option_string(handle, "sub-auto", "fuzzy")
             mpv_set_option_string(handle, "slang", "en,eng,English")
+            // A dual-audio release carries both tracks and mpv defaults to
+            // the file's own flagged one (Japanese, on every release that
+            // has one), so "Dubbed" played in Japanese no matter what the
+            // resolve picked. `alang` is read at file load, which is why the
+            // mid-episode switch goes through `selectAudioLanguage` instead.
+            mpv_set_option_string(handle, "alang", Self.audioLanguages(preferDub: Self.preferDubSetting()))
             mpv_set_option_string(handle, "subs-fallback", "yes")
 
             let initStatus = mpv_initialize(handle)
@@ -519,6 +525,9 @@ public struct MpvMetalSurface: NSViewRepresentable {
             }
             controller.onCycleAudioTrack = { [weak self] in
                 self?.runCommand(["cycle", "audio"])
+            }
+            controller.onSelectAudioLanguage = { [weak self] preferDub in
+                self?.selectAudioLanguage(preferDub: preferDub) ?? false
             }
             controller.onCycleSubtitleTrack = { [weak self] in
                 self?.runCommand(["cycle", "sub"])
@@ -598,6 +607,12 @@ public struct MpvMetalSurface: NSViewRepresentable {
             } else {
                 mpv_set_property_string(mpv, "start", "none")
             }
+            // Re-read per file, not only at mpv creation: the preference can
+            // change (Settings, the detail page, the player's own Sub/Dub
+            // row) while one long-lived mpv instance plays a whole binge
+            // through `loadfile ... replace`, and `alang` is consumed at
+            // load time.
+            mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: Coordinator.preferDubSetting()))
             runCommand(["loadfile", url, "replace"])
             print("[libmpv] Playing stream: \(url)")
         }
@@ -694,6 +709,63 @@ public struct MpvMetalSurface: NSViewRepresentable {
         // Backward compatibility overload
         func applyAnime4K(preset: Anime4KPreset) {
             applyAnime4K(enabled: preset != .off)
+        }
+
+        /// Selects the loaded file's audio track whose language matches the
+        /// Sub/Dub choice. Walks `track-list/N/...` sub-properties rather
+        /// than parsing the whole MPV_FORMAT_NODE list, same reason as
+        /// `fetchTrackInfo` below. A file with no track in the wanted
+        /// language is left alone — a single-audio sub release has nothing
+        /// to switch to, and forcing `aid` there would only mute it. Returns
+        /// whether a matching track was found, so the caller can say so
+        /// instead of reporting a switch that did not happen.
+        @discardableResult
+        func selectAudioLanguage(preferDub: Bool) -> Bool {
+            guard let mpv else { return false }
+            func stringProperty(_ name: String) -> String? {
+                guard let cstr = mpv_get_property_string(mpv, name) else { return nil }
+                defer { mpv_free(cstr) }
+                let value = String(cString: cstr)
+                return value.isEmpty ? nil : value
+            }
+            // Re-applied on the next file too: `alang` is a load-time option,
+            // so setting it here is what makes the choice stick across an
+            // auto-next transition within the same mpv instance.
+            mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: preferDub))
+            guard let countString = stringProperty("track-list/count"),
+                  let count = Int(countString) else { return false }
+            let wanted = preferDub ? ["en", "eng", "english"] : ["ja", "jp", "jpn", "japanese"]
+            // Says what the release actually carries: "dub doesn't work" is
+            // two different bugs depending on whether the file has a second
+            // audio track at all, and nothing else in the app prints it.
+            let audioTracks = (0..<count)
+                .filter { stringProperty("track-list/\($0)/type") == "audio" }
+                .map { "\(stringProperty("track-list/\($0)/id") ?? "?"):\(stringProperty("track-list/\($0)/lang") ?? "-")/\(stringProperty("track-list/\($0)/title") ?? "-")" }
+            print("[libmpv] audio tracks: \(audioTracks.joined(separator: ", "))")
+            for index in 0..<count {
+                guard stringProperty("track-list/\(index)/type") == "audio" else { continue }
+                let lang = (stringProperty("track-list/\(index)/lang") ?? "").lowercased()
+                let title = (stringProperty("track-list/\(index)/title") ?? "").lowercased()
+                let matches = wanted.contains(lang)
+                    || wanted.contains(where: { title.contains($0) })
+                    // A dub-only release often labels neither, so the
+                    // English word in the title is the only signal left.
+                    || (preferDub && title.contains("dub"))
+                guard matches, let id = stringProperty("track-list/\(index)/id") else { continue }
+                mpv_set_property_string(mpv, "aid", id)
+                return true
+            }
+            return false
+        }
+
+        /// The Sub/Dub preference, in the one vocabulary `anicat_sub_dub` is
+        /// stored in by both Settings and the detail page's AUDIO toggle.
+        static func preferDubSetting() -> Bool {
+            UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+        }
+
+        static func audioLanguages(preferDub: Bool) -> String {
+            preferDub ? "en,eng,English" : "ja,jpn,Japanese,en,eng,English"
         }
 
         /// mpv exposes the currently-selected track's language/title as
@@ -798,6 +870,7 @@ public struct MpvMetalSurface: NSViewRepresentable {
             controller.onSeek = nil
             controller.onSetPause = nil
             controller.onCycleAudioTrack = nil
+            controller.onSelectAudioLanguage = nil
             controller.onCycleSubtitleTrack = nil
             controller.onFetchTrackInfo = nil
             controller.onSetVolume = nil

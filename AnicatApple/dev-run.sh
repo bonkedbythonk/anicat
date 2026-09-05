@@ -13,4 +13,13 @@ swift build --product Anicat -c debug
 
 pkill -f "dist/Anicat.app/Contents/MacOS/Anicat" 2>/dev/null || true
 cp .build/arm64-apple-macosx/debug/Anicat dist/Anicat.app/Contents/MacOS/Anicat
+# The bundle's Info.plist was written once by a packaging run and never
+# touched again, so Settings > Maintenance kept reporting whatever version
+# that run had (1.0.0, for months). Stamp it from version.txt every run.
+VERSION="$(tr -d '[:space:]' < ../version.txt)"
+PLIST=dist/Anicat.app/Contents/Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$PLIST"
 open dist/Anicat.app

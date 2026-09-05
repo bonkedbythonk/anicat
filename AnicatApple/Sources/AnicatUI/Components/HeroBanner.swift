@@ -35,6 +35,10 @@ public struct HeroBanner: View {
         /// hand has to advance this one.
         public let listProgress: Int?
         public let isFavourite: Bool
+        /// MyAnimeList's id for this same title, when AniList has the
+        /// mapping. AniSkip (intro/outro skip times) is keyed by MAL id, not
+        /// AniList's — this is the only bridge between the two catalogs.
+        public let malId: Int64?
 
         /// A neighbouring season, as the detail page's chain cards draw it.
         public struct Relation: Sendable, Identifiable, Codable {
@@ -74,7 +78,8 @@ public struct HeroBanner: View {
             userScore: Double? = nil,
             listEntryId: Int64? = nil,
             listProgress: Int? = nil,
-            isFavourite: Bool = false
+            isFavourite: Bool = false,
+            malId: Int64? = nil
         ) {
             self.status = status
             self.episodeCount = episodeCount
@@ -87,6 +92,7 @@ public struct HeroBanner: View {
             self.listEntryId = listEntryId
             self.listProgress = listProgress
             self.isFavourite = isFavourite
+            self.malId = malId
             self.id = id
             self.title = title
             self.romajiTitle = romajiTitle
@@ -152,6 +158,13 @@ public struct HeroBanner: View {
                     endPoint: .trailing
                 )
             }
+            // The `.animation(value: details.id)` below is scoped to this whole
+            // ZStack, so without this the near-black placeholder Rectangle that
+            // AsyncImage resets to on every title change would crossfade over
+            // the previous banner image — a black bar smoothly fading in before
+            // the new image pops in (untimed, since it lands outside this
+            // transaction). Only the text content below should animate.
+            .transaction { $0.animation = nil }
 
             // Content Overlay
             VStack(alignment: .leading, spacing: SumiTheme.spaceSm) {
@@ -177,7 +190,9 @@ public struct HeroBanner: View {
 
                 // Title
                 Text(details.title)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 34, weight: .bold))
+                    .tracking(-0.7)
+                    .lineSpacing(2)
                     .foregroundColor(SumiTheme.foreground)
                     .lineLimit(2)
 
@@ -191,7 +206,8 @@ public struct HeroBanner: View {
                 // Synopsis
                 if let synopsis = details.synopsis {
                     Text(synopsis)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 14, weight: .regular))
+                        .lineSpacing(3)
                         .foregroundColor(SumiTheme.muted)
                         .lineLimit(3)
                         .padding(.top, 2)
@@ -205,16 +221,16 @@ public struct HeroBanner: View {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 13))
                             Text(details.nextEpisodeText ?? "Watch Now")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: 14, weight: .bold))
                         }
                         .foregroundColor(SumiTheme.background)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
                         .background(SumiTheme.indigo)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.sumiPressable)
 
                     if let onTrailer = onTrailerAction {
                         Button(action: onTrailer) {
@@ -222,20 +238,20 @@ public struct HeroBanner: View {
                                 Image(systemName: "film")
                                     .font(.system(size: 13))
                                 Text("Trailer")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.system(size: 14, weight: .semibold))
                             }
                             .foregroundColor(SumiTheme.foreground)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background(SumiTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
                             .overlay(
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                                     .stroke(SumiTheme.border, lineWidth: 1)
                             )
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                     }
                 }
                 .padding(.top, 8)

@@ -28,15 +28,19 @@ public struct WeekStrip: View {
         self.onSelect = onSelect
     }
 
+    nonisolated private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+
     nonisolated public static func computeDays(
         from items: [ScheduleView.ScheduleItem],
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [DayBucket] {
         let today = calendar.startOfDay(for: now)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE"
-        formatter.calendar = calendar
+        let formatter = dayFormatter
 
         let watchingItems = items.filter { $0.isWatching }
 
@@ -152,16 +156,14 @@ public struct WeekStrip: View {
                 .padding(.vertical, 2)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help(item.title)
             .background(
                 RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                     .fill(SumiTheme.indigo.opacity(isHovered ? 0.12 : 0))
             )
             .scaleEffect(isHovered ? 1.03 : 1.0, anchor: .leading)
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }

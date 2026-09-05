@@ -75,7 +75,7 @@ public struct PickerSheet: View {
                         .padding(4)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
             .padding(.bottom, 16)
 
@@ -113,7 +113,7 @@ public struct PickerSheet: View {
                         )
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.sumiPressable)
 
                     VStack(alignment: .leading, spacing: 0) {
                         Text(pick.item.title)
@@ -156,14 +156,14 @@ public struct PickerSheet: View {
                             Button(action: { commit(pick.item) }) {
                                 Text("Watch this")
                                     .font(.system(size: 12.5, weight: .semibold))
-                                    .foregroundColor(Color.black)
+                                    .foregroundColor(SumiTheme.background)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 7)
                                     .background(SumiTheme.indigo)
                                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
 
                             Button(action: {
                                 withAnimation(.smooth) {
@@ -182,7 +182,7 @@ public struct PickerSheet: View {
                                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
                         }
                         .padding(.top, 14)
                     }
@@ -464,7 +464,7 @@ private struct PickerChip: View {
                 )
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.sumiPressable)
         .animation(.snappy, value: isActive)
     }
 }

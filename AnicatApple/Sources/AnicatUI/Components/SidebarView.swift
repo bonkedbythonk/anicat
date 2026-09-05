@@ -68,6 +68,7 @@ public struct SidebarView: View {
 
     @Binding public var currentView: NavSection
     public let onOpenSearchPalette: () -> Void
+    @Namespace private var sidebarNavNamespace
 
     private let browseItems: [NavSection] = [
         .upNext, .schedule, .library, .manga, .novels, .search, .history
@@ -147,7 +148,7 @@ public struct SidebarView: View {
                     )
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -158,7 +159,7 @@ public struct SidebarView: View {
 
     private func navGroup(title: String, items: [NavSection]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
+            Text(title.uppercased())
                 .sumiTabularMono(size: 11.5)
                 .foregroundColor(SumiTheme.muted)
                 .padding(.horizontal, 20)
@@ -172,9 +173,12 @@ public struct SidebarView: View {
     }
 
     private func navItemButton(_ item: NavSection) -> some View {
-        NavItemButton(item: item, isActive: currentView == item) {
-            withAnimation(.snappy) {
-                currentView = item
+        NavItemButton(item: item, isActive: currentView == item, namespace: sidebarNavNamespace) {
+            if currentView != item {
+                SumiHaptics.selection()
+                withAnimation(.snappy) {
+                    currentView = item
+                }
             }
         }
     }
@@ -182,6 +186,7 @@ public struct SidebarView: View {
     private struct NavItemButton: View {
         let item: NavSection
         let isActive: Bool
+        let namespace: Namespace.ID
         let onSelect: () -> Void
 
         @State private var isHovered = false
@@ -218,19 +223,27 @@ public struct SidebarView: View {
                 .padding(.leading, 20)
                 .padding(.trailing, 16)
                 .padding(.vertical, 7)
-                .background(isActive ? SumiTheme.indigo.opacity(0.10) : (isHovered ? SumiTheme.foreground.opacity(0.04) : Color.clear))
-                .overlay(
-                    // 2px solid left accent indicator matching Tauri CSS
-                    Rectangle()
-                        .fill(isActive ? SumiTheme.indigo : Color.clear)
-                        .frame(width: 2),
-                    alignment: .leading
-                )
+                .background {
+                    if isActive {
+                        SumiTheme.indigo.opacity(0.10)
+                            .matchedGeometryEffect(id: "sidebarNavBackground", in: namespace)
+                    } else if isHovered {
+                        SumiTheme.foreground.opacity(0.04)
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    if isActive {
+                        Rectangle()
+                            .fill(SumiTheme.indigo)
+                            .frame(width: 2)
+                            .matchedGeometryEffect(id: "sidebarNavIndicator", in: namespace)
+                    }
+                }
                 .animation(.snappy, value: isHovered)
                 .animation(.snappy, value: isActive)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif

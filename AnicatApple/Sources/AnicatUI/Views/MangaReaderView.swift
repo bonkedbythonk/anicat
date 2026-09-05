@@ -39,6 +39,7 @@ public struct MangaReaderView: View {
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
     @State private var wasFullScreenBeforeOpen: Bool = false
+    @FocusState private var isFocused: Bool
 
     public init(
         title: String,
@@ -58,6 +59,18 @@ public struct MangaReaderView: View {
         self.onNextChapter = onNextChapter
         self.onPrevChapter = onPrevChapter
         self.onClose = onClose
+    }
+
+    private var pageStep: Int {
+        readingMode == .double ? 2 : 1
+    }
+
+    private func turnPage(forward: Bool) {
+        let delta = forward ? pageStep : -pageStep
+        let next = min(max(currentPageIndex + delta, 0), max(pageURLs.count - 1, 0))
+        guard next != currentPageIndex else { return }
+        currentPageIndex = next
+        onPageChanged(next)
     }
 
     public var body: some View {
@@ -87,9 +100,31 @@ public struct MangaReaderView: View {
                         currentZoom = 1.0
                     }
             )
-            .onTapGesture {
-                withAnimation(.smooth) {
-                    showControls.toggle()
+            // Tap zones only apply for paged modes: webtoon already turns pages
+            // by scrolling, and a left/right split there would fight the scroll gesture.
+            // Middle third toggles controls (matches the old whole-page tap);
+            // outer thirds turn pages, mirrored by reading direction.
+            .overlay {
+                if readingMode == .webtoon {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.smooth) { showControls.toggle() }
+                        }
+                } else {
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { turnPage(forward: readingDirection == .rtl) }
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.smooth) { showControls.toggle() }
+                            }
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { turnPage(forward: readingDirection == .ltr) }
+                    }
                 }
             }
 
@@ -103,7 +138,18 @@ public struct MangaReaderView: View {
                 .transition(.opacity)
             }
         }
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.leftArrow) {
+            turnPage(forward: readingDirection == .rtl)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            turnPage(forward: readingDirection == .ltr)
+            return .handled
+        }
         .onAppear {
+            isFocused = true
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 wasFullScreenBeforeOpen = window.styleMask.contains(.fullScreen)
@@ -229,7 +275,7 @@ public struct MangaReaderView: View {
                     .background(SumiTheme.card.opacity(0.85))
                     .clipShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -256,7 +302,7 @@ public struct MangaReaderView: View {
                     .background(SumiTheme.card.opacity(0.85))
                     .clipShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .padding(.trailing, 4)
 
             // Reading Direction Toggle
@@ -274,7 +320,8 @@ public struct MangaReaderView: View {
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
+            .animation(.snappy, value: readingDirection)
             .padding(.trailing, 4)
 
             // Reading Mode Picker
@@ -288,7 +335,8 @@ public struct MangaReaderView: View {
                             .background(readingMode == mode ? SumiTheme.indigo : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.sumiPressable)
+                    .animation(.snappy, value: readingMode)
                 }
             }
             .padding(4)
@@ -317,7 +365,7 @@ public struct MangaReaderView: View {
                     .sumiTabularMono(size: 11, weight: .medium)
                     .foregroundColor(SumiTheme.foreground)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
 
             Spacer()
 
@@ -332,7 +380,7 @@ public struct MangaReaderView: View {
                     .sumiTabularMono(size: 11, weight: .medium)
                     .foregroundColor(SumiTheme.indigo)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
         }
         .padding(SumiTheme.spaceMd)
         .background(

@@ -23,6 +23,7 @@ public struct MenuBarView: View {
     
     public let onResumeLastWatched: () -> Void
     public let onOpenMainApp: () -> Void
+    public let onOpenSettings: () -> Void
     public let onQuit: () -> Void
 
     public init(
@@ -32,6 +33,7 @@ public struct MenuBarView: View {
         airingItems: [AiringTodayItem] = [],
         onResumeLastWatched: @escaping () -> Void = {},
         onOpenMainApp: @escaping () -> Void = {},
+        onOpenSettings: @escaping () -> Void = {},
         onQuit: @escaping () -> Void = {}
     ) {
         self.lastWatchedTitle = lastWatchedTitle
@@ -40,6 +42,7 @@ public struct MenuBarView: View {
         self.airingItems = airingItems
         self.onResumeLastWatched = onResumeLastWatched
         self.onOpenMainApp = onOpenMainApp
+        self.onOpenSettings = onOpenSettings
         self.onQuit = onQuit
     }
 
@@ -110,15 +113,21 @@ public struct MenuBarView: View {
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.sumiPressable)
                 }
             }
 
             Divider()
                 .background(SumiTheme.border)
 
-            // Bottom Actions
-            HStack {
+            // Bottom Actions. Three equal-width slots (rather than one
+            // `Spacer()` either side of the gear icon) so the gear actually
+            // lands in the row's visual center — with plain spacers, two
+            // unequal-width siblings ("Open Anicat" is icon+text, "Quit" is
+            // text alone) get equal leftover space either side of the middle
+            // button, not equal *total* space, so the gear sat visibly
+            // off-center toward whichever side had the narrower neighbor.
+            HStack(spacing: 0) {
                 Button(action: onOpenMainApp) {
                     HStack(spacing: 6) {
                         Image(systemName: "macwindow")
@@ -127,16 +136,30 @@ public struct MenuBarView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(SumiTheme.foreground)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
+                // Carried over from the discrete-Button menu-bar layout this
+                // popover replaced — that version bound these on plain
+                // `Button.keyboardShortcut`, and converting to a custom
+                // `MenuBarView` dropped both silently along with it.
+                .keyboardShortcut("o", modifiers: .command)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer()
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .buttonStyle(.sumiPressable)
+                .keyboardShortcut(",", modifiers: .command)
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 Button(action: onQuit) {
                     Text("Quit")
                         .font(.system(size: 12))
                         .foregroundColor(SumiTheme.muted)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(.top, 2)
         }

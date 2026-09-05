@@ -118,7 +118,7 @@ public struct KeyboardShortcutsOverlay: View {
                     .clipShape(Circle())
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help("Close (Esc)")
         }
         .padding(.horizontal, 20)

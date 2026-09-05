@@ -22,20 +22,34 @@ public struct CommandPalette: View {
 
     let commands: [Command]
     let onDismiss: () -> Void
+    /// Live show search, debounced below — kept separate from `commands`
+    /// (a fixed, synchronous list of nav shortcuts) since this one is async
+    /// and per-keystroke. `nil` (the default) means no show search is wired
+    /// up: the placeholder still says "Search shows, actions, pages" either
+    /// way, but only a caller that passes this actually searches shows.
+    var onSearchTitles: ((String) async -> [Command])?
 
     @State private var query = ""
     @State private var highlighted = 0
+    @State private var titleMatches: [Command] = []
     @FocusState private var fieldFocused: Bool
 
-    public init(commands: [Command], onDismiss: @escaping () -> Void) {
+    public init(
+        commands: [Command],
+        onSearchTitles: ((String) async -> [Command])? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
         self.commands = commands
+        self.onSearchTitles = onSearchTitles
         self.onDismiss = onDismiss
     }
 
     private var matches: [Command] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return commands }
-        return commands.filter { $0.label.lowercased().contains(q) }
+        // Title matches first: with a query typed, a specific show is almost
+        // always what's being looked for, not "Go to Home".
+        return titleMatches + commands.filter { $0.label.lowercased().contains(q) }
     }
 
     /// Groups in the order their first command appears, so the list does not
@@ -75,6 +89,23 @@ public struct CommandPalette: View {
         }
         .onAppear { fieldFocused = true }
         .onExitCommand(perform: onDismiss)
+        // `.task(id:)` cancels the previous debounce automatically when
+        // `query` changes again — same pattern as the Search tab's own
+        // `.task(id: searchText)` — so only the last keystroke in a burst
+        // actually fires a search.
+        .task(id: query) {
+            guard let onSearchTitles else { return }
+            let trimmed = query.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                titleMatches = []
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            let found = await onSearchTitles(trimmed)
+            guard !Task.isCancelled else { return }
+            titleMatches = found
+        }
     }
 
     private var field: some View {
@@ -133,7 +164,7 @@ public struct CommandPalette: View {
                                 .animation(.snappy, value: highlighted == index)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                         .onHover { hovering in
                             if hovering { highlighted = index }
                         }

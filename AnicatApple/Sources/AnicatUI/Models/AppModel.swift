@@ -475,6 +475,12 @@ public final class AppModel: @unchecked Sendable {
             print("Anicat Rust Engine ready! Dynamic stream server on port: \(port)")
             self.isInitialized = true
 
+            // The librqbit session and its DHT bootstrap, paid now instead of
+            // on the first press of Play. `resolve` logs `session=...ms`;
+            // before this it was the whole cold-start cost of the first play
+            // of every app session, after it that number is ~0.
+            Task.detached(priority: .utility) { await coreEngine.warmUp() }
+
             // A no-op when Discord isn't running — the IPC connect just fails
             // and logs a warning on the Rust side.
             coreEngine.discordConnect()
@@ -2051,7 +2057,8 @@ public final class AppModel: @unchecked Sendable {
             title: effectiveTitle,
             preferDub: preferDub,
             chosenName: chosenName,
-            resumeFraction: resumeFraction
+            resumeFraction: resumeFraction,
+            preload: false
         )
 
         // Real feedback instead of a bare spinner: resolve is a single
@@ -2181,6 +2188,12 @@ public final class AppModel: @unchecked Sendable {
             }
         } else {
             engine?.discordClearPresence()
+        }
+        // Release the playing-file pin and pause the session's torrents.
+        // Without it a closed player kept downloading the rest of the
+        // episode, and the preloaded next one, at full speed.
+        if let engine {
+            Task.detached(priority: .utility) { await engine.playbackStopped() }
         }
         self.activeStreamURL = nil
         self.isPlayerMinimized = false

@@ -99,6 +99,36 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 2 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- The release that last played for an episode, with enough of
+            -- the candidate to add it to the session again without a search.
+            -- A play that starts here skips the indexer wave entirely; one
+            -- whose release has since died falls through to the ordinary
+            -- search after a bounded attempt. prefer_dub is the preference
+            -- it was picked under, since a flip must re-search.
+            CREATE TABLE IF NOT EXISTS resolved_releases (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                magnet TEXT,
+                torrent_url TEXT,
+                assume_batch INTEGER NOT NULL DEFAULT 0,
+                prefer_dub INTEGER NOT NULL DEFAULT 0,
+                resolved_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id, episode_number)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 2)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

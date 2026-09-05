@@ -46,6 +46,50 @@ struct Resolved {
     prefer_dub: bool,
 }
 
+/// The release that last played for an episode: enough of a `Candidate` to
+/// add it to the session again without running the indexer search. Persisted
+/// by the registry (`resolved_releases`) and handed back in on the next play
+/// of the same episode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedRelease {
+    pub name: String,
+    pub magnet: Option<String>,
+    pub torrent_url: Option<String>,
+    /// `Candidate::assume_batch` at the time it won. The layout check that
+    /// flag gates (a file whose name carries the episode) has to run the
+    /// same way it did then, or a batch remembered for episode 3 could hand
+    /// back some other file of the pack for episode 4.
+    pub assume_batch: bool,
+    /// The preference it was picked under, so a Sub/Dub flip re-searches
+    /// instead of replaying yesterday's pick.
+    pub prefer_dub: bool,
+}
+
+impl RememberedRelease {
+    fn from_candidate(cand: &search::Candidate, prefer_dub: bool) -> Self {
+        Self {
+            name: cand.name.clone(),
+            magnet: cand.magnet.clone(),
+            torrent_url: cand.torrent_url.clone(),
+            assume_batch: cand.assume_batch,
+            prefer_dub,
+        }
+    }
+
+    fn to_candidate(&self) -> search::Candidate {
+        search::Candidate {
+            name: self.name.clone(),
+            magnet: self.magnet.clone(),
+            torrent_url: self.torrent_url.clone(),
+            // Unknown until the swarm answers; only the search ranking read
+            // these and this candidate is not ranked against anything.
+            seeders: 0,
+            score: 0,
+            assume_batch: self.assume_batch,
+        }
+    }
+}
+
 /// What to find a torrent stream for. Grouped (rather than passed as five
 /// separate `resolve()` params) since they're all "what episode, searched
 /// how" — one cohesive unit distinct from the infra params (`client`,
@@ -103,6 +147,9 @@ pub struct ResolveTarget<'a> {
     /// stopTime/duration is close enough: this only needs to warm roughly the
     /// right region, not land on the exact byte.
     pub resume_fraction: Option<f64>,
+    /// The release that played this episode last time, tried before any
+    /// search. `None` on a first play or after a Sub/Dub flip.
+    pub remembered: Option<RememberedRelease>,
 }
 
 /// What every candidate in one resolve is judged against. Constant across the
@@ -223,6 +270,10 @@ pub struct TorrentManager {
     session: tokio::sync::OnceCell<Arc<Session>>,
     cache_dir: PathBuf,
     resolved: tokio::sync::Mutex<HashMap<(crate::media::MediaKey, i64), Resolved>>,
+    /// The candidate behind each entry of `resolved`, for the host to
+    /// persist. Kept beside rather than inside `Resolved` so that stays
+    /// `Copy` for the hot reuse path.
+    winners: tokio::sync::Mutex<HashMap<(crate::media::MediaKey, i64), RememberedRelease>>,
     /// Torrent ids with a `spawn_stall_logger` task currently running —
     /// dedupes against the burst of range requests mpv fires per seek.
     stall_logging: std::sync::Mutex<std::collections::HashSet<usize>>,
@@ -351,6 +402,7 @@ impl TorrentManager {
             session: tokio::sync::OnceCell::new(),
             cache_dir,
             resolved: tokio::sync::Mutex::new(HashMap::new()),
+            winners: tokio::sync::Mutex::new(HashMap::new()),
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
             candidate_cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -517,6 +569,34 @@ impl TorrentManager {
             .map(|r| (r.torrent_id, r.file_id))
     }
 
+    /// The release behind the current resolution of an episode, for the host
+    /// to persist. `None` for an episode served from a reuse of a resolution
+    /// made before this process started.
+    pub async fn winning_release(
+        &self,
+        media: crate::media::MediaKey,
+        episode: i64,
+    ) -> Option<RememberedRelease> {
+        self.winners.lock().await.get(&(media, episode)).cloned()
+    }
+
+    /// Records a successful candidate as this episode's resolution. Every
+    /// success path in `resolve` goes through here so the winner map can
+    /// never disagree with the reuse cache.
+    async fn commit_resolution(
+        &self,
+        media: crate::media::MediaKey,
+        episode: i64,
+        r: Resolved,
+        cand: &search::Candidate,
+    ) {
+        self.resolved.lock().await.insert((media, episode), r);
+        self.winners
+            .lock()
+            .await
+            .insert((media, episode), RememberedRelease::from_candidate(cand, r.prefer_dub));
+    }
+
     pub async fn set_playing(&self, media: crate::media::MediaKey, episode: i64) {
         let resolved = self.resolved.lock().await.get(&(media, episode)).copied();
         let Some(r) = resolved else {
@@ -579,7 +659,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -637,6 +717,77 @@ impl TorrentManager {
         // the resolved-stream cache and the whole app are keyed by, and
         // within-season numbers collide across seasons.
         let file_episode = series_criteria.map(|c| c.episode as i64).unwrap_or(episode);
+
+        // Where this entry sits in its franchise, as `try_candidate` needs it
+        // to find the right season's files inside a combined pack. Western TV
+        // states its season outright in `EpisodeCriteria`; for anime it comes
+        // from AniList via `gather_media_info`, and is left unknown rather
+        // than guessed when nothing establishes it.
+        let hint = match series_criteria {
+            Some(c) => layout::EntryHint {
+                kind: layout::EntryKind::Tv,
+                season: Some(c.season),
+                season_at_least: None,
+            },
+            None => entry,
+        };
+        // Titles normalized once, so an alias inside a torrent's own paths is
+        // told apart from a title continuation — same rule the search uses.
+        let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
+        // Last time's release, before any search. When it is still alive this
+        // is the whole cold path: no indexer wave, no SeaDex round-trip, no
+        // scoring — add, connect, pre-buffer. Sequential rather than raced
+        // against the search because the win condition is the search not
+        // running at all; the attempt is bounded so a release that has died
+        // since costs a few seconds, not `PREBUFFER_TIMEOUT`. A dead swarm
+        // fails in `PEER_GRACE` anyway; the budget is for the "peers connect,
+        // nothing arrives" case and for a magnet whose metadata has to come
+        // over DHT. Skipped when the user picked a release by hand, since
+        // that pick is the stronger instruction.
+        if let (Some(rem), None) = (remembered.as_ref(), chosen_name.as_ref()) {
+            const REMEMBERED_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+            let cand = rem.to_candidate();
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub };
+            let added = std::sync::Mutex::new(None);
+            let attempt = tokio::time::timeout(
+                REMEMBERED_BUDGET,
+                self.try_candidate(client, &session, &cand, &ctx, &added),
+            )
+            .await;
+            match attempt {
+                Ok(Ok(r)) => {
+                    self.commit_resolution(media, episode, r, &cand).await;
+                    let dir = self.cache_dir.clone();
+                    let session_for_cleanup = session.clone();
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                    log::info!(
+                        "[resolve] torrent remembered release '{}' still good for media={} ep={} (torrent {}, file {}, session={}ms, total={}ms)",
+                        cand.name, media, episode, r.torrent_id, r.file_id, session_ms, stage.elapsed().as_millis()
+                    );
+                    return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
+                }
+                Ok(Err(e)) => {
+                    log::warn!("[resolve] remembered release '{}' failed ({}), searching", cand.name, e);
+                }
+                Err(_) => {
+                    log::warn!(
+                        "[resolve] remembered release '{}' exceeded {}s, searching",
+                        cand.name, REMEMBERED_BUDGET.as_secs()
+                    );
+                }
+            }
+            // Same teardown as a losing racer: a cancelled or failed attempt
+            // leaves its torrent in the session pulling at full speed against
+            // whatever the search is about to start. Skipped when the torrent
+            // is one another episode already plays from (`AlreadyManaged` is
+            // recorded as None by `try_candidate`).
+            let added_id = *added.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(id) = added_id {
+                let _ = session.delete(id.into(), true).await;
+                self.selected_files.lock().await.remove(&id);
+            }
+            stage = std::time::Instant::now();
+        }
 
         // SeaDex is a different host answering a different question (which
         // release did a human pick for this AniList entry), so it has no
@@ -704,22 +855,6 @@ impl TorrentManager {
         // One wall-clock number covers both now that they overlap; splitting
         // them would only report which of the two happened to finish last.
         let search_ms = stage.elapsed().as_millis();
-        // Where this entry sits in its franchise, as `try_candidate` needs it
-        // to find the right season's files inside a combined pack. Western TV
-        // states its season outright in `EpisodeCriteria`; for anime it comes
-        // from AniList via `gather_media_info`, and is left unknown rather
-        // than guessed when nothing establishes it.
-        let hint = match series_criteria {
-            Some(c) => layout::EntryHint {
-                kind: layout::EntryKind::Tv,
-                season: Some(c.season),
-                season_at_least: None,
-            },
-            None => entry,
-        };
-        // Titles normalized once, so an alias inside a torrent's own paths is
-        // told apart from a title continuation — same rule the search uses.
-        let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
         // A human already picked the release for this exact AniList entry, so
         // when SeaDex has one it goes in ahead of every regex-matched result —
         // and, unlike the regex search, it can be the *only* candidate for the
@@ -835,7 +970,7 @@ impl TorrentManager {
                     self.selected_files.lock().await.remove(&id);
                 }
 
-                self.resolved.lock().await.insert((media, episode), r);
+                self.commit_resolution(media, episode, r, cand).await;
                 let dir = self.cache_dir.clone();
                 let session_for_cleanup = session.clone();
                 tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
@@ -862,7 +997,7 @@ impl TorrentManager {
                 .await
             {
                 Ok(r) => {
-                    self.resolved.lock().await.insert((media, episode), r);
+                    self.commit_resolution(media, episode, r, cand).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
@@ -903,7 +1038,7 @@ impl TorrentManager {
                 .await
             {
                 Ok(r) => {
-                    self.resolved.lock().await.insert((media, episode), r);
+                    self.commit_resolution(media, episode, r, cand).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
@@ -2662,6 +2797,7 @@ mod tests {
                     season_at_least: None,
                 },
                 resume_fraction: None,
+                remembered: None,
             },
             13370,
         )
@@ -2680,6 +2816,59 @@ mod tests {
         std::fs::write(&out, &buf).unwrap();
         println!("wrote {}", out.display());
         let _ = session.stop().await;
+    }
+
+    /// Live. `cargo test --lib live_remembered -- --ignored --nocapture`
+    ///
+    /// The persisted-release fast path end to end: a cold resolve records a
+    /// winner, a second manager (a fresh process, as far as the session is
+    /// concerned) is handed that winner and must play it without a search.
+    /// Prints both wall-clock times; the second is the number the feature
+    /// exists for, and it should be a fraction of the first.
+    #[tokio::test]
+    #[ignore]
+    async fn live_remembered_release_skips_the_search() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let titles = vec!["Frieren: Beyond Journey's End".to_string(), "Sousou no Frieren".to_string()];
+        let media = MediaKey::anilist(154587);
+        let target = |remembered: Option<RememberedRelease>| ResolveTarget {
+            media,
+            episode: 1,
+            titles: &titles,
+            allow_episodeless: false,
+            episode_count: Some(28),
+            prefer_dub: false,
+            browser_client: false,
+            chosen_name: None,
+            movie: None,
+            series: None,
+            sibling_titles: &[],
+            entry: layout::EntryHint { kind: layout::EntryKind::Tv, season: Some(1), season_at_least: None },
+            resume_fraction: None,
+            remembered,
+        };
+
+        let cold = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-remembered-cold"));
+        let t0 = std::time::Instant::now();
+        cold.resolve(&client(), target(None), 13370).await.expect("cold resolve failed");
+        let cold_ms = t0.elapsed().as_millis();
+        let winner = cold.winning_release(media, 1).await.expect("cold resolve recorded no winner");
+        let _ = cold.session().await.unwrap().stop().await;
+
+        let warm = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-remembered-warm"));
+        // Session up first, so the second number measures the fast path and
+        // not DHT bootstrap; warm_up does the same in the app.
+        warm.session().await.unwrap();
+        let t1 = std::time::Instant::now();
+        warm.resolve(&client(), target(Some(winner.clone())), 13370).await.expect("remembered resolve failed");
+        let warm_ms = t1.elapsed().as_millis();
+        let replayed = warm.winning_release(media, 1).await.unwrap();
+        assert_eq!(replayed.name, winner.name, "remembered path played a different release");
+        // Empty means the search never ran: the pool cache is only written by
+        // the indexer branch.
+        assert!(warm.candidate_cache.lock().await.is_empty(), "search ran despite a live remembered release");
+        println!("cold={cold_ms}ms remembered={warm_ms}ms release={}", winner.name);
+        let _ = warm.session().await.unwrap().stop().await;
     }
 
     /// Live. `cargo test --lib torrent -- --ignored --nocapture`
@@ -3067,6 +3256,7 @@ mod tests {
                         entry: case.hint,
                         sibling_titles: &siblings,
                         resume_fraction: None,
+                        remembered: None,
                     },
                     13370,
                 )
@@ -3262,6 +3452,7 @@ mod tests {
                         season_at_least: None,
                     },
                 resume_fraction: None,
+                remembered: None,
                 },
                 13370,
             )
@@ -3320,6 +3511,7 @@ mod tests {
                     sibling_titles: &[],
                     entry: layout::EntryHint { kind: layout::EntryKind::Movie, ..Default::default() },
                     resume_fraction: None,
+                    remembered: None,
                 },
                 13370,
             )
@@ -3384,6 +3576,7 @@ mod tests {
                     entry: Default::default(),
                     sibling_titles: &[],
                     resume_fraction: None,
+                    remembered: None,
                 },
                 13370,
             )
@@ -3454,6 +3647,7 @@ mod tests {
                 season_at_least: None,
             },
                 resume_fraction: None,
+                remembered: None,
         };
 
         let cold_started = std::time::Instant::now();

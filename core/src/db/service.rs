@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::schema::{migrate, Catalog};
+use crate::torrent::RememberedRelease;
 
 /// An episode's playback position, as stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +185,67 @@ impl Registry {
         .map_err(|e| e.to_string())
     }
 
+    /// The release that last played for this episode, if one was recorded.
+    pub fn remembered_release(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode: i64,
+    ) -> Result<Option<RememberedRelease>, String> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT name, magnet, torrent_url, assume_batch, prefer_dub
+             FROM resolved_releases
+             WHERE catalog = ?1 AND catalog_id = ?2 AND episode_number = ?3",
+            params![catalog.as_str(), catalog_id, episode],
+            |r| {
+                Ok(RememberedRelease {
+                    name: r.get(0)?,
+                    magnet: r.get(1)?,
+                    torrent_url: r.get(2)?,
+                    assume_batch: r.get::<_, i64>(3)? != 0,
+                    prefer_dub: r.get::<_, i64>(4)? != 0,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn remember_release(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode: i64,
+        release: &RememberedRelease,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO resolved_releases
+                (catalog, catalog_id, episode_number, name, magnet, torrent_url, assume_batch, prefer_dub, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+             ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
+                name = excluded.name,
+                magnet = excluded.magnet,
+                torrent_url = excluded.torrent_url,
+                assume_batch = excluded.assume_batch,
+                prefer_dub = excluded.prefer_dub,
+                resolved_at = excluded.resolved_at",
+            params![
+                catalog.as_str(),
+                catalog_id,
+                episode,
+                release.name,
+                release.magnet,
+                release.torrent_url,
+                release.assume_batch as i64,
+                release.prefer_dub as i64,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Wipes every table: resume positions, provider-slug overrides, the
     /// offline list mirror, and per-show prefs. Schema/migrations are left
     /// alone — only rows go, not structure — so the next write just refills
@@ -193,6 +255,7 @@ impl Registry {
         conn.execute_batch(
             "BEGIN TRANSACTION;
             DELETE FROM watch_history;
+            DELETE FROM resolved_releases;
             DELETE FROM provider_slugs;
             DELETE FROM local_library;
             DELETE FROM media_prefs;
@@ -275,6 +338,34 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, 2);
+    }
+
+    #[test]
+    fn remembered_release_round_trips_and_is_replaced() {
+        let db = Registry::open_in_memory().unwrap();
+        assert_eq!(db.remembered_release(Catalog::Anilist, 21, 3).unwrap(), None);
+        let first = RememberedRelease {
+            name: "[SubsPlease] One Piece - 003 (1080p)".into(),
+            magnet: Some("magnet:?xt=urn:btih:abc".into()),
+            torrent_url: None,
+            assume_batch: false,
+            prefer_dub: false,
+        };
+        db.remember_release(Catalog::Anilist, 21, 3, &first).unwrap();
+        assert_eq!(db.remembered_release(Catalog::Anilist, 21, 3).unwrap(), Some(first));
+        // Same episode resolved again under a dub preference replaces the row
+        // rather than adding one; the key is the episode, not the release.
+        let second = RememberedRelease {
+            name: "[Erai-raws] One Piece - 003 [1080p][Multiple Subtitle]".into(),
+            magnet: None,
+            torrent_url: Some("https://nyaa.si/download/1.torrent".into()),
+            assume_batch: true,
+            prefer_dub: true,
+        };
+        db.remember_release(Catalog::Anilist, 21, 3, &second).unwrap();
+        assert_eq!(db.remembered_release(Catalog::Anilist, 21, 3).unwrap(), Some(second));
+        db.clear_all().unwrap();
+        assert_eq!(db.remembered_release(Catalog::Anilist, 21, 3).unwrap(), None);
     }
 }

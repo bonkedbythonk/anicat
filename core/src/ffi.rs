@@ -354,6 +354,12 @@ pub struct StreamRequest {
     /// a fresh play. See `torrent::ResolveTarget::resume_fraction` for why
     /// this has to reach the pre-buffer gate, not just mpv's `--start`.
     pub resume_fraction: Option<f64>,
+    /// A speculative resolve for an episode nobody is watching yet (the
+    /// next one, near the end of the current one). It fills the reuse cache
+    /// so the real play is instant, but must not claim the playing-file pin:
+    /// that belongs to the episode mpv is reading, and moving it would let
+    /// `retain_recent` evict the file under the player.
+    pub preload: bool,
 }
 
 /// Status of a "Download Episode" — mirrors `torrent::EpisodeDownloadStatus`,
@@ -461,6 +467,30 @@ impl AnicatEngine {
         self.ensure_stream_server().await
     }
 
+    /// Brings up everything a first play would otherwise pay for on the
+    /// spot: the loopback range server and the librqbit session with its
+    /// DHT bootstrap. Called by the host right after construction, off the
+    /// path that paints the first screen. Failures are logged, not
+    /// returned; the same work is retried by the first real resolve.
+    pub async fn warm_up(&self) {
+        let started = std::time::Instant::now();
+        if let Err(e) = self.ensure_stream_server().await {
+            log::warn!("warm_up: range server: {e:?}");
+        }
+        match self.torrents.session().await {
+            Ok(_) => log::info!("warm_up: torrent session ready in {}ms", started.elapsed().as_millis()),
+            Err(e) => log::warn!("warm_up: torrent session: {e}"),
+        }
+    }
+
+    /// The player has stopped reading. Releases the playing-file pin and
+    /// pauses every torrent in the session; without this a closed player
+    /// left librqbit pulling the rest of the episode, and any preloaded
+    /// next one, at full speed until the cache evicted them.
+    pub async fn playback_stopped(&self) {
+        self.torrents.pause_all().await;
+    }
+
     /// Sign in (or out, with `None`) without rebuilding the engine.
     ///
     /// The engine is constructed once at launch, before the user has pasted
@@ -566,6 +596,16 @@ impl AnicatEngine {
             });
         }
 
+        // Last time's release for this exact episode, when it was picked
+        // under the same Sub/Dub preference. A flip is a request for a
+        // different release, so it goes to the search.
+        let remembered = self
+            .registry
+            .remembered_release(media.catalog, media.id, req.episode)
+            .ok()
+            .flatten()
+            .filter(|r| r.prefer_dub == req.prefer_dub);
+
         let url = self
             .torrents
             .resolve(
@@ -588,6 +628,7 @@ impl AnicatEngine {
                     entry: info.hint,
                     sibling_titles: &info.siblings,
                     resume_fraction: req.resume_fraction,
+                    remembered,
                 },
                 port,
             )
@@ -601,6 +642,20 @@ impl AnicatEngine {
             .ok_or_else(|| AnicatError::Internal {
                 msg: "resolve returned a url with nothing behind it".into(),
             })?;
+        // Persist the winner so the next play of this episode, in any later
+        // process, starts from it instead of a search. A reuse has no
+        // winner recorded in this process and changes nothing on disk.
+        if let Some(winner) = self.torrents.winning_release(media, req.episode).await {
+            if let Err(e) = self
+                .registry
+                .remember_release(media.catalog, media.id, req.episode, &winner)
+            {
+                log::warn!("registry: could not remember release for {media} ep {}: {e}", req.episode);
+            }
+        }
+        if !req.preload {
+            self.torrents.set_playing(media, req.episode).await;
+        }
         Ok(StreamHandle {
             url,
             torrent_id: torrent_id as u64,
@@ -656,6 +711,7 @@ impl AnicatEngine {
                     entry: info.hint,
                     sibling_titles: &info.siblings,
                     resume_fraction: None,
+                    remembered: None,
                 },
             )
             .await;
@@ -720,6 +776,7 @@ impl AnicatEngine {
                     entry: info.hint,
                     sibling_titles: &info.siblings,
                     resume_fraction: None,
+                    remembered: None,
                 },
                 port,
             )

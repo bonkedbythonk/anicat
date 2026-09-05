@@ -26,6 +26,13 @@ public final class BonjourDiscovery: @unchecked Sendable {
 
     private var listener: NWListener?
     private var browser: NWBrowser?
+    // Resolve attempts in flight for the current browse-result set. Kept so a
+    // stale/unreachable candidate (asleep, firewalled) that never reaches
+    // `.ready` can be cancelled — both when a sibling candidate resolves first
+    // and when a fresh `browseResultsChangedHandler` fire supersedes the
+    // whole batch — instead of leaking a connection that self-retains via its
+    // own `stateUpdateHandler` closure forever.
+    private var pendingResolves: [NWConnection] = []
 
     private init() {}
 
@@ -90,22 +97,59 @@ public final class BonjourDiscovery: @unchecked Sendable {
         )
 
         browser.browseResultsChangedHandler = { [weak self] results, changes in
-            Task { @MainActor in
-                for result in results {
-                    if case .service(let name, _, _, _) = result.endpoint {
-                        // Resolved service
-                        if let resolvedPort = self?.extractPort(from: result.endpoint) {
-                            self?.discoveredMacNode = DiscoveredNode(
+            guard let self else { return }
+            // A fresh result set replaces the candidates being tried, not
+            // adds to them — cancel whatever the previous batch still had in
+            // flight so a peer dropped from this update can't keep resolving
+            // in the background.
+            self.pendingResolves.forEach { $0.cancel() }
+            self.pendingResolves.removeAll()
+
+            // `NWBrowser` hands back unresolved `.service` endpoints — no
+            // host or port yet, just enough to name each peer. Try every
+            // candidate concurrently rather than committing to the first:
+            // mDNS can list a stale/unreachable Mac (asleep, off the LAN
+            // segment, firewalled) before a perfectly reachable one, and that
+            // candidate would otherwise never reach `.ready` while blocking
+            // every other candidate from ever being attempted.
+            for result in results {
+                guard case .service(let name, _, _, _) = result.endpoint else { continue }
+                let connection = NWConnection(to: result.endpoint, using: .tcp)
+                connection.stateUpdateHandler = { [weak self, weak connection] state in
+                    guard let self, let connection else { return }
+                    switch state {
+                    case .ready:
+                        // First candidate to resolve wins; tear down every
+                        // other in-flight attempt from this batch.
+                        self.pendingResolves.removeAll { $0 === connection }
+                        self.pendingResolves.forEach { $0.cancel() }
+                        self.pendingResolves.removeAll()
+                        defer { connection.cancel() }
+                        guard case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint else { return }
+                        let hostString: String
+                        switch host {
+                        case .ipv4(let addr): hostString = "\(addr)"
+                        case .ipv6(let addr): hostString = "\(addr)"
+                        case .name(let n, _): hostString = n
+                        @unknown default: return
+                        }
+                        Task { @MainActor in
+                            self.discoveredMacNode = DiscoveredNode(
                                 id: name,
                                 name: name,
-                                host: "localhost",
-                                port: resolvedPort
+                                host: hostString,
+                                port: port.rawValue
                             )
-                            print("[Bonjour] Discovered local Mac stream server: \(name) on port \(resolvedPort)")
-                            return
+                            print("[Bonjour] Discovered local Mac stream server: \(name) at \(hostString):\(port.rawValue)")
                         }
+                    case .failed, .cancelled:
+                        self.pendingResolves.removeAll { $0 === connection }
+                    default:
+                        break
                     }
                 }
+                connection.start(queue: .main)
+                self.pendingResolves.append(connection)
             }
         }
 
@@ -117,12 +161,5 @@ public final class BonjourDiscovery: @unchecked Sendable {
         browser?.cancel()
         browser = nil
         discoveredMacNode = nil
-    }
-
-    private func extractPort(from endpoint: NWEndpoint) -> UInt16? {
-        if case .hostPort(_, let port) = endpoint {
-            return port.rawValue
-        }
-        return nil
     }
 }

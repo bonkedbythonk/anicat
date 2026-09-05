@@ -67,7 +67,10 @@ public final class FPSMonitor: NSObject {
 
     // Main-thread watcher
     private var watcherThread: Thread?
-    private var watcherShouldStop = false
+    // Polled from the watcher thread, set from the main actor. A plain flag
+    // is what this wants (a stale read costs one extra 8ms ping); the
+    // annotation says so instead of routing every poll through the actor.
+    nonisolated(unsafe) private var watcherShouldStop = false
 
     override private init() {
         super.init()
@@ -195,7 +198,12 @@ public final class FPSMonitor: NSObject {
     /// be delayed — and that delay shows up here, not in the display-link FPS.
     ///
     /// Threshold: >16ms = 1 missed frame at 60Hz, logged as a stall.
-    private func runWatcher() {
+    // `nonisolated`: this runs on its own Thread, off the main actor by
+    // definition. The local toolchain let a plain method be called from the
+    // Thread closure; the CI toolchain (Swift 6.1) rejects the call as a
+    // main-actor method used from a nonisolated context, which is the more
+    // accurate reading.
+    nonisolated private func runWatcher() {
         let pingInterval: Double = 0.008  // 8ms between pings
         let stallThreshold: Double = 16.0 // ms before it counts as a stall
         // Posting on a fixed 8ms timer regardless of whether the previous ping
@@ -208,9 +216,14 @@ public final class FPSMonitor: NSObject {
 
         while !watcherShouldStop {
             let sent = CACurrentMediaTime()
+            // DispatchQueue rather than a Task so the measurement stays what
+            // it claims to be: time for the main queue to service a block.
+            // The block runs on the main thread, which is the main actor;
+            // `assumeIsolated` states that for the compiler.
             DispatchQueue.main.async { [weak self] in
                 defer { pingDone.signal() }
                 guard let self else { return }
+                MainActor.assumeIsolated {
                 let responseMs = (CACurrentMediaTime() - sent) * 1000.0
 
                 // Full-resolution local buffer, appended every ping — cheap,
@@ -230,11 +243,12 @@ public final class FPSMonitor: NSObject {
                     self.lastStallMs = responseMs
 
                     if self.logHitchesToConsole {
-                        print(String(format: "[FPS] 🧵 Main thread stall: %.0fms (stall #%d)", responseMs, self.mainThreadStalls))
+                        print(String(format: "[FPS] main thread stall: %.0fms (stall #%d)", responseMs, self.mainThreadStalls))
                     }
                 } else {
                     // Decay lastStallMs so the HUD doesn't show stale values forever
                     if self.lastStallMs > 0 { self.lastStallMs = 0 }
+                }
                 }
             }
             _ = pingDone.wait(timeout: .now() + 1.0)

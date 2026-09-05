@@ -38,8 +38,13 @@ public final class ContinuityManager: @unchecked Sendable {
     }
 
     /// Broadcasts current manga reading state for Apple Handoff.
+    ///
+    /// `anilistId` is the catalog id the receiving device can actually open —
+    /// `mangaId` is the scraper's own chapter id, meaningless to the other
+    /// device's registry. Without it, an incoming Handoff had nowhere to go.
     public func advertiseReading(
         mangaId: String,
+        anilistId: Int64?,
         title: String,
         chapter: String,
         pageIndex: Int
@@ -49,13 +54,17 @@ public final class ContinuityManager: @unchecked Sendable {
         activity.isEligibleForHandoff = true
         activity.isEligibleForSearch = true
 
-        activity.userInfo = [
+        var userInfo: [String: Any] = [
             "mangaId": mangaId,
             "title": title,
             "chapter": chapter,
             "pageIndex": pageIndex,
             "timestamp": Date().timeIntervalSince1970
         ]
+        if let anilistId {
+            userInfo["anilistId"] = anilistId
+        }
+        activity.userInfo = userInfo
 
         activity.requiredUserInfoKeys = ["mangaId", "chapter", "pageIndex"]
         activity.becomeCurrent()
@@ -85,7 +94,8 @@ public final class ContinuityManager: @unchecked Sendable {
            let chapter = userInfo["chapter"] as? String,
            let pageIndex = userInfo["pageIndex"] as? Int {
             let title = userInfo["title"] as? String ?? "Manga"
-            return .reading(mangaId: mangaId, title: title, chapter: chapter, pageIndex: pageIndex)
+            let anilistId = userInfo["anilistId"] as? Int64
+            return .reading(mangaId: mangaId, anilistId: anilistId, title: title, chapter: chapter, pageIndex: pageIndex)
         }
 
         return nil
@@ -93,6 +103,6 @@ public final class ContinuityManager: @unchecked Sendable {
 
     public enum HandoffPayload: Sendable {
         case playback(catalogId: Int64, title: String, episode: Int, timePosition: Double)
-        case reading(mangaId: String, title: String, chapter: String, pageIndex: Int)
+        case reading(mangaId: String, anilistId: Int64?, title: String, chapter: String, pageIndex: Int)
     }
 }

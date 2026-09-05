@@ -300,6 +300,22 @@ struct AnicatUITests {
         #expect(box.pausedState == true)
     }
 
+    @Test("PlayerController autohide state, isMenuOpen, and cancelAutohide")
+    func testPlayerControllerAutohideAndMenuState() {
+        let controller = PlayerController(title: "Frieren", episodeNumber: 1)
+        #expect(controller.areControlsVisible == true)
+        #expect(controller.isMenuOpen == false)
+
+        controller.showControlsBriefly()
+        #expect(controller.areControlsVisible == true)
+
+        controller.isMenuOpen = true
+        #expect(controller.isMenuOpen == true)
+
+        controller.cancelAutohide()
+        #expect(controller.areControlsVisible == true)
+    }
+
     @Test("AppModel.navigate(to:) clears overlays and switches nav section")
     @MainActor
     func testAppModelNavigate() {
@@ -354,6 +370,7 @@ struct AnicatUITests {
     }
 
     @Test("AniList Outage Detection - Threshold and Reset")
+    @MainActor
     func testAniListOutageThresholdAndReset() {
         let model = AppModel()
         #expect(model.isAniListDown == false)
@@ -377,6 +394,7 @@ struct AnicatUITests {
     }
 
     @Test("AniList Outage Detection - Rolling Window Expiration")
+    @MainActor
     func testAniListOutageRollingWindowExpiration() {
         let model = AppModel()
         let networkError = AnicatError.Network(msg: "Gateway timeout")
@@ -399,6 +417,7 @@ struct AnicatUITests {
     }
 
     @Test("AniList Outage Detection - Explicit anilist_down Prefix")
+    @MainActor
     func testAniListOutageExplicitPrefix() {
         let model = AppModel()
         let outageError = AnicatError.Network(msg: "anilist_down:AniList servers under maintenance")
@@ -411,6 +430,7 @@ struct AnicatUITests {
     }
 
     @Test("AniList Outage Detection - Non-Network Errors Ignored")
+    @MainActor
     func testAniListOutageNonNetworkErrorsIgnored() {
         let model = AppModel()
         let notFound = AnicatError.NotFound(msg: "Media not found")
@@ -446,6 +466,68 @@ struct AnicatUITests {
         let customRow = MediaRowSkeleton(title: "Watching", count: 8)
         #expect(customRow.title == "Watching")
         #expect(customRow.count == 8)
+
+        let episodeRow = EpisodeRowSkeleton(isCompact: false)
+        _ = episodeRow.body
+
+        let compactEpisodeRow = EpisodeRowSkeleton(isCompact: true)
+        _ = compactEpisodeRow.body
+
+        let episodeList = EpisodeListSkeleton(count: 4, isCompact: false)
+        #expect(episodeList.count == 4)
+        _ = episodeList.body
+
+        let synopsisSkeleton = SynopsisSkeleton()
+        _ = synopsisSkeleton.body
+    }
+
+    @Test("DetailCache LRU and TTL Automatic Pruning")
+    func testDetailCachePruning() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("detail-cache-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let now = Date()
+        // File 1: very old (should be purged by TTL)
+        let oldURL = tempDir.appendingPathComponent("anime-1.json")
+        try "{}".write(to: oldURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-200)], ofItemAtPath: oldURL.path)
+
+        // File 2, 3, 4, 5: fresh (should be capped to maxCount = 2 by LRU)
+        for i in 2...5 {
+            let u = tempDir.appendingPathComponent("anime-\(i).json")
+            try "{}".write(to: u, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(Double(i))], ofItemAtPath: u.path)
+        }
+
+        DetailCache.pruneCacheIfNeeded(targetDirectory: tempDir, maxCount: 2, maxTime: 100)
+
+        let remaining = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        #expect(remaining.count == 2)
+        #expect(!remaining.contains(where: { $0.lastPathComponent == "anime-1.json" }))
+        #expect(remaining.contains(where: { $0.lastPathComponent == "anime-5.json" }))
+        #expect(remaining.contains(where: { $0.lastPathComponent == "anime-4.json" }))
+    }
+
+    @Test("AppModel closeDetail clears forward stack when closing to home")
+    @MainActor
+    func testDetailForwardStackRetention() {
+        let model = AppModel()
+        model.selectedMediaDetails = HeroBanner.Details(
+            id: 12345, title: "Test Anime", romajiTitle: nil, bannerURL: nil, coverURL: nil,
+            format: "TV", year: 2024, studio: nil, synopsis: nil, genres: [],
+            averageScore: nil, nextEpisodeText: nil, status: "RELEASING",
+            episodeCount: 12, resumeEpisode: nil, resumeSeconds: nil, prequel: nil, sequel: nil
+        )
+
+        #expect(model.canGoForward == false)
+        model.closeDetail()
+
+        // Detail is closed (home view active)
+        #expect(model.selectedMediaDetails == nil)
+        // Closing to home must clear forward stack so home scrolling is never hijacked
+        #expect(model.canGoForward == false)
     }
 }
 

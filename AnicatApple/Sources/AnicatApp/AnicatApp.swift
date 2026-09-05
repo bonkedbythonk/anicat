@@ -15,6 +15,30 @@ import AnicatCoreKit
 final class AppearanceLock: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        _ = ScrollPocketWorkaround.disableScrollPocketsOnce
+    }
+}
+
+/// Window delegate that ensures the toolbar and menu bar autohide in fullscreen,
+/// preventing the solid ~35px gray toolbar from sticking at the top of the screen.
+@MainActor
+final class AnicatWindowDelegate: NSObject, NSWindowDelegate {
+    static let shared = AnicatWindowDelegate()
+
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
+        return [.fullScreen, .autoHideToolbar, .autoHideMenuBar]
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            window.toolbar = nil
+        }
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            window.toolbar = nil
+        }
     }
 }
 
@@ -35,16 +59,30 @@ struct WindowConfigurator: NSViewRepresentable {
 
     private func configure(_ window: NSWindow?) {
         guard let window else { return }
+        _ = ScrollPocketWorkaround.disableScrollPocketsOnce
         AppWindow.main = window
+        window.delegate = AnicatWindowDelegate.shared
+        window.acceptsMouseMovedEvents = true
+        window.toolbar = nil
         // Overlay-style titlebar, like Tauri's `titleBarStyle: "Overlay"`:
         // the content runs under the traffic lights with no title text and no
         // background strip. Traffic lights stay (Tauri's `decorations: true`),
         // which is why the sidebar still reserves its 38pt strip for them.
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.styleMask.insert(.fullSizeContentView)
-        window.backgroundColor = .clear
+        // Not .clear: a fully non-opaque window drops out of AppKit's opaque
+        // fast path entirely, so every redraw anywhere in the window pays a
+        // full recomposite-against-desktop cost, not just the sidebar's own
+        // NSVisualEffectView bounds — that's what made scrolling in the main
+        // content area jank even though only the sidebar is meant to be
+        // vibrant. A real opaque color here keeps the rest of the window on
+        // the fast path; VibrancyBackdrop's own .behindWindow view still
+        // handles the sidebar's translucency independently.
+        window.backgroundColor = NSColor(srgbRed: 22.0 / 255, green: 19.0 / 255, blue: 16.0 / 255, alpha: 1)
+        ScrollPocketWorkaround.disableScrollPockets(in: window.contentView)
     }
 }
 #endif
@@ -70,62 +108,90 @@ struct AnicatApp: App {
         }
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)
-        .commands {
-            SidebarCommands()
-        }
         #endif
 
         #if os(macOS)
         MenuBarExtra {
-            if model.activeStreamURL != nil, let title = model.currentPlaybackTitle ?? Optional(model.playerController.title), !title.isEmpty {
-                let ep = model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber)
-                Text("\(title) — Ep \(ep)")
-                Button(model.playerController.isPlaying ? "Pause" : "Play") {
-                    model.playerController.togglePlayPause()
-                }
-                Divider()
-            } else if let first = model.upNextItems.first {
-                Button("Resume \(first.title) (\(first.unit) \(first.nextEpisodeOrChapter))") {
-                    if first.unit != "CH" {
-                        Task {
-                            do {
-                                _ = try await model.resolveAndPlay(
-                                    catalogId: first.id,
-                                    episode: Int64(first.nextEpisodeOrChapter),
-                                    title: first.title
-                                )
-                            } catch {
-                                model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
+            // `.window` style renders arbitrary SwiftUI in a popover instead of
+            // a plain NSMenu, which is what makes the real MenuBarView (cover
+            // art, resume card) usable here instead of a menu of text rows.
+            MenuBarView(
+                lastWatchedTitle: model.activeStreamURL != nil
+                    ? (model.currentPlaybackTitle ?? model.playerController.title)
+                    : model.upNextItems.first?.title,
+                lastWatchedEpisode: model.activeStreamURL != nil
+                    ? Int(model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber))
+                    : model.upNextItems.first.map { Int($0.nextEpisodeOrChapter) },
+                lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+                airingItems: model.scheduleItems
+                    .filter(\.isWatching)
+                    .map {
+                        MenuBarView.AiringTodayItem(
+                            id: $0.id,
+                            title: $0.title,
+                            episodeNumber: $0.episodeNumber,
+                            countdownText: $0.countdownText
+                        )
+                    },
+                onResumeLastWatched: {
+                    if model.activeStreamURL != nil {
+                        // Restore the player if it was backgrounded (see
+                        // `AppModel.isPlayerMinimized`) rather than only
+                        // toggling play/pause somewhere the viewer can't
+                        // see — "Resume" should mean "show me the video",
+                        // not silently unpause it off-screen.
+                        NSApp.activate(ignoringOtherApps: true)
+                        AppWindow.main?.makeKeyAndOrderFront(nil)
+                        withAnimation(.smooth) {
+                            model.isPlayerMinimized = false
+                        }
+                        if !model.playerController.isPlaying {
+                            model.playerController.togglePlayPause()
+                        }
+                    } else if let first = model.upNextItems.first {
+                        if first.unit != "CH" {
+                            Task {
+                                do {
+                                    _ = try await model.resolveAndPlay(
+                                        catalogId: first.id,
+                                        episode: Int64(first.nextEpisodeOrChapter),
+                                        title: first.title
+                                    )
+                                } catch {
+                                    model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
+                                }
+                            }
+                        } else {
+                            Task { @MainActor in
+                                await model.openDetail(id: first.id, isManga: true)
                             }
                         }
-                    } else {
-                        Task { @MainActor in
-                            await model.openDetail(id: first.id, isManga: true)
-                        }
                     }
+                },
+                onOpenMainApp: {
+                    NSApp.activate(ignoringOtherApps: true)
+                    AppWindow.main?.makeKeyAndOrderFront(nil)
+                },
+                onOpenSettings: {
+                    NSApp.activate(ignoringOtherApps: true)
+                    // The actual bug this fixes: `PlayerView` used to render
+                    // unconditionally over everything whenever a stream was
+                    // active, regardless of `currentNavSection` — so opening
+                    // Settings from the menu bar while something was playing
+                    // switched the section underneath but the video stayed
+                    // covering the whole window with no visible way back to
+                    // the app. Minimizing (not stopping) it is what actually
+                    // uncovers Settings.
+                    withAnimation(.smooth) {
+                        model.isPlayerMinimized = true
+                    }
+                    model.currentNavSection = .settings
+                    AppWindow.main?.makeKeyAndOrderFront(nil)
+                },
+                onQuit: {
+                    NSApp.terminate(nil)
                 }
-                Divider()
-            }
-
-            Button("Open Anicat") {
-                NSApp.activate(ignoringOtherApps: true)
-                AppWindow.main?.makeKeyAndOrderFront(nil)
-            }
-            .keyboardShortcut("o")
-
-            Button("Settings...") {
-                NSApp.activate(ignoringOtherApps: true)
-                model.currentNavSection = .settings
-                AppWindow.main?.makeKeyAndOrderFront(nil)
-            }
-            .keyboardShortcut(",")
-
-            Divider()
-
-            Button("Quit Anicat") {
-                NSApp.terminate(nil)
-            }
-            .keyboardShortcut("q")
+            )
         } label: {
             if let icon = BrandAssets.menuBarIcon {
                 icon
@@ -133,7 +199,7 @@ struct AnicatApp: App {
                 Image(systemName: "cat.fill")
             }
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
         #endif
     }
 }

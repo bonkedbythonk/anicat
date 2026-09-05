@@ -1,7 +1,7 @@
 import SwiftUI
 
 public struct UpNextQueueView: View {
-    public struct QueueEntry: Identifiable, Sendable {
+    public struct QueueEntry: Identifiable, Sendable, Codable {
         public let id: Int64
         public let title: String
         public let thumbnailURL: URL?
@@ -36,15 +36,30 @@ public struct UpNextQueueView: View {
     }
 
     public let items: [QueueEntry]
+    public let namespace: Namespace.ID?
+    // Which row (if any) is the poster-morph source, as "<shelfKey>:<id>" —
+    // e.g. "upnext:12345". This view is reused for more than one shelf
+    // (Up Next on Home, the resume queue on Manga/Novels), and the same
+    // title can be visible in more than one shelf on the same screen at
+    // once, so a bare id isn't enough to say which row actually triggered
+    // the open — see `AppModel.openingDetailSourceKey`.
+    public let openingSourceKey: String?
+    public let shelfKey: String
     public let onSelect: (QueueEntry) -> Void
     public let onPlay: (QueueEntry) -> Void
 
     public init(
         items: [QueueEntry],
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
+        shelfKey: String = "upnext",
         onSelect: @escaping (QueueEntry) -> Void,
         onPlay: @escaping (QueueEntry) -> Void
     ) {
         self.items = items
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
+        self.shelfKey = shelfKey
         self.onSelect = onSelect
         self.onPlay = onPlay
     }
@@ -55,6 +70,14 @@ public struct UpNextQueueView: View {
                 RowView(
                     entry: entry,
                     isFirst: index == 0,
+                    // Never a real namespace here, deliberately: the
+                    // thumbnail is a 104x60 landscape rect and the detail
+                    // page's poster is portrait — matchedGeometryEffect
+                    // interpolates the frame linearly, so that morph reads
+                    // as a visible squash/stretch rather than a clean grow.
+                    // Same call as `WeekStrip`, which never had a thumbnail
+                    // wired up to it in the first place.
+                    namespace: nil,
                     onSelect: { onSelect(entry) },
                     onPlay: { onPlay(entry) }
                 )
@@ -82,6 +105,7 @@ public struct UpNextQueueView: View {
     private struct RowView: View {
         let entry: QueueEntry
         let isFirst: Bool
+        let namespace: Namespace.ID?
         let onSelect: () -> Void
         let onPlay: () -> Void
 
@@ -99,26 +123,27 @@ public struct UpNextQueueView: View {
                                 .fill(SumiTheme.card)
                                 .frame(width: 104, height: 60)
 
-                            AsyncImage(url: entry.thumbnailURL) { phase in
-                                if let image = phase.image {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 104, height: 60)
-                                        .clipped()
-                                } else {
-                                    Rectangle()
-                                        .fill(SumiTheme.background)
-                                        .overlay(
-                                            Image(systemName: "photo")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(SumiTheme.muted)
-                                        )
-                                }
+                            CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 208) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 104, height: 60)
+                                    .clipped()
+                            } placeholder: {
+                                Rectangle()
+                                    .fill(SumiTheme.background)
+                                    .overlay(
+                                        Image(systemName: "photo")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(SumiTheme.muted)
+                                    )
                             }
                         }
                         .frame(width: 104, height: 60)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .ifLet(namespace) { view, namespace in
+                            view.matchedGeometryEffect(id: entry.id, in: namespace)
+                        }
 
                         // Info Column
                         VStack(alignment: .leading, spacing: 0) {
@@ -144,16 +169,16 @@ public struct UpNextQueueView: View {
 
                             // 2px Progress Bar
                             if entry.totalCount > 0 {
-                                GeometryReader { geo in
-                                    ZStack(alignment: .leading) {
-                                        Capsule()
-                                            .fill(SumiTheme.foreground.opacity(0.1))
-                                        Capsule()
-                                            .fill(SumiTheme.indigo)
-                                            .frame(width: min(geo.size.width * CGFloat(entry.progressPercent / 100.0), geo.size.width))
-                                    }
+                                let pct = min(max(CGFloat(entry.progressPercent / 100.0), 0), 1)
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(SumiTheme.foreground.opacity(0.1))
+                                    Capsule()
+                                        .fill(SumiTheme.indigo)
+                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
                                 }
-                                .frame(maxWidth: 420, maxHeight: 2)
+                                .frame(maxWidth: 420)
+                                .frame(height: 2)
                                 .padding(.top, 8)
                             }
                         }
@@ -161,14 +186,14 @@ public struct UpNextQueueView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
                 .contentShape(Rectangle())
 
                 // Dedicated Play / Resume Button
                 Button(action: onPlay) {
                     Text(isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"))
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(isFirst ? Color.black : (isPlayHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
+                        .foregroundColor(isFirst ? SumiTheme.background : (isPlayHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(isFirst ? (isPlayHovered ? SumiTheme.indigo.opacity(0.85) : SumiTheme.indigo) : (isPlayHovered ? SumiTheme.card : Color.clear))
@@ -179,22 +204,18 @@ public struct UpNextQueueView: View {
                         )
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
                 .contentShape(Rectangle())
                 .animation(.snappy, value: isPlayHovered)
-                #if os(macOS)
-                .onHover { isPlayHovered = $0 }
-                #endif
+                .stableHover { isPlayHovered = $0 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(isFirst ? SumiTheme.card : (isHovered ? SumiTheme.card.opacity(0.6) : Color.clear))
             .animation(.snappy, value: isHovered)
-            #if os(macOS)
-            .onHover { hovering in
+            .stableHover { hovering in
                 isHovered = hovering
             }
-            #endif
         }
     }
 }

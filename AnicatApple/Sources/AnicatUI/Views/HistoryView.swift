@@ -13,6 +13,8 @@ public struct HistoryView: View {
     /// already loaded. An id with no title still shows, with the id — losing
     /// the row entirely would misreport how much was watched.
     let titles: [Int64: String]
+    let namespace: Namespace.ID?
+    let openingSourceKey: String?
     let onSelectFavourite: (MediaCard.Item) -> Void
 
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
@@ -22,11 +24,15 @@ public struct HistoryView: View {
         viewer: ViewerProfile?,
         activity: [ActivityRow],
         titles: [Int64: String],
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
         onSelectFavourite: @escaping (MediaCard.Item) -> Void = { _ in }
     ) {
         self.viewer = viewer
         self.activity = activity
         self.titles = titles
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
         self.onSelectFavourite = onSelectFavourite
     }
 
@@ -136,7 +142,10 @@ public struct HistoryView: View {
                     spacing: 20
                 ) {
                     ForEach(items) { item in
-                        MediaCard(item: item) {
+                        MediaCard(
+                            item: item,
+                            namespace: openingSourceKey == "history-fav:\(item.id)" ? namespace : nil
+                        ) {
                             onSelectFavourite(item)
                         }
                     }

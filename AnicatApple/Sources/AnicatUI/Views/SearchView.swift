@@ -6,17 +6,34 @@ public struct SearchView: View {
     public let results: [MediaCard.Item]
     public let discoverItems: [MediaCard.Item]
     public let isLoading: Bool
+    public let namespace: Namespace.ID?
+    // Which card (if any) is the poster-morph source, as "<shelfKey>:<id>" —
+    // "search-discover:<id>" or "search-results:<id>". Both grids can be
+    // relevant at once, so a bare id isn't enough to say which one a tap
+    // came from — see `AppModel.openingDetailSourceKey`.
+    public let openingSourceKey: String?
     /// Query, the AniList media type ("ANIME"/"MANGA"/"NOVEL"), and the
     /// active filters — the search view owns filter state since it's the
     /// only screen that exposes it, and hands the resolved value up rather
     /// than making the caller peek at private @State.
     public let onSearchCommit: (String, String, SearchFilters) -> Void
-    public let onSelectMedia: (MediaCard.Item) -> Void
-    public let onLoadDiscover: () -> Void
-    public let onShuffle: () -> Void
+    // 2nd arg is the poster-morph source key ("search-discover:<id>" or
+    // "search-results:<id>") — this view knows which grid the tap came
+    // from, the caller doesn't.
+    public let onSelectMedia: (MediaCard.Item, String) -> Void
+    /// Both take the currently toggled media type ("ANIME"/"MANGA"/"NOVEL")
+    /// — Discover used to always show the Home page's fixed, anime-only
+    /// trending shelf regardless of this screen's own toggle, which is why
+    /// switching it while browsing (no typed query, no filter) visibly did
+    /// nothing.
+    public let onLoadDiscover: (String) -> Void
+    public let onShuffle: (String) -> Void
     public var hasMorePages: Bool = true
     public var isLoadingMore: Bool = false
     public var onLoadMore: (String, String, SearchFilters) -> Void = { _, _, _ in }
+    public var hasMoreDiscoverPages: Bool = true
+    public var isLoadingMoreDiscover: Bool = false
+    public var onLoadMoreDiscover: (String) -> Void = { _ in }
 
     @State private var searchType: String = "ANIME"
 
@@ -35,22 +52,32 @@ public struct SearchView: View {
         results: [MediaCard.Item],
         discoverItems: [MediaCard.Item] = [],
         isLoading: Bool = false,
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
         onSearchCommit: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in },
-        onSelectMedia: @escaping (MediaCard.Item) -> Void = { _ in },
-        onLoadDiscover: @escaping () -> Void = {},
-        onShuffle: @escaping () -> Void = {},
+        onSelectMedia: @escaping (MediaCard.Item, String) -> Void = { _, _ in },
+        onLoadDiscover: @escaping (String) -> Void = { _ in },
+        onShuffle: @escaping (String) -> Void = { _ in },
         hasMorePages: Bool = true,
         isLoadingMore: Bool = false,
-        onLoadMore: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in }
+        onLoadMore: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in },
+        hasMoreDiscoverPages: Bool = true,
+        isLoadingMoreDiscover: Bool = false,
+        onLoadMoreDiscover: @escaping (String) -> Void = { _ in }
     ) {
         self._searchText = searchText
         self.results = results
         self.discoverItems = discoverItems
         self.isLoading = isLoading
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
         self.onSearchCommit = onSearchCommit
         self.onSelectMedia = onSelectMedia
         self.onLoadDiscover = onLoadDiscover
         self.onShuffle = onShuffle
+        self.hasMoreDiscoverPages = hasMoreDiscoverPages
+        self.isLoadingMoreDiscover = isLoadingMoreDiscover
+        self.onLoadMoreDiscover = onLoadMoreDiscover
         self.hasMorePages = hasMorePages
         self.isLoadingMore = isLoadingMore
         self.onLoadMore = onLoadMore
@@ -141,7 +168,7 @@ public struct SearchView: View {
                             selection: $searchType
                         )
 
-                        SumiOutlineButton("Shuffle", systemImage: "shuffle", action: onShuffle)
+                        SumiOutlineButton("Shuffle", systemImage: "shuffle", action: { onShuffle(searchType) })
                     }
 
                     HStack(spacing: 12) {
@@ -164,7 +191,7 @@ public struct SearchView: View {
                                     .padding(4)
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
                         }
 
                         if isLoading {
@@ -212,7 +239,7 @@ public struct SearchView: View {
                                     .padding(.vertical, 4)
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
                             .transition(.opacity)
                         }
 
@@ -220,7 +247,16 @@ public struct SearchView: View {
                     }
                     .animation(.snappy, value: hasActiveFilters)
                 }
-                .onChange(of: searchType) { _, _ in commitSearch() }
+                .onChange(of: searchType) { _, newType in
+                    // `commitSearch()` no-ops on an empty query with no
+                    // filter (that's what Discover is for) — Discover needs
+                    // its own explicit refresh for the newly toggled type.
+                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !hasActiveFilters {
+                        onLoadDiscover(newType)
+                    } else {
+                        commitSearch()
+                    }
+                }
                 // One handler on the combined value rather than five on the
                 // individual @State vars — "Clear filters" sets all five at
                 // once, and five separate onChange handlers would each fire
@@ -265,15 +301,37 @@ public struct SearchView: View {
                                 alignment: .leading,
                                 spacing: 20
                             ) {
-                                ForEach(discoverItems) { item in
-                                    MediaCard(item: item) {
-                                        onSelectMedia(item)
+                                ForEach(Array(discoverItems.enumerated()), id: \.element.id) { index, item in
+                                    MediaCard(
+                                        item: item,
+                                        namespace: openingSourceKey == "search-discover:\(item.id)" ? namespace : nil
+                                    ) {
+                                        onSelectMedia(item, "search-discover:\(item.id)")
+                                    }
+                                    .equatable()
+                                    // Same "a few cards early" pattern as the
+                                    // results grid below — Discover used to
+                                    // just stop at a fixed 24 items with
+                                    // nothing more ever loading.
+                                    .onAppear {
+                                        if index == discoverItems.count - 6 {
+                                            guard hasMoreDiscoverPages, !isLoadingMoreDiscover else { return }
+                                            onLoadMoreDiscover(searchType)
+                                        }
                                     }
                                 }
                             }
                             .padding(.horizontal, 40)
                             .opacity(isLoading ? 0.5 : 1)
                             .animation(.snappy, value: isLoading)
+
+                            if isLoadingMoreDiscover {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .tint(SumiTheme.indigo)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
                         }
                     } else if isLoading {
                         VStack(alignment: .leading, spacing: 16) {
@@ -314,9 +372,13 @@ public struct SearchView: View {
                             spacing: 20
                         ) {
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
-                                MediaCard(item: item) {
-                                    onSelectMedia(item)
+                                MediaCard(
+                                    item: item,
+                                    namespace: openingSourceKey == "search-results:\(item.id)" ? namespace : nil
+                                ) {
+                                    onSelectMedia(item, "search-results:\(item.id)")
                                 }
+                                .equatable()
                                 // Firing the next page a few cards before the
                                 // true end means the next row is already
                                 // loading by the time the viewer scrolls to
@@ -356,6 +418,7 @@ public struct SearchView: View {
                     }
                 }
                 .animation(.smooth, value: results.isEmpty)
+                .animation(.smooth, value: searchType)
             }
             .padding(.top, 40)
             .padding(.bottom, 32)
@@ -363,6 +426,10 @@ public struct SearchView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
-        .onAppear { onLoadDiscover() }
+        // `RootView` remounts this view (`.id(currentNavSection)`) on every
+        // nav switch, so an unconditional `onAppear` refetched trending —
+        // already sitting in `discoverItems` from startup — and flashed the
+        // global loading scrim on every visit to Search for no new data.
+        .onAppear { if discoverItems.isEmpty { onLoadDiscover(searchType) } }
     }
 }

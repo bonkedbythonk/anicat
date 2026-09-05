@@ -10,6 +10,8 @@ public struct LibraryView: View {
     @Binding var status: String
     @Binding var mediaType: String
     let isSignedIn: Bool
+    let namespace: Namespace.ID?
+    let openingSourceKey: String?
     let onSelect: (MediaCard.Item) -> Void
 
     @AppStorage("anicat_library_layout") private var layout: String = "grid"
@@ -20,6 +22,8 @@ public struct LibraryView: View {
         status: Binding<String>,
         mediaType: Binding<String>,
         isSignedIn: Bool,
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
         onSelect: @escaping (MediaCard.Item) -> Void
     ) {
         self.items = items
@@ -27,6 +31,8 @@ public struct LibraryView: View {
         self._status = status
         self._mediaType = mediaType
         self.isSignedIn = isSignedIn
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
         self.onSelect = onSelect
     }
 
@@ -78,7 +84,7 @@ public struct LibraryView: View {
                         detail: "Search for \(mediaType.lowercased()) and add them to your list."
                     )
                 } else if layout == "grid" {
-                    SumiPosterGrid(items: items, onSelect: onSelect)
+                    SumiPosterGrid(items: items, namespace: namespace, openingSourceKey: openingSourceKey, shelfKey: "library", onSelect: onSelect)
                         .opacity(isLoading ? 0.5 : 1)
                 } else {
                     LibraryTable(items: items, mediaType: mediaType, onSelect: onSelect)
@@ -109,6 +115,7 @@ private struct LibraryTable: View {
             .padding(.vertical, 10)
             .overlay(Rectangle().fill(SumiTheme.border).frame(height: 1), alignment: .bottom)
 
+            LazyVStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 Button { onSelect(item) } label: {
                     HStack(spacing: 0) {
@@ -130,11 +137,12 @@ private struct LibraryTable: View {
                     .padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
 
                 if index < items.count - 1 {
                     Rectangle().fill(SumiTheme.border).frame(height: 1)
                 }
+            }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))

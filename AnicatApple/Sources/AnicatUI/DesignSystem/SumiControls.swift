@@ -27,6 +27,8 @@ public struct SumiPageHeader<Trailing: View>: View {
                     Text(subtitle)
                         .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.muted)
+                        .contentTransition(.numericText())
+                        .animation(.sumiSpring, value: subtitle)
                 }
             }
             Spacer(minLength: 16)
@@ -45,6 +47,7 @@ public extension SumiPageHeader where Trailing == EmptyView {
 /// no underline and no pill border, which is what separates this from the
 /// segmented control below.
 public struct SumiTabBar: View {
+    @Namespace private var tabNamespace
     let tabs: [(key: String, label: String)]
     @Binding var selection: String
 
@@ -56,27 +59,40 @@ public struct SumiTabBar: View {
     public var body: some View {
         HStack(spacing: 4) {
             ForEach(tabs, id: \.key) { tab in
+                let isSelected = selection == tab.key
                 Button {
-                    selection = tab.key
+                    if selection != tab.key {
+                        SumiHaptics.selection()
+                        withAnimation(.sumiSpring) {
+                            selection = tab.key
+                        }
+                    }
                 } label: {
                     Text(tab.label)
                         .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(selection == tab.key ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
+                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(selection == tab.key ? SumiTheme.indigo.opacity(0.15) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                    .fill(SumiTheme.indigo.opacity(0.15))
+                                    .matchedGeometryEffect(id: "sumiTabBarHighlight", in: tabNamespace)
+                            }
+                        }
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
         }
-        .animation(.snappy, value: selection)
+        .animation(.sumiSpring, value: selection)
     }
 }
 
 /// The joined toggle used for Anime/Manga and Grid/Table: one hairline box
 /// with the segments butted together inside it, not separate buttons.
 public struct SumiSegmentedControl: View {
+    @Namespace private var segmentNamespace
     let options: [(key: String, label: String)]
     @Binding var selection: String
 
@@ -88,17 +104,30 @@ public struct SumiSegmentedControl: View {
     public var body: some View {
         HStack(spacing: 0) {
             ForEach(options, id: \.key) { option in
+                let isSelected = selection == option.key
                 Button {
-                    selection = option.key
+                    if selection != option.key {
+                        SumiHaptics.selection()
+                        withAnimation(.sumiSpring) {
+                            selection = option.key
+                        }
+                    }
                 } label: {
                     Text(option.label)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(selection == option.key ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
+                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(selection == option.key ? SumiTheme.indigo.opacity(0.15) : Color.clear)
+                        .background {
+                            if isSelected {
+                                Rectangle()
+                                    .fill(SumiTheme.indigo.opacity(0.15))
+                                    .matchedGeometryEffect(id: "sumiSegmentHighlight", in: segmentNamespace)
+                            }
+                        }
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
@@ -106,7 +135,7 @@ public struct SumiSegmentedControl: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
-        .animation(.snappy, value: selection)
+        .animation(.sumiSpring, value: selection)
     }
 }
 
@@ -142,7 +171,7 @@ public struct SumiOutlineButton: View {
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.sumiPressable)
     }
 }
 
@@ -271,10 +300,26 @@ public struct SumiSectionHeader: View {
 /// The six-column poster grid the Library and Search results share.
 public struct SumiPosterGrid: View {
     let items: [MediaCard.Item]
+    let namespace: Namespace.ID?
+    // Which card (if any) is the poster-morph source, as "<shelfKey>:<id>".
+    // Gated per-card here rather than passing `namespace` straight through,
+    // since the same title can be visible in more than one grid/shelf on
+    // the same screen — see `AppModel.openingDetailSourceKey`.
+    let openingSourceKey: String?
+    let shelfKey: String
     let onSelect: (MediaCard.Item) -> Void
 
-    public init(items: [MediaCard.Item], onSelect: @escaping (MediaCard.Item) -> Void) {
+    public init(
+        items: [MediaCard.Item],
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
+        shelfKey: String = "grid",
+        onSelect: @escaping (MediaCard.Item) -> Void
+    ) {
         self.items = items
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
+        self.shelfKey = shelfKey
         self.onSelect = onSelect
     }
 
@@ -285,7 +330,10 @@ public struct SumiPosterGrid: View {
             spacing: 20
         ) {
             ForEach(items) { item in
-                MediaCard(item: item) { onSelect(item) }
+                MediaCard(
+                    item: item,
+                    namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
+                ) { onSelect(item) }
             }
         }
     }

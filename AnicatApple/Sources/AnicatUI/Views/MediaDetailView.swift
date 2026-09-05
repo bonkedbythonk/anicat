@@ -50,7 +50,7 @@ public struct MediaDetailView: View {
         case failed(message: String)
     }
 
-    public struct EpisodeItem: Identifiable, Sendable, Codable {
+    public struct EpisodeItem: Identifiable, Sendable, Codable, Equatable {
         public let id: Int64
         public let number: Int
         public let title: String
@@ -212,6 +212,7 @@ public struct MediaDetailView: View {
     public let relations: [RelationItem]
     public let recommendations: [RecommendationItem]
     public let discussions: [DiscussionItem]
+    public let isLoading: Bool
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     public let onReadChapter: (MangaChapterItem) -> Void
@@ -237,12 +238,22 @@ public struct MediaDetailView: View {
     /// Keyed by episode number. An episode with no entry has never had a
     /// download started — `EpisodeRow` treats that the same as `.notStarted`.
     public let downloadStates: [Int: EpisodeDownloadState]
+    /// Shared with the `MediaCard` this detail page was opened from, so the
+    /// poster grows from that card's actual on-screen frame instead of the
+    /// generic offset/opacity swap. `nil` when opened from a context that
+    /// isn't wired to a shared namespace (or wasn't opened from a card at
+    /// all, e.g. deep-linked).
+    public var namespace: Namespace.ID?
 
     @State private var selectedTab: DetailTab = .episodes
+    let onTabChanged: (DetailTab) -> Void
     @State private var selectedAudioType: AudioType = .sub
     @State private var selectedViewMode: EpisodeViewMode = .cards
     @State private var isSynopsisExpanded = false
     @State private var isBackHovered = false
+    @Namespace private var detailTabNamespace
+    @Namespace private var viewModeNamespace
+    @Namespace private var audioNamespace
 
     public init(
         details: HeroBanner.Details,
@@ -252,6 +263,7 @@ public struct MediaDetailView: View {
         relations: [RelationItem] = [],
         recommendations: [RecommendationItem] = [],
         discussions: [DiscussionItem] = [],
+        isLoading: Bool = false,
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
         onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
@@ -265,8 +277,18 @@ public struct MediaDetailView: View {
         onLoadReleaseCandidates: @escaping (Int) async -> [ReleaseCandidateItem] = { _ in [] },
         onPlayWithRelease: @escaping (EpisodeItem, String) -> Void = { _, _ in },
         onDownloadEpisode: @escaping (EpisodeItem) -> Void = { _ in },
-        downloadStates: [Int: EpisodeDownloadState] = [:]
+        downloadStates: [Int: EpisodeDownloadState] = [:],
+        namespace: Namespace.ID? = nil,
+        /// Restores whichever tab was open the last time this title was
+        /// visited (threaded through by the caller's back/forward stack).
+        /// `nil` falls back to the usual "episodes, unless this is a
+        /// manga/novel" default — this view is `.id(details.id)`-keyed, so
+        /// its own `@State selectedTab` never survives a title change on its
+        /// own.
+        restoredTab: DetailTab? = nil,
+        onTabChanged: @escaping (DetailTab) -> Void = { _ in }
     ) {
+        self.onTabChanged = onTabChanged
         self.details = details
         self.episodes = episodes
         self.mangaChapters = mangaChapters
@@ -274,6 +296,7 @@ public struct MediaDetailView: View {
         self.relations = relations
         self.recommendations = recommendations
         self.discussions = discussions
+        self.isLoading = isLoading
         self.onPlayEpisode = onPlayEpisode
         self.onReadChapter = onReadChapter
         self.onSelectRelation = onSelectRelation
@@ -288,9 +311,12 @@ public struct MediaDetailView: View {
         self.onPlayWithRelease = onPlayWithRelease
         self.onDownloadEpisode = onDownloadEpisode
         self.downloadStates = downloadStates
+        self.namespace = namespace
 
         let initial: DetailTab
-        if !episodes.isEmpty {
+        if let restoredTab {
+            initial = restoredTab
+        } else if !episodes.isEmpty {
             initial = .episodes
         } else if !mangaChapters.isEmpty {
             initial = .manga
@@ -303,9 +329,9 @@ public struct MediaDetailView: View {
     }
 
 
-    /// Overlap of the content column onto the banner. Sized to match the Tauri app
-    /// where the poster sits lower and does not intrude too high into the banner artwork.
-    private let bannerOverlap: CGFloat = 50
+    /// Overlap of the content column onto the banner. Sized to match the web app
+    /// (-mt-28 / 112pt) where the poster and title overlap the bottom hero gradient.
+    private let bannerOverlap: CGFloat = 112
 
     public var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -317,13 +343,27 @@ public struct MediaDetailView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
+        #if os(macOS)
+        .onAppear {
+            _ = ScrollPocketWorkaround.disableScrollPocketsOnce
+        }
+        #endif
+        // Keeps the caller's back/forward stack informed of the tab actually
+        // open on this page, so navigating away and back can restore it —
+        // `initial: true` because this view mounts fresh (`.id(details.id)`)
+        // every time the title changes, and the very first value (whether
+        // computed default or a restored one) needs reporting too, not just
+        // subsequent taps.
+        .onChange(of: selectedTab, initial: true) { _, newTab in
+            onTabChanged(newTab)
+        }
     }
 
     // MARK: - Banner
 
     private var banner: some View {
         ZStack(alignment: .topLeading) {
-            Color(hex: "#161310")
+            SumiTheme.background
 
             // AsyncImage given a directly-flexible `.frame(maxWidth: .infinity)`
             // measured a specific banner (a portrait-leaning image scaled up
@@ -339,21 +379,11 @@ public struct MediaDetailView: View {
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: 288)
-                // A source banner scaled to fill this frame is usually
-                // taller than 288pt once its width matches the column, so
-                // centering (the default alignment) crops evenly off both
-                // edges — cutting as much off the bottom, where an anime
-                // banner's characters actually are, as off the top, which is
-                // usually just sky or logo art. Bottom-aligning the overlay
-                // keeps the bottom of the source pinned and crops the top
-                // instead, so the image reads lower in the frame.
-                .overlay(alignment: .bottom) {
-                    AsyncImage(url: details.bannerURL ?? details.coverURL) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } else {
-                            Rectangle().fill(SumiTheme.card)
-                        }
+                .overlay {
+                    CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 1200) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Rectangle().fill(SumiTheme.card)
                     }
                 }
                 .clipped()
@@ -371,24 +401,17 @@ public struct MediaDetailView: View {
             )
             .frame(height: 288)
 
-            // Top Left Back Button (positioned cleanly below window traffic lights zone)
+            // Top Left Back Button
             VStack(alignment: .leading) {
                 Button(action: onClose) {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
                         Text("Back")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12.5, weight: .medium))
                     }
-                    .foregroundColor(isBackHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(isBackHovered ? SumiTheme.card.opacity(0.9) : Color.black.opacity(0.4))
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(isBackHovered ? SumiTheme.border : Color.white.opacity(0.12), lineWidth: 1)
-                    )
+                    .foregroundColor(isBackHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.75))
+                    .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -413,9 +436,10 @@ public struct MediaDetailView: View {
         HStack(alignment: .top, spacing: 32) {
             poster
             info
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .padding(.horizontal, 56)
-        .padding(.bottom, 64)
+        .padding(.bottom, 28)
         .frame(maxWidth: 1150, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.top, -bannerOverlap)
@@ -425,52 +449,70 @@ public struct MediaDetailView: View {
         Color.clear
             .frame(width: 192, height: 288)
             .overlay {
-                AsyncImage(url: details.coverURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Rectangle().fill(SumiTheme.card)
-                    }
+                CachedAsyncImage(url: details.coverURL, maxPixelSize: 600) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Rectangle().fill(SumiTheme.card)
                 }
             }
             .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.55), radius: 24, y: 10)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
+            .ifLet(namespace) { view, namespace in
+                view.matchedGeometryEffect(id: details.id, in: namespace)
+            }
+            // Same reasoning as `MediaCard`: matchedGeometryEffect only
+            // animates frame, so without this the poster snapped into its
+            // final size with no cross-fade while everything around it
+            // (via the page's own insertion transition) faded normally.
+            .transition(.opacity)
+            .compositingGroup()
+            .shadow(color: .black.opacity(0.55), radius: 24, y: 10)
     }
 
     private var info: some View {
         VStack(alignment: .leading, spacing: 16) {
             metaLine
-                .padding(.top, bannerOverlap + 24)
+                .padding(.top, 24)
 
             Text(details.title)
                 .font(.system(size: 36, weight: .bold))
                 .tracking(-0.8)
+                .lineSpacing(3)
                 .foregroundColor(SumiTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !details.genres.isEmpty {
                 genrePills
+            } else if isLoading {
+                HStack(spacing: 6) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(SumiTheme.foregroundWash)
+                            .frame(width: 54, height: 20)
+                    }
+                }
             }
 
             actionBar
+                .padding(.top, 4)
 
             if let synopsis = details.synopsis, !synopsis.isEmpty {
                 synopsisBlock(synopsis)
+            } else if isLoading {
+                SynopsisSkeleton()
             }
-
-            seasonChain
         }
     }
 
     /// Tabs and their content, full-width below the poster/info row. The web
     /// build keeps the episode list out of the poster's column — it spans the
     /// whole content width — and the native port had it squeezed beside the
-    /// poster, which is why every episode row looked about 200pt too narrow.
+    /// poster, leaving almost no room for episode descriptions or release
+    /// names.
     private var tabsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             tabBar
@@ -482,35 +524,85 @@ public struct MediaDetailView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+    /// Full-width shelf between `content` and `tabsSection` that shows the
+    /// previous / next season chain. Living here — outside the poster/info
+    /// HStack — means it animates in without pushing the tabs bar down, since
+    /// it's measured independently and doesn't share vertical space with the
+    /// poster column that stops at 288pt.
+    @ViewBuilder
+    private var seasonStrip: some View {
+        if details.prequel != nil || details.sequel != nil {
+            HStack(spacing: 12) {
+                if let prequel = details.prequel {
+                    relationCard(prequel, label: "PREVIOUS SEASON", leading: true)
+                }
+                if let sequel = details.sequel {
+                    relationCard(sequel, label: "NEXT SEASON", leading: false)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 56)
+            .padding(.bottom, 28)
+            .frame(maxWidth: 1150, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
     /// The one line of state above the title. Everything is muted mono except
     /// the three things worth colouring: the format, the airing status, and
     /// the counts.
     private var metaLine: some View {
         HStack(spacing: 12) {
             if let format = details.format {
-                Text(format).foregroundColor(SumiTheme.foreground).fontWeight(.semibold)
+                Text(format)
+                    .foregroundColor(SumiTheme.foreground)
+                    .fontWeight(.semibold)
+            } else if isLoading {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 44, height: 12)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 52, height: 12)
             }
+
             switch details.status {
             case "RELEASING":
-                Text("Airing").foregroundColor(SumiTheme.indigo).fontWeight(.semibold)
+                Text("AIRING")
+                    .foregroundColor(SumiTheme.indigo)
+                    .fontWeight(.semibold)
             case "FINISHED":
-                Text("Finished").foregroundColor(Color(hex: "#34D399")).fontWeight(.semibold)
+                Text("FINISHED")
+                    .foregroundColor(Color(hex: "#34D399"))
+                    .fontWeight(.semibold)
             default:
                 EmptyView()
             }
+
             if let count = details.episodeCount, count > 0 {
                 let unit = (episodes.isEmpty && !mangaChapters.isEmpty) ? "CH" : "EP"
-                Text("\(count) \(unit)").foregroundColor(SumiTheme.indigo).fontWeight(.semibold)
+                Text("\(count) \(unit)")
+                    .foregroundColor(SumiTheme.indigo)
+                    .fontWeight(.semibold)
             }
+
             if let year = details.year {
-                Text(String(year)).foregroundColor(SumiTheme.muted)
+                Text(String(year))
+                    .foregroundColor(SumiTheme.muted)
             }
+
             if let studio = details.studio {
-                Text(studio).foregroundColor(SumiTheme.muted)
+                Text(studio)
+                    .foregroundColor(SumiTheme.muted)
             }
+
             if let score = details.averageScore, score > 0 {
-                Text("Score \(score)%").foregroundColor(SumiTheme.indigo).fontWeight(.semibold)
+                Text("SCORE \(score)%")
+                    .foregroundColor(SumiTheme.indigo)
+                    .fontWeight(.semibold)
             }
+
             Spacer(minLength: 0)
         }
         .sumiTabularMono(size: 10.5)
@@ -538,22 +630,19 @@ public struct MediaDetailView: View {
                     if let episode = resumeTarget { onPlayEpisode(episode) }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "play.fill").font(.system(size: 12))
+                        Image(systemName: "play.fill").font(.system(size: 13))
                         Text(primaryActionLabel)
-                        Circle()
-                            .fill(Color.black.opacity(0.6))
-                            .frame(width: 4, height: 4)
                     }
                     .font(.system(size: 13.5, weight: .bold))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .foregroundColor(SumiTheme.background)
+                    .padding(.horizontal, 20)
+                    .frame(height: 40)
                     .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .shadow(color: SumiTheme.indigo.opacity(0.2), radius: 8, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+                    .shadow(color: SumiTheme.indigo.opacity(0.10), radius: 10, y: 3)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
                 .disabled(resumeTarget == nil)
                 .opacity(resumeTarget == nil ? 0.5 : 1)
             } else if let first = mangaChapters.first {
@@ -561,19 +650,19 @@ public struct MediaDetailView: View {
                     onReadChapter(first)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "book.fill").font(.system(size: 12))
+                        Image(systemName: "book.fill").font(.system(size: 13))
                         Text("Read Chapter \(first.number)")
                     }
                     .font(.system(size: 13.5, weight: .bold))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .foregroundColor(SumiTheme.background)
+                    .padding(.horizontal, 20)
+                    .frame(height: 40)
                     .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .shadow(color: SumiTheme.indigo.opacity(0.2), radius: 8, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+                    .shadow(color: SumiTheme.indigo.opacity(0.10), radius: 10, y: 3)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
 
             Menu {
@@ -581,44 +670,42 @@ public struct MediaDetailView: View {
                     Button(Self.statusLabel(status)) { onSetListStatus(status) }
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text(Self.statusLabel(details.listStatus))
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
-                }
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(SumiTheme.foreground.opacity(0.9))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(SumiTheme.card.opacity(0.8))
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-                // `Menu`'s built-in hit target is computed from its label's
-                // drawn content, not its `.frame()` — the background fill
-                // reads as decoration, not a hit-testable shape, so only the
-                // text/chevron glyphs themselves were clickable and the
-                // pill's visible padding around them was dead space.
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-
-            Button(action: onToggleFavourite) {
-                Image(systemName: details.isFavourite ? "heart.fill" : "heart")
-                    .font(.system(size: 14))
-                    .foregroundColor(details.isFavourite ? Color(hex: "#EC4899") : SumiTheme.foreground.opacity(0.8))
-                    .frame(width: 36, height: 36)
-                    .background(details.isFavourite ? Color(hex: "#EC4899").opacity(0.15) : SumiTheme.card.opacity(0.8))
+                // No manual chevron here: `.menuStyle(.borderlessButton)` below
+                // already draws its own disclosure caret, so this used to show
+                // two arrows stacked next to each other.
+                Text(Self.statusLabel(details.listStatus))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(SumiTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(details.isFavourite ? Color(hex: "#EC4899").opacity(0.4) : SumiTheme.border, lineWidth: 1)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                    .sumiMenuPressable()
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .animation(.snappy, value: details.listStatus)
+
+            Button(action: onToggleFavourite) {
+                Image(systemName: details.isFavourite ? "heart.fill" : "heart")
+                    .font(.system(size: 15))
+                    .foregroundColor(details.isFavourite ? Color(hex: "#EC4899") : SumiTheme.foreground.opacity(0.8))
+                    .frame(width: 40, height: 40)
+                    .background(details.isFavourite ? Color(hex: "#EC4899").opacity(0.15) : SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(details.isFavourite ? Color(hex: "#EC4899").opacity(0.3) : SumiTheme.border, lineWidth: 1)
                     )
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
+            .animation(.bouncy, value: details.isFavourite)
 
             Menu {
                 Button(role: .destructive, action: onRemoveFromList) {
@@ -627,16 +714,17 @@ public struct MediaDetailView: View {
                 .disabled(details.listEntryId == nil)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                    .frame(width: 36, height: 36)
-                    .background(SumiTheme.card.opacity(0.8))
+                    .frame(width: 40, height: 40)
+                    .background(SumiTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                     .contentShape(Rectangle())
+                    .sumiMenuPressable()
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -697,16 +785,16 @@ public struct MediaDetailView: View {
     }
 
     private func synopsisBlock(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("SYNOPSIS")
-                .sumiTabularMono(size: 11)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Synopsis")
+                .sumiTabularMono(size: 11.5, weight: .semibold)
                 .foregroundColor(SumiTheme.indigo)
 
             // Body copy, not metadata: it reads at foreground/80 rather than
             // the muted token the labels around it use.
             Text(text)
-                .font(.system(size: 13.5))
-                .lineSpacing(4)
+                .font(.system(size: 14))
+                .lineSpacing(4.5)
                 .foregroundColor(SumiTheme.foreground.opacity(0.8))
                 .lineLimit(isSynopsisExpanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -717,29 +805,14 @@ public struct MediaDetailView: View {
                 HStack(spacing: 5) {
                     Text(isSynopsisExpanded ? "Show Less" : "Read Full Synopsis")
                     Image(systemName: isSynopsisExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                 }
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(SumiTheme.foreground.opacity(0.5))
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-        }
-    }
-
-    @ViewBuilder
-    private var seasonChain: some View {
-        if details.prequel != nil || details.sequel != nil {
-            HStack(spacing: 12) {
-                if let prequel = details.prequel {
-                    relationCard(prequel, label: "PREVIOUS SEASON", leading: true)
-                }
-                if let sequel = details.sequel {
-                    relationCard(sequel, label: "NEXT SEASON", leading: false)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.sumiPressable)
         }
     }
 
@@ -747,7 +820,7 @@ public struct MediaDetailView: View {
         RelationCardView(relation: relation, label: label, leading: leading, onSelect: onSelectRelation)
     }
 
-    private struct RelationCardView: View {
+    fileprivate struct RelationCardView: View {
         let relation: HeroBanner.Details.Relation
         let label: String
         let leading: Bool
@@ -764,7 +837,8 @@ public struct MediaDetailView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(SumiTheme.muted)
-                        Color.clear
+                        Rectangle()
+                            .fill(SumiTheme.card)
                             .frame(width: 36, height: 48)
                             .overlay {
                                 CachedAsyncImage(url: relation.coverURL, maxPixelSize: 96) { image in
@@ -806,7 +880,8 @@ public struct MediaDetailView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        Color.clear
+                        Rectangle()
+                            .fill(SumiTheme.card)
                             .frame(width: 36, height: 48)
                             .overlay {
                                 CachedAsyncImage(url: relation.coverURL, maxPixelSize: 96) { image in
@@ -833,10 +908,9 @@ public struct MediaDetailView: View {
                 )
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .buttonStyle(.sumiPressable)
+            .contentShape(Rectangle())
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }
@@ -891,90 +965,132 @@ public struct MediaDetailView: View {
     }
 
     private var tabBar: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            HStack(spacing: 24) {
-                ForEach(availableTabs) { tab in
-                    Button {
-                        withAnimation(.smooth) {
-                            selectedTab = tab
+        HStack(alignment: .bottom, spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 18) {
+                    ForEach(availableTabs) { tab in
+                        let isSelected = activeTab == tab
+                        Button {
+                            if activeTab != tab {
+                                SumiHaptics.selection()
+                                withAnimation(.smooth) {
+                                    selectedTab = tab
+                                }
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                Text(tabLabel(tab))
+                                    .sumiTabularMono(size: 12, weight: isSelected ? .semibold : .medium)
+                                    .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
+                                    .lineLimit(1)
+                                ZStack {
+                                    Rectangle()
+                                        .fill(Color.clear)
+                                        .frame(height: 2)
+                                    if isSelected {
+                                        Rectangle()
+                                            .fill(SumiTheme.indigo)
+                                            .frame(height: 2)
+                                            .matchedGeometryEffect(id: "detailTabUnderline", in: detailTabNamespace)
+                                    }
+                                }
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .contentShape(Rectangle())
                         }
-                    } label: {
-                        VStack(spacing: 8) {
-                            Text(tabLabel(tab))
-                                .sumiTabularMono(size: 11, weight: activeTab == tab ? .bold : .medium)
-                                .foregroundColor(activeTab == tab ? SumiTheme.foreground : SumiTheme.muted)
-                            Rectangle()
-                                .fill(activeTab == tab ? SumiTheme.indigo : Color.clear)
-                                .frame(height: 2)
-                        }
-                        .fixedSize()
-                        .contentShape(Rectangle())
+                        .buttonStyle(.sumiPressable)
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 12)
 
             // Right side: Audio and ViewMode toggles when episodes tab is active
             if activeTab == .episodes && !episodes.isEmpty {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     // Audio toggle
                     HStack(spacing: 6) {
                         Text("AUDIO:")
                             .sumiTabularMono(size: 10.5, weight: .bold)
                             .foregroundColor(SumiTheme.muted)
+                            .lineLimit(1)
 
                         HStack(spacing: 2) {
                             ForEach(AudioType.allCases, id: \.self) { audio in
+                                let isSelected = selectedAudioType == audio
                                 Button {
-                                    withAnimation(.snappy) {
-                                        selectedAudioType = audio
+                                    if selectedAudioType != audio {
+                                        SumiHaptics.selection()
+                                        withAnimation(.snappy) {
+                                            selectedAudioType = audio
+                                        }
                                     }
                                 } label: {
                                     Text(audio.rawValue)
-                                        .sumiTabularMono(size: 10.5, weight: selectedAudioType == audio ? .bold : .regular)
-                                        .foregroundColor(selectedAudioType == audio ? SumiTheme.indigo : SumiTheme.muted)
+                                        .sumiTabularMono(size: 10.5, weight: isSelected ? .bold : .regular)
+                                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.muted)
+                                        .lineLimit(1)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 3)
-                                        .background(selectedAudioType == audio ? SumiTheme.indigo.opacity(0.18) : Color.clear)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        .background {
+                                            if isSelected {
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(SumiTheme.indigo.opacity(0.18))
+                                                    .matchedGeometryEffect(id: "audioPill", in: audioNamespace)
+                                            }
+                                        }
                                         .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.sumiPressable)
                             }
                         }
+                        .animation(.snappy, value: selectedAudioType)
                         .padding(2)
                         .background(SumiTheme.card)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
                     }
+                    .fixedSize(horizontal: true, vertical: false)
 
                     // View Mode toggle: Cards | Compact
                     HStack(spacing: 2) {
                         ForEach(EpisodeViewMode.allCases, id: \.self) { mode in
+                            let isSelected = selectedViewMode == mode
                             Button {
-                                withAnimation(.snappy) {
-                                    selectedViewMode = mode
+                                if selectedViewMode != mode {
+                                    SumiHaptics.selection()
+                                    withAnimation(.snappy) {
+                                        selectedViewMode = mode
+                                    }
                                 }
                             } label: {
                                 Text(mode.rawValue)
-                                    .font(.system(size: 10.5, weight: selectedViewMode == mode ? .bold : .medium))
-                                    .foregroundColor(selectedViewMode == mode ? SumiTheme.foreground : SumiTheme.muted)
+                                    .font(.system(size: 10.5, weight: isSelected ? .bold : .medium))
+                                    .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
+                                    .lineLimit(1)
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 3)
-                                    .background(selectedViewMode == mode ? SumiTheme.foreground.opacity(0.12) : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    .background {
+                                        if isSelected {
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(SumiTheme.foreground.opacity(0.12))
+                                                .matchedGeometryEffect(id: "viewModePill", in: viewModeNamespace)
+                                        }
+                                    }
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
                         }
                     }
+                    .animation(.snappy, value: selectedViewMode)
                     .padding(2)
                     .background(SumiTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
+                    .fixedSize(horizontal: true, vertical: false)
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
                 .padding(.bottom, 6)
             }
         }
@@ -985,197 +1101,46 @@ public struct MediaDetailView: View {
     private var tabContent: some View {
         switch activeTab {
         case .episodes:
-            if episodes.isEmpty {
-                SumiEmptyState(headline: "No episodes found", detail: "Nothing was returned for this title.")
-            } else if selectedViewMode == .compact {
-                VStack(spacing: 4) {
-                    ForEach(episodes) { episode in
-                        CompactEpisodeRow(
-                            episode: episode,
-                            isResumeTarget: episode.id == resumeTarget?.id,
-                            resumeSeconds: episode.number == details.resumeEpisode ? details.resumeSeconds : nil,
-                            onPlay: { onPlayEpisode(episode) },
-                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
-                        )
-                    }
-                }
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(episodes) { episode in
-                        EpisodeRow(
-                            episode: episode,
-                            isResumeTarget: episode.id == resumeTarget?.id,
-                            resumeSeconds: episode.number == details.resumeEpisode ? details.resumeSeconds : nil,
-                            downloadState: downloadStates[episode.number] ?? .notStarted,
-                            onPlay: { onPlayEpisode(episode) },
-                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) },
-                            onLoadReleaseCandidates: { await onLoadReleaseCandidates(episode.number) },
-                            onPlayWithRelease: { name in onPlayWithRelease(episode, name) },
-                            onDownload: { onDownloadEpisode(episode) }
-                        )
-                    }
-                }
-            }
+            // Its own View struct, not another computed property here: this
+            // is the one section whose backing state (`downloadStates`)
+            // mutates on a 1s poll while a download runs. Inlined as a
+            // computed property it register that dependency on the whole
+            // 1854-line `body` above, so every tick re-evaluated the entire
+            // detail page — banner, tabs, unrelated sections — to redraw one
+            // row's percentage.
+            EpisodeListSection(
+                episodes: episodes,
+                resumeEpisode: details.resumeEpisode,
+                resumeSeconds: details.resumeSeconds,
+                selectedViewMode: selectedViewMode,
+                downloadStates: downloadStates,
+                isLoading: isLoading,
+                onPlayEpisode: onPlayEpisode,
+                onSetEpisodeWatched: onSetEpisodeWatched,
+                onLoadReleaseCandidates: onLoadReleaseCandidates,
+                onPlayWithRelease: onPlayWithRelease,
+                onDownloadEpisode: onDownloadEpisode
+            )
         case .manga:
-            if mangaChapters.isEmpty {
-                if details.format == "NOVEL" {
-                    SumiEmptyState(
-                        headline: "Light novel reading isn't available yet",
-                        detail: "There's no light-novel reader in the native app yet — this section is a placeholder, not a failed search."
-                    )
-                } else {
-                    SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
-                }
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(mangaChapters) { chapter in
-                        ChapterRowView(chapter: chapter) {
-                            onReadChapter(chapter)
-                        }
-                    }
-                }
-            }
+            MangaTabSection(chapters: mangaChapters, format: details.format, isLoading: isLoading, onReadChapter: onReadChapter)
         case .characters:
-            if characters.isEmpty {
-                SumiEmptyState(headline: "Cast & Staff", detail: "Loading cast & staff details for this title...")
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
-                    ForEach(characters) { char in
-                        Button {
-                            #if os(macOS)
-                            // AniList's character page carries the bio and
-                            // every other role/show this voice actor has —
-                            // there's no reason to rebuild that here.
-                            if let url = URL(string: "https://anilist.co/character/\(char.id)") {
-                                NSWorkspace.shared.open(url)
-                            }
-                            #endif
-                        } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Color.clear
-                                .aspectRatio(2/3, contentMode: .fit)
-                                .overlay {
-                                    CachedAsyncImage(url: char.imageURL, maxPixelSize: 320) { image in
-                                        image.resizable().aspectRatio(contentMode: .fill)
-                                    } placeholder: {
-                                        Rectangle().fill(SumiTheme.card)
-                                    }
-                                }
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .overlay(
-                                    ZStack(alignment: .topLeading) {
-                                        RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1)
-                                        Text(char.role.replacingOccurrences(of: "_", with: " ").capitalized)
-                                            .font(.system(size: 8.5, weight: .black))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Color.black.opacity(0.75))
-                                            .foregroundColor(.white.opacity(0.9))
-                                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                                            .padding(5)
-                                    }
-                                )
-
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(char.name)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(SumiTheme.foreground)
-                                    .lineLimit(1)
-                                if let va = char.voiceActorName, !va.isEmpty {
-                                    Text(va)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(SumiTheme.muted)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-                    }
-                }
-            }
+            CharactersTabSection(characters: characters)
         case .related:
-            if relations.isEmpty && details.prequel == nil && details.sequel == nil {
-                SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
-            } else {
-                VStack(alignment: .leading, spacing: 20) {
-                    let mainRels = relations.filter { ["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"].contains($0.relationType) }
-                    let otherRels = relations.filter { !["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"].contains($0.relationType) }
-
-                    if !mainRels.isEmpty || details.prequel != nil || details.sequel != nil {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("SEASONS & ADAPTATIONS")
-                                .sumiTabularMono(size: 11)
-                                .foregroundColor(SumiTheme.indigo)
-
-                            if !mainRels.isEmpty {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
-                                    ForEach(mainRels) { rel in
-                                        RelatedMediaCard(relation: rel) {
-                                            let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
-                                            onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
-                                        }
-                                    }
-                                }
-                            } else {
-                                seasonChain
-                            }
-                        }
-                    }
-
-                    if !otherRels.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("OTHER RELATIONS")
-                                .sumiTabularMono(size: 11)
-                                .foregroundColor(SumiTheme.muted)
-
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
-                                ForEach(otherRels) { rel in
-                                    RelatedMediaCard(relation: rel) {
-                                        let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
-                                        onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            RelatedTabSection(
+                relations: relations,
+                prequel: details.prequel,
+                sequel: details.sequel,
+                onSelectRelation: onSelectRelation,
+                onSelectMediaId: onSelectMediaId
+            )
         case .discussions:
-            if discussions.isEmpty {
-                SumiEmptyState(headline: "Discussions", detail: "No community discussion threads found for this title.")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(discussions) { thread in
-                        DiscussionRowView(thread: thread)
-                    }
-                }
-            }
+            DiscussionsTabSection(discussions: discussions)
         case .more:
-            if recommendations.isEmpty {
-                SumiEmptyState(headline: "No Additional Content", detail: "No community recommendations found.")
-            } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("RECOMMENDATIONS")
-                        .sumiTabularMono(size: 11)
-                        .foregroundColor(SumiTheme.indigo)
-
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 130, maximum: 165), spacing: 14)], spacing: 14) {
-                        ForEach(recommendations) { rec in
-                            RecommendationCardView(rec: rec) {
-                                let isManga = rec.format == "MANGA" || rec.format == "NOVEL" || rec.format == "ONE_SHOT"
-                                onSelectMediaId?(rec.id, rec.title, rec.coverURL, isManga)
-                            }
-                        }
-                    }
-                }
-            }
+            RecommendationsTabSection(recommendations: recommendations, onSelectMediaId: onSelectMediaId)
         }
     }
 
-    private struct ChapterRowView: View {
+    fileprivate struct ChapterRowView: View {
         let chapter: MediaDetailView.MangaChapterItem
         let onRead: () -> Void
 
@@ -1203,15 +1168,13 @@ public struct MediaDetailView: View {
                 )
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .buttonStyle(.sumiPressable)
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }
 
-    private struct RelatedMediaCard: View {
+    fileprivate struct RelatedMediaCard: View {
         let relation: MediaDetailView.RelationItem
         let onSelect: () -> Void
 
@@ -1269,15 +1232,13 @@ public struct MediaDetailView: View {
                 )
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .buttonStyle(.sumiPressable)
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }
 
-    private struct DiscussionRowView: View {
+    fileprivate struct DiscussionRowView: View {
         let thread: MediaDetailView.DiscussionItem
 
         @State private var isHovered = false
@@ -1299,7 +1260,7 @@ public struct MediaDetailView: View {
             } label: {
                 rowContent
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .contentShape(Rectangle())
         }
 
@@ -1345,14 +1306,12 @@ public struct MediaDetailView: View {
                 RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                     .stroke(isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border.opacity(0.3), lineWidth: 1)
             )
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }
 
-    private struct RecommendationCardView: View {
+    fileprivate struct RecommendationCardView: View {
         let rec: MediaDetailView.RecommendationItem
         let onSelect: () -> Void
 
@@ -1402,17 +1361,316 @@ public struct MediaDetailView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            #if os(macOS)
-            .onHover { isHovered = $0 }
-            #endif
+            .buttonStyle(.sumiPressable)
+            .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }
     }
 }
 
 /// One episode, as a compact row.
-private struct CompactEpisodeRow: View {
+/// The `.episodes` tab's list, pulled out of `MediaDetailView.tabContent` so
+/// `downloadStates` polling only re-evaluates this struct's own body, not
+/// the whole detail page.
+private struct EpisodeListSection: View {
+    let episodes: [MediaDetailView.EpisodeItem]
+    let resumeEpisode: Int?
+    let resumeSeconds: Int?
+    let selectedViewMode: MediaDetailView.EpisodeViewMode
+    let downloadStates: [Int: MediaDetailView.EpisodeDownloadState]
+    var isLoading: Bool = false
+    let onPlayEpisode: (MediaDetailView.EpisodeItem) -> Void
+    let onSetEpisodeWatched: (Int, Bool) -> Void
+    let onLoadReleaseCandidates: (Int) async -> [MediaDetailView.ReleaseCandidateItem]
+    let onPlayWithRelease: (MediaDetailView.EpisodeItem, String) -> Void
+    let onDownloadEpisode: (MediaDetailView.EpisodeItem) -> Void
+
+    @State private var serverPickerEpisode: MediaDetailView.EpisodeItem?
+    @State private var isLoadingServers = false
+    @State private var serverCandidates: [MediaDetailView.ReleaseCandidateItem] = []
+
+    // Cached resume target — computing `episodes.first(where:)` on every body
+    // call (once per EpisodeRow in the lazy list) adds O(n) work per render.
+    // Stored in @State and rebuilt only when the inputs actually change.
+    @State private var resumeTarget: MediaDetailView.EpisodeItem? = nil
+
+    private func computeResumeTarget() -> MediaDetailView.EpisodeItem? {
+        if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
+            return match
+        }
+        return episodes.first(where: { !$0.isWatched }) ?? episodes.first
+    }
+
+    var body: some View {
+        Group {
+            if episodes.isEmpty {
+                if isLoading {
+                    EpisodeListSkeleton(count: 6, isCompact: selectedViewMode == .compact)
+                } else {
+                    SumiEmptyState(headline: "No episodes found", detail: "Nothing was returned for this title.")
+                }
+            } else if selectedViewMode == .compact {
+                LazyVStack(spacing: 4) {
+                    ForEach(episodes) { episode in
+                        CompactEpisodeRow(
+                            episode: episode,
+                            isResumeTarget: episode.id == resumeTarget?.id,
+                            resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
+                            onPlay: { onPlayEpisode(episode) },
+                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
+                        )
+                        .equatable()
+                    }
+                }
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(episodes) { episode in
+                        EpisodeRow(
+                            episode: episode,
+                            isResumeTarget: episode.id == resumeTarget?.id,
+                            resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
+                            downloadState: downloadStates[episode.number] ?? .notStarted,
+                            onPlay: { onPlayEpisode(episode) },
+                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) },
+                            onOpenServerPicker: {
+                                serverPickerEpisode = episode
+                                serverCandidates = []
+                                isLoadingServers = true
+                                Task {
+                                    let found = await onLoadReleaseCandidates(episode.number)
+                                    isLoadingServers = false
+                                    serverCandidates = found
+                                }
+                            },
+                            onDownload: { onDownloadEpisode(episode) },
+                            isServerPickerOpen: serverPickerEpisode?.id == episode.id,
+                            isLoadingServers: isLoadingServers,
+                            serverCandidates: serverCandidates,
+                            onCloseServerPicker: { serverPickerEpisode = nil },
+                            onSelectServer: { name in
+                                serverPickerEpisode = nil
+                                onPlayWithRelease(episode, name)
+                            }
+                        )
+                        .equatable()
+                    }
+                }
+            }
+        }
+        .animation(.smooth, value: selectedViewMode)
+    }
+}
+
+/// The `.manga` tab. Split out of `tabContent` alongside the other tabs
+/// below so switching tabs, or any one tab's own state changing, only
+/// re-evaluates that tab's struct instead of the whole detail page body.
+private struct MangaTabSection: View {
+    let chapters: [MediaDetailView.MangaChapterItem]
+    let format: String?
+    var isLoading: Bool = false
+    let onReadChapter: (MediaDetailView.MangaChapterItem) -> Void
+
+    var body: some View {
+        if chapters.isEmpty {
+            if isLoading {
+                EpisodeListSkeleton(count: 6, isCompact: true)
+            } else if format == "NOVEL" {
+                SumiEmptyState(
+                    headline: "Light novel reading isn't available yet",
+                    detail: "There's no light-novel reader in the native app yet — this section is a placeholder, not a failed search."
+                )
+            } else {
+                SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
+            }
+        } else {
+            LazyVStack(spacing: 8) {
+                ForEach(chapters) { chapter in
+                    MediaDetailView.ChapterRowView(chapter: chapter) {
+                        onReadChapter(chapter)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CharactersTabSection: View {
+    let characters: [MediaDetailView.CharacterItem]
+
+    var body: some View {
+        if characters.isEmpty {
+            SumiEmptyState(headline: "Cast & Staff", detail: "Loading cast & staff details for this title...")
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
+                ForEach(characters) { char in
+                    Button {
+                        #if os(macOS)
+                        // AniList's character page carries the bio and
+                        // every other role/show this voice actor has —
+                        // there's no reason to rebuild that here.
+                        if let url = URL(string: "https://anilist.co/character/\(char.id)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                        #endif
+                    } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Color.clear
+                            .aspectRatio(2/3, contentMode: .fit)
+                            .overlay {
+                                CachedAsyncImage(url: char.imageURL, maxPixelSize: 320) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Rectangle().fill(SumiTheme.card)
+                                }
+                            }
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(
+                                ZStack(alignment: .topLeading) {
+                                    RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1)
+                                    Text(char.role.replacingOccurrences(of: "_", with: " ").capitalized)
+                                        .font(.system(size: 8.5, weight: .black))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.black.opacity(0.75))
+                                        .foregroundColor(.white.opacity(0.9))
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        .padding(5)
+                                }
+                            )
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(char.name)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            if let va = char.voiceActorName, !va.isEmpty {
+                                Text(va)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(SumiTheme.muted)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .contentShape(Rectangle())
+                }
+            }
+        }
+    }
+}
+
+private struct RelatedTabSection: View {
+    let relations: [MediaDetailView.RelationItem]
+    let prequel: HeroBanner.Details.Relation?
+    let sequel: HeroBanner.Details.Relation?
+    let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
+    let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
+
+    private static let mainTypes: Set<String> = ["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"]
+
+    var body: some View {
+        if relations.isEmpty && prequel == nil && sequel == nil {
+            SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                let mainRels = relations.filter { Self.mainTypes.contains($0.relationType) }
+                let otherRels = relations.filter { !Self.mainTypes.contains($0.relationType) }
+
+                if !mainRels.isEmpty || prequel != nil || sequel != nil {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("SEASONS & ADAPTATIONS")
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.indigo)
+
+                        if !mainRels.isEmpty {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
+                                ForEach(mainRels) { rel in
+                                    MediaDetailView.RelatedMediaCard(relation: rel) {
+                                        let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
+                                        onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
+                                    }
+                                }
+                            }
+                        } else if prequel != nil || sequel != nil {
+                            HStack(spacing: 12) {
+                                if let prequel {
+                                    MediaDetailView.RelationCardView(relation: prequel, label: "PREVIOUS SEASON", leading: true, onSelect: onSelectRelation)
+                                }
+                                if let sequel {
+                                    MediaDetailView.RelationCardView(relation: sequel, label: "NEXT SEASON", leading: false, onSelect: onSelectRelation)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+
+                if !otherRels.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("OTHER RELATIONS")
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 12)], spacing: 12) {
+                            ForEach(otherRels) { rel in
+                                MediaDetailView.RelatedMediaCard(relation: rel) {
+                                    let isManga = rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
+                                    onSelectMediaId?(rel.id, rel.title, rel.coverURL, isManga)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct DiscussionsTabSection: View {
+    let discussions: [MediaDetailView.DiscussionItem]
+
+    var body: some View {
+        if discussions.isEmpty {
+            SumiEmptyState(headline: "Discussions", detail: "No community discussion threads found for this title.")
+        } else {
+            VStack(spacing: 8) {
+                ForEach(discussions) { thread in
+                    MediaDetailView.DiscussionRowView(thread: thread)
+                }
+            }
+        }
+    }
+}
+
+private struct RecommendationsTabSection: View {
+    let recommendations: [MediaDetailView.RecommendationItem]
+    let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
+
+    var body: some View {
+        if recommendations.isEmpty {
+            SumiEmptyState(headline: "No Additional Content", detail: "No community recommendations found.")
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("RECOMMENDATIONS")
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.indigo)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130, maximum: 165), spacing: 14)], spacing: 14) {
+                    ForEach(recommendations) { rec in
+                        MediaDetailView.RecommendationCardView(rec: rec) {
+                            let isManga = rec.format == "MANGA" || rec.format == "NOVEL" || rec.format == "ONE_SHOT"
+                            onSelectMediaId?(rec.id, rec.title, rec.coverURL, isManga)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CompactEpisodeRow: View, Equatable {
     let episode: MediaDetailView.EpisodeItem
     let isResumeTarget: Bool
     let resumeSeconds: Int?
@@ -1421,6 +1679,13 @@ private struct CompactEpisodeRow: View {
 
     @State private var isHovered = false
 
+    // See EpisodeRow.== — closures excluded deliberately, not an oversight.
+    nonisolated static func == (lhs: CompactEpisodeRow, rhs: CompactEpisodeRow) -> Bool {
+        lhs.episode == rhs.episode
+            && lhs.isResumeTarget == rhs.isResumeTarget
+            && lhs.resumeSeconds == rhs.resumeSeconds
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
@@ -1428,7 +1693,7 @@ private struct CompactEpisodeRow: View {
                     // Episode Number Badge
                     Text("\(episode.number)")
                         .sumiTabularMono(size: 11, weight: .bold)
-                        .foregroundColor(isResumeTarget ? .black : (episode.isWatched ? SumiTheme.muted.opacity(0.6) : SumiTheme.muted))
+                        .foregroundColor(isResumeTarget ? SumiTheme.background : (episode.isWatched ? SumiTheme.muted.opacity(0.6) : SumiTheme.muted))
                         .frame(width: 28, height: 28)
                         .background(isResumeTarget ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.07))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -1460,7 +1725,7 @@ private struct CompactEpisodeRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
 
             Button(action: { onToggleWatched(!episode.isWatched) }) {
                 Image(systemName: episode.isWatched ? "checkmark.circle.fill" : "circle")
@@ -1469,7 +1734,7 @@ private struct CompactEpisodeRow: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help(episode.isWatched ? "Mark unwatched" : "Mark watched")
         }
         .padding(.horizontal, 12)
@@ -1480,16 +1745,14 @@ private struct CompactEpisodeRow: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                 .stroke(isResumeTarget ? SumiTheme.indigo.opacity(0.4) : (isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border.opacity(0.3)), lineWidth: 1)
         )
-        #if os(macOS)
-        .onHover { isHovered = $0 }
-        #endif
+        .stableHover { isHovered = $0 }
         .animation(.snappy, value: isHovered)
     }
 }
 
 /// One episode, as a card: thumbnail with its state drawn on it, then the
 /// meta line, title and description.
-private struct EpisodeRow: View {
+private struct EpisodeRow: View, Equatable {
     let episode: MediaDetailView.EpisodeItem
     let isResumeTarget: Bool
     let resumeSeconds: Int?
@@ -1500,14 +1763,41 @@ private struct EpisodeRow: View {
     /// hit area is unreliable in SwiftUI; this one lives outside `onPlay`'s
     /// button entirely, alongside it in the row's `HStack`.
     let onToggleWatched: (Bool) -> Void
-    let onLoadReleaseCandidates: () async -> [MediaDetailView.ReleaseCandidateItem]
-    let onPlayWithRelease: (String) -> Void
+    let onOpenServerPicker: () -> Void
     let onDownload: () -> Void
+    // The popover used to be attached to the whole episode list's container
+    // view instead of this row's own button, so SwiftUI anchored it to that
+    // container's position, not to wherever the viewer actually clicked —
+    // it could open anywhere on screen depending on scroll offset. Owning
+    // presentation state per-row (driven by the parent's single
+    // `serverPickerEpisode`, so only one row is ever open) anchors it to the
+    // real button.
+    let isServerPickerOpen: Bool
+    let isLoadingServers: Bool
+    let serverCandidates: [MediaDetailView.ReleaseCandidateItem]
+    let onCloseServerPicker: () -> Void
+    let onSelectServer: (String) -> Void
 
     @State private var isHovered = false
-    @State private var showServerPicker = false
-    @State private var isLoadingServers = false
-    @State private var serverCandidates: [MediaDetailView.ReleaseCandidateItem] = []
+
+    // The trailing closures are recreated by the caller on every parent body
+    // evaluation (they capture `episode`), so they're excluded here rather
+    // than making this un-comparable — they always wrap the same instance
+    // methods, so two rows with identical data behave identically regardless
+    // of closure identity. `.equatable()` at the call site uses this to skip
+    // re-diffing rows AttributeGraph would otherwise walk again on every
+    // parent update even though nothing about them changed — the dominant
+    // main-thread cost `sample` found during scroll (AttributeGraph/SwiftUICore
+    // diffing, not any single blocking call).
+    nonisolated static func == (lhs: EpisodeRow, rhs: EpisodeRow) -> Bool {
+        lhs.episode == rhs.episode
+            && lhs.isResumeTarget == rhs.isResumeTarget
+            && lhs.resumeSeconds == rhs.resumeSeconds
+            && lhs.downloadState == rhs.downloadState
+            && lhs.isServerPickerOpen == rhs.isServerPickerOpen
+            && lhs.isLoadingServers == rhs.isLoadingServers
+            && lhs.serverCandidates == rhs.serverCandidates
+    }
 
     /// AniZip's `airdate` is a plain `YYYY-MM-DD`. Parsed as UTC to match how
     /// it was written — treating it as local time would roll the date for
@@ -1525,9 +1815,28 @@ private struct EpisodeRow: View {
         return f
     }()
 
+    private static var airDateCache: [String: String] = [:]
+    private static let airDateLock = NSLock()
+
     static func formatAirDate(_ raw: String) -> String {
-        guard let date = airDateParser.date(from: raw) else { return raw }
-        return airDateDisplay.string(from: date)
+        airDateLock.lock()
+        if let cached = airDateCache[raw] {
+            airDateLock.unlock()
+            return cached
+        }
+        airDateLock.unlock()
+
+        let formatted: String
+        if let date = airDateParser.date(from: raw) {
+            formatted = airDateDisplay.string(from: date)
+        } else {
+            formatted = raw
+        }
+
+        airDateLock.lock()
+        airDateCache[raw] = formatted
+        airDateLock.unlock()
+        return formatted
     }
 
     var body: some View {
@@ -1552,35 +1861,26 @@ private struct EpisodeRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
 
-            Button {
-                showServerPicker = true
-                guard serverCandidates.isEmpty else { return }
-                isLoadingServers = true
-                Task {
-                    let found = await onLoadReleaseCandidates()
-                    isLoadingServers = false
-                    serverCandidates = found
-                }
-            } label: {
+            Button(action: onOpenServerPicker) {
                 Image(systemName: "server.rack")
                     .font(.system(size: 14))
                     .foregroundColor(SumiTheme.muted.opacity(0.6))
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help("Stream Servers")
             .padding(.top, 3)
-            .popover(isPresented: $showServerPicker, arrowEdge: .top) {
+            .popover(isPresented: Binding(
+                get: { isServerPickerOpen },
+                set: { if !$0 { onCloseServerPicker() } }
+            ), arrowEdge: .top) {
                 ServerPickerView(
                     isLoading: isLoadingServers,
                     candidates: serverCandidates,
-                    onSelect: { name in
-                        showServerPicker = false
-                        onPlayWithRelease(name)
-                    }
+                    onSelect: onSelectServer
                 )
             }
 
@@ -1594,20 +1894,28 @@ private struct EpisodeRow: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help(episode.isWatched ? "Mark unwatched" : "Mark watched")
             .padding(.top, 2)
         }
         .padding(12)
-        .background(isHovered ? SumiTheme.card : Color.clear)
+        .background(
+            isResumeTarget
+                ? SumiTheme.indigo.opacity(0.10)
+                : (isHovered ? SumiTheme.card : SumiTheme.foreground.opacity(0.02))
+        )
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
         .overlay(
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(isHovered ? SumiTheme.border.opacity(0.9) : (isResumeTarget ? SumiTheme.foreground.opacity(0.25) : SumiTheme.border), lineWidth: 1)
+                .stroke(
+                    isResumeTarget
+                        ? SumiTheme.indigo.opacity(0.40)
+                        : (isHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border),
+                    lineWidth: 1
+                )
         )
-        #if os(macOS)
-        .onHover { isHovered = $0 }
-        #endif
+        .opacity(episode.isWatched ? (isHovered ? 0.90 : 0.55) : 1.0)
+        .stableHover { isHovered = $0 }
         .animation(.snappy, value: isHovered)
     }
 
@@ -1622,7 +1930,7 @@ private struct EpisodeRow: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help("Download Episode")
         case .downloading(let percent):
             ZStack {
@@ -1648,7 +1956,7 @@ private struct EpisodeRow: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.sumiPressable)
             .help("Download failed: \(message) — click to retry")
         }
     }
@@ -1694,7 +2002,7 @@ private struct EpisodeRow: View {
             if episode.isWatched {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .black))
-                    .foregroundColor(.black)
+                    .foregroundColor(SumiTheme.background)
                     .frame(width: 16, height: 16)
                     .background(SumiTheme.indigo)
                     .clipShape(Circle())
@@ -1731,14 +2039,14 @@ private struct EpisodeRow: View {
                 .frame(height: 2.5)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         } else if let percent = episode.progressPercent, percent > 0 {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(SumiTheme.foreground.opacity(0.2))
-                    Rectangle()
-                        .fill(SumiTheme.indigo)
-                        .frame(width: geo.size.width * min(max(percent / 100, 0.1), 1))
-                }
+            let pct = min(max(CGFloat(percent / 100), 0.1), 1)
+            ZStack(alignment: .leading) {
+                Rectangle().fill(SumiTheme.foreground.opacity(0.2))
+                Rectangle()
+                    .fill(SumiTheme.indigo)
+                    .scaleEffect(x: pct, y: 1, anchor: .leading)
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 2.5)
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
@@ -1785,20 +2093,41 @@ private struct ServerPickerView: View {
                                 onSelect(candidate.name)
                             } label: {
                                 HStack(alignment: .top, spacing: 8) {
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        // Real release names routinely run
+                                        // 80-100+ characters (group tag,
+                                        // full title, resolution, codec,
+                                        // audio track) — a 2-line cap at
+                                        // 11pt in a 340pt-wide popover
+                                        // truncated most of them into
+                                        // unreadable mush. Uncapped at a
+                                        // wider column reads as an actual
+                                        // release name again.
                                         Text(candidate.name)
-                                            .font(.system(size: 11, weight: .medium))
+                                            .font(.system(size: 12, weight: .medium))
                                             .foregroundColor(SumiTheme.foreground)
+                                            // Uncapped, this let one very
+                                            // long release name (fansub
+                                            // group + full title + codec
+                                            // tags) wrap 3-4 lines and eat
+                                            // most of the popover's height
+                                            // by itself, so only one row
+                                            // fit on screen at a time. The
+                                            // wider 460pt column already
+                                            // fixed the "unreadably tiny"
+                                            // complaint; 2 lines is enough
+                                            // to actually read a name at
+                                            // that width.
                                             .lineLimit(2)
                                             .fixedSize(horizontal: false, vertical: true)
                                         HStack(spacing: 6) {
                                             if candidate.isDub {
                                                 Text("DUB")
-                                                    .sumiTabularMono(size: 9, weight: .bold)
+                                                    .sumiTabularMono(size: 10, weight: .bold)
                                                     .foregroundColor(SumiTheme.indigo)
                                             }
                                             Text("\(candidate.seeders) seeders")
-                                                .sumiTabularMono(size: 9.5)
+                                                .sumiTabularMono(size: 10.5)
                                                 .foregroundColor(SumiTheme.muted)
                                         }
                                     }
@@ -1811,7 +2140,7 @@ private struct ServerPickerView: View {
                                 .padding(.vertical, 9)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.sumiPressable)
 
                             if candidate.id != candidates.last?.id {
                                 Divider().padding(.leading, 14)
@@ -1819,10 +2148,10 @@ private struct ServerPickerView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 260)
+                .frame(maxHeight: 380)
             }
         }
-        .frame(width: 340)
+        .frame(width: 460)
         .background(SumiTheme.card)
     }
 }

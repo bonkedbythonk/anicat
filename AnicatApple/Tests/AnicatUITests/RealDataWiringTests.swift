@@ -87,6 +87,7 @@ struct RealDataWiringTests {
         model.playerController.currentTime = 600.0
         model.playerController.duration = 1420.0
         model.stopPlayback()
+        model.engineIOQueue.sync {}
 
         let finalProgress = try engine.getProgress(catalog: .anilist, catalogId: 154587, episodeNumber: 3)
         #expect(finalProgress?.stopTime == 600)
@@ -400,4 +401,41 @@ struct RealDataWiringTests {
             #expect(!firstThread.title.isEmpty)
         }
     }
+
+    @Test("AppModel.openDetail deduplicates concurrent loads for the same title and protects history")
+    func testOpenDetailDeduplication() async throws {
+        let (engine, tempDir) = try makeEngine()
+        defer { try? FileManager.default.removeItem(atPath: tempDir) }
+
+        let model = AppModel()
+        model.engine = engine
+
+        // Load Frieren initially
+        await model.openDetail(id: 154587, title: "Frieren", isManga: false)
+        #expect(model.selectedMediaDetails?.id == 154587)
+        #expect(model.isDetailLoading == false)
+
+        // Rapid duplicate call with same ID while loaded should be an immediate no-op
+        await model.openDetail(id: 154587, title: "Frieren", isManga: false)
+        #expect(model.selectedMediaDetails?.id == 154587)
+
+        // Navigating back should go home directly because duplicate was not appended to history
+        model.closeDetail()
+        #expect(model.selectedMediaDetails == nil)
+    }
+
+    @Test("AppModel.isMangaFormat correctly classifies media formats")
+    func testMangaFormatClassification() {
+        #expect(AppModel.isMangaFormat("MANGA") == true)
+        #expect(AppModel.isMangaFormat("NOVEL") == true)
+        #expect(AppModel.isMangaFormat("ONE_SHOT") == true)
+        #expect(AppModel.isMangaFormat("TV") == false)
+        #expect(AppModel.isMangaFormat("TV_SHORT") == false)
+        #expect(AppModel.isMangaFormat("MOVIE") == false)
+        #expect(AppModel.isMangaFormat("OVA") == false)
+        #expect(AppModel.isMangaFormat("ONA") == false)
+        #expect(AppModel.isMangaFormat("SPECIAL") == false)
+        #expect(AppModel.isMangaFormat(nil) == false)
+    }
 }
+

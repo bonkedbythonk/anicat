@@ -32,8 +32,17 @@ public struct ReadingView: View {
     let reading: [MediaCard.Item]
     let trending: [MediaCard.Item]
     let isSignedIn: Bool
-    let onSelect: (MediaCard.Item) -> Void
-    let onRead: (MediaCard.Item) -> Void
+    let namespace: Namespace.ID?
+    // Which card (if any) is the poster-morph source, as "<shelfKey>:<id>" —
+    // the same title can be in the resume queue, the reading shelf, and the
+    // trending shelf all at once, so a bare id can't say which one a tap
+    // came from — see `AppModel.openingDetailSourceKey`.
+    let openingSourceKey: String?
+    // 2nd arg is the source key ("reading-queue:<id>", "reading-shelf:<id>",
+    // or "reading-trending:<id>") — this view knows which shelf a tap came
+    // from, the caller doesn't.
+    let onSelect: (MediaCard.Item, String) -> Void
+    let onRead: (MediaCard.Item, String) -> Void
     let onBrowse: () -> Void
 
     public init(
@@ -41,14 +50,18 @@ public struct ReadingView: View {
         reading: [MediaCard.Item],
         trending: [MediaCard.Item],
         isSignedIn: Bool,
-        onSelect: @escaping (MediaCard.Item) -> Void,
-        onRead: @escaping (MediaCard.Item) -> Void,
+        namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
+        onSelect: @escaping (MediaCard.Item, String) -> Void,
+        onRead: @escaping (MediaCard.Item, String) -> Void,
         onBrowse: @escaping () -> Void
     ) {
         self.config = config
         self.reading = reading
         self.trending = trending
         self.isSignedIn = isSignedIn
+        self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
         self.onSelect = onSelect
         self.onRead = onRead
         self.onBrowse = onBrowse
@@ -94,17 +107,24 @@ public struct ReadingView: View {
             }
 
             if !queue.isEmpty {
-                UpNextQueueView(items: queue, onSelect: { entry in
-                    if let item = reading.first(where: { $0.id == entry.id }) { onSelect(item) }
-                }, onPlay: { entry in
-                    if let item = reading.first(where: { $0.id == entry.id }) { onRead(item) }
-                })
+                UpNextQueueView(
+                    items: queue,
+                    namespace: namespace,
+                    openingSourceKey: openingSourceKey,
+                    shelfKey: "reading-queue",
+                    onSelect: { entry in
+                        if let item = reading.first(where: { $0.id == entry.id }) { onSelect(item, "reading-queue:\(entry.id)") }
+                    },
+                    onPlay: { entry in
+                        if let item = reading.first(where: { $0.id == entry.id }) { onRead(item, "reading-queue:\(entry.id)") }
+                    }
+                )
             }
 
             if !reading.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     SumiSectionHeader(config.readingShelf, trailing: "\(reading.count) titles")
-                    shelf(reading)
+                    shelf(reading, shelfKey: "reading-shelf")
                 }
                 .padding(.top, 20)
             }
@@ -112,18 +132,21 @@ public struct ReadingView: View {
             if !trending.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     SumiSectionHeader(config.trendingShelf)
-                    shelf(trending)
+                    shelf(trending, shelfKey: "reading-trending")
                 }
                 .padding(.top, 20)
             }
         }
     }
 
-    private func shelf(_ items: [MediaCard.Item]) -> some View {
+    private func shelf(_ items: [MediaCard.Item], shelfKey: String) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 16) {
                 ForEach(items) { item in
-                    MediaCard(item: item) { onSelect(item) }
+                    MediaCard(
+                        item: item,
+                        namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
+                    ) { onSelect(item, "\(shelfKey):\(item.id)") }
                         .frame(width: 180)
                 }
             }

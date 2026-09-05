@@ -6,8 +6,13 @@ import AppKit
 
 public struct RootView: View {
     @Bindable public var model: AppModel
-    @State private var showHomeCustomize = false
-    @State private var showPicker = false
+    @State private var showSyosetuReader = false
+    // Shared between every card grid and the detail page so tapping a card
+    // grows its poster into the detail page's poster rather than crossfading
+    // two separate images. Which card (if any) actually gets tagged with
+    // this namespace is gated per-shelf by `model.openingDetailSourceKey`,
+    // not by catalog id alone — see that property's comment for why.
+    @Namespace private var cardNamespace
     #if os(macOS)
     // Only exit fullscreen on close if we're the one who entered it — if the
     // window was already fullscreen (user did it manually before pressing
@@ -24,14 +29,11 @@ public struct RootView: View {
             SumiTheme.background
                 .ignoresSafeArea()
 
-            // `.ignoresSafeArea()` is what puts the shell at the true window
-            // top. `hiddenTitleBar` makes the title bar transparent but does
-            // not remove it, so SwiftUI still insets its content below it —
-            // measured against the running Tauri app, every row in the sidebar
-            // sat about 32pt low, and the 38pt traffic-light spacer below was
-            // clearing a gap that had already been cleared.
+            // Ink & Index shell: fixed 200pt sidebar rail + 1px hairline border +
+            // full-bleed main column. We deliberately avoid NavigationSplitView,
+            // which injects AppKit NSToolbar items, creates floating rounded
+            // inset sidebars, and forces top titlebar gaps.
             HStack(spacing: 0) {
-                // Fixed Left Sidebar (exact Tauri layout)
                 SidebarView(
                     currentView: Binding(
                         get: { model.currentNavSection },
@@ -48,13 +50,11 @@ public struct RootView: View {
                     onOpenSearchPalette: { model.paletteOpen = true }
                 )
                 .frame(width: 200)
-                .layoutPriority(1)
 
-                // Hairline Divider
+                // 1px hairline border separating sidebar and main content
                 Rectangle()
                     .fill(SumiTheme.border)
                     .frame(width: 1)
-                    .layoutPriority(1)
                     .ignoresSafeArea()
 
                 // Dynamic Main Content Area
@@ -87,112 +87,119 @@ public struct RootView: View {
                     }
 
                     // Active Section Switcher
-                    Group {
-                    // The detail page replaces the section, inside the
-                    // content column. It is not a window-wide overlay: the
-                    // sidebar stays visible and stays navigable, which is what
-                    // the web build does by rendering it inside <main>.
-                    if let details = model.selectedMediaDetails {
-                        MediaDetailView(
-                            details: details,
-                            episodes: model.selectedEpisodes,
-                            mangaChapters: model.selectedMangaChapters,
-                            characters: model.selectedCharacters,
-                            relations: model.selectedRelations,
-                            recommendations: model.selectedRecommendations,
-                            discussions: model.selectedDiscussions,
-                            onPlayEpisode: { ep in
-                                Task {
-                                    do {
-                                        _ = try await model.resolveAndPlay(
-                                            catalogId: details.id,
-                                            episode: Int64(ep.number),
-                                            title: details.title
-                                        )
-                                    } catch {
-                                        model.errorMessage = "Failed to play episode \(ep.number): \(error.localizedDescription)"
-                                    }
-                                }
-                            },
-                            onReadChapter: { chapter in
-                                Task {
-                                    await model.openReader(
-                                        title: details.title,
-                                        chapter: chapter,
-                                        allChapters: model.selectedMangaChapters,
-                                        anilistId: details.id
-                                    )
-                                }
-                            },
-                            onSelectRelation: { rel in
-                                openDetailFor(
-                                    id: rel.id,
-                                    title: rel.title,
-                                    coverURL: rel.coverURL,
-                                    isManga: rel.format == "MANGA" || rel.format == "NOVEL" || rel.format == "ONE_SHOT"
-                                )
-                            },
-                            onSelectMediaId: { id, title, coverURL, isManga in
-                                openDetailFor(
-                                    id: id,
-                                    title: title,
-                                    coverURL: coverURL,
-                                    isManga: isManga
-                                )
-                            },
-                            onExportAppleBooks: {},
-                            onClose: {
-                                withAnimation(.smooth) {
-                                    model.closeDetail()
-                                }
-                            },
-                            onSetListStatus: { status in
-                                Task { await model.updateListEntry(status: status) }
-                            },
-                            onToggleFavourite: {
-                                Task { await model.toggleFavourite() }
-                            },
-                            onRemoveFromList: {
-                                Task { await model.removeFromList() }
-                            },
-                            onSetEpisodeWatched: { episode, watched in
-                                Task { await model.setEpisodeWatched(episode, watched: watched) }
-                            },
-                            onLoadReleaseCandidates: { episode in
-                                await model.loadReleaseCandidates(episode: episode)
-                            },
-                            onPlayWithRelease: { ep, releaseName in
-                                Task {
-                                    do {
-                                        _ = try await model.resolveAndPlay(
-                                            catalogId: details.id,
-                                            episode: Int64(ep.number),
-                                            title: details.title,
-                                            chosenName: releaseName
-                                        )
-                                    } catch {
-                                        model.errorMessage = "Failed to play episode \(ep.number): \(error.localizedDescription)"
-                                    }
-                                }
-                            },
-                            onDownloadEpisode: { ep in
-                                Task { await model.startDownload(episode: ep.number) }
-                            },
-                            downloadStates: model.downloadStates
-                        )
-                        .id(details.id)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.97).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                    } else {
+                    //
+                    // sectionContent stays mounted underneath at all times and
+                    // MediaDetailView overlays on top of it rather than the two
+                    // being mutually-exclusive branches of one `if`. With an
+                    // `if`/`else` here, opening or closing the detail page
+                    // cross-fades two full-size opaque views (both carry a
+                    // near-black SumiTheme.background) simultaneously — at the
+                    // transition's midpoint both are ~50% opaque and stacked,
+                    // which reads as a black bar fading in/out over the page.
+                    // Keeping sectionContent always rendered means only the
+                    // detail page's own opacity animates, so closing it reveals
+                    // the already-fully-opaque section beneath instantly.
+                    ZStack {
                         sectionContent
                             .id(model.currentNavSection)
                             .transition(.opacity)
+                            .zIndex(1)
+                            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(model.selectedMediaDetails == nil)
+
+                        // The detail page replaces the section, inside the
+                        // content column. It is not a window-wide overlay: the
+                        // sidebar stays visible and stays navigable, which is what
+                        // the web build does by rendering it inside <main>.
+                        if let details = model.selectedMediaDetails {
+                            MediaDetailView(
+                                details: details,
+                                episodes: model.selectedEpisodes,
+                                mangaChapters: model.selectedMangaChapters,
+                                characters: model.selectedCharacters,
+                                relations: model.selectedRelations,
+                                recommendations: model.selectedRecommendations,
+                                discussions: model.selectedDiscussions,
+                                isLoading: model.isDetailLoading,
+                                onPlayEpisode: { ep in
+                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title)
+                                },
+                                onReadChapter: { chapter in
+                                    Task {
+                                        await model.openReader(
+                                            title: details.title,
+                                            chapter: chapter,
+                                            allChapters: model.selectedMangaChapters,
+                                            anilistId: details.id
+                                        )
+                                    }
+                                },
+                                onSelectRelation: { rel in
+                                    let isManga: Bool
+                                    if let fmt = rel.format {
+                                        isManga = AppModel.isMangaFormat(fmt)
+                                    } else {
+                                        isManga = AppModel.isMangaFormat(details.format)
+                                    }
+                                    openDetailFor(
+                                        id: rel.id,
+                                        title: rel.title,
+                                        coverURL: rel.coverURL,
+                                        isManga: isManga
+                                    )
+                                },
+                                onSelectMediaId: { id, title, coverURL, isManga in
+                                    openDetailFor(
+                                        id: id,
+                                        title: title,
+                                        coverURL: coverURL,
+                                        isManga: isManga
+                                    )
+                                },
+                                onExportAppleBooks: {},
+                                // Not wrapped in `withAnimation` here:
+                                // `closeDetail()` animates its own mutation
+                                // internally (see AppModel). Wrapping it again at
+                                // every call site raced a second transaction
+                                // against the first with a different curve —
+                                // that's what read as "jitters, stops, pops
+                                // away," worse the faster it was retriggered.
+                                onClose: {
+                                    model.closeDetail()
+                                },
+                                onSetListStatus: { status in
+                                    Task { await model.updateListEntry(status: status) }
+                                },
+                                onToggleFavourite: {
+                                    Task { await model.toggleFavourite() }
+                                },
+                                onRemoveFromList: {
+                                    Task { await model.removeFromList() }
+                                },
+                                onSetEpisodeWatched: { episode, watched in
+                                    Task { await model.setEpisodeWatched(episode, watched: watched) }
+                                },
+                                onLoadReleaseCandidates: { episode in
+                                    await model.loadReleaseCandidates(episode: episode)
+                                },
+                                onPlayWithRelease: { ep, releaseName in
+                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title, chosenName: releaseName)
+                                },
+                                onDownloadEpisode: { ep in
+                                    Task { await model.startDownload(episode: ep.number) }
+                                },
+                                downloadStates: model.downloadStates,
+                                namespace: model.openingDetailSourceKey != nil ? cardNamespace : nil,
+                                restoredTab: model.restoredDetailTab,
+                                onTabChanged: { model.currentDetailTab = $0 }
+                            )
+                            .id(details.id)
+                            .transition(.opacity)
+                            .zIndex(2)
+                        }
                     }
-                    }
-                    .animation(.smooth, value: model.currentNavSection)
-                    .animation(.smooth, value: model.selectedMediaDetails?.id)
+                    .animation(.smooth(duration: 0.2), value: model.currentNavSection)
+                    .animation(.easeInOut(duration: 0.32), value: model.selectedMediaDetails != nil)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -201,7 +208,25 @@ public struct RootView: View {
 
             // Command palette. Above sections, player, and reader so navigation is accessible anywhere.
             if model.paletteOpen {
-                CommandPalette(commands: paletteCommands) {
+                CommandPalette(commands: paletteCommands, onSearchTitles: { query in
+                    let items = await model.quickSearchTitles(query)
+                    return items.map { item in
+                        // See `paletteCommands` below for why this hops back
+                        // through `Task { @MainActor in }` rather than
+                        // calling `openDetailFor` directly: `Command.action`
+                        // is `@Sendable`, so the closure has to cross that
+                        // boundary with only Sendable captures.
+                        let id = item.id
+                        let title = item.title
+                        let coverURL = item.coverImageURL
+                        let isManga = item.isManga
+                        return CommandPalette.Command(id: "title-\(item.id)", label: item.title, group: "Shows") {
+                            Task { @MainActor in
+                                self.openDetailFor(id: id, title: title, coverURL: coverURL, isManga: isManga)
+                            }
+                        }
+                    }
+                }) {
                     withAnimation(.snappy) {
                         model.paletteOpen = false
                     }
@@ -222,14 +247,36 @@ public struct RootView: View {
             }
 
 
-            // In-App Video Player Overlay
+            // In-App Video Player Overlay — always mounted once a stream is
+            // active, minimized or not. See `PlayerView.isMinimized`'s doc
+            // comment: wrapping this in `if !model.isPlayerMinimized` (the
+            // previous version) unmounted `MpvMetalSurface` entirely on
+            // minimize, and its `dismantleNSView` path stops playback — so
+            // "Minimize" was indistinguishable from closing the player.
             if let streamURL = model.activeStreamURL {
                 PlayerView(
                     controller: model.playerController,
                     streamURL: streamURL,
                     onClose: {
+                        #if os(macOS)
+                        NSCursor.setHiddenUntilMouseMoves(false)
+                        #endif
                         withAnimation(.smooth) {
                             model.stopPlayback()
+                        }
+                    },
+                    onMinimize: {
+                        #if os(macOS)
+                        NSCursor.setHiddenUntilMouseMoves(false)
+                        #endif
+                        withAnimation(.smooth) {
+                            model.isPlayerMinimized = true
+                        }
+                    },
+                    isMinimized: model.isPlayerMinimized,
+                    onRestore: {
+                        withAnimation(.smooth) {
+                            model.isPlayerMinimized = false
                         }
                     }
                 )
@@ -246,6 +293,7 @@ public struct RootView: View {
                     onPageChanged: { page in
                         ContinuityManager.shared.advertiseReading(
                             mangaId: session.chapterId,
+                            anilistId: session.anilistId,
                             title: session.title,
                             chapter: session.chapterTitle,
                             pageIndex: page
@@ -282,9 +330,26 @@ public struct RootView: View {
 
                         Spacer()
 
+                        // Only for failures retrying might actually fix (a
+                        // resolve timeout, a dead candidate) — see
+                        // `errorRetryAction`'s doc comment.
+                        if let retry = model.errorRetryAction {
+                            Button(action: retry) {
+                                Text("Retry")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(SumiTheme.indigo)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(SumiTheme.indigo.opacity(0.12))
+                                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+
                         Button(action: {
                             withAnimation(.snappy) {
                                 model.errorMessage = nil
+                                model.errorRetryAction = nil
                             }
                         }) {
                             Image(systemName: "xmark")
@@ -293,7 +358,7 @@ public struct RootView: View {
                                 .padding(4)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -313,8 +378,15 @@ public struct RootView: View {
                 .zIndex(60)
             }
 
-            // Loading Scrim
-            if model.isLoading {
+            // Loading Scrim — suppressed while the player is already up: an
+            // episode switch (`resolveAndPlay` from Next/Prev) also drives
+            // `isLoading`, and this scrim sits at zIndex 70, above the
+            // fullscreen `PlayerView` at 30. Without the guard, pressing Next
+            // painted an opaque black scrim over the still-playing video for
+            // the whole resolve — indistinguishable from a hang — when
+            // `PlayerView`'s own `isBuffering` spinner already covers exactly
+            // this case in place, without blacking out the frame underneath.
+            if model.isLoading && model.activeStreamURL == nil && model.resolveStartedAt == nil {
                 ZStack {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
@@ -325,16 +397,68 @@ public struct RootView: View {
                 .transition(.opacity)
                 .zIndex(70)
             }
+
+            // Resolving a stream specifically (not some other loading state)
+            // gets real feedback instead of a bare spinner: `resolveStream`
+            // is a single opaque FFI call with no intermediate progress, and
+            // used to have no ceiling at all — a stalled search or a dead
+            // swarm hung here for as long as the viewer was willing to wait,
+            // with no indication anything was even happening or a way out
+            // short of force-quitting. A small corner toast, not a centered
+            // modal with a full-screen scrim: a modal in the middle of the
+            // screen for something this routine (every single play press
+            // shows it, if only for a moment) read as far more alarming than
+            // it is, and blocked seeing/using anything else while it waited.
+            if let startedAt = model.resolveStartedAt {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        ResolvingStreamCard(
+                            startedAt: startedAt,
+                            onCancel: { model.cancelResolve() }
+                        )
+                        .padding(.trailing, 24)
+                        .padding(.bottom, 24)
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(70)
+            }
         }
         .animation(.smooth, value: model.activeStreamURL != nil)
         .animation(.smooth, value: model.activeReadingSession != nil)
-        .animation(.smooth, value: model.selectedMediaDetails != nil)
+        // No `selectedMediaDetails != nil` entry here: the detail page's own
+        // `.animation(..., value: model.selectedMediaDetails != nil)` is scoped
+        // directly to the section/detail ZStack above to prevent conflicting curves.
         .animation(.snappy, value: model.errorMessage != nil)
         .animation(.smooth, value: model.isAniListDown)
         .animation(.snappy, value: model.isLoading)
         .animation(.snappy, value: model.paletteOpen)
         .animation(.snappy, value: model.shortcutsOpen)
+        .overlay(alignment: .topTrailing) {
+            FPSHUDView()
+                .padding(.top, 14)
+                .padding(.trailing, 20)
+                .zIndex(100)
+        }
         .globalKeyboardShortcuts(model: model)
+        // `ContinuityManager` broadcasts Handoff activities on every page/time
+        // update, but nothing ever received them — Handoff on another device
+        // opened straight to the home screen with no idea what was playing.
+        // Routed to the detail page rather than straight into playback: every
+        // other entry point into a title goes through it too, and forcing
+        // playback from a system callback races `resolveAndPlay`'s own resume
+        // logic with no user gesture behind it.
+        .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
+            guard case .playback(let catalogId, _, _, _) = ContinuityManager.shared.parseIncomingActivity(activity) else { return }
+            Task { await model.openDetail(id: catalogId, isManga: false) }
+        }
+        .onContinueUserActivity(ContinuityManager.readingActivityType) { activity in
+            guard case .reading(_, let anilistId, _, _, _) = ContinuityManager.shared.parseIncomingActivity(activity),
+                  let anilistId else { return }
+            Task { await model.openDetail(id: anilistId, isManga: true) }
+        }
         #if os(macOS)
         // Driven off activeStreamURL's nil<->value edge rather than
         // PlayerView's onAppear/onDisappear: that view can be reused or
@@ -343,12 +467,20 @@ public struct RootView: View {
         // edge is unambiguous and fires exactly once per playback session.
         .onChange(of: model.activeStreamURL != nil) { wasPlaying, isPlaying in
             guard let window = AppWindow.main else { return }
-            if isPlaying, !wasPlaying, !window.styleMask.contains(.fullScreen) {
-                enteredFullscreenForPlayback = true
-                window.toggleFullScreen(nil)
-            } else if !isPlaying, wasPlaying, enteredFullscreenForPlayback, window.styleMask.contains(.fullScreen) {
-                window.toggleFullScreen(nil)
-                enteredFullscreenForPlayback = false
+            AppWindow.isPlaybackActive = isPlaying
+            if isPlaying {
+                AppWindow.setToolbarVisible(false)
+                if !wasPlaying, !window.styleMask.contains(.fullScreen) {
+                    enteredFullscreenForPlayback = true
+                    window.toggleFullScreen(nil)
+                }
+            } else {
+                AppWindow.setToolbarVisible(false)
+                NSCursor.setHiddenUntilMouseMoves(false)
+                if wasPlaying, enteredFullscreenForPlayback, window.styleMask.contains(.fullScreen) {
+                    window.toggleFullScreen(nil)
+                    enteredFullscreenForPlayback = false
+                }
             }
         }
         #endif
@@ -359,7 +491,16 @@ public struct RootView: View {
     private var sectionContent: some View {
         switch model.currentNavSection {
         case .upNext:
-            homeView
+            // Its own View struct, not a computed property here: `homeView`
+            // used to inline into this 1198-line body, so any one shelf's
+            // array changing (a Watching progress tick from playback, a
+            // background refreshAll updating Trending) re-evaluated every
+            // other shelf's layout along with it.
+            HomeSectionView(
+                model: model,
+                namespace: cardNamespace,
+                onOpenDetail: openDetailFor
+            )
         case .schedule:
             ScheduleView(items: model.scheduleItems) { item in
                 openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
@@ -368,19 +509,24 @@ public struct RootView: View {
             SearchView(
                 searchText: $model.searchQuery,
                 results: model.searchResults,
-                discoverItems: model.trendingItems,
+                discoverItems: model.searchDiscoverItems,
                 isLoading: model.isLoading,
+                namespace: cardNamespace,
+                openingSourceKey: model.openingDetailSourceKey,
                 onSearchCommit: { q, mediaType, filters in
                     Task { await model.search(query: q, mediaType: mediaType, filters: filters) }
                 },
-                onSelectMedia: { item in
-                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                onSelectMedia: { item, sourceKey in
+                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga, sourceKey: sourceKey)
                 },
-                onLoadDiscover: {
-                    Task { await model.loadTrending() }
+                onLoadDiscover: { mediaType in
+                    Task { await model.loadSearchDiscover(mediaType: mediaType) }
                 },
-                onShuffle: {
-                    Task { await model.loadTrending() }
+                onShuffle: { mediaType in
+                    Task {
+                        await model.loadSearchDiscover(mediaType: mediaType)
+                        model.searchDiscoverItems.shuffle()
+                    }
                 },
                 hasMorePages: model.searchHasMorePages,
                 isLoadingMore: model.isLoadingMoreSearchResults,
@@ -389,6 +535,17 @@ public struct RootView: View {
                         await model.search(
                             query: q, mediaType: mediaType, filters: filters,
                             page: model.searchCurrentPage + 1, append: true
+                        )
+                    }
+                },
+                hasMoreDiscoverPages: model.searchDiscoverHasMorePages,
+                isLoadingMoreDiscover: model.isLoadingMoreSearchDiscover,
+                onLoadMoreDiscover: { mediaType in
+                    Task {
+                        await model.loadSearchDiscover(
+                            mediaType: mediaType,
+                            page: model.searchDiscoverPage + 1,
+                            append: true
                         )
                     }
                 }
@@ -423,7 +580,15 @@ public struct RootView: View {
                     set: { next in Task { await model.loadLibrary(type: next) } }
                 ),
                 isSignedIn: model.isSignedIn,
-                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: model.libraryType == "MANGA" || $0.isManga) }
+                namespace: cardNamespace,
+                openingSourceKey: model.openingDetailSourceKey,
+                onSelect: {
+                    openDetailFor(
+                        id: $0.id, title: $0.title, coverURL: $0.coverImageURL,
+                        isManga: model.libraryType == "MANGA" || $0.isManga,
+                        sourceKey: "library:\($0.id)"
+                    )
+                }
             )
         case .manga:
             ReadingView(
@@ -431,38 +596,145 @@ public struct RootView: View {
                 reading: model.mangaReading,
                 trending: model.mangaTrending,
                 isSignedIn: model.isSignedIn,
-                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
+                namespace: cardNamespace,
+                openingSourceKey: model.openingDetailSourceKey,
+                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
+                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
                 onBrowse: { model.currentNavSection = .search }
             )
         case .novels:
-            ReadingView(
-                config: .novels,
-                reading: model.novelReading,
-                trending: model.novelTrending,
-                isSignedIn: model.isSignedIn,
-                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true) },
-                onBrowse: { model.currentNavSection = .search }
-            )
+            ZStack(alignment: .topTrailing) {
+                ReadingView(
+                    config: .novels,
+                    reading: model.novelReading,
+                    trending: model.novelTrending,
+                    isSignedIn: model.isSignedIn,
+                    namespace: cardNamespace,
+                    openingSourceKey: model.openingDetailSourceKey,
+                    onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
+                    onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
+                    onBrowse: { model.currentNavSection = .search }
+                )
+                // AniList/RanobeDB entries above have no linked text source
+                // yet (see `AppModel.SyosetuSession`'s comment) — this is the
+                // only way into a novel's actual chapter text today.
+                SumiOutlineButton("Read a Syosetu link", systemImage: "link", action: { showSyosetuReader = true })
+                    .padding(20)
+            }
+            .sheet(isPresented: $showSyosetuReader) {
+                SyosetuReaderView(model: model)
+                    .frame(minWidth: 560, minHeight: 640)
+            }
         case .history:
             HistoryView(
                 viewer: model.viewer,
                 activity: model.activity,
                 titles: model.knownTitles,
+                namespace: cardNamespace,
+                openingSourceKey: model.openingDetailSourceKey,
                 onSelectFavourite: { item in
-                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga, sourceKey: "history-fav:\(item.id)")
                 }
             )
         case .downloads:
-            DownloadsView()
+            DownloadsView(downloads: model.libraryDownloads)
         }
     }
 
-    // MARK: - Home / Up Next View
-    private var homeView: some View {
+
+    /// Every section, as a palette entry. The palette is the only navigation
+    /// that reaches a section without the sidebar, so the list has to stay in
+    /// step with `NavSection` — driving it off `allCases` is what keeps it
+    /// there when a section is added.
+    private var paletteCommands: [CommandPalette.Command] {
+        SidebarView.NavSection.allCases.map { section in
+            let model = self.model
+            // `rawValue` rather than the enum case: the case is task-isolated
+            // once it crosses into the @MainActor closure, and re-deriving it
+            // from the string on the other side keeps the capture Sendable.
+            let raw = section.rawValue
+            return CommandPalette.Command(id: raw, label: "Go to \(section.label)") {
+                Task { @MainActor in
+                    guard let target = SidebarView.NavSection(rawValue: raw) else { return }
+                    model.navigate(to: target)
+                }
+            }
+        }
+    }
+
+
+    /// Opens the detail page, querying the Rust core via UniFFI.
+    // `sourceKey` is nil unless the caller can name exactly which card grid
+    // it came from (e.g. "watching:12345") — relation/recommendation clicks
+    // inside the detail page, schedule taps, and any other non-card open
+    // leave it nil, which just means a plain fade with no poster morph.
+    private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false, sourceKey: String? = nil) {
+        model.openingDetailSourceKey = sourceKey
+        Task { await model.openDetail(id: id, title: title, coverURL: coverURL, isManga: isManga) }
+    }
+
+}
+
+/// Shared by every `resolveAndPlay` call site (across both `RootView` and
+/// `HomeSectionView`) so the error banner's Retry button
+/// (`AppModel.errorRetryAction`) can re-run the exact same attempt rather
+/// than each site wiring its own retry closure by hand.
+private func playEpisode(model: AppModel, catalogId: Int64, episode: Int, title: String, chosenName: String? = nil) {
+    model.activeResolveTask = Task {
+        do {
+            _ = try await model.resolveAndPlay(
+                catalogId: catalogId,
+                episode: Int64(episode),
+                title: title,
+                chosenName: chosenName
+            )
+            model.errorRetryAction = nil
+        } catch is CancellationError {
+            // The viewer hit Cancel on the "Finding a stream…" overlay —
+            // not a real failure.
+        } catch {
+            model.errorMessage = "Failed to play episode \(episode): \(error.localizedDescription)"
+            model.errorRetryAction = { [weak model] in
+                model?.errorMessage = nil
+                guard let model else { return }
+                playEpisode(model: model, catalogId: catalogId, episode: episode, title: title, chosenName: chosenName)
+            }
+        }
+    }
+}
+
+/// The `.upNext` section: queue, week strip, Watching, and every configurable
+/// discover row. Pulled out of `RootView.sectionContent` because it used to
+/// be a computed property inlined into the 1198-line body — any one shelf's
+/// array changing (a Watching progress tick from playback, a background
+/// refreshAll updating Trending) re-evaluated every other shelf's layout
+/// along with it. Own `@State` for the two sheets it owns, since neither is
+/// read outside this section.
+private struct HomeSectionView: View {
+    @Bindable var model: AppModel
+    let namespace: Namespace.ID
+    // 5th arg is the shelf-scoped source key for the poster morph (e.g.
+    // "watching:12345"), nil where there's no card to morph from.
+    let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
+
+    @State private var showHomeCustomize = false
+    @State private var showPicker = false
+
+    /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only
+    /// appended when there are any, matching HomeView.tsx.
+    private var upNextSubtitle: String {
+        let inProgress = model.upNextItems.count
+        let new = model.upNextItems.filter(\.hasNewEpisode).count
+        var out = "\(inProgress) in progress"
+        if new > 0 {
+            out += " · \(new) new episode\(new == 1 ? "" : "s")"
+        }
+        return out
+    }
+
+    var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 40) {
+            LazyVStack(alignment: .leading, spacing: 40) {
                 // Up Next Section Header
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .bottom) {
@@ -501,7 +773,7 @@ public struct RootView: View {
                                  )
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
 
                         // Reorders/hides the configurable rows below. Shown
                         // even signed-out, same as HomeView.tsx: Trending,
@@ -524,31 +796,24 @@ public struct RootView: View {
                             )
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                     }
 
                     // Up Next Queue Container
                     if !model.upNextItems.isEmpty {
                         UpNextQueueView(
                             items: model.upNextItems,
+                            namespace: namespace,
+                            openingSourceKey: model.openingDetailSourceKey,
+                            shelfKey: "upnext",
                             onSelect: { entry in
-                                openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL, isManga: entry.unit == "CH")
+                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", "upnext:\(entry.id)")
                             },
                             onPlay: { entry in
                                 if entry.unit == "CH" {
-                                    openDetailFor(id: entry.id, title: entry.title, coverURL: entry.thumbnailURL, isManga: true)
+                                    onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, "upnext:\(entry.id)")
                                 } else {
-                                    Task {
-                                        do {
-                                            _ = try await model.resolveAndPlay(
-                                                catalogId: entry.id,
-                                                episode: Int64(entry.nextEpisodeOrChapter),
-                                                title: entry.title
-                                            )
-                                        } catch {
-                                            model.errorMessage = "Failed to play episode \(entry.nextEpisodeOrChapter): \(error.localizedDescription)"
-                                        }
-                                    }
+                                    playEpisode(model: model, catalogId: entry.id, episode: entry.nextEpisodeOrChapter, title: entry.title)
                                 }
                             }
                         )
@@ -571,7 +836,7 @@ public struct RootView: View {
 
                 if !model.scheduleItems.filter({ $0.isWatching }).isEmpty {
                     WeekStrip(items: model.scheduleItems) { item in
-                        openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
+                        onOpenDetail(item.id, item.title, item.coverImageURL, false, nil)
                     }
                 }
 
@@ -579,7 +844,7 @@ public struct RootView: View {
                 // HomeView.tsx (queue + Watching are the front page; the rest
                 // are rows the user can reorder or hide).
                 if !model.watchingItems.isEmpty {
-                    mediaRow(title: "Watching", count: model.watchingItems.count, items: model.watchingItems)
+                    mediaRow(title: "Watching", count: model.watchingItems.count, items: model.watchingItems, shelfKey: "watching")
                 } else if model.isSignedIn && model.isLoading {
                     MediaRowSkeleton(title: "Watching")
                 }
@@ -609,21 +874,27 @@ public struct RootView: View {
                 model: model,
                 isPresented: $showPicker,
                 onCommit: { item in
-                    openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                    // No source card behind a modal sheet once it's
+                    // dismissed, so no sourceKey — plain fade like any
+                    // other non-card open.
+                    onOpenDetail(item.id, item.title, item.coverImageURL, item.isManga, nil)
                 }
             )
         }
     }
 
     /// One configurable row, by id. Skeletons preserve the shelf layout
-    /// while queries are in flight, preventing sudden reflows.
+    /// while queries are in flight, preventing sudden reflows. `id` doubles
+    /// as the row's shelf key: distinct rows can show the same title at
+    /// once (Watching and Trending, say), so the poster-morph source has to
+    /// be scoped per-row, not just per-id — see `AppModel.openingDetailSourceKey`.
     @ViewBuilder
     private func homeDiscoverRow(id: String, title: String) -> some View {
         switch id {
         case "planning":
             if model.isSignedIn {
                 if !model.planningItems.isEmpty {
-                    mediaRow(title: title, count: model.planningItems.count, items: model.planningItems)
+                    mediaRow(title: title, count: model.planningItems.count, items: model.planningItems, shelfKey: id)
                 } else if model.isLoading {
                     MediaRowSkeleton(title: title)
                 }
@@ -631,26 +902,26 @@ public struct RootView: View {
         case "smartPlaylist":
             if model.isSignedIn {
                 if !model.smartPicks.isEmpty {
-                    mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks)
+                    mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks, shelfKey: id)
                 } else if model.isLoading {
                     MediaRowSkeleton(title: title)
                 }
             }
         case "trending":
             if !model.trendingItems.isEmpty {
-                mediaRow(title: title, count: model.trendingItems.count, items: model.trendingItems)
+                mediaRow(title: title, count: model.trendingItems.count, items: model.trendingItems, shelfKey: id)
             } else if model.isLoading {
                 MediaRowSkeleton(title: title)
             }
         case "newlyReleasing":
             if !model.newlyReleasingItems.isEmpty {
-                mediaRow(title: title, count: model.newlyReleasingItems.count, items: model.newlyReleasingItems)
+                mediaRow(title: title, count: model.newlyReleasingItems.count, items: model.newlyReleasingItems, shelfKey: id)
             } else if model.isLoading {
                 MediaRowSkeleton(title: title)
             }
         case "seasonal":
             if !model.seasonalItems.isEmpty {
-                mediaRow(title: title, count: model.seasonalItems.count, items: model.seasonalItems)
+                mediaRow(title: title, count: model.seasonalItems.count, items: model.seasonalItems, shelfKey: id)
             } else if model.isLoading {
                 MediaRowSkeleton(title: title)
             }
@@ -659,39 +930,7 @@ public struct RootView: View {
         }
     }
 
-    /// Every section, as a palette entry. The palette is the only navigation
-    /// that reaches a section without the sidebar, so the list has to stay in
-    /// step with `NavSection` — driving it off `allCases` is what keeps it
-    /// there when a section is added.
-    private var paletteCommands: [CommandPalette.Command] {
-        SidebarView.NavSection.allCases.map { section in
-            let model = self.model
-            // `rawValue` rather than the enum case: the case is task-isolated
-            // once it crosses into the @MainActor closure, and re-deriving it
-            // from the string on the other side keeps the capture Sendable.
-            let raw = section.rawValue
-            return CommandPalette.Command(id: raw, label: "Go to \(section.label)") {
-                Task { @MainActor in
-                    guard let target = SidebarView.NavSection(rawValue: raw) else { return }
-                    model.navigate(to: target)
-                }
-            }
-        }
-    }
-
-    /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only
-    /// appended when there are any, matching HomeView.tsx.
-    private var upNextSubtitle: String {
-        let inProgress = model.upNextItems.count
-        let new = model.upNextItems.filter(\.hasNewEpisode).count
-        var out = "\(inProgress) in progress"
-        if new > 0 {
-            out += " · \(new) new episode\(new == 1 ? "" : "s")"
-        }
-        return out
-    }
-
-    private func mediaRow(title: String, count: Int, items: [MediaCard.Item]) -> some View {
+    private func mediaRow(title: String, count: Int, items: [MediaCard.Item], shelfKey: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 Text(title)
@@ -709,9 +948,16 @@ public struct RootView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(items) { item in
-                        MediaCard(item: item) {
-                            openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga)
+                        MediaCard(
+                            item: item,
+                            namespace: model.openingDetailSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil,
+                            onPrefetch: {
+                                model.prefetchDetail(id: item.id, isManga: item.isManga)
+                            }
+                        ) {
+                            onOpenDetail(item.id, item.title, item.coverImageURL, item.isManga, "\(shelfKey):\(item.id)")
                         }
+                        .equatable()
                         .frame(width: 180)
                     }
                 }
@@ -719,47 +965,33 @@ public struct RootView: View {
             }
         }
     }
-
-    @available(*, deprecated, message: "Every section has a real view now.")
-    private func genericListView(title: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 36))
-                .foregroundColor(SumiTheme.muted.opacity(0.3))
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(SumiTheme.foreground)
-            Text("Content loaded from AniList and local database.")
-                .font(.system(size: 13))
-                .foregroundColor(SumiTheme.muted)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SumiTheme.background)
-    }
-
-    /// Opens the detail page, querying the Rust core via UniFFI.
-    private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false) {
-        Task { await model.openDetail(id: id, isManga: isManga) }
-    }
-
 }
 
 #if os(macOS)
 import AppKit
 
+@MainActor
+private final class SwipeGestureTracker {
+    var accumulatedDeltaX: CGFloat = 0
+    var accumulatedDeltaY: CGFloat = 0
+    var isCooling = false
+    var gestureDisqualified = false
+    var lastSwipeEventAt: Date = .distantPast
+
+    func reset() {
+        accumulatedDeltaX = 0
+        accumulatedDeltaY = 0
+        gestureDisqualified = false
+    }
+}
+
 private struct GlobalKeyboardShortcutsModifier: ViewModifier {
     @Bindable var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var monitor: Any?
     @State private var scrollMonitor: Any?
     @State private var mouseMonitor: Any?
-    @State private var accumulatedDeltaX: CGFloat = 0
-    @State private var accumulatedDeltaY: CGFloat = 0
-    @State private var gestureSampleCount = 0
-    @State private var gestureDisqualified = false
-    @State private var isCooling = false
-    @State private var lastSwipeEventAt: Date = .distantPast
+    @State private var swipeTracker = SwipeGestureTracker()
 
     func body(content: Content) -> some View {
         content
@@ -776,80 +1008,105 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             handleKeyDown(event)
         }
-        // Mirrors App.tsx's trackpad-back handler: horizontal-dominance guard
-        // against vertical scroll, and the same cooldown-until-idle (not a
-        // fixed timer) so one physical swipe's inertial tail can't re-cross
-        // the threshold and pop a second level.
-        //
-        // Sign is positive, not negative like the web's deltaX: AppKit's
-        // `scrollingDeltaX` already reflects the user's Natural Scrolling
-        // trackpad setting, so which physical swipe direction lands negative
-        // depends on that preference rather than matching the browser's
-        // convention. Confirmed against the real gesture — negative fired on
-        // the forward swipe and did nothing on back.
-        //
-        // A pure vertical scroll still tripped this on this input device: the
-        // dominance ratio alone isn't enough, because ordinary vertical
-        // scrolling here carries a horizontal component large enough to keep
-        // clearing a purely relative (dx > 2*dy) check for several samples in
-        // a row, not just a one-sample startup blip. `gestureSampleCount`
-        // withholds the check for the first couple of samples so a genuine
-        // horizontal swipe (which stays horizontal) can still separate from a
-        // vertical scroll's noisy opening; `gestureDisqualified` is the harder
-        // guard — once a gesture has shown any real vertical travel it can
-        // never fire "back" for the rest of that gesture, even if dx spikes
-        // later, because a real swipe-back gesture has near-zero vertical
-        // travel throughout, not just a favorable ratio at one instant. An
-        // idle gap (trackpad momentum doesn't reliably send `.ended`) starts
-        // a fresh gesture.
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
+        // Two-finger trackpad swipe back & forward navigation.
+        // Accumulates horizontal scroll delta on trackpads with an idle-gap cooldown
+        // and horizontal dominance guard. Triggers an instantaneous, smooth fade
+        // via `model.closeDetail()` and `model.goForwardDetail()`.
+        // Tracking state lives in `swipeTracker` (a plain reference type) rather
+        // than view `@State` so wheel ticks do not re-evaluate `RootView` / `MediaDetailView`
+        // at 120Hz during normal vertical scrolling.
+        let tracker = self.swipeTracker
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self, tracker] event in
+            guard model.activeStreamURL == nil,
+                  model.activeReadingSession == nil,
+                  !model.paletteOpen,
+                  !model.shortcutsOpen else {
+                return event
+            }
+
+            // Trackpad swipe navigation ONLY operates when a detail page is open.
+            // On the home screen and other sections, all scroll wheel events belong
+            // exclusively to the page's vertical feed and horizontal carousels.
             guard model.selectedMediaDetails != nil else { return event }
+
+            let canGoBack = true
+            let canGoForward = model.canGoForward
+
+            // Only trackpad / precise scrolling gestures participate in swipe navigation
+            guard event.hasPreciseScrollingDeltas else { return event }
+
+            // Ignore inertial momentum tail after fingers lift to prevent double-popping
+            if !event.momentumPhase.isEmpty {
+                return event
+            }
+
             let now = Date()
-            if isCooling {
-                if now.timeIntervalSince(lastSwipeEventAt) > 0.12 {
-                    isCooling = false
+
+            // Cooldown: stay cooling until the gesture goes idle (> 0.15s gap) so one
+            // physical swipe fires exactly once.
+            if tracker.isCooling {
+                if now.timeIntervalSince(tracker.lastSwipeEventAt) > 0.15 {
+                    tracker.isCooling = false
                 } else {
-                    lastSwipeEventAt = now
+                    tracker.lastSwipeEventAt = now
                     return event
                 }
             }
-            if now.timeIntervalSince(lastSwipeEventAt) > 0.15 {
-                accumulatedDeltaX = 0
-                accumulatedDeltaY = 0
-                gestureSampleCount = 0
-                gestureDisqualified = false
+
+            // Fresh gesture start on began phase or after an idle pause
+            if event.phase == .began || now.timeIntervalSince(tracker.lastSwipeEventAt) > 0.15 {
+                tracker.reset()
             }
-            lastSwipeEventAt = now
-            accumulatedDeltaX += event.scrollingDeltaX
-            accumulatedDeltaY += abs(event.scrollingDeltaY)
-            gestureSampleCount += 1
-            if accumulatedDeltaY > 15 {
-                gestureDisqualified = true
+            tracker.lastSwipeEventAt = now
+
+            // Normalize deltaX so physical swipe right (back) is positive, swipe left (forward) is negative.
+            let rawDeltaX = event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+            let rawDeltaY = event.scrollingDeltaY
+
+            tracker.accumulatedDeltaX += rawDeltaX
+            tracker.accumulatedDeltaY += abs(rawDeltaY)
+
+            // Disqualify if vertical scrolling is clearly dominant over horizontal travel.
+            if tracker.accumulatedDeltaY > abs(tracker.accumulatedDeltaX) * 1.5 && tracker.accumulatedDeltaY > 20 {
+                tracker.gestureDisqualified = true
             }
-            if !gestureDisqualified && gestureSampleCount >= 3 && accumulatedDeltaX > 60 && abs(accumulatedDeltaX) > accumulatedDeltaY * 2 {
-                accumulatedDeltaX = 0
-                accumulatedDeltaY = 0
-                gestureSampleCount = 0
-                isCooling = true
-                withAnimation(.smooth) {
-                    model.closeDetail()
-                }
+
+            if event.phase == .ended || event.phase == .cancelled {
+                tracker.reset()
+                return event
+            }
+
+            guard !tracker.gestureDisqualified else { return event }
+
+            let isHorizontal = abs(tracker.accumulatedDeltaX) > tracker.accumulatedDeltaY * 1.3
+            let threshold: CGFloat = 50.0
+
+            // Swipe right: Back (close detail / return to previous)
+            if tracker.accumulatedDeltaX > threshold && isHorizontal && canGoBack {
+                tracker.reset()
+                tracker.isCooling = true
+                model.closeDetail()
                 return nil
             }
-            if event.phase == .ended {
-                accumulatedDeltaX = 0
-                accumulatedDeltaY = 0
-                gestureSampleCount = 0
-                gestureDisqualified = false
+
+            // Swipe left: Forward (redo detail navigation)
+            if tracker.accumulatedDeltaX < -threshold && isHorizontal && canGoForward {
+                tracker.reset()
+                tracker.isCooling = true
+                model.goForwardDetail()
+                return nil
             }
+
             return event
         }
-        // Button 3 is the standard back side-button on 5-button mice in AppKit (0=left, 1=right, 2=middle).
+        // Buttons 3/4 are the standard back/forward side-buttons on 5-button mice in AppKit (0=left, 1=right, 2=middle).
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [self] event in
+            guard model.selectedMediaDetails != nil || model.canGoForward else { return event }
             if event.buttonNumber == 3 && model.selectedMediaDetails != nil {
-                withAnimation(.smooth) {
-                    model.closeDetail()
-                }
+                model.closeDetail()
+                return nil
+            } else if event.buttonNumber == 4 && model.canGoForward {
+                model.goForwardDetail()
                 return nil
             }
             return event
@@ -888,6 +1145,14 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             return nil
         }
 
+        // Cmd+Shift+D: Toggle FPS / Performance Debugger HUD
+        if isCmd && isShift && !isCtrl && !isAlt && chars == "d" {
+            let key = "anicat_show_fps_hud"
+            let current = UserDefaults.standard.object(forKey: key) as? Bool ?? true
+            UserDefaults.standard.set(!current, forKey: key)
+            return nil
+        }
+
         // 2. ESC key (keyCode 53):
         // Order of dismissal:
         // 1. KeyboardShortcutsOverlay (topmost help modal)
@@ -895,20 +1160,27 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // 3. PlayerView (modal video overlay)
         // 4. MangaReaderView (modal reader overlay)
         // 5. MediaDetailView (detail page)
+        // Not wrapped in `withAnimation`: every state `handleEscapeKey`/
+        // `closeDetail`/`goForwardDetail` can touch already has its own
+        // `.animation(value:)` modifier on the ZStack that renders it. A
+        // second explicit transaction here raced those with a different
+        // curve every keypress.
         if event.keyCode == 53 {
-            var handled = false
-            withAnimation(.smooth) {
-                handled = model.handleEscapeKey()
-            }
+            let handled = model.handleEscapeKey()
             return handled ? nil : event
         }
 
         // Arrow keys in AppKit automatically include `.numericPad` and `.function`
         // flags, so we exclude explicit modifiers instead of checking a raw flag mask.
         if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 123 && model.selectedMediaDetails != nil {
-            withAnimation(.smooth) {
-                model.closeDetail()
-            }
+            model.closeDetail()
+            return nil
+        }
+
+        // Right arrow (keyCode 124) mirrors Left above — Alt+Right redoes
+        // through `detailForwardStack`, matching a browser's Alt+Right/Cmd+].
+        if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 124 && model.canGoForward {
+            model.goForwardDetail()
             return nil
         }
 
@@ -943,6 +1215,47 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 model.playerController.seekRelative(by: 10)
                 return nil
             }
+            // Up arrow: volume +5%
+            if event.keyCode == 126 {
+                model.playerController.setVolume(model.playerController.volume + 0.05)
+                return nil
+            }
+            // Down arrow: volume -5%
+            if event.keyCode == 125 {
+                model.playerController.setVolume(model.playerController.volume - 0.05)
+                return nil
+            }
+            // 'm': toggle mute
+            if chars == "m" {
+                model.playerController.toggleMute()
+                return nil
+            }
+            // 'f': toggle fullscreen
+            if chars == "f" {
+                if let window = AppWindow.main {
+                    if model.activeStreamURL != nil {
+                        AppWindow.setToolbarVisible(false)
+                    }
+                    window.toggleFullScreen(nil)
+                }
+                return nil
+            }
+            // 'n': next episode
+            if chars == "n" {
+                model.playerController.nextEpisode()
+                return nil
+            }
+            // 'p': previous episode
+            if chars == "p" {
+                model.playerController.previousEpisode()
+                return nil
+            }
+        }
+
+        // Shift+V: rotate video 90 degrees (off / CW / CCW)
+        if model.activeStreamURL != nil && isShift && !isCmd && !isCtrl && !isAlt && chars == "v" {
+            model.playerController.cycleSideways()
+            return nil
         }
 
         // 5. Navigation shortcuts (only when no modifier keys are held)
@@ -1012,7 +1325,7 @@ private struct HomeCustomizeSheet: View {
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
             .padding(.bottom, 4)
 
@@ -1029,41 +1342,99 @@ private struct HomeCustomizeSheet: View {
                             .foregroundColor(row.visible ? SumiTheme.foreground : SumiTheme.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Button(action: { model.moveHomeRow(at: index, by: -1) }) {
+                        Button(action: { withAnimation(.snappy) { model.moveHomeRow(at: index, by: -1) } }) {
                             Image(systemName: "chevron.up")
                                 .foregroundColor(index == 0 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
                                 .frame(width: 20, height: 20)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                         .disabled(index == 0)
 
-                        Button(action: { model.moveHomeRow(at: index, by: 1) }) {
+                        Button(action: { withAnimation(.snappy) { model.moveHomeRow(at: index, by: 1) } }) {
                             Image(systemName: "chevron.down")
                                 .foregroundColor(index == model.homeRowConfig.count - 1 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
                                 .frame(width: 20, height: 20)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
                         .disabled(index == model.homeRowConfig.count - 1)
 
-                        Button(action: { model.toggleHomeRow(id: row.id) }) {
+                        Button(action: { withAnimation(.snappy) { model.toggleHomeRow(id: row.id) } }) {
                             Image(systemName: row.visible ? "eye" : "eye.slash")
                                 .foregroundColor(row.visible ? SumiTheme.indigo : SumiTheme.muted.opacity(0.5))
                                 .frame(width: 20, height: 20)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.sumiPressable)
+                        .animation(.snappy, value: row.visible)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 8)
                     .background(SumiTheme.card.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                 }
+                .animation(.snappy, value: model.homeRowConfig)
             }
         }
         .padding(20)
         .frame(width: 380)
         .background(SumiTheme.background)
+    }
+}
+
+/// Shown while `resolveAndPlay` is inside its `resolveStream` FFI call —
+/// see the loading overlay's comment for why this exists instead of a bare
+/// spinner. `TimelineView` rather than a `Timer`/`@State` tick: it's a
+/// display-only clock with no state to manage or invalidate when the card
+/// disappears.
+private struct ResolvingStreamCard: View {
+    let startedAt: Date
+    let onCancel: () -> Void
+
+    var body: some View {
+        // A compact horizontal toast, same corner the mini-player uses —
+        // not a centered modal. This shows on every single play
+        // press (if only for a moment), so treating it like an alarming
+        // blocking dialog was wrong to begin with; a small notification you
+        // can glance at (or ignore) fits what it actually is.
+        HStack(spacing: 10) {
+            ProgressView()
+                .scaleEffect(0.8)
+                .tint(SumiTheme.indigo)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Finding a stream…")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+
+                TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                    let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
+                    Text("\(elapsed)s")
+                        .sumiTabularMono(size: 10)
+                        .foregroundColor(SumiTheme.muted)
+                }
+            }
+
+            Button(action: onCancel) {
+                Text("Cancel")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(SumiTheme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.sumiPressable)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .frame(height: 56)
+        .sumiCardStyle()
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
     }
 }

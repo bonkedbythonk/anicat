@@ -1,7 +1,7 @@
 import SwiftUI
 
-public struct MediaCard: View {
-    public struct Item: Identifiable, Sendable, Equatable {
+public struct MediaCard: View, Equatable {
+    public struct Item: Identifiable, Sendable, Equatable, Codable {
         public let id: Int64
         public let title: String
         public let coverImageURL: URL?
@@ -37,12 +37,35 @@ public struct MediaCard: View {
 
     public let item: Item
     public let onSelect: () -> Void
-    
+    /// Shared with `MediaDetailView`'s poster so opening/closing this card's
+    /// detail page grows the poster from this exact frame instead of a
+    /// generic cross-fade. `nil` where a caller hasn't been wired up to a
+    /// shared namespace yet — the modifier is skipped rather than crashing.
+    public var namespace: Namespace.ID?
+    public var onPrefetch: (() -> Void)?
+
     @State private var isHovered = false
 
-    public init(item: Item, onSelect: @escaping () -> Void) {
+    public init(
+        item: Item,
+        namespace: Namespace.ID? = nil,
+        onPrefetch: (() -> Void)? = nil,
+        onSelect: @escaping () -> Void
+    ) {
         self.item = item
+        self.namespace = namespace
+        self.onPrefetch = onPrefetch
         self.onSelect = onSelect
+    }
+
+    // Closures excluded: the caller recreates them every parent body
+    // evaluation (they capture `item`), but always as thin wrappers over the
+    // same instance methods — two cards with identical `item`/`namespace`
+    // behave identically regardless of closure identity. Letting `.equatable()`
+    // compare only that lets a fast-scrolling shelf skip re-diffing every
+    // already-materialized card each time the shelf's own body re-evaluates.
+    public nonisolated static func == (lhs: MediaCard, rhs: MediaCard) -> Bool {
+        lhs.item == rhs.item && lhs.namespace == rhs.namespace
     }
 
     public var body: some View {
@@ -100,16 +123,19 @@ public struct MediaCard: View {
                     // black 45% track. The track is what makes it legible on a
                     // bright poster — the fill alone vanishes into pale art.
                     if let progress = item.progress, let total = item.totalEpisodesOrChapters, total > 0 {
-                        let pct = CGFloat(progress) / CGFloat(total)
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.45))
-                                Rectangle()
-                                    .fill(SumiTheme.indigo)
-                                    .frame(width: geo.size.width * min(max(pct, 0), 1))
-                            }
+                        let pct = min(max(CGFloat(progress) / CGFloat(total), 0), 1)
+                        // scaleEffect instead of GeometryReader: this bar lives inside
+                        // MediaCard, the most-instantiated view in the app, and a
+                        // GeometryReader here forced a second layout pass per card in
+                        // every scrolling grid just to compute a fill width.
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.45))
+                            Rectangle()
+                                .fill(SumiTheme.indigo)
+                                .scaleEffect(x: pct, y: 1, anchor: .leading)
                         }
+                        .frame(maxWidth: .infinity)
                         .frame(height: 3)
                     }
                 }
@@ -118,6 +144,16 @@ public struct MediaCard: View {
                     RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
+                .ifLet(namespace) { view, namespace in
+                    view.matchedGeometryEffect(id: item.id, in: namespace)
+                }
+                // `.card-glow:hover` (index.css:377-382): lift 2px and deepen
+                // the shadow on hover/focus — the poster's own scale/dim
+                // covered the "something responded" read but not the "this
+                // row raised toward you" one every other hoverable surface has.
+                .offset(y: isHovered ? -2 : 0)
+                .shadow(color: .black.opacity(isHovered ? 0.45 : 0), radius: isHovered ? 14 : 0, y: isHovered ? 10 : 0)
+                .animation(.snappy, value: isHovered)
 
                 // Card Info: Clean Typography, Art carries the card
                 VStack(alignment: .leading, spacing: 4) {
@@ -178,12 +214,13 @@ public struct MediaCard: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.sumiPressable)
         .contentShape(Rectangle())
-        #if os(macOS)
-        .onHover { hovering in
+        .stableHover { hovering in
             isHovered = hovering
+            if hovering {
+                onPrefetch?()
+            }
         }
-        #endif
     }
 }

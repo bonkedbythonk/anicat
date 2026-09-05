@@ -40,7 +40,7 @@ struct ContinuityTests {
         let payload = ContinuityManager.shared.parseIncomingActivity(activity)
         #expect(payload != nil)
 
-        if case .reading(let mangaId, let title, let chapter, let pageIndex) = payload {
+        if case .reading(let mangaId, _, let title, let chapter, let pageIndex) = payload {
             #expect(mangaId == "frieren-mangadex-uuid")
             #expect(title == "Sousou no Frieren")
             #expect(chapter == "42")

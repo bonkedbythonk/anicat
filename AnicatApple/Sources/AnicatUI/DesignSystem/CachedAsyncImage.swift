@@ -12,8 +12,14 @@ import UniformTypeIdentifiers
 /// that would actually justify it — the decode is the same cost every time,
 /// scroll or not, but a 120Hz frame budget is half a 60Hz one and has no
 /// slack left for it.
-@MainActor
-final class ImageDecodeCache {
+///
+/// Thread-safety: deliberately NOT `@MainActor`. Cache reads and writes are
+/// guarded by `cacheLock`. This means decode completions never need to hop
+/// back to the main actor just to write to the cache — they write directly
+/// from the background task, then publish the result to SwiftUI (which does
+/// its own main-actor marshalling). Eliminating these unnecessary main-actor
+/// hops reduces the "30 main thread stalls" the FPS HUD reports.
+final class ImageDecodeCache: @unchecked Sendable {
     static let shared = ImageDecodeCache()
 
     private final class Box {
@@ -22,37 +28,100 @@ final class ImageDecodeCache {
     }
 
     private let cache = NSCache<NSString, Box>()
+    private let cacheLock = NSLock()
     private var inFlight: [String: Task<CGImage?, Never>] = [:]
+    private let inFlightLock = NSLock()
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        let memoryCapacity = 50 * 1024 * 1024 // 50 MB
+        let diskCapacity = 200 * 1024 * 1024 // 200 MB
+        config.urlCache = URLCache(
+            memoryCapacity: memoryCapacity,
+            diskCapacity: diskCapacity,
+            diskPath: "anicat_image_cache"
+        )
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: config)
+    }()
 
     private init() {
         cache.countLimit = 500
     }
 
-    func image(for url: URL, maxPixelSize: CGFloat) async -> CGImage? {
+    func cachedImage(for url: URL, maxPixelSize: CGFloat) -> CGImage? {
         let key = "\(url.absoluteString)#\(Int(maxPixelSize))" as NSString
-        if let hit = cache.object(forKey: key) {
-            return hit.image
+        return lockedCache(nsKey: key)
+    }
+
+    // Swift 6 flags `NSLock.lock()/unlock()` written directly inside an
+    // `async` function body as unavailable, regardless of whether a
+    // suspension point actually falls between them. Isolating each
+    // lock/unlock pair in its own synchronous, nonisolated function sidesteps
+    // that check without changing the locking behavior.
+    private nonisolated func lockedCache(nsKey: NSString) -> CGImage? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return cache.object(forKey: nsKey)?.image
+    }
+
+    private nonisolated func storeCache(nsKey: NSString, image: CGImage) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        cache.setObject(Box(image), forKey: nsKey)
+    }
+
+    private nonisolated func takeInFlight(key: String) -> Task<CGImage?, Never>? {
+        inFlightLock.lock()
+        defer { inFlightLock.unlock() }
+        return inFlight[key]
+    }
+
+    private nonisolated func setInFlight(key: String, task: Task<CGImage?, Never>) {
+        inFlightLock.lock()
+        defer { inFlightLock.unlock() }
+        inFlight[key] = task
+    }
+
+    private nonisolated func clearInFlight(key: String) {
+        inFlightLock.lock()
+        defer { inFlightLock.unlock() }
+        inFlight[key] = nil
+    }
+
+    func image(for url: URL, maxPixelSize: CGFloat) async -> CGImage? {
+        let key = "\(url.absoluteString)#\(Int(maxPixelSize))"
+        let nsKey = key as NSString
+
+        if let hit = lockedCache(nsKey: nsKey) {
+            return hit
         }
-        if let existing = inFlight[key as String] {
+
+        if let existing = takeInFlight(key: key) {
             return await existing.value
         }
 
-        let task = Task<CGImage?, Never> {
-            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        let session = Self.session
+        // Runs on a background cooperative worker thread rather than inheriting @MainActor:
+        // CGImageSource thumbnail decoding is CPU-heavy and must never block the 120Hz display link.
+        let task = Task.detached(priority: .userInitiated) { () -> CGImage? in
+            guard let (data, _) = try? await session.data(from: url) else { return nil }
             return Self.downsample(data: data, maxPixelSize: maxPixelSize)
         }
-        inFlight[key as String] = task
+        setInFlight(key: key, task: task)
+
         let result = await task.value
-        inFlight[key as String] = nil
+
+        clearInFlight(key: key)
+
         if let result {
-            cache.setObject(Box(result), forKey: key)
+            storeCache(nsKey: nsKey, image: result)
         }
         return result
     }
 
-    /// Runs on the calling task's executor, not the main actor — `ImageIO`'s
-    /// thumbnail decode is the actual CPU cost being avoided on scroll, so it
-    /// still has to happen off it.
+    /// Runs off the main actor — `ImageIO`'s thumbnail decode is the actual CPU
+    /// cost being avoided on scroll.
     nonisolated private static func downsample(data: Data, maxPixelSize: CGFloat) -> CGImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
@@ -89,14 +158,22 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         self.maxPixelSize = maxPixelSize
         self.content = content
         self.placeholder = placeholder
+
+        if let url, let cached = ImageDecodeCache.shared.cachedImage(for: url, maxPixelSize: maxPixelSize) {
+            self._cgImage = State(initialValue: cached)
+        } else {
+            self._cgImage = State(initialValue: nil)
+        }
     }
 
     public var body: some View {
         Group {
             if let cgImage {
                 content(Image(decorative: cgImage, scale: 1))
+                    .transition(.opacity)
             } else {
                 placeholder()
+                    .transition(.opacity)
             }
         }
         .task(id: url) {
@@ -104,9 +181,12 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 cgImage = nil
                 return
             }
-            // A cache hit resolves synchronously inside the `Task`, so this
-            // never shows the placeholder for an image that's already
-            // decoded — only a genuine first fetch does.
+            if let cached = ImageDecodeCache.shared.cachedImage(for: url, maxPixelSize: maxPixelSize) {
+                if cgImage !== cached {
+                    cgImage = cached
+                }
+                return
+            }
             cgImage = await ImageDecodeCache.shared.image(for: url, maxPixelSize: maxPixelSize)
         }
     }

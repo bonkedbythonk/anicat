@@ -89,3 +89,107 @@ public struct MediaRowSkeleton: View {
         }
     }
 }
+
+/// Single episode placeholder matching EpisodeRow / CompactEpisodeRow height and layout.
+public struct EpisodeRowSkeleton: View {
+    public let isCompact: Bool
+
+    public init(isCompact: Bool = false) {
+        self.isCompact = isCompact
+    }
+
+    public var body: some View {
+        if isCompact {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 32, height: 14)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(height: 14)
+                    .frame(maxWidth: 240)
+                Spacer()
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 40, height: 12)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(SumiTheme.card.opacity(0.4))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        } else {
+            HStack(alignment: .top, spacing: 14) {
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 135, height: 76)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(SumiTheme.foregroundWash)
+                        .frame(width: 60, height: 11)
+
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(SumiTheme.foregroundWash)
+                        .frame(height: 14)
+                        .frame(maxWidth: 260, alignment: .leading)
+
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(SumiTheme.foregroundWash)
+                        .frame(height: 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.top, 4)
+
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(SumiTheme.card.opacity(0.4))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                    .stroke(SumiTheme.border.opacity(0.4), lineWidth: 1)
+            )
+        }
+    }
+}
+
+/// Episode list placeholder when a title's episode list is loading.
+public struct EpisodeListSkeleton: View {
+    public let count: Int
+    public let isCompact: Bool
+
+    public init(count: Int = 6, isCompact: Bool = false) {
+        self.count = count
+        self.isCompact = isCompact
+    }
+
+    public var body: some View {
+        LazyVStack(spacing: isCompact ? 4 : 8) {
+            ForEach(0..<count, id: \.self) { _ in
+                EpisodeRowSkeleton(isCompact: isCompact)
+            }
+        }
+    }
+}
+
+/// Multi-line synopsis placeholder.
+public struct SynopsisSkeleton: View {
+    public init() {}
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(SumiTheme.foregroundWash)
+                .frame(height: 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(SumiTheme.foregroundWash)
+                .frame(height: 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(SumiTheme.foregroundWash)
+                .frame(width: 220, height: 14)
+        }
+        .padding(.vertical, 4)
+    }
+}

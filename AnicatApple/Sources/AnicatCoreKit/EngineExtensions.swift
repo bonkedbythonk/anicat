@@ -6,6 +6,15 @@ import Foundation
 // fails Swift 6's strict-concurrency check at the call site instead of here.
 extension SearchFilters: @unchecked Sendable {}
 
+// uniffi generates AnicatEngine as a plain class with no Sendable
+// conformance, so the strict-concurrency checker refuses to send it into
+// `async let` children — every AniList fetch on the home/library/detail
+// load paths was forced sequential by this alone. The Rust side is safe for
+// concurrent calls: the registry's SQLite connection is Mutex-guarded
+// (core/src/db/service.rs), reqwest::Client pools its own connections, and
+// TorrentManager synchronizes its own state internally.
+extension AnicatEngine: @unchecked Sendable {}
+
 extension AnicatEngine {
     /// Fetches chapters for an AniList manga ID by resolving its MangaDex mapping.
     public func mangaChapters(alId: Int64) async throws -> [MangaChapter] {

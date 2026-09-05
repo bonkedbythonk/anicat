@@ -40,7 +40,7 @@ public struct StatusBadge: View {
         .sumiTabularMono(size: 10, weight: .medium)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(SumiTheme.card.opacity(0.85))
+        .background(SumiTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
         .overlay(
             RoundedRectangle(cornerRadius: SumiTheme.radiusSm)

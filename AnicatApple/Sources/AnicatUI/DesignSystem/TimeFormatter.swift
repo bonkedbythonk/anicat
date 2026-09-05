@@ -21,24 +21,48 @@ public enum SumiTimeFormatter {
         return fmt == "12-hour (AM/PM)" ? "EEE hh:mm a" : "EEE HH:mm"
     }
 
+    private static let time12Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    private static let time24Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static let history12Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE hh:mm a"
+        return f
+    }()
+
+    private static let history24Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE HH:mm"
+        return f
+    }()
+
     public static func formatTime(_ date: Date, timeFormat: String? = nil) -> String {
-        timeFormatter(timeFormat: timeFormat).string(from: date)
+        let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
+        return (is12 ? time12Formatter : time24Formatter).string(from: date)
     }
 
     public static func formatHistoryDate(_ date: Date, timeFormat: String? = nil) -> String {
-        historyDateFormatter(timeFormat: timeFormat).string(from: date)
+        let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
+        return (is12 ? history12Formatter : history24Formatter).string(from: date)
     }
 
     public static func timeFormatter(timeFormat: String? = nil) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = timeFormatPattern(for: timeFormat)
-        return formatter
+        let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
+        return is12 ? time12Formatter : time24Formatter
     }
 
     public static func historyDateFormatter(timeFormat: String? = nil) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = historyFormatPattern(for: timeFormat)
-        return formatter
+        let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
+        return is12 ? history12Formatter : history24Formatter
     }
 }
 

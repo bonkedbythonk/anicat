@@ -18,17 +18,15 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {
-        # Anicat is a Tauri (Rust) + React (Node) desktop app with a small
-        # Python scraper sidecar. This flake provides only a dev shell — the
-        # app is built with `npm run tauri build`, not Nix.
+        # Anicat is a Swift package (AnicatApple/) over a Rust core (core/)
+        # exposed through UniFFI. This flake provides only a dev shell for
+        # the Rust side; the app itself is built with `swift build` on a Mac,
+        # not Nix.
         devShells.default = pkgs.mkShell {
           packages =
             with pkgs;
             [
-              # Frontend
-              nodejs_22
-
-              # Rust / Tauri backend
+              # Rust core
               rustc
               cargo
               pkg-config
@@ -42,10 +40,6 @@
             ++ lib.optionals stdenv.isLinux (
               with pkgs;
               [
-                # Tauri v2 system dependencies on Linux
-                webkitgtk_4_1
-                gtk3
-                libsoup_3
                 openssl
               ]
             )

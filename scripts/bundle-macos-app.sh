@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
 APP_DIR="$ROOT/Anicat.app"
 BIN="$ROOT/AnicatApple/.build/debug/Anicat"
 RESOURCES="$ROOT/AnicatApple/.build/debug/AnicatApple_AnicatUI.bundle"
-ICON="$ROOT/web/src-tauri/icons/icon.icns"
+ICON="$ROOT/assets/branding/icon.icns"
 
 echo "==> Building Anicat executable..."
 cd "$ROOT/AnicatApple"
@@ -32,7 +33,7 @@ if [ -d "$ROOT/AnicatApple/Sources/AnicatUI/Resources/Fonts" ]; then
     cp -R "$ROOT/AnicatApple/Sources/AnicatUI/Resources/Fonts/"* "$APP_DIR/Contents/Resources/Fonts/"
 fi
 
-cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
+cat << EOF > "$APP_DIR/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -50,9 +51,9 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

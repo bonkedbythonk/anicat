@@ -122,8 +122,6 @@ htmlcov/
 # Static build artifacts
 anicat_media/api/static/
 # Tauri and build artifacts
-web/src-tauri/binaries/
-web/src-tauri/target/
 build_sidecar/
 !build_sidecar/sidecar.spec
 !build_sidecar/anicat-server.py
@@ -132,15 +130,11 @@ build_sidecar/
 build_sidecar/dist/
 
 # Old Next.js source remnants
-web/src.old/
 
-web/src-tauri/target/release/bundle/dmg/
 .copilot/
 docs/
 
 # Compiled JS from .tsx/.ts (not build output)
-web/src/**/*.js
-web/src/*.js
 
 scraper-bin/
 mpv-shot*.jpg

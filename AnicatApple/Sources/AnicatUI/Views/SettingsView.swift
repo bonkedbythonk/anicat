@@ -44,6 +44,10 @@ public struct SettingsView: View {
     public let onSaveToken: (String) -> Void
     public let onDisconnectAniList: () -> Void
     public let onClearRegistry: () async -> Bool
+    /// Reset onboarding: besides clearing the seen flag, shows the screen
+    /// again right away, so an already signed-in user can actually see what
+    /// they are resetting instead of waiting for a token-less launch.
+    public let onResetOnboarding: () -> Void
     public let onOpenShortcuts: (() -> Void)?
 
     public init(
@@ -54,12 +58,14 @@ public struct SettingsView: View {
         onSaveToken: @escaping (String) -> Void = { _ in },
         onDisconnectAniList: @escaping () -> Void = {},
         onClearRegistry: @escaping () async -> Bool = { false },
+        onResetOnboarding: @escaping () -> Void = {},
         onOpenShortcuts: (() -> Void)? = nil
     ) {
         self.isSignedIn = isSignedIn
         self.username = username
         self.avatarUrl = avatarUrl
         self.onClearRegistry = onClearRegistry
+        self.onResetOnboarding = onResetOnboarding
         self._selectedTab = State(initialValue: initialTab)
         self.onSaveToken = onSaveToken
         self.onDisconnectAniList = onDisconnectAniList
@@ -105,6 +111,7 @@ public struct SettingsView: View {
                                 isSignedIn: isSignedIn,
                                 username: username,
                                 onClearRegistry: onClearRegistry,
+                                onResetOnboarding: onResetOnboarding,
                                 copyFeedback: $copyFeedback
                             )
                         }
@@ -597,6 +604,7 @@ private struct MaintenanceTabSection: View {
     let isSignedIn: Bool
     let username: String?
     let onClearRegistry: () async -> Bool
+    let onResetOnboarding: () -> Void
     @Binding var copyFeedback: String?
 
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
@@ -766,6 +774,7 @@ private struct MaintenanceTabSection: View {
                 if onboardingResetState == .confirming {
                     UserDefaults.standard.removeObject(forKey: "anicat_onboarding_seen")
                     onboardingResetState = .done
+                    onResetOnboarding()
                 } else if onboardingResetState == .idle {
                     onboardingResetState = .confirming
                 }

@@ -89,6 +89,18 @@ public final class AppModel: @unchecked Sendable {
     public var currentNavSection: SidebarView.NavSection = .upNext
     public var paletteOpen = false
     public var shortcutsOpen = false
+    /// First-launch screen (`OnboardingView`). Shown once, on a launch with
+    /// no AniList token; `anicat_onboarding_seen` remembers the dismissal
+    /// and Settings' "Reset onboarding" clears it.
+    public var onboardingOpen = false
+    static let onboardingSeenKey = "anicat_onboarding_seen"
+
+    public func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: Self.onboardingSeenKey)
+        withAnimation(.smooth(duration: 0.4)) {
+            onboardingOpen = false
+        }
+    }
     public var searchQuery: String = ""
     public var selectedMediaDetails: HeroBanner.Details?
     public var isDetailLoading: Bool = false
@@ -528,6 +540,11 @@ public final class AppModel: @unchecked Sendable {
             self.engine = coreEngine
             if let token, !token.isEmpty {
                 self.isSignedIn = true
+                // A token already in the Keychain means the first run
+                // happened on some earlier build; nothing left to onboard.
+                UserDefaults.standard.set(true, forKey: Self.onboardingSeenKey)
+            } else if !UserDefaults.standard.bool(forKey: Self.onboardingSeenKey) {
+                self.onboardingOpen = true
             }
 
             let port = try await coreEngine.streamPort()
@@ -2330,6 +2347,11 @@ public final class AppModel: @unchecked Sendable {
     /// 5. MediaDetailView (detail page)
     @discardableResult
     public func handleEscapeKey() -> Bool {
+        if onboardingOpen {
+            // Escape reads as "not now", the same as the Skip button.
+            completeOnboarding()
+            return true
+        }
         if shortcutsOpen {
             shortcutsOpen = false
             return true

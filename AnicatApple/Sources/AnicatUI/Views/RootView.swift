@@ -235,6 +235,14 @@ public struct RootView: View {
                 .transition(.opacity)
             }
 
+            // First launch. Above everything: nothing underneath is
+            // meaningful until the viewer has either connected or skipped.
+            if model.onboardingOpen {
+                OnboardingView(model: model)
+                    .zIndex(80)
+                    .transition(.opacity)
+            }
+
             // Keyboard shortcuts overlay. Above palette and modal views.
             if model.shortcutsOpen {
                 KeyboardShortcutsOverlay {
@@ -562,6 +570,11 @@ public struct RootView: View {
                 },
                 onClearRegistry: {
                     await model.clearLocalRegistry()
+                },
+                onResetOnboarding: {
+                    withAnimation(.smooth(duration: 0.4)) {
+                        model.onboardingOpen = true
+                    }
                 },
                 onOpenShortcuts: {
                     model.shortcutsOpen = true

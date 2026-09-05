@@ -16,6 +16,12 @@ const STALE_GRACE: Duration = Duration::from_secs(24 * 3600);
 pub struct AniListCache {
     entries: Arc<Mutex<HashMap<String, (Value, Instant)>>>,
     insert_count: Arc<std::sync::atomic::AtomicUsize>,
+    /// Write-through copy of `entries`, so a cold launch starts from the
+    /// previous run's rows instead of refetching them. `None` for the
+    /// in-memory cache tests and the fallback when the file cannot be
+    /// opened. The memory map stays the only thing reads consult; the disk
+    /// is loaded once in `persistent` and written on every mutation.
+    disk: Arc<Mutex<Option<rusqlite::Connection>>>,
 }
 
 impl Default for AniListCache {
@@ -29,6 +35,131 @@ impl AniListCache {
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
             insert_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            disk: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// A cache backed by a SQLite file. Every cold launch used to refetch
+    /// every home row (user list per status, trending, discover, profile,
+    /// schedule: a dozen requests in the first second against AniList's
+    /// 90/min cap, 30/min in its degraded mode) because the previous
+    /// process's cache died with it; the Swift home snapshot hid the
+    /// latency but saved none of the requests. Rows are reloaded with
+    /// their TTL recomputed from when they were stored, so a row that was
+    /// fresh for another hour when the app quit is still fresh for that
+    /// hour, and one older than TTL plus `STALE_GRACE` is dropped.
+    pub fn persistent(path: &std::path::Path) -> Self {
+        let cache = Self::new();
+        let conn = match rusqlite::Connection::open(path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("catalog cache: could not open {}: {e}; running in memory only", path.display());
+                return cache;
+            }
+        };
+        let setup = conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS entries (
+                 key TEXT PRIMARY KEY,
+                 cmd TEXT NOT NULL,
+                 value TEXT NOT NULL,
+                 stored_at INTEGER NOT NULL
+             );",
+        );
+        if let Err(e) = setup {
+            log::warn!("catalog cache: schema setup failed: {e}; running in memory only");
+            return cache;
+        }
+        let now_unix = unix_now();
+        let now = Instant::now();
+        let mut loaded = 0usize;
+        let mut dropped = Vec::new();
+        {
+            let mut stmt = match conn.prepare("SELECT key, cmd, value, stored_at FROM entries") {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("catalog cache: read failed: {e}; running in memory only");
+                    return cache;
+                }
+            };
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?))
+            });
+            let Ok(rows) = rows else { return cache };
+            let mut entries = cache.entries.lock().unwrap();
+            for row in rows.flatten() {
+                let (key, cmd, value, stored_at) = row;
+                let age = Duration::from_secs(now_unix.saturating_sub(stored_at).max(0) as u64);
+                let ttl = Self::ttl(&cmd);
+                if age >= ttl + STALE_GRACE {
+                    dropped.push(key);
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<Value>(&value) else {
+                    dropped.push(key);
+                    continue;
+                };
+                // Instant has no past: an already-expired row (still inside
+                // the stale grace) gets an expiry of "now", which `get`
+                // treats as expired and `get_stale` still serves.
+                let expires = if age < ttl { now + (ttl - age) } else { now };
+                entries.insert(key, (value, expires));
+                loaded += 1;
+            }
+        }
+        for key in &dropped {
+            let _ = conn.execute("DELETE FROM entries WHERE key = ?1", rusqlite::params![key]);
+        }
+        log::info!(
+            "catalog cache: loaded {loaded} rows from {} ({} expired rows dropped)",
+            path.display(),
+            dropped.len()
+        );
+        *cache.disk.lock().unwrap() = Some(conn);
+        cache
+    }
+
+    fn disk_put(&self, key: &str, cmd: &str, value: &Value) {
+        let guard = self.disk.lock().unwrap();
+        let Some(conn) = guard.as_ref() else { return };
+        let Ok(text) = serde_json::to_string(value) else { return };
+        if let Err(e) = conn.execute(
+            "INSERT INTO entries (key, cmd, value, stored_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET cmd = excluded.cmd, value = excluded.value, stored_at = excluded.stored_at",
+            rusqlite::params![key, cmd, text, unix_now()],
+        ) {
+            log::warn!("catalog cache: write failed for {key}: {e}");
+        }
+    }
+
+    /// Rewrites a row's value in place after an in-memory patch
+    /// (`update_user_list_progress`, `remove_from_user_list_by_entry_id`)
+    /// without touching `stored_at`, so the patch does not extend the row's
+    /// life.
+    fn disk_patch(&self, key: &str, value: &Value) {
+        let guard = self.disk.lock().unwrap();
+        let Some(conn) = guard.as_ref() else { return };
+        let Ok(text) = serde_json::to_string(value) else { return };
+        let _ = conn.execute(
+            "UPDATE entries SET value = ?2 WHERE key = ?1",
+            rusqlite::params![key, text],
+        );
+    }
+
+    fn disk_delete_prefix(&self, prefix: &str) {
+        let guard = self.disk.lock().unwrap();
+        let Some(conn) = guard.as_ref() else { return };
+        let _ = conn.execute(
+            "DELETE FROM entries WHERE key = ?1 OR key LIKE ?2",
+            rusqlite::params![prefix, format!("{prefix}|%")],
+        );
+    }
+
+    fn disk_delete_keys(&self, keys: &[String]) {
+        let guard = self.disk.lock().unwrap();
+        let Some(conn) = guard.as_ref() else { return };
+        for key in keys {
+            let _ = conn.execute("DELETE FROM entries WHERE key = ?1", rusqlite::params![key]);
         }
     }
 
@@ -116,6 +247,7 @@ impl AniListCache {
     pub fn set(&self, key: String, value: Value, cmd: &str) {
         let ttl = Self::ttl(cmd);
         let expires = Instant::now() + ttl;
+        self.disk_put(&key, cmd, &value);
         let mut entries = self.entries.lock().unwrap();
         entries.insert(key, (value, expires));
         drop(entries);
@@ -129,6 +261,8 @@ impl AniListCache {
     pub fn invalidate(&self, cmd_prefix: &str) {
         let mut entries = self.entries.lock().unwrap();
         entries.retain(|k, _| !k.starts_with(cmd_prefix));
+        drop(entries);
+        self.disk_delete_prefix(cmd_prefix);
     }
 
     pub fn update_user_list_progress(&self, media_id: i64, new_progress: Option<i64>, new_status: Option<&str>, new_score: Option<f64>) {
@@ -141,10 +275,16 @@ impl AniListCache {
             "get_smart_playlist",
             "search_media",
         ];
+        let mut touched = Vec::new();
         for (key, (value, _)) in entries.iter_mut() {
             if relevant_prefixes.iter().any(|p| key.starts_with(p)) {
                 update_media_in_value(value, media_id, new_progress, new_status, new_score);
+                touched.push((key.clone(), value.clone()));
             }
+        }
+        drop(entries);
+        for (key, value) in &touched {
+            self.disk_patch(key, value);
         }
     }
 
@@ -189,19 +329,32 @@ impl AniListCache {
             "get_smart_playlist",
             "search_media",
         ];
+        let mut touched = Vec::new();
         for (key, (value, _)) in entries.iter_mut() {
             if relevant_prefixes.iter().any(|p| key.starts_with(p)) {
                 remove_media_in_value(value, entry_id);
+                touched.push((key.clone(), value.clone()));
             }
+        }
+        drop(entries);
+        for (key, value) in &touched {
+            self.disk_patch(key, value);
         }
     }
 
     pub fn prune(&self) {
         let mut entries = self.entries.lock().unwrap();
         let now = Instant::now();
+        let mut removed = Vec::new();
         // Expired entries live on for STALE_GRACE as degraded-mode fallbacks
         // (see get_stale); only truly ancient ones get dropped here.
-        entries.retain(|_, (_, expires)| now < *expires + STALE_GRACE);
+        entries.retain(|k, (_, expires)| {
+            let keep = now < *expires + STALE_GRACE;
+            if !keep {
+                removed.push(k.clone());
+            }
+            keep
+        });
         while entries.len() > MAX_ENTRIES {
             let oldest_key = entries
                 .iter()
@@ -209,11 +362,21 @@ impl AniListCache {
                 .map(|(k, _)| k.clone());
             if let Some(key) = oldest_key {
                 entries.remove(&key);
+                removed.push(key);
             } else {
                 break;
             }
         }
+        drop(entries);
+        self.disk_delete_keys(&removed);
     }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn update_media_in_value(
@@ -454,5 +617,59 @@ mod tests {
             (serde_json::json!(1), Instant::now() - Duration::from_secs(1)),
         );
         assert_eq!(cache.get(&key), None);
+    }
+
+    #[test]
+    fn persistent_cache_survives_a_restart_and_mirrors_invalidation() {
+        let dir = std::env::temp_dir().join(format!("anicat-catalog-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("catalog-cache.sqlite");
+
+        let first = AniListCache::persistent(&path);
+        let trending = AniListCache::key("get_trending", &[("type", "ANIME")]);
+        let list = AniListCache::key("get_user_list", &[("user", "thomas"), ("status", "CURRENT")]);
+        first.set(trending.clone(), serde_json::json!([{"id": 1}]), "get_trending");
+        first.set(list.clone(), serde_json::json!([{"id": 2}]), "get_user_list");
+        drop(first);
+
+        // A second process: rows come back fresh, since their TTLs (6h and
+        // 15min) are nowhere near up.
+        let second = AniListCache::persistent(&path);
+        assert_eq!(second.get(&trending), Some(serde_json::json!([{"id": 1}])));
+        assert_eq!(second.get(&list), Some(serde_json::json!([{"id": 2}])));
+
+        // Invalidation reaches the file, or the next launch would resurrect
+        // a list the user just changed.
+        second.invalidate("get_user_list");
+        drop(second);
+        let third = AniListCache::persistent(&path);
+        assert_eq!(third.get(&list), None);
+        assert_eq!(third.get(&trending), Some(serde_json::json!([{"id": 1}])));
+
+        // A row stored longer ago than TTL + STALE_GRACE is dropped on load;
+        // one past TTL but inside the grace is served only as stale.
+        {
+            let guard = third.disk.lock().unwrap();
+            let conn = guard.as_ref().unwrap();
+            let ancient = unix_now() - (6 * 3600 + 24 * 3600 + 60);
+            let expired = unix_now() - (6 * 3600 + 60);
+            conn.execute(
+                "UPDATE entries SET stored_at = ?1 WHERE key = ?2",
+                rusqlite::params![expired, trending],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO entries (key, cmd, value, stored_at) VALUES ('get_seasonal|x', 'get_seasonal', '[]', ?1)",
+                rusqlite::params![ancient],
+            )
+            .unwrap();
+        }
+        drop(third);
+        let fourth = AniListCache::persistent(&path);
+        assert_eq!(fourth.get(&trending), None);
+        assert_eq!(fourth.get_stale(&trending), Some(serde_json::json!([{"id": 1}])));
+        assert_eq!(fourth.get_stale("get_seasonal|x"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

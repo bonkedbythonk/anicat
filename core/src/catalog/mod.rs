@@ -30,10 +30,21 @@ pub struct Catalogs {
 
 impl Catalogs {
     pub fn new(http: reqwest::Client, anilist_token: Option<String>, tmdb_key: Option<String>) -> Self {
+        Self::with_cache(http, anilist_token, tmdb_key, AniListCache::new())
+    }
+
+    /// `cache` is `AniListCache::persistent(..)` in the app and the plain
+    /// in-memory one in tests.
+    pub fn with_cache(
+        http: reqwest::Client,
+        anilist_token: Option<String>,
+        tmdb_key: Option<String>,
+        cache: AniListCache,
+    ) -> Self {
         Self {
             anilist: Arc::new(AniListClient::new(http.clone(), anilist_token)),
             tmdb: Arc::new(TmdbClient::new(http, tmdb_key)),
-            cache: Arc::new(AniListCache::new()),
+            cache: Arc::new(cache),
         }
     }
 

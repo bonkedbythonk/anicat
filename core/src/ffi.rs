@@ -447,7 +447,16 @@ impl AnicatEngine {
         let registry = Registry::open(&dir.join("registry.sqlite"))
             .map_err(|msg| AnicatError::Storage { msg })?;
         Ok(Arc::new(Self {
-            catalogs: Catalogs::new(http.clone(), anilist_token, tmdb_key),
+            // Its own file, not a registry table: it is disposable, it can
+            // grow to tens of megabytes of JSON, and it must never be part
+            // of what "wipe the registry" touches or what a registry
+            // migration has to carry.
+            catalogs: Catalogs::with_cache(
+                http.clone(),
+                anilist_token,
+                tmdb_key,
+                AniListCache::persistent(&dir.join("catalog-cache.sqlite")),
+            ),
             registry,
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),

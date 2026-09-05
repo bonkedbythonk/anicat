@@ -1271,21 +1271,70 @@ impl TorrentManager {
         // consecutive healthy resolves, to the millisecond. Checking a stats
         // snapshot is cheap; the grace budget above is unchanged.
         const PEER_POLL: std::time::Duration = std::time::Duration::from_millis(150);
-        let grace_start = std::time::Instant::now();
+        // A torrent whose file is already in the cache directory (the
+        // episode played before, in a previous process) is hash-checked
+        // before it goes live, and until then `stats().live` is `None`.
+        // That read as "no peers" here, so every replay of a cached episode
+        // after a restart was declared dead at the grace line and fell
+        // through to a *different* release, downloaded from scratch:
+        // observed as four copies of one episode in the cache, 4.6 GB, and
+        // three consecutive launches each "failing" the release that had
+        // streamed fine the launch before. The grace clock starts when the
+        // torrent reaches `Live`; the check itself gets its own, longer
+        // budget, since a 1.4 GB file takes several seconds to hash.
+        const CHECK_BUDGET: std::time::Duration = std::time::Duration::from_secs(90);
+        // The file is already complete on disk (this episode played to the
+        // end in an earlier process and the cache kept it). A finished
+        // torrent has nothing left to request, so librqbit connects to
+        // nobody, and waiting for a peer here meant the one case that could
+        // play instantly from disk was the one declared dead: three
+        // consecutive launches each rejected the release that had streamed
+        // the launch before, and the cache filled with a fresh copy from a
+        // different release every time. Nothing to wait for; the read
+        // below verifies the bytes are really there.
+        let wanted_len = handle
+            .with_metadata(|m| m.file_infos.get(file_id).map(|f| f.len))
+            .ok()
+            .flatten();
+        let complete_on_disk = match (wanted_len, handle.stats().file_progress.get(file_id)) {
+            (Some(len), Some(done)) => len > 0 && *done >= len,
+            _ => false,
+        };
+        if complete_on_disk {
+            log::info!("[resolve] torrent {} file {} already complete on disk, skipping the peer wait", handle.id(), file_id);
+        }
+        let check_start = std::time::Instant::now();
+        let mut grace_start: Option<std::time::Instant> = None;
         loop {
-            let live = handle
-                .stats()
-                .live
-                .map(|l| l.snapshot.peer_stats.live)
-                .unwrap_or(0);
+            if complete_on_disk {
+                break;
+            }
+            let stats = handle.stats();
+            let checking = matches!(stats.state, librqbit::TorrentStatsState::Initializing);
+            let live = stats.live.map(|l| l.snapshot.peer_stats.live).unwrap_or(0);
             if live > 0 {
                 break;
             }
-            if grace_start.elapsed() >= PEER_GRACE {
-                stages.peers_ms = stages.take();
-                return Err("no seeders (no peers connected)".to_string());
+            if checking {
+                if check_start.elapsed() >= CHECK_BUDGET {
+                    stages.peers_ms = stages.take();
+                    return Err("still hash-checking cached data after 90s".to_string());
+                }
+            } else {
+                let started = *grace_start.get_or_insert_with(std::time::Instant::now);
+                if started.elapsed() >= PEER_GRACE {
+                    stages.peers_ms = stages.take();
+                    return Err("no seeders (no peers connected)".to_string());
+                }
             }
             tokio::time::sleep(PEER_POLL).await;
+        }
+        if check_start.elapsed() > std::time::Duration::from_secs(1) {
+            log::info!(
+                "[resolve] torrent {} spent {}ms hash-checking cached data before going live",
+                handle.id(),
+                check_start.elapsed().as_millis()
+            );
         }
 
         stages.peers_ms = stages.take();
@@ -1446,6 +1495,16 @@ impl TorrentManager {
         // enough that another candidate is worth trying.
         const NEEDS_TO_FINISH_WITHIN_SECS: f64 = 30.0 * 60.0;
         let required_bps = file_len as f64 / NEEDS_TO_FINISH_WITHIN_SECS;
+
+        // Nothing left to download means nothing to measure: the whole
+        // question this gate asks is whether the swarm can keep ahead of
+        // playback, and for a file already complete on disk the answer does
+        // not depend on the swarm at all. Sampled anyway, it read 0 KB/s
+        // and rejected every fully cached episode as "too slow".
+        if complete_on_disk {
+            stages.throughput_ms = stages.take();
+            return Ok(());
+        }
 
         // Two samples, not one: right after a network hiccup (the machine
         // waking from sleep, Wi-Fi reassociating, a VPN reconnect) a swarm's

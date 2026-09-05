@@ -27,14 +27,8 @@ let package = Package(
             path: "Frameworks/AnicatCore.xcframework"
         ),
         .target(
-            name: "anicat_coreFFI",
-            dependencies: ["AnicatCore"],
-            path: "Sources/anicat_coreFFI",
-            publicHeadersPath: "include"
-        ),
-        .target(
             name: "AnicatCoreKit",
-            dependencies: ["AnicatCore", "anicat_coreFFI"],
+            dependencies: ["AnicatCore"],
             path: "Sources/AnicatCoreKit",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
@@ -54,7 +48,8 @@ let package = Package(
             path: "Sources/AnicatUI",
             resources: [
                 .copy("Resources/Shaders"),
-                .process("Resources/Images")
+                .process("Resources/Images"),
+                .copy("Resources/Fonts")
             ]
         ),
         .executableTarget(

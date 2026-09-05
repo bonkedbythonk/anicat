@@ -62,9 +62,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
 </dict>
 </plist>
 PLIST
+
+if [ -d "$SRC/Sources/AnicatUI/Resources/Fonts" ]; then
+    mkdir -p "$APP/Contents/Resources/Fonts"
+    cp -R "$SRC/Sources/AnicatUI/Resources/Fonts/"* "$APP/Contents/Resources/Fonts/"
+fi
 
 echo "=== Vendoring libmpv's dependency closure ==="
 # -od: overwrite existing deps in the bundle. -b: fix the main binary too.

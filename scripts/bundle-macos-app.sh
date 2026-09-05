@@ -27,6 +27,11 @@ if [ -d "$RESOURCES" ]; then
     cp -R "$RESOURCES" "$APP_DIR/Contents/Resources/"
 fi
 
+if [ -d "$ROOT/AnicatApple/Sources/AnicatUI/Resources/Fonts" ]; then
+    mkdir -p "$APP_DIR/Contents/Resources/Fonts"
+    cp -R "$ROOT/AnicatApple/Sources/AnicatUI/Resources/Fonts/"* "$APP_DIR/Contents/Resources/Fonts/"
+fi
+
 cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,6 +57,8 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
     <!-- The Ink & Index skin is dark-only; without this the bundle inherits
          the system appearance and SumiTheme's dynamic colours resolve to the
          washi-paper light palette on a Mac set to Light. -->

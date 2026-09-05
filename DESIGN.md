@@ -18,11 +18,11 @@ colors:
   warning-light: "#facc15"
 typography:
   body:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif"
+    fontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace"
+    fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Monaco, Menlo, monospace"
     fontSize: "11.5px"
     fontWeight: 400
     letterSpacing: "0.08em"
@@ -93,10 +93,10 @@ Near-monochrome ink/paper neutrals carry the interface; one cool accent is the e
 
 ## Typography
 
-**Body Font:** `-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif` — SF Pro first so macOS reads as fully native; Inter is the cross-platform fallback.
-**Label/Mono Font:** `ui-monospace, "SF Mono", Menlo, monospace`.
+**Body Font:** `'Geist', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif` — Geist provides an architectural, clean Swiss archival feel; system sans provides native platform fallbacks, with Hiragino Sans / Noto Sans JP ensuring CJK optical balance.
+**Label/Mono Font:** `'IBM Plex Mono', ui-monospace, "SF Mono", Monaco, Menlo, monospace` — IBM Selectric-inspired typewriter DNA for the library card catalog and stamped ledger metadata.
 
-**Character:** System sans for everything read as prose or a label; mono is reserved entirely for state metadata, giving it a distinct, slightly technical register from surrounding UI text.
+**Character:** Archival sans for everything read as prose or a label; monospace is reserved entirely for state metadata, giving it a distinct, mechanical register like a physical date-stamp on an index card.
 
 ### Hierarchy
 - **Body** (400, inherit size, 1.5 line-height): default UI text, sentence case throughout — titles and buttons never go uppercase.

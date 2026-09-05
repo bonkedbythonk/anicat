@@ -179,7 +179,19 @@ public final class AppModel: @unchecked Sendable {
         lastDiscordPaused = discordPaused
         hasAdvancedAniListForCurrentEpisode = false
         hasAutoAdvancedEpisode = false
+        hasPreloadedNextEpisode = false
     }
+    // One speculative resolve of the next episode per episode session, see
+    // `nextEpisodePreloadPct`.
+    private var hasPreloadedNextEpisode = false
+    // Where in the current episode the next one is resolved ahead of time.
+    // Far enough from the end that a cold resolve (search, race, pre-buffer;
+    // 2 to 10 s, more on a slow swarm) has landed before auto-next fires at
+    // `autoAdvanceRemainingSeconds`, and past the point where most viewers
+    // who are going to stop have stopped, so the second download slot is
+    // not spent on episodes nobody reaches. On a 24 min episode this is
+    // 6 min of headroom.
+    private static let nextEpisodePreloadPct: Double = 75.0
     // Same 85% line the Tauri build's `commands/playback.rs` uses for
     // "watched" — kept in sync with it, not derived from anything else.
     private static let watchedThresholdPct: Double = 85.0
@@ -382,9 +394,59 @@ public final class AppModel: @unchecked Sendable {
     /// Jumps straight to an arbitrary episode number from the player's
     /// episode list, rather than stepping one at a time like
     /// `playAdjacentEpisode`.
+    /// The episode list of the title that is *playing*, as opposed to
+    /// `selectedEpisodes`, which belongs to whatever detail page is open.
+    /// The two used to be one array, on the assumption that the playing
+    /// title is always the open page. It is not: a play from the Up Next
+    /// shelf opens no page at all (so next/prev, auto-next and the preload
+    /// had an empty list and did nothing), and the mini-player lets a
+    /// different title's page open mid-episode (so "next" looked the current
+    /// episode number up in another show's list).
+    public private(set) var playbackEpisodes: [MediaDetailView.EpisodeItem] = []
+    private var playbackEpisodesCatalogId: Int64?
+
+    static func episodeItems(from d: MediaDetail) -> [MediaDetailView.EpisodeItem] {
+        d.episodes.map { e in
+            MediaDetailView.EpisodeItem(
+                id: Int64(e.number),
+                number: Int(e.number),
+                title: e.title,
+                thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
+                isWatched: e.isWatched,
+                progressPercent: e.progressPercent,
+                synopsis: e.synopsis,
+                airDate: e.airDate,
+                runtimeMinutes: e.runtimeMinutes.map(Int.init)
+            )
+        }
+        .sorted { $0.number < $1.number }
+    }
+
+    /// Points `playbackEpisodes` at the right list for `catalogId`: the open
+    /// page's list when it is the same title, otherwise a fetch (served from
+    /// the engine's hour-long detail cache on any title opened recently).
+    /// The fetch runs alongside the resolve rather than ahead of it, and
+    /// the navigation state is recomputed when it lands.
+    private func ensurePlaybackEpisodes(for catalogId: Int64, engine: AnicatEngine) {
+        if selectedMediaDetails?.id == catalogId, !selectedEpisodes.isEmpty {
+            playbackEpisodes = selectedEpisodes
+            playbackEpisodesCatalogId = catalogId
+            return
+        }
+        guard playbackEpisodesCatalogId != catalogId || playbackEpisodes.isEmpty else { return }
+        playbackEpisodes = []
+        playbackEpisodesCatalogId = catalogId
+        Task { [weak self] in
+            guard let detail = try? await engine.mediaDetail(catalogId: catalogId, isManga: false) else { return }
+            guard let self, self.currentPlaybackCatalogId == catalogId else { return }
+            self.playbackEpisodes = Self.episodeItems(from: detail)
+            self.updateEpisodeNavigationState()
+        }
+    }
+
     public func playSelectedEpisode(_ number: Int) async {
         guard let catalogId = currentPlaybackCatalogId else { return }
-        guard selectedEpisodes.contains(where: { $0.number == number }) else { return }
+        guard playbackEpisodes.contains(where: { $0.number == number }) else { return }
         do {
             _ = try await resolveAndPlay(
                 catalog: currentPlaybackCatalog,
@@ -396,15 +458,12 @@ public final class AppModel: @unchecked Sendable {
         }
     }
 
-    /// Advances or rewinds one entry in `selectedEpisodes` from whatever is
-    /// currently playing. `selectedEpisodes` is only ever populated for the
-    /// title whose detail page is open, which is also the only title that
-    /// can be playing — same assumption `handlePlaybackPositionChange` and
-    /// friends already make against `currentPlaybackCatalogId`.
+    /// Advances or rewinds one entry in `playbackEpisodes` from whatever is
+    /// currently playing.
     public func playAdjacentEpisode(offset: Int) async {
         guard let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode else { return }
-        let sorted = selectedEpisodes.sorted { $0.number < $1.number }
+        let sorted = playbackEpisodes
         guard let index = sorted.firstIndex(where: { $0.number == Int(episode) }) else { return }
         let targetIndex = index + offset
         guard sorted.indices.contains(targetIndex) else { return }
@@ -421,11 +480,11 @@ public final class AppModel: @unchecked Sendable {
     }
 
     /// Recomputes whether the player's next/prev buttons have anywhere to
-    /// go, against `selectedEpisodes` — called after every episode change
-    /// since that list (and the current position within it) is the only
-    /// thing that decides it.
+    /// go, against `playbackEpisodes` — called after every episode change
+    /// and whenever that list arrives, since it (and the current position
+    /// within it) is the only thing that decides it.
     private func updateEpisodeNavigationState() {
-        let sorted = selectedEpisodes.sorted { $0.number < $1.number }
+        let sorted = playbackEpisodes
         playerController.episodeList = sorted
         guard let episode = currentPlaybackEpisode else {
             playerController.hasNextEpisode = false
@@ -951,19 +1010,7 @@ public final class AppModel: @unchecked Sendable {
                 d = try await engine.mediaDetail(catalogId: id, isManga: !isManga)
             }
             if Task.isCancelled { return }
-            let episodes = d.episodes.map { e in
-                MediaDetailView.EpisodeItem(
-                    id: Int64(e.number),
-                    number: Int(e.number),
-                    title: e.title,
-                    thumbnailURL: e.thumbnail.flatMap(URL.init(string:)),
-                    isWatched: e.isWatched,
-                    progressPercent: e.progressPercent,
-                    synopsis: e.synopsis,
-                    airDate: e.airDate,
-                    runtimeMinutes: e.runtimeMinutes.map(Int.init)
-                )
-            }
+            let episodes = Self.episodeItems(from: d)
             var chapters: [MediaDetailView.MangaChapterItem] = []
             // `mangaChapters` only ever searches MangaDex, which carries
             // manga/manhwa/manhua — never prose light novels. Sending a
@@ -1008,7 +1055,12 @@ public final class AppModel: @unchecked Sendable {
                 )
             }
 
-            self.selectedEpisodes = episodes.sorted(by: { $0.number < $1.number })
+            self.selectedEpisodes = episodes
+            if currentPlaybackCatalogId == id {
+                playbackEpisodes = episodes
+                playbackEpisodesCatalogId = id
+                updateEpisodeNavigationState()
+            }
             self.selectedMangaChapters = chapters
             self.selectedRelations = relations
             self.selectedRecommendations = recommendations
@@ -1882,6 +1934,42 @@ public final class AppModel: @unchecked Sendable {
             }
         }
 
+        // Resolve the next episode into the second selected-file slot before
+        // it is needed. Without this every auto-next was a cold resolve, a
+        // black gap between episodes for as long as search plus pre-buffer
+        // took. The result is not read here; the real play hits the reuse
+        // path in `TorrentManager::resolve`. `preload: true` keeps it from
+        // taking the playing-file pin off the episode mpv is reading.
+        if currentPlaybackCatalog == .anilist, !hasPreloadedNextEpisode, dur > 0,
+           playerController.hasNextEpisode,
+           Double(stopTime) / Double(dur) * 100 >= Self.nextEpisodePreloadPct {
+            hasPreloadedNextEpisode = true
+            let sorted = playbackEpisodes
+            if let index = sorted.firstIndex(where: { $0.number == Int(episode) }),
+               sorted.indices.contains(index + 1) {
+                let next = Int64(sorted[index + 1].number)
+                let req = StreamRequest(
+                    catalog: .anilist,
+                    catalogId: catalogId,
+                    episode: next,
+                    title: currentPlaybackTitle,
+                    preferDub: UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed",
+                    chosenName: nil,
+                    resumeFraction: nil,
+                    preload: true
+                )
+                Task.detached(priority: .utility) {
+                    do {
+                        _ = try await engine.resolveStream(req: req)
+                    } catch {
+                        // A failed preload costs nothing visible: the real
+                        // play resolves cold exactly as it did before.
+                        print("[preload] episode \(next) not preloaded: \(error)")
+                    }
+                }
+            }
+        }
+
         // Auto-play-next: same near-end-of-duration check as the watched
         // threshold above, gated on the setting and on there being a next
         // episode at all. `playAdjacentEpisode` reuses the ordinary
@@ -1902,7 +1990,7 @@ public final class AppModel: @unchecked Sendable {
         }
 
         let title = currentPlaybackTitle ?? "Anime"
-        let episodeTitle = selectedEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
+        let episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
         let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
         let catalog = currentPlaybackCatalog
 
@@ -2004,6 +2092,7 @@ public final class AppModel: @unchecked Sendable {
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode
+        ensurePlaybackEpisodes(for: catalogId, engine: engine)
         self.currentPlaybackTitle = effectiveTitle
         // A fresh play always opens full-screen, not stuck minimized from
         // whatever the last session left it as.
@@ -2034,7 +2123,7 @@ public final class AppModel: @unchecked Sendable {
             }
         }
         if initialDuration <= 0 {
-            if let ep = selectedEpisodes.first(where: { $0.number == Int(episode) }),
+            if let ep = playbackEpisodes.first(where: { $0.number == Int(episode) }),
                let runtime = ep.runtimeMinutes, runtime > 0 {
                 initialDuration = Double(runtime * 60)
             }
@@ -2096,7 +2185,7 @@ public final class AppModel: @unchecked Sendable {
         // Before returning streamURL, configure playerController with actual title, episode number, and duration
         self.playerController.title = effectiveTitle
         self.playerController.episodeNumber = Int(episode)
-        self.playerController.episodeTitle = selectedEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
+        self.playerController.episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
         self.playerController.isPlaying = true
         if self.playerController.duration <= 0 && initialDuration > 0 {
             self.playerController.duration = initialDuration
@@ -2152,7 +2241,7 @@ public final class AppModel: @unchecked Sendable {
         engine.discordSetPresence(
             title: effectiveTitle,
             episode: episode,
-            episodeTitle: selectedEpisodes.first(where: { $0.number == Int(episode) })?.title ?? "",
+            episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? "",
             totalEpisodes: Int64(selectedMediaDetails?.episodeCount ?? 0),
             pos: Int64(playerController.currentTime),
             duration: Int64(playerController.duration),
@@ -2204,6 +2293,8 @@ public final class AppModel: @unchecked Sendable {
         playerController.hasNextEpisode = false
         playerController.hasPreviousEpisode = false
         playerController.episodeList = []
+        playbackEpisodes = []
+        playbackEpisodesCatalogId = nil
         ContinuityManager.shared.stopAdvertising()
 
         Task {

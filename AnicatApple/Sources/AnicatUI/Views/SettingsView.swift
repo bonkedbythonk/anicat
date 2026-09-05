@@ -24,38 +24,14 @@ public struct SettingsView: View {
 
     // Tab Navigation
     @State private var selectedTab: SettingsTab = .general
+    @Namespace private var settingsNavNamespace
 
-    // General: Appearance
-    @AppStorage("anicat_ui_style") private var selectedStyle: String = "ink-and-index"
-    @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
-
-    // General: Advanced
-    @AppStorage("anicat_cinema_enabled") private var cinemaEnabled: Bool = false
-    @AppStorage("anicat_tmdb_token") private var tmdbToken: String = ""
-    @AppStorage("anicat_anime_provider") private var animeProvider: String = "Torrents (Nyaa)"
-    @AppStorage("anicat_manga_provider") private var mangaProvider: String = "MangaDex (Default)"
-    @AppStorage("anicat_novel_provider") private var novelProvider: String = "RanobeDB"
-    @AppStorage("anicat_media_api") private var mediaApi: String = "AniList"
-
-    // General: E-Reader
-    @AppStorage("anicat_ereader_profile") private var ereaderProfile: String = "★ Xteink X3 (528×792)"
-    @AppStorage("anicat_ereader_grayscale") private var ereaderGrayscale: Bool = true
-    @AppStorage("anicat_ereader_split_spreads") private var ereaderSplitSpreads: Bool = true
-
-    // Player
-    @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
-    @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
-    @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
-    @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
-
-    // Account & Transient State
-    @State private var anilistTokenInput: String = ""
-    @State private var disconnectConfirming: Bool = false
-    @State private var registryState: MaintenanceActionState = .idle
-    @State private var onboardingResetState: MaintenanceActionState = .idle
+    // Maintenance card's "Copy Debug Report" feedback also renders in
+    // `headerSection` above the tab rail, so it stays here rather than
+    // moving into `MaintenanceTabSection` with the rest of that tab's state.
     @State private var copyFeedback: String? = nil
 
-    private enum MaintenanceActionState {
+    enum MaintenanceActionState {
         case idle
         case confirming
         case working
@@ -103,18 +79,37 @@ public struct SettingsView: View {
                         .frame(width: 180)
 
                     // Right Column: Settings Cards
+                    // Each tab below is its own View struct rather than a
+                    // computed property inlined here: every AppStorage
+                    // toggle and confirm-flow @State (disconnect, wipe
+                    // registry, reset onboarding) used to live inside this
+                    // 1236-line body, so flipping one switch re-evaluated
+                    // all four tabs' worth of layout, not just the one
+                    // showing.
                     VStack(alignment: .leading, spacing: 20) {
                         switch selectedTab {
                         case .general:
-                            generalTab
+                            GeneralTabSection()
                         case .player:
-                            playerTab
+                            PlayerTabSection(onOpenShortcuts: onOpenShortcuts)
                         case .account:
-                            accountTab
+                            AccountTabSection(
+                                isSignedIn: isSignedIn,
+                                username: username,
+                                avatarUrl: avatarUrl,
+                                onSaveToken: onSaveToken,
+                                onDisconnectAniList: onDisconnectAniList
+                            )
                         case .maintenance:
-                            maintenanceTab
+                            MaintenanceTabSection(
+                                isSignedIn: isSignedIn,
+                                username: username,
+                                onClearRegistry: onClearRegistry,
+                                copyFeedback: $copyFeedback
+                            )
                         }
                     }
+                    .animation(.smooth, value: selectedTab)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
@@ -160,8 +155,11 @@ public struct SettingsView: View {
             ForEach(SettingsTab.allCases) { tab in
                 let isActive = selectedTab == tab
                 Button {
-                    withAnimation(.smooth) {
-                        selectedTab = tab
+                    if selectedTab != tab {
+                        SumiHaptics.selection()
+                        withAnimation(.smooth) {
+                            selectedTab = tab
+                        }
                     }
                 } label: {
                     HStack(spacing: 10) {
@@ -177,862 +175,931 @@ public struct SettingsView: View {
                     .foregroundColor(isActive ? SumiTheme.foreground : SumiTheme.muted)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(
-                        isActive
-                            ? SumiTheme.foreground.opacity(0.08)
-                            : Color.clear
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background {
+                        if isActive {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(SumiTheme.foreground.opacity(0.08))
+                                .matchedGeometryEffect(id: "settingsNavHighlight", in: settingsNavNamespace)
+                        }
+                    }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.sumiPressable)
             }
         }
+        .animation(.snappy, value: selectedTab)
     }
 
-    // MARK: - General Tab
-    private var generalTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Appearance Card
-            SettingsCard(title: "Appearance") {
-                // Style
-                SettingField(
-                    label: "Style",
-                    badge: "Coming soon",
-                    description: "Choose a complete visual skin for the interface.",
-                    isStacked: true
-                ) {
-                    HStack(spacing: 12) {
-                        // Ink & Index
-                        stylePreviewCard(
-                            id: "ink-and-index",
-                            title: "Ink & Index",
-                            subtitle: "Warm ink / Indigo accent",
-                            gradientColors: [Color(hex: "#161310"), Color(hex: "#1E1A15"), Color(hex: "#252015")],
-                            swatch1: Color(hex: "#1E1A15"),
-                            swatch1Border: Color.white.opacity(0.08),
-                            swatch2: Color(hex: "#8FB8DC").opacity(0.30),
-                            swatch2Border: Color(hex: "#8FB8DC").opacity(0.50)
-                        )
+}
 
-                        // Sakura Zen
-                        stylePreviewCard(
-                            id: "sakura-zen",
-                            title: "Sakura Zen",
-                            subtitle: "Soft pastel / Japanese editorial",
-                            gradientColors: [Color(hex: "#130910"), Color(hex: "#1A0E14"), Color(hex: "#1F1018")],
-                            swatch1: Color(hex: "#F4B4C4").opacity(0.08),
-                            swatch1Border: Color(hex: "#E8A0B4").opacity(0.20),
-                            swatch2: Color(hex: "#E8A0B4").opacity(0.25),
-                            swatch2Border: Color(hex: "#E8A0B4").opacity(0.40)
-                        )
+// MARK: - Settings Tabs
 
-                        // Retro Manga
-                        stylePreviewCard(
-                            id: "retro-manga",
-                            title: "Retro Manga",
-                            subtitle: "Halftone dot / Manga panel style",
-                            gradientColors: [Color(hex: "#191410"), Color(hex: "#241E17")],
-                            swatch1: Color(hex: "#EDE8E0"),
-                            swatch1Border: Color(hex: "#0C0A08"),
-                            swatch2: Color(hex: "#C02024"),
-                            swatch2Border: Color(hex: "#0C0A08")
-                        )
-                    }
-                }
+private struct GeneralTabSection: View {
+    @AppStorage("anicat_ui_style") private var selectedStyle: String = "ink-and-index"
+    @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
+    @AppStorage("anicat_show_fps_hud") private var showFPSHUD: Bool = true
+    @AppStorage("anicat_cinema_enabled") private var cinemaEnabled: Bool = false
+    @AppStorage("anicat_tmdb_token") private var tmdbToken: String = ""
+    @AppStorage("anicat_anime_provider") private var animeProvider: String = "Torrents (Nyaa)"
+    @AppStorage("anicat_manga_provider") private var mangaProvider: String = "MangaDex (Default)"
+    @AppStorage("anicat_novel_provider") private var novelProvider: String = "RanobeDB"
+    @AppStorage("anicat_media_api") private var mediaApi: String = "AniList"
+    @AppStorage("anicat_ereader_profile") private var ereaderProfile: String = "★ Xteink X3 (528×792)"
+    @AppStorage("anicat_ereader_grayscale") private var ereaderGrayscale: Bool = true
+    @AppStorage("anicat_ereader_split_spreads") private var ereaderSplitSpreads: Bool = true
 
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Time Format
-                SettingField(
-                    label: "Time Format",
-                    description: "How dates and times should be displayed."
-                ) {
-                    SumiDropdown(
-                        options: ["24-hour", "12-hour (AM/PM)"],
-                        selected: $selectedTimeFormat,
-                        minWidth: 160
-                    )
-                }
-            }
-
-            // Advanced Card
-            SettingsCard(
-                title: "Advanced",
-                description: "Rarely need to change these after initial setup."
+    var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+        // Appearance Card
+        SettingsCard(title: "Appearance") {
+            // Style
+            SettingField(
+                label: "Style",
+                badge: "Coming soon",
+                description: "Choose a complete visual skin for the interface.",
+                isStacked: true
             ) {
-                // Movies and series
-                SettingField(
-                    label: "Movies and series",
-                    description: "Adds a second mode for movies and series. Click the logo at the bottom of the sidebar to switch worlds. Still being built, so it has no catalogue yet."
-                ) {
-                    SumiSwitch(isOn: $cinemaEnabled)
-                }
-
-                if cinemaEnabled {
-                    Divider()
-                        .background(SumiTheme.border)
-
-                    SettingField(
-                        label: "TMDB Token",
-                        description: "Where movie and series details come from. Free from themoviedb.org, under Settings then API."
-                    ) {
-                        SecureField("Paste your read access token", text: $tmdbToken)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(SumiTheme.foreground)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(SumiTheme.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
-                            .frame(maxWidth: 240)
-                    }
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Anime Provider
-                SettingField(
-                    label: "Anime Provider",
-                    description: "Primary streaming source."
-                ) {
-                    SumiDropdown(
-                        options: ["Torrents (Nyaa)"],
-                        selected: $animeProvider,
-                        minWidth: 160
+                HStack(spacing: 12) {
+                    // Ink & Index
+                    stylePreviewCard(
+                        id: "ink-and-index",
+                        title: "Ink & Index",
+                        subtitle: "Warm ink / Indigo accent",
+                        gradientColors: [Color(hex: "#161310"), Color(hex: "#1E1A15"), Color(hex: "#252015")],
+                        swatch1: Color(hex: "#1E1A15"),
+                        swatch1Border: Color.white.opacity(0.08),
+                        swatch2: Color(hex: "#8FB8DC").opacity(0.30),
+                        swatch2Border: Color(hex: "#8FB8DC").opacity(0.50)
                     )
-                }
 
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Manga Provider
-                SettingField(
-                    label: "Manga Provider",
-                    badge: "Coming soon",
-                    description: "Source for manga chapters."
-                ) {
-                    SumiDropdown(
-                        options: ["MangaDex (Default)", "MangaKatana"],
-                        selected: $mangaProvider,
-                        minWidth: 160
+                    // Sakura Zen
+                    stylePreviewCard(
+                        id: "sakura-zen",
+                        title: "Sakura Zen",
+                        subtitle: "Soft pastel / Japanese editorial",
+                        gradientColors: [Color(hex: "#130910"), Color(hex: "#1A0E14"), Color(hex: "#1F1018")],
+                        swatch1: Color(hex: "#F4B4C4").opacity(0.08),
+                        swatch1Border: Color(hex: "#E8A0B4").opacity(0.20),
+                        swatch2: Color(hex: "#E8A0B4").opacity(0.25),
+                        swatch2Border: Color(hex: "#E8A0B4").opacity(0.40)
                     )
-                }
 
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Novel Provider
-                SettingField(
-                    label: "Light Novel Provider",
-                    badge: "Coming soon",
-                    description: "Primary index and source for light novels. RanobeDB carries the richest metadata and published volumes; the rest are web-novel sources."
-                ) {
-                    SumiDropdown(
-                        options: [
-                            "RanobeDB",
-                            "Lnori",
-                            "Syosetu (小説家になろう)",
-                            "Kakuyomu (カクヨム)",
-                            "Hameln (ハーメルン)",
-                            "Royal Road",
-                            "Baka-Tsuki"
-                        ],
-                        selected: $novelProvider,
-                        minWidth: 160
-                    )
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Search & Tracking API
-                SettingField(
-                    label: "Search & Tracking API",
-                    badge: "Coming soon",
-                    description: "Metadata and list sync source."
-                ) {
-                    SumiDropdown(
-                        options: ["AniList", "Jikan (MyAnimeList - Fallback)"],
-                        selected: $mediaApi,
-                        minWidth: 160
+                    // Retro Manga
+                    stylePreviewCard(
+                        id: "retro-manga",
+                        title: "Retro Manga",
+                        subtitle: "Halftone dot / Manga panel style",
+                        gradientColors: [Color(hex: "#191410"), Color(hex: "#241E17")],
+                        swatch1: Color(hex: "#EDE8E0"),
+                        swatch1Border: Color(hex: "#0C0A08"),
+                        swatch2: Color(hex: "#C02024"),
+                        swatch2Border: Color(hex: "#0C0A08")
                     )
                 }
             }
 
-            // CrossPoint E-Reader Optimization Card
-            SettingsCard(
-                title: "CrossPoint E-Reader Optimization",
-                badge: "Coming soon"
+            Divider()
+                .background(SumiTheme.border)
+
+            // Time Format
+            SettingField(
+                label: "Time Format",
+                description: "How dates and times should be displayed."
             ) {
-                SettingField(
-                    label: "Default E-Reader Device",
-                    description: "Pre-configures image dimensions and screen layout for your e-reader hardware."
-                ) {
-                    SumiDropdown(
-                        options: [
-                            "★ Xteink X3 (528×792)",
-                            "Xteink X4 (480×800)",
-                            "Kindle Paperwhite (1072×1448)",
-                            "Kindle Basic (600×800)",
-                            "Kobo Clara (1072×1448)",
-                            "Kobo Libra (1264×1680)",
-                            "Custom Resolution"
-                        ],
-                        selected: $ereaderProfile,
-                        minWidth: 180
-                    )
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                SettingField(
-                    label: "8-bit True Grayscale Mode (Mode L)",
-                    description: "Converts images to hardware 8-bit grayscale to eliminate dithering artifacts on e-ink."
-                ) {
-                    SumiSwitch(isOn: $ereaderGrayscale)
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                SettingField(
-                    label: "Auto-Split Landscape Double Spreads",
-                    description: "Detects wide illustration spreads (w > h * 1.15) and cuts them into Left & Right portrait pages at full height."
-                ) {
-                    SumiSwitch(isOn: $ereaderSplitSpreads)
-                }
-            }
-        }
-    }
-
-    // MARK: - Style Preview Card Helper
-    private func stylePreviewCard(
-        id: String,
-        title: String,
-        subtitle: String,
-        gradientColors: [Color],
-        swatch1: Color,
-        swatch1Border: Color,
-        swatch2: Color,
-        swatch2Border: Color
-    ) -> some View {
-        let isSelected = selectedStyle == id
-
-        return Button {
-            selectedStyle = id
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 0) {
-                    // Preview Banner
-                    ZStack(alignment: .bottom) {
-                        LinearGradient(
-                            colors: gradientColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-
-                        HStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(swatch1)
-                                .frame(height: 28)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(swatch1Border, lineWidth: 1))
-
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(swatch2)
-                                .frame(height: 28)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(swatch2Border, lineWidth: 1))
-                        }
-                        .padding(10)
-                    }
-                    .frame(height: 72)
-
-                    // Footer Info
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(SumiTheme.foreground)
-
-                        Text(subtitle)
-                            .font(.system(size: 10))
-                            .foregroundColor(SumiTheme.muted)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(SumiTheme.card)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border, lineWidth: isSelected ? 2 : 1)
+                SumiDropdown(
+                    options: ["24-hour", "12-hour (AM/PM)"],
+                    selected: $selectedTimeFormat,
+                    minWidth: 160
                 )
-                .contentShape(Rectangle())
+            }
 
-                // Blue Checkmark Badge
-                if isSelected {
-                    Circle()
-                        .fill(SumiTheme.indigo)
-                        .frame(width: 18, height: 18)
-                        .overlay(
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(Color(hex: "#161310"))
-                        )
-                        .padding(6)
-                }
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Performance HUD",
+                badge: "120Hz Debugger",
+                description: "Real-time FPS and frame hitch counter in the top-right corner. Shortcut: ⌘⇧D."
+            ) {
+                SumiSwitch(isOn: $showFPSHUD)
             }
         }
-        .buttonStyle(.plain)
-    }
 
-    // MARK: - Player Tab
-    private var playerTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Playback Card
-            SettingsCard(title: "Playback") {
-                // Sub/Dub
-                SettingField(
-                    label: "Sub/Dub",
-                    description: "Preferred audio language for streaming."
-                ) {
-                    SumiDropdown(
-                        options: ["Subtitled", "Dubbed"],
-                        selected: $subDub,
-                        minWidth: 160
-                    )
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Auto-Skip Intros
-                SettingField(
-                    label: "Auto-Skip Intros",
-                    badge: "Coming soon",
-                    description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
-                ) {
-                    SumiSwitch(isOn: $autoSkipIntro)
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // GPU Upscaling
-                SettingField(
-                    label: "GPU Upscaling",
-                    description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
-                ) {
-                    SumiSwitch(isOn: $gpuUpscaling)
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Hardware Decoding
-                SettingField(
-                    label: "Hardware Decoding",
-                    badge: "Coming soon",
-                    description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
-                ) {
-                    SumiSwitch(isOn: $hardwareDecoding)
-                }
+        // Advanced Card
+        SettingsCard(
+            title: "Advanced",
+            description: "Rarely need to change these after initial setup."
+        ) {
+            // Movies and series
+            SettingField(
+                label: "Movies and series",
+                description: "Adds a second mode for movies and series. Click the logo at the bottom of the sidebar to switch worlds. Still being built, so it has no catalogue yet."
+            ) {
+                SumiSwitch(isOn: $cinemaEnabled)
             }
 
-            // Keyboard Shortcuts Card
-            SettingsCard(title: "Keyboard Shortcuts") {
-                HStack(alignment: .center, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Cheat Sheet")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(SumiTheme.foreground)
+            if cinemaEnabled {
+                Divider()
+                    .background(SumiTheme.border)
 
-                        Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
-                            .font(.system(size: 12))
-                            .foregroundColor(SumiTheme.muted)
-                    }
-
-                    Spacer()
-
-                    if let onOpenShortcuts {
-                        Button(action: onOpenShortcuts) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "keyboard")
-                                    .font(.system(size: 11))
-                                Text("View Shortcuts")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(SumiTheme.foreground)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.04))
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Text("?")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(SumiTheme.foreground)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(SumiTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Account Tab
-    private var accountTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SettingsCard(title: "AniList") {
-                if isSignedIn {
-                    // Profile Header with Avatar & Disconnect
-                    HStack(spacing: 16) {
-                        // Avatar
-                        AsyncImage(url: avatarUrl.flatMap(URL.init(string:))) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else {
-                                ZStack {
-                                    Color(hex: "#161310")
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(SumiTheme.muted)
-                                }
-                            }
-                        }
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(username ?? "AniList User")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(SumiTheme.foreground)
-
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(SumiTheme.successLight)
-                                    .frame(width: 7, height: 7)
-
-                                Text("Connected to AniList")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(SumiTheme.successLight)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button {
-                            if disconnectConfirming {
-                                onDisconnectAniList()
-                                disconnectConfirming = false
-                            } else {
-                                disconnectConfirming = true
-                            }
-                        } label: {
-                            Text(disconnectConfirming ? "Are you sure? Click again" : "Disconnect")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(SumiTheme.dangerLight)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(SumiTheme.card)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(disconnectConfirming ? SumiTheme.danger : SumiTheme.border, lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(14)
-                    .background(Color.white.opacity(0.02))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
-
-                    Divider()
-                        .background(SumiTheme.border)
-
-                    // Status
-                    SettingField(
-                        label: "Status",
-                        description: "AniList account connection status."
-                    ) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(SumiTheme.successLight)
-                                .frame(width: 8, height: 8)
-
-                            Text("Connected")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(SumiTheme.successLight)
-                        }
-                    }
-
-                    Divider()
-                        .background(SumiTheme.border)
-
-                    // API Token
-                    SettingField(
-                        label: "API Token",
-                        description: "Your authorization token. Keep this private."
-                    ) {
-                        Text("••••••••••••••••••••••••••••••••")
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(SumiTheme.muted)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(SumiTheme.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
-                    }
-                } else {
-                    // Not signed in: Login
-                    SettingField(
-                        label: "Login",
-                        description: "Authorize Anicat to access your AniList account."
-                    ) {
-                        Button {
-                            #if os(macOS)
-                            if let url = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20822&response_type=token") {
-                                NSWorkspace.shared.open(url)
-                            }
-                            #endif
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "globe")
-                                    .font(.system(size: 13, weight: .semibold))
-                                Text("Connect AniList")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundColor(SumiTheme.indigo)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(SumiTheme.indigo.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(SumiTheme.indigo.opacity(0.30), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Divider()
-                        .background(SumiTheme.border)
-
-                    // API Token Input
-                    SettingField(
-                        label: "API Token",
-                        description: "After authorizing, paste the full URL you were redirected to (or just the token)."
-                    ) {
-                        HStack(spacing: 8) {
-                            SecureField("Paste redirect URL or token...", text: $anilistTokenInput)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .foregroundColor(SumiTheme.foreground)
-
-                            Button {
-                                let trimmed = anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !trimmed.isEmpty {
-                                    onSaveToken(trimmed)
-                                    anilistTokenInput = ""
-                                }
-                            } label: {
-                                Text("Save & Connect")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(Color(hex: "#161310"))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(SumiTheme.indigo)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .opacity(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1.0)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                SettingField(
+                    label: "TMDB Token",
+                    description: "Where movie and series details come from. Free from themoviedb.org, under Settings then API."
+                ) {
+                    SecureField("Paste your read access token", text: $tmdbToken)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                         .background(SumiTheme.background)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
-                        .frame(maxWidth: 340)
+                        .frame(maxWidth: 240)
+                }
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Anime Provider
+            SettingField(
+                label: "Anime Provider",
+                description: "Primary streaming source."
+            ) {
+                SumiDropdown(
+                    options: ["Torrents (Nyaa)"],
+                    selected: $animeProvider,
+                    minWidth: 160
+                )
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Manga Provider
+            SettingField(
+                label: "Manga Provider",
+                badge: "Coming soon",
+                description: "Source for manga chapters."
+            ) {
+                SumiDropdown(
+                    options: ["MangaDex (Default)", "MangaKatana"],
+                    selected: $mangaProvider,
+                    minWidth: 160
+                )
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Novel Provider
+            SettingField(
+                label: "Light Novel Provider",
+                badge: "Coming soon",
+                description: "Primary index and source for light novels. RanobeDB carries the richest metadata and published volumes; the rest are web-novel sources."
+            ) {
+                SumiDropdown(
+                    options: [
+                        "RanobeDB",
+                        "Lnori",
+                        "Syosetu (小説家になろう)",
+                        "Kakuyomu (カクヨム)",
+                        "Hameln (ハーメルン)",
+                        "Royal Road",
+                        "Baka-Tsuki"
+                    ],
+                    selected: $novelProvider,
+                    minWidth: 160
+                )
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Search & Tracking API
+            SettingField(
+                label: "Search & Tracking API",
+                badge: "Coming soon",
+                description: "Metadata and list sync source."
+            ) {
+                SumiDropdown(
+                    options: ["AniList", "Jikan (MyAnimeList - Fallback)"],
+                    selected: $mediaApi,
+                    minWidth: 160
+                )
+            }
+        }
+
+        // CrossPoint E-Reader Optimization Card
+        SettingsCard(
+            title: "CrossPoint E-Reader Optimization",
+            badge: "Coming soon"
+        ) {
+            SettingField(
+                label: "Default E-Reader Device",
+                description: "Pre-configures image dimensions and screen layout for your e-reader hardware."
+            ) {
+                SumiDropdown(
+                    options: [
+                        "★ Xteink X3 (528×792)",
+                        "Xteink X4 (480×800)",
+                        "Kindle Paperwhite (1072×1448)",
+                        "Kindle Basic (600×800)",
+                        "Kobo Clara (1072×1448)",
+                        "Kobo Libra (1264×1680)",
+                        "Custom Resolution"
+                    ],
+                    selected: $ereaderProfile,
+                    minWidth: 180
+                )
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "8-bit True Grayscale Mode (Mode L)",
+                description: "Converts images to hardware 8-bit grayscale to eliminate dithering artifacts on e-ink."
+            ) {
+                SumiSwitch(isOn: $ereaderGrayscale)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Auto-Split Landscape Double Spreads",
+                description: "Detects wide illustration spreads (w > h * 1.15) and cuts them into Left & Right portrait pages at full height."
+            ) {
+                SumiSwitch(isOn: $ereaderSplitSpreads)
+            }
+        }
+    }
+}
+
+// MARK: - Style Preview Card Helper
+private func stylePreviewCard(
+    id: String,
+    title: String,
+    subtitle: String,
+    gradientColors: [Color],
+    swatch1: Color,
+    swatch1Border: Color,
+    swatch2: Color,
+    swatch2Border: Color
+) -> some View {
+    let isSelected = selectedStyle == id
+
+    return Button {
+        selectedStyle = id
+    } label: {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                // Preview Banner
+                ZStack(alignment: .bottom) {
+                    LinearGradient(
+                        colors: gradientColors,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(swatch1)
+                            .frame(height: 28)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(swatch1Border, lineWidth: 1))
+
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(swatch2)
+                            .frame(height: 28)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(swatch2Border, lineWidth: 1))
                     }
+                    .padding(10)
+                }
+                .frame(height: 72)
+
+                // Footer Info
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(SumiTheme.foreground)
+
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundColor(SumiTheme.muted)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(SumiTheme.card)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border, lineWidth: isSelected ? 2 : 1)
+            )
+            .contentShape(Rectangle())
+
+            // Blue Checkmark Badge
+            if isSelected {
+                Circle()
+                    .fill(SumiTheme.indigo)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(Color(hex: "#161310"))
+                    )
+                    .padding(6)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+    }
+    .buttonStyle(.sumiPressable)
+    .animation(.snappy, value: isSelected)
+}
+
+}
+
+private struct PlayerTabSection: View {
+    let onOpenShortcuts: (() -> Void)?
+
+    @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
+    @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
+    @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
+    @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
+
+    var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+        // Playback Card
+        SettingsCard(title: "Playback") {
+            // Sub/Dub
+            SettingField(
+                label: "Sub/Dub",
+                description: "Preferred audio language for streaming."
+            ) {
+                SumiDropdown(
+                    options: ["Subtitled", "Dubbed"],
+                    selected: $subDub,
+                    minWidth: 160
+                )
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Auto-Skip Intros
+            SettingField(
+                label: "Auto-Skip Intros",
+                description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
+            ) {
+                SumiSwitch(isOn: $autoSkipIntro)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // GPU Upscaling
+            SettingField(
+                label: "GPU Upscaling",
+                description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
+            ) {
+                SumiSwitch(isOn: $gpuUpscaling)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Hardware Decoding
+            SettingField(
+                label: "Hardware Decoding",
+                description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
+            ) {
+                SumiSwitch(isOn: $hardwareDecoding)
+            }
+        }
+
+        // Keyboard Shortcuts Card
+        SettingsCard(title: "Keyboard Shortcuts") {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cheat Sheet")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(SumiTheme.foreground)
+
+                    Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.muted)
                 }
 
-                // Status Diagnostics Box
-                VStack(spacing: 7) {
-                    diagnosticRow(label: "Token saved", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
-                    diagnosticRow(label: "Backend connected", value: "yes", isGood: true)
-                    diagnosticRow(label: "AniList validated", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
-                    if let username, !username.isEmpty {
-                        diagnosticRow(label: "Signed in as", value: username, isGood: true, highlightColor: SumiTheme.indigo)
+                Spacer()
+
+                if let onOpenShortcuts {
+                    Button(action: onOpenShortcuts) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "keyboard")
+                                .font(.system(size: 11))
+                            Text("View Shortcuts")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
                     }
+                    .buttonStyle(.sumiPressable)
+                } else {
+                    Text("?")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                }
+            }
+        }
+    }
+}
+
+}
+
+private struct AccountTabSection: View {
+    let isSignedIn: Bool
+    let username: String?
+    let avatarUrl: String?
+    let onSaveToken: (String) -> Void
+    let onDisconnectAniList: () -> Void
+
+    @State private var anilistTokenInput: String = ""
+    @State private var disconnectConfirming: Bool = false
+
+    var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+        SettingsCard(title: "AniList") {
+            if isSignedIn {
+                // Profile Header with Avatar & Disconnect
+                HStack(spacing: 16) {
+                    // Avatar
+                    AsyncImage(url: avatarUrl.flatMap(URL.init(string:))) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            ZStack {
+                                Color(hex: "#161310")
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(SumiTheme.muted)
+                            }
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(username ?? "AniList User")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(SumiTheme.successLight)
+                                .frame(width: 7, height: 7)
+
+                            Text("Connected to AniList")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(SumiTheme.successLight)
+                        }
+                    }
+
+                    Spacer()
+
+                    Button {
+                        if disconnectConfirming {
+                            onDisconnectAniList()
+                            disconnectConfirming = false
+                        } else {
+                            disconnectConfirming = true
+                        }
+                    } label: {
+                        Text(disconnectConfirming ? "Are you sure? Click again" : "Disconnect")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(SumiTheme.dangerLight)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(SumiTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(disconnectConfirming ? SumiTheme.danger : SumiTheme.border, lineWidth: 1)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .animation(.snappy, value: disconnectConfirming)
                 }
                 .padding(14)
                 .background(Color.white.opacity(0.02))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 10)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
-            }
-        }
-    }
 
-    private func diagnosticRow(label: String, value: String, isGood: Bool, highlightColor: Color? = nil) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(SumiTheme.muted)
+                Divider()
+                    .background(SumiTheme.border)
 
-            Spacer()
+                // Status
+                SettingField(
+                    label: "Status",
+                    description: "AniList account connection status."
+                ) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(SumiTheme.successLight)
+                            .frame(width: 8, height: 8)
 
-            Text(value)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(highlightColor ?? (isGood ? SumiTheme.successLight : SumiTheme.muted.opacity(0.6)))
-        }
-    }
+                        Text("Connected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.successLight)
+                    }
+                }
 
-    // MARK: - Maintenance Tab
-    private var maintenanceTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Updates Card
-            SettingsCard(title: "Updates", description: "Keep the app up to date.") {
-                HStack {
-                    Text("Current version:")
-                        .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.muted)
+                Divider()
+                    .background(SumiTheme.border)
 
-                    Text("1.0.0 (Native Apple Silicon ARM64)")
+                // API Token
+                SettingField(
+                    label: "API Token",
+                    description: "Your authorization token. Keep this private."
+                ) {
+                    Text("••••••••••••••••••••••••••••••••")
                         .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(SumiTheme.foreground)
-                }
-
-                // No update mechanism exists in the native build yet — a
-                // fake "checking" spinner that always reports up to date is
-                // worse than no button, since it reads as a real check.
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 12))
                         .foregroundColor(SumiTheme.muted)
-                    Text("Update checking isn't available yet in the native build.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(SumiTheme.muted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(SumiTheme.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.02))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-            }
-
-            // Logs & Debugging Card
-            SettingsCard(title: "Logs & Debugging") {
-                Button {
-                    #if os(macOS)
-                    let report = """
-                    Anicat Version: 1.0.0 (Native Apple Silicon ARM64)
-                    Platform: macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
-                    Architecture: arm64
-                    Signed In: \(isSignedIn)
-                    AniList Viewer: \(username ?? "None")
-                    Anime4K Upscaling: \(gpuUpscaling ? "Enabled" : "Disabled")
-                    Timestamp: \(Date())
-                    """
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(report, forType: .string)
-                    withAnimation(.snappy) {
-                        copyFeedback = "Debug report copied to clipboard!"
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        withAnimation(.snappy) {
-                            copyFeedback = nil
+            } else {
+                // Not signed in: Login
+                SettingField(
+                    label: "Login",
+                    description: "Authorize Anicat to access your AniList account."
+                ) {
+                    Button {
+                        #if os(macOS)
+                        // Must match the client id the web build registers
+                        // in web/src-tauri/src/commands/auth.rs — this one
+                        // was wrong (20822 belongs to a third-party app,
+                        // "Airin," not this one) and sent users through
+                        // someone else's OAuth client instead of Anicat's own.
+                        if let url = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token") {
+                            NSWorkspace.shared.open(url)
                         }
+                        #endif
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Connect AniList")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(SumiTheme.indigo)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(SumiTheme.indigo.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(SumiTheme.indigo.opacity(0.30), lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
                     }
-                    #endif
-                } label: {
+                    .buttonStyle(.sumiPressable)
+                }
+
+                Divider()
+                    .background(SumiTheme.border)
+
+                // API Token Input
+                SettingField(
+                    label: "API Token",
+                    description: "After authorizing, paste the full URL you were redirected to (or just the token)."
+                ) {
                     HStack(spacing: 8) {
-                        Image(systemName: "doc.on.doc")
+                        SecureField("Paste redirect URL or token...", text: $anilistTokenInput)
+                            .textFieldStyle(.plain)
                             .font(.system(size: 13))
-                        Text("Copy Debug Report")
-                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+
+                        Button {
+                            let trimmed = anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmed.isEmpty {
+                                onSaveToken(trimmed)
+                                anilistTokenInput = ""
+                            }
+                        } label: {
+                            Text("Save & Connect")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(hex: "#161310"))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(SumiTheme.indigo)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.sumiPressable)
+                        .disabled(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .opacity(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1.0)
                     }
-                    .foregroundColor(SumiTheme.foreground.opacity(0.85))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.04))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(SumiTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
-                    .contentShape(Rectangle())
+                    .frame(maxWidth: 340)
                 }
-                .buttonStyle(.plain)
+            }
 
-                // Environment Snapshot. No live log stream is wired up in the
-                // native build — this used to be five hardcoded strings
-                // dressed up as a log window; only the sign-in line was ever
-                // real. Better to show the handful of values that ARE real
-                // than fabricate the rest.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Signed in: \(isSignedIn ? "yes" : "no")")
-                    Text("Anime4K upscaling: \(gpuUpscaling ? "enabled" : "disabled")")
-                    Text("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+            // Status Diagnostics Box
+            VStack(spacing: 7) {
+                diagnosticRow(label: "Token saved", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
+                diagnosticRow(label: "Backend connected", value: "yes", isGood: true)
+                diagnosticRow(label: "AniList validated", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
+                if let username, !username.isEmpty {
+                    diagnosticRow(label: "Signed in as", value: username, isGood: true, highlightColor: SumiTheme.indigo)
                 }
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundColor(SumiTheme.muted)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.02))
+            }
+            .padding(14)
+            .background(Color.white.opacity(0.02))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
+        }
+    }
+}
+
+private func diagnosticRow(label: String, value: String, isGood: Bool, highlightColor: Color? = nil) -> some View {
+    HStack {
+        Text(label)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(SumiTheme.muted)
+
+        Spacer()
+
+        Text(value)
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundColor(highlightColor ?? (isGood ? SumiTheme.successLight : SumiTheme.muted.opacity(0.6)))
+    }
+}
+
+}
+
+private struct MaintenanceTabSection: View {
+    let isSignedIn: Bool
+    let username: String?
+    let onClearRegistry: () async -> Bool
+    @Binding var copyFeedback: String?
+
+    @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
+    @State private var registryState: SettingsView.MaintenanceActionState = .idle
+    @State private var onboardingResetState: SettingsView.MaintenanceActionState = .idle
+
+    var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+        // Updates Card
+        SettingsCard(title: "Updates", description: "Keep the app up to date.") {
+            HStack {
+                Text("Current version:")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.muted)
+
+                Text("1.0.0 (Native Apple Silicon ARM64)")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(SumiTheme.foreground)
+            }
+
+            // No update mechanism exists in the native build yet — a
+            // fake "checking" spinner that always reports up to date is
+            // worse than no button, since it reads as a real check.
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.muted)
+                Text("Update checking isn't available yet in the native build.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(SumiTheme.muted)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.02))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
+        }
+
+        // Logs & Debugging Card
+        SettingsCard(title: "Logs & Debugging") {
+            Button {
+                #if os(macOS)
+                let report = """
+                Anicat Version: 1.0.0 (Native Apple Silicon ARM64)
+                Platform: macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+                Architecture: arm64
+                Signed In: \(isSignedIn)
+                AniList Viewer: \(username ?? "None")
+                Anime4K Upscaling: \(gpuUpscaling ? "Enabled" : "Disabled")
+                Timestamp: \(Date())
+                """
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(report, forType: .string)
+                withAnimation(.snappy) {
+                    copyFeedback = "Debug report copied to clipboard!"
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    withAnimation(.snappy) {
+                        copyFeedback = nil
+                    }
+                }
+                #endif
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13))
+                    Text("Copy Debug Report")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.sumiPressable)
 
-            // System Maintenance Card
-            SettingsCard(
-                title: "System Maintenance",
-                description: "Irreversible system actions."
-            ) {
-                // Clear Local Registry
-                Button {
-                    if registryState == .confirming {
-                        registryState = .working
-                        Task {
-                            let succeeded = await onClearRegistry()
-                            await MainActor.run {
-                                registryState = succeeded ? .done : .idle
-                            }
+            // Environment Snapshot. No live log stream is wired up in the
+            // native build — this used to be five hardcoded strings
+            // dressed up as a log window; only the sign-in line was ever
+            // real. Better to show the handful of values that ARE real
+            // than fabricate the rest.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Signed in: \(isSignedIn ? "yes" : "no")")
+                Text("Anime4K upscaling: \(gpuUpscaling ? "enabled" : "disabled")")
+                Text("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+            }
+            .font(.system(size: 10.5, design: .monospaced))
+            .foregroundColor(SumiTheme.muted)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.02))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
+        }
+
+        // System Maintenance Card
+        SettingsCard(
+            title: "System Maintenance",
+            description: "Irreversible system actions."
+        ) {
+            // Clear Local Registry
+            Button {
+                if registryState == .confirming {
+                    registryState = .working
+                    Task {
+                        let succeeded = await onClearRegistry()
+                        await MainActor.run {
+                            registryState = succeeded ? .done : .idle
                         }
-                    } else if registryState == .idle {
-                        registryState = .confirming
                     }
-                } label: {
-                    Text(
-                        registryState == .working
-                            ? "Wiping Registry..."
-                            : registryState == .done
-                                ? "Registry Wiped"
-                                : registryState == .confirming
-                                    ? "Are you sure? Click again to wipe"
-                                    : "Clear Local Registry"
-                    )
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(registryState == .done ? SumiTheme.successLight : SumiTheme.dangerLight)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        registryState == .confirming
-                            ? SumiTheme.danger.opacity(0.18)
-                            : registryState == .done
-                                ? SumiTheme.success.opacity(0.18)
-                                : Color.white.opacity(0.03)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                registryState == .confirming
-                                    ? SumiTheme.danger.opacity(0.40)
-                                    : registryState == .done
-                                        ? SumiTheme.success.opacity(0.40)
-                                        : SumiTheme.danger.opacity(0.20),
-                                lineWidth: 1
-                            )
-                    )
-                    .contentShape(Rectangle())
+                } else if registryState == .idle {
+                    registryState = .confirming
                 }
-                .buttonStyle(.plain)
-                .disabled(registryState == .working || registryState == .done)
-
-                // Reset Onboarding Setup
-                Button {
-                    if onboardingResetState == .confirming {
-                        UserDefaults.standard.removeObject(forKey: "anicat_onboarding_seen")
-                        onboardingResetState = .done
-                    } else if onboardingResetState == .idle {
-                        onboardingResetState = .confirming
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 12))
-                        Text(
-                            onboardingResetState == .done
-                                ? "Onboarding Reset"
-                                : onboardingResetState == .confirming
-                                    ? "Are you sure? Click again to Reset"
-                                    : "Reset Onboarding Setup"
+            } label: {
+                Text(
+                    registryState == .working
+                        ? "Wiping Registry..."
+                        : registryState == .done
+                            ? "Registry Wiped"
+                            : registryState == .confirming
+                                ? "Are you sure? Click again to wipe"
+                                : "Clear Local Registry"
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(registryState == .done ? SumiTheme.successLight : SumiTheme.dangerLight)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    registryState == .confirming
+                        ? SumiTheme.danger.opacity(0.18)
+                        : registryState == .done
+                            ? SumiTheme.success.opacity(0.18)
+                            : Color.white.opacity(0.03)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            registryState == .confirming
+                                ? SumiTheme.danger.opacity(0.40)
+                                : registryState == .done
+                                    ? SumiTheme.success.opacity(0.40)
+                                    : SumiTheme.danger.opacity(0.20),
+                            lineWidth: 1
                         )
-                        .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(onboardingResetState == .done ? SumiTheme.successLight : SumiTheme.muted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(
-                        onboardingResetState == .confirming
-                            ? SumiTheme.danger.opacity(0.15)
-                            : Color.white.opacity(0.02)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                onboardingResetState == .confirming
-                                    ? SumiTheme.danger.opacity(0.35)
-                                    : SumiTheme.border,
-                                lineWidth: 1
-                            )
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(onboardingResetState == .done)
+                )
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.sumiPressable)
+            .animation(.snappy, value: registryState)
+            .disabled(registryState == .working || registryState == .done)
+
+            // Reset Onboarding Setup
+            Button {
+                if onboardingResetState == .confirming {
+                    UserDefaults.standard.removeObject(forKey: "anicat_onboarding_seen")
+                    onboardingResetState = .done
+                } else if onboardingResetState == .idle {
+                    onboardingResetState = .confirming
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12))
+                    Text(
+                        onboardingResetState == .done
+                            ? "Onboarding Reset"
+                            : onboardingResetState == .confirming
+                                ? "Are you sure? Click again to Reset"
+                                : "Reset Onboarding Setup"
+                    )
+                    .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(onboardingResetState == .done ? SumiTheme.successLight : SumiTheme.muted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    onboardingResetState == .confirming
+                        ? SumiTheme.danger.opacity(0.15)
+                        : Color.white.opacity(0.02)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            onboardingResetState == .confirming
+                                ? SumiTheme.danger.opacity(0.35)
+                                : SumiTheme.border,
+                            lineWidth: 1
+                        )
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+            .animation(.snappy, value: onboardingResetState)
+            .disabled(onboardingResetState == .done)
         }
     }
+}
 }
 
 // MARK: - Reusable Settings Components
@@ -1178,7 +1245,7 @@ private struct SumiSwitch: View {
             }
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.sumiPressable)
     }
 }
 
@@ -1224,6 +1291,7 @@ private struct SumiDropdown: View {
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             .contentShape(Rectangle())
+            .sumiMenuPressable()
         }
         .menuStyle(.borderlessButton)
     }

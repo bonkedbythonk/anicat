@@ -14,11 +14,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::catalog::{anilist, Catalogs};
+use crate::catalog::{anilist, cache::AniListCache, Catalogs};
 use crate::db::{Catalog, Registry};
 use crate::media::MediaKey;
 use crate::reader::mangadex::MangaDexClient;
 use crate::reader::mangakatana::MangaKatanaClient;
+use crate::reader::syosetu::SyosetuClient;
+use crate::discord::DiscordClient;
 use crate::torrent::{layout, ResolveTarget, TorrentManager};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -115,6 +117,52 @@ pub struct MangaChapter {
     pub title: String,
     pub id: String,
     pub pages: u32,
+}
+
+/// One chapter link from a Syosetu novel's table of contents.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NovelChapterRef {
+    pub index: i32,
+    pub title: String,
+    pub url: String,
+    pub volume_name: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NovelInfo {
+    pub title: String,
+    pub author: String,
+    pub description: String,
+    pub chapters: Vec<NovelChapterRef>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NovelChapterContent {
+    pub title: String,
+    pub text: String,
+}
+
+impl From<crate::reader::syosetu::NovelChapterRef> for NovelChapterRef {
+    fn from(c: crate::reader::syosetu::NovelChapterRef) -> Self {
+        Self { index: c.index, title: c.title, url: c.url, volume_name: c.volume_name }
+    }
+}
+
+impl From<crate::reader::syosetu::NovelInfo> for NovelInfo {
+    fn from(n: crate::reader::syosetu::NovelInfo) -> Self {
+        Self {
+            title: n.title,
+            author: n.author,
+            description: n.description,
+            chapters: n.chapters.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<crate::reader::syosetu::NovelChapterContent> for NovelChapterContent {
+    fn from(c: crate::reader::syosetu::NovelChapterContent) -> Self {
+        Self { title: c.title, text: c.text }
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -235,6 +283,11 @@ pub struct FfiDiscussion {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MediaDetail {
     pub catalog_id: i64,
+    /// MyAnimeList's id for this same title, when AniList has the mapping.
+    /// AniSkip (intro/outro skip times) is keyed by MAL id, not AniList's —
+    /// the two catalogs are otherwise unrelated here, so this is the only
+    /// bridge between them.
+    pub mal_id: Option<i64>,
     pub title: String,
     pub romaji_title: Option<String>,
     pub cover_image: String,
@@ -354,6 +407,8 @@ pub struct AnicatEngine {
     torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
     mangakatana: MangaKatanaClient,
+    syosetu: SyosetuClient,
+    discord: DiscordClient,
     /// Started on the first resolve rather than in the constructor, which is
     /// sync and so has no runtime to bind a listener on. `OnceCell` rather
     /// than a flag: two resolves racing must produce one server, not two.
@@ -382,6 +437,8 @@ impl AnicatEngine {
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
             mangakatana: MangaKatanaClient::new(http.clone()),
+            syosetu: SyosetuClient::new(http.clone()),
+            discord: DiscordClient::new(),
             http,
             stream_port: tokio::sync::OnceCell::new(),
         }))
@@ -435,11 +492,30 @@ impl AnicatEngine {
         filters: Option<SearchFilters>,
         page: Option<i32>,
     ) -> FfiResult<Vec<MediaSummary>> {
+        let page_num = page.unwrap_or(1);
+        let page_str = page_num.to_string();
+        let year_str = filters.as_ref().and_then(|f| f.year).map(|y| y.to_string()).unwrap_or_default();
+        let min_score_str = filters.as_ref().and_then(|f| f.min_score).map(|s| s.to_string()).unwrap_or_default();
+        let cache_key = AniListCache::key("search_media", &[
+            ("q", query.as_deref().unwrap_or("")),
+            ("page", &page_str),
+            ("type", media_type.as_deref().unwrap_or("")),
+            ("genre", filters.as_ref().and_then(|f| f.genre.as_deref()).unwrap_or("")),
+            ("year", &year_str),
+            ("min", &min_score_str),
+            ("status", filters.as_ref().and_then(|f| f.status.as_deref()).unwrap_or("")),
+            ("sort", filters.as_ref().and_then(|f| f.sort.as_deref()).unwrap_or("")),
+        ]);
+        if let Some(hit) = self.catalogs.cache.get(&cache_key) {
+            if let Ok(items) = serde_json::from_value::<Vec<anilist::types::MediaItem>>(hit) {
+                return Ok(items.iter().map(summarize).collect());
+            }
+        }
         let vars = build_search_variables(
             query.as_deref(),
             media_type.as_deref(),
             filters.as_ref(),
-            page.unwrap_or(1),
+            page_num,
         );
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
             .catalogs
@@ -447,7 +523,11 @@ impl AnicatEngine {
             .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
-        Ok(page.page.media.unwrap_or_default().iter().map(summarize).collect())
+        let items = page.page.media.unwrap_or_default();
+        if let Ok(v) = serde_json::to_value(&items) {
+            self.catalogs.cache.set(cache_key, v, "search_media");
+        }
+        Ok(items.iter().map(summarize).collect())
     }
 
     /// Find a torrent for an episode and hand back what the player opens.
@@ -917,13 +997,7 @@ impl AnicatEngine {
             });
         }
 
-        // The furthest episode with a real position that is not finished. A
-        // completed episode is not something to resume into.
-        let resume = history
-            .iter()
-            .filter(|e| e.duration > 0 && e.stop_time > 0)
-            .filter(|e| (e.stop_time as f64 / e.duration as f64) < 0.85)
-            .max_by_key(|e| e.episode_number);
+        let resume = resume_episode(&history, list_progress);
 
         let (prequel, sequel) = relations(&m);
 
@@ -983,6 +1057,7 @@ impl AnicatEngine {
 
         Ok(MediaDetail {
             catalog_id,
+            mal_id: m.id_mal,
             title: m
                 .title
                 .as_ref()
@@ -1129,6 +1204,65 @@ impl AnicatEngine {
             .collect())
     }
 
+    /// A Syosetu novel's title, author, synopsis and full table of contents,
+    /// from a `ncode.syosetu.com/nXXXXXX/` URL pasted in by the viewer — see
+    /// `reader::syosetu`'s module comment for why this takes a URL directly
+    /// rather than an AniList/RanobeDB id.
+    pub async fn novel_info(&self, url: String) -> FfiResult<NovelInfo> {
+        if !SyosetuClient::can_handle(&url) {
+            return Err(AnicatError::NotFound { msg: format!("not a syosetu.com URL: {url}") });
+        }
+        self.syosetu
+            .novel_info(&url)
+            .await
+            .map(Into::into)
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// One chapter's text, from a URL out of `novel_info`'s chapter list.
+    pub async fn novel_chapter(&self, url: String) -> FfiResult<NovelChapterContent> {
+        if !SyosetuClient::can_handle(&url) {
+            return Err(AnicatError::NotFound { msg: format!("not a syosetu.com URL: {url}") });
+        }
+        self.syosetu
+            .chapter_content(&url)
+            .await
+            .map(Into::into)
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// Connects to the local Discord client over IPC, if one is running.
+    /// Silently a no-op when Discord isn't installed or open — this is a
+    /// presence nicety, never something playback should fail over.
+    pub fn discord_connect(&self) {
+        self.discord.connect();
+    }
+
+    pub fn discord_disconnect(&self) {
+        self.discord.disconnect();
+    }
+
+    /// `episode_title` empty means "show Episode N instead"; `duration <= 0`
+    /// means unknown, which drops the "time remaining" countdown entirely
+    /// rather than showing a nonsensical one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn discord_set_presence(
+        &self,
+        title: String,
+        episode: i64,
+        episode_title: String,
+        total_episodes: i64,
+        pos: i64,
+        duration: i64,
+        paused: bool,
+    ) {
+        self.discord.set_presence(&title, episode, &episode_title, total_episodes, pos, duration, paused);
+    }
+
+    pub fn discord_clear_presence(&self) {
+        self.discord.clear_presence();
+    }
+
     pub fn record_progress(
         &self,
         catalog: FfiCatalog,
@@ -1257,6 +1391,48 @@ fn episode_is_watched(number: i32, local_percent: f64, anilist_progress: Option<
     local_percent >= 85.0 || anilist_progress.is_some_and(|p| number <= p)
 }
 
+/// The local-history episode the primary button should offer to resume
+/// into. A completed episode is not something to resume into (the `< 0.85`
+/// filter), and once AniList has a confirmed progress, the *only* valid
+/// candidate is the one episode immediately after it — not just anything
+/// with an incomplete local position, however far away.
+///
+/// That distinction matters because local history isn't a clean log of
+/// what's been watched in order: scrubbing past a slow part, sampling a few
+/// episodes out of order, or briefly opening one while testing all leave a
+/// row with `stop_time` under 85% for whatever episode number that was.
+/// Taking the *furthest* such row — the original version of this function —
+/// meant a stray incomplete open of episode 12 outranked genuine partial
+/// watches of 3, 7, and 9 sitting between it and AniList's confirmed
+/// progress of 9, and the button offered "Continue Episode 12" for a title
+/// the viewer had only actually reached episode 9 of.
+///
+/// A completed-elsewhere title still needs the same guard as before: a row
+/// left over from a title played partway through Anicat once, then finished
+/// elsewhere (the AniList app, a browser, another device), must not override
+/// `list_progress` forever — episode `list_progress + 1` is exactly the one
+/// case that can't be "elsewhere", since AniList's own progress already
+/// accounts for everything up to and including `list_progress`.
+///
+/// With no AniList progress at all (fresh install, first-ever open), there's
+/// no boundary to anchor to, so this falls back to the plain furthest
+/// unfinished episode — the same behavior `episode_is_watched` falls back to
+/// for the same reason.
+fn resume_episode(
+    history: &[crate::db::service::WatchEntry],
+    list_progress: Option<i32>,
+) -> Option<&crate::db::service::WatchEntry> {
+    history
+        .iter()
+        .filter(|e| e.duration > 0 && e.stop_time > 0)
+        .filter(|e| (e.stop_time as f64 / e.duration as f64) < 0.85)
+        .filter(|e| match list_progress {
+            Some(p) => e.episode_number == p as i64 + 1,
+            None => true,
+        })
+        .max_by_key(|e| e.episode_number)
+}
+
 /// MangaKatana ids are the site's own page URLs (it has no numeric id of its
 /// own); MangaDex ids are UUIDs. That is enough to route a manga/chapter id
 /// back to the client that produced it without adding a second
@@ -1361,11 +1537,56 @@ fn strip_html(input: &str) -> String {
 }
 
 /// The franchise's immediate neighbours, if AniList names them.
+/// Filters candidates so anime only links to anime seasons and manga only links to manga,
+/// ranking by format priority (TV/TV_SHORT/ONA over OVA/SPECIAL/MOVIE) and release year.
 fn relations(m: &anilist::types::MediaItem) -> (Option<RelatedTitle>, Option<RelatedTitle>) {
-    let mut prequel = None;
-    let mut sequel = None;
+    let is_current_anime = match m.media_type.as_deref() {
+        Some("ANIME") => true,
+        Some("MANGA") => false,
+        _ => !matches!(m.format.as_deref(), Some("MANGA" | "NOVEL" | "ONE_SHOT")),
+    };
+
+    let m_year = m.season_year.or_else(|| m.start_date.as_ref().and_then(|d| d.year));
+
+    let mut best_prequel: Option<(RelatedTitle, i32, Option<i32>, i64)> = None;
+    let mut best_sequel: Option<(RelatedTitle, i32, Option<i32>, i64)> = None;
+
     for edge in m.relations.as_ref().and_then(|r| r.edges.as_ref()).into_iter().flatten() {
         let Some(node) = edge.node.as_ref() else { continue };
+
+        let is_node_anime = match node.media_type.as_deref() {
+            Some("ANIME") => true,
+            Some("MANGA") => false,
+            _ => !matches!(node.format.as_deref(), Some("MANGA" | "NOVEL" | "ONE_SHOT")),
+        };
+
+        // Don't cross media boundaries for season chains: anime should only link to anime,
+        // and manga should only link to manga. Source manga / adaptations belong in main relations.
+        if is_current_anime != is_node_anime {
+            continue;
+        }
+
+        let format_priority = if is_current_anime {
+            match node.format.as_deref() {
+                Some("TV") => 100,
+                Some("TV_SHORT") => 90,
+                Some("ONA") => 85,
+                Some("MOVIE") => 70,
+                Some("OVA") => 50,
+                Some("SPECIAL") => 40,
+                Some("MUSIC") => 10,
+                _ => 60,
+            }
+        } else {
+            match node.format.as_deref() {
+                Some("MANGA") => 100,
+                Some("ONE_SHOT") => 80,
+                Some("NOVEL") => 60,
+                _ => 50,
+            }
+        };
+
+        let node_year = node.start_date.as_ref().and_then(|d| d.year);
         let card = RelatedTitle {
             catalog_id: node.id,
             title: node
@@ -1380,13 +1601,75 @@ fn relations(m: &anilist::types::MediaItem) -> (Option<RelatedTitle>, Option<Rel
                 .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
                 .unwrap_or_default(),
         };
+
         match edge.relation_type.as_deref() {
-            Some("PREQUEL") if prequel.is_none() => prequel = Some(card),
-            Some("SEQUEL") if sequel.is_none() => sequel = Some(card),
+            Some("PREQUEL") => {
+                let is_better = match &best_prequel {
+                    None => true,
+                    Some((_, best_pri, best_yr, best_id)) => {
+                        if format_priority != *best_pri {
+                            format_priority > *best_pri
+                        } else {
+                            match (node_year, *best_yr, m_year) {
+                                (Some(ny), Some(by), Some(my)) => {
+                                    let n_valid = ny <= my;
+                                    let b_valid = by <= my;
+                                    if n_valid != b_valid {
+                                        n_valid
+                                    } else if n_valid {
+                                        ny > by
+                                    } else {
+                                        ny < by
+                                    }
+                                }
+                                (Some(ny), Some(by), None) => ny > by,
+                                (Some(_), None, _) => true,
+                                (None, Some(_), _) => false,
+                                (None, None, _) => node.id > *best_id,
+                            }
+                        }
+                    }
+                };
+                if is_better {
+                    best_prequel = Some((card, format_priority, node_year, node.id));
+                }
+            }
+            Some("SEQUEL") => {
+                let is_better = match &best_sequel {
+                    None => true,
+                    Some((_, best_pri, best_yr, best_id)) => {
+                        if format_priority != *best_pri {
+                            format_priority > *best_pri
+                        } else {
+                            match (node_year, *best_yr, m_year) {
+                                (Some(ny), Some(by), Some(my)) => {
+                                    let n_valid = ny >= my;
+                                    let b_valid = by >= my;
+                                    if n_valid != b_valid {
+                                        n_valid
+                                    } else if n_valid {
+                                        ny < by
+                                    } else {
+                                        ny > by
+                                    }
+                                }
+                                (Some(ny), Some(by), None) => ny < by,
+                                (Some(_), None, _) => true,
+                                (None, Some(_), _) => false,
+                                (None, None, _) => node.id < *best_id,
+                            }
+                        }
+                    }
+                };
+                if is_better {
+                    best_sequel = Some((card, format_priority, node_year, node.id));
+                }
+            }
             _ => {}
         }
     }
-    (prequel, sequel)
+
+    (best_prequel.map(|(c, _, _, _)| c), best_sequel.map(|(c, _, _, _)| c))
 }
 
 /// One place that flattens `MediaItem` for the FFI, so a field added for one
@@ -1450,6 +1733,64 @@ mod tests {
         assert!(episode_is_watched(5, 20.0, Some(5)));
     }
 
+    fn progress(episode_number: i64, stop_time: i64, duration: i64) -> crate::db::service::WatchEntry {
+        crate::db::service::WatchEntry { episode_number, stop_time, duration }
+    }
+
+    #[test]
+    fn resumes_into_furthest_unfinished_local_episode() {
+        let history = vec![progress(1, 1200, 1400), progress(2, 300, 1400)];
+        let resume = resume_episode(&history, None);
+        assert_eq!(resume.map(|e| e.episode_number), Some(2));
+    }
+
+    #[test]
+    fn stale_local_row_does_not_override_anilist_progress_already_past_it() {
+        // The exact bug: episode 1 was started once and abandoned partway
+        // through, but AniList says the show is caught up to episode 6 —
+        // resuming into episode 1 forever would be wrong.
+        let history = vec![progress(1, 300, 1400)];
+        assert!(resume_episode(&history, Some(6)).is_none());
+    }
+
+    #[test]
+    fn local_row_still_wins_when_anilist_has_not_caught_up_to_it() {
+        // Watched further locally than AniList has synced — still resumable.
+        let history = vec![progress(7, 300, 1400)];
+        let resume = resume_episode(&history, Some(6));
+        assert_eq!(resume.map(|e| e.episode_number), Some(7));
+    }
+
+    #[test]
+    fn stray_incomplete_episode_far_past_progress_is_not_offered() {
+        // The exact real-world bug: AniList says progress 9, but local
+        // history has incomplete rows scattered from skipping/testing —
+        // episodes 3, 7, 9, and a stray open of 12. `max_by_key` on episode
+        // number alone picked 12 ("Continue Episode 12") even though the
+        // viewer had only actually reached 9. Only `list_progress + 1` (10,
+        // not present here) is a valid resume target once progress is known.
+        let history = vec![
+            progress(3, 290, 1432),
+            progress(7, 28, 1420),
+            progress(9, 649, 1420),
+            progress(12, 328, 1432),
+        ];
+        assert!(resume_episode(&history, Some(9)).is_none());
+    }
+
+    #[test]
+    fn only_the_episode_right_after_progress_is_a_valid_resume_target() {
+        let history = vec![progress(3, 290, 1432), progress(10, 200, 1432)];
+        let resume = resume_episode(&history, Some(9));
+        assert_eq!(resume.map(|e| e.episode_number), Some(10));
+    }
+
+    #[test]
+    fn finished_local_episode_is_not_a_resume_target() {
+        let history = vec![progress(3, 1300, 1400)]; // 92.8%, past the 85% cutoff
+        assert!(resume_episode(&history, None).is_none());
+    }
+
     #[test]
     fn plain_anime_query_leaves_sort_unset_for_relevance() {
         let vars = build_search_variables(Some("Frieren"), Some("ANIME"), None, 1);
@@ -1493,6 +1834,98 @@ mod tests {
         assert_eq!(vars.get("averageScoreGreater"), Some(&serde_json::json!(80)));
         assert_eq!(vars.get("status"), Some(&serde_json::json!("RELEASING")));
         assert_eq!(vars.get("sort"), Some(&serde_json::json!(["SCORE_DESC"])));
+    }
+
+    #[test]
+    fn relations_ignores_manga_for_anime_and_prefers_tv_season() {
+        let m: crate::catalog::anilist::types::MediaItem = serde_json::from_value(serde_json::json!({
+            "id": 10,
+            "type": "ANIME",
+            "format": "TV",
+            "seasonYear": 2020,
+            "relations": {
+                "edges": [
+                    {
+                        "relationType": "PREQUEL",
+                        "node": {
+                            "id": 99,
+                            "type": "MANGA",
+                            "format": "MANGA",
+                            "title": { "english": "Prequel Light Novel / Manga" }
+                        }
+                    },
+                    {
+                        "relationType": "PREQUEL",
+                        "node": {
+                            "id": 9,
+                            "type": "ANIME",
+                            "format": "TV",
+                            "title": { "english": "Real Previous Season" }
+                        }
+                    },
+                    {
+                        "relationType": "SEQUEL",
+                        "node": {
+                            "id": 11,
+                            "type": "ANIME",
+                            "format": "OVA",
+                            "title": { "english": "Side Story OVA" }
+                        }
+                    },
+                    {
+                        "relationType": "SEQUEL",
+                        "node": {
+                            "id": 12,
+                            "type": "ANIME",
+                            "format": "TV",
+                            "title": { "english": "Next TV Season" }
+                        }
+                    }
+                ]
+            }
+        })).unwrap();
+
+        let (prequel, sequel) = relations(&m);
+        assert_eq!(prequel.map(|p| p.catalog_id), Some(9));
+        assert_eq!(sequel.map(|s| s.catalog_id), Some(12));
+    }
+
+    #[test]
+    fn relations_picks_closest_year_among_same_format() {
+        let m: crate::catalog::anilist::types::MediaItem = serde_json::from_value(serde_json::json!({
+            "id": 20,
+            "type": "ANIME",
+            "format": "TV",
+            "seasonYear": 2020,
+            "relations": {
+                "edges": [
+                    {
+                        "relationType": "SEQUEL",
+                        "node": {
+                            "id": 30,
+                            "type": "ANIME",
+                            "format": "TV",
+                            "title": { "english": "Season 3" },
+                            "startDate": { "year": 2024 }
+                        }
+                    },
+                    {
+                        "relationType": "SEQUEL",
+                        "node": {
+                            "id": 21,
+                            "type": "ANIME",
+                            "format": "TV",
+                            "title": { "english": "Season 2" },
+                            "startDate": { "year": 2021 }
+                        }
+                    }
+                ]
+            }
+        })).unwrap();
+
+        let (_, sequel) = relations(&m);
+        // Season 2 (2021) is closer next season than Season 3 (2024)
+        assert_eq!(sequel.map(|s| s.catalog_id), Some(21));
     }
 }
 

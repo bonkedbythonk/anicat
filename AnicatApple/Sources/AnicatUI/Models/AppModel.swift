@@ -139,6 +139,14 @@ public final class AppModel: @unchecked Sendable {
 
     // PlayerController & Playback Tracking
     public let playerController = PlayerController()
+    /// The system Now Playing tile and the media keys behind it. Fed from
+    /// the same title/episode/cover data Discord presence already gets.
+    let nowPlaying = NowPlayingBridge()
+    /// Cover of the playing title when it came from the detail fetch in
+    /// `ensurePlaybackEpisodes` rather than an open page or a loaded shelf:
+    /// a play from the Up Next shelf opens no page, and the shelf's
+    /// `QueueEntry` is not one of the arrays `syncKnownTitles` reads.
+    private var playbackCoverURL: URL?
     public var currentPlaybackCatalog: FfiCatalog = .anilist
     public var currentPlaybackCatalogId: Int64?
     public var currentPlaybackEpisode: Int64?
@@ -368,13 +376,19 @@ public final class AppModel: @unchecked Sendable {
     /// `syncKnownTitles()` on write rather than rebuilt from all six source
     /// arrays on every read.
     public private(set) var knownTitles: [Int64: String] = [:]
+    /// Same sourcing as `knownTitles`, for the Now Playing artwork of a
+    /// title played without its page open.
+    public private(set) var knownCovers: [Int64: URL] = [:]
 
     private func syncKnownTitles() {
-        var out: [Int64: String] = [:]
+        var titles: [Int64: String] = [:]
+        var covers: [Int64: URL] = [:]
         for item in watchingItems + trendingItems + libraryItems + mangaReading + novelReading + searchResults {
-            out[item.id] = item.title
+            titles[item.id] = item.title
+            if let cover = item.coverImageURL { covers[item.id] = cover }
         }
-        knownTitles = out
+        knownTitles = titles
+        knownCovers = covers
     }
 
     /// Whether AniList answered with a viewer. The four catalog-backed views
@@ -389,6 +403,10 @@ public final class AppModel: @unchecked Sendable {
         playerController.onPositionChange = { [weak self] currentTime, duration in
             self?.handlePlaybackPositionChange(currentTime: currentTime, duration: duration)
         }
+        playerController.onPlayingStateChange = { [weak self] _ in
+            self?.syncPlaybackSession()
+        }
+        nowPlaying.attach(to: playerController)
         playerController.onPlaybackStopped = { [weak self] in
             self?.stopPlayback()
         }
@@ -448,10 +466,12 @@ public final class AppModel: @unchecked Sendable {
         guard playbackEpisodesCatalogId != catalogId || playbackEpisodes.isEmpty else { return }
         playbackEpisodes = []
         playbackEpisodesCatalogId = catalogId
+        playbackCoverURL = nil
         Task { [weak self] in
             guard let detail = try? await engine.mediaDetail(catalogId: catalogId, isManga: false) else { return }
             guard let self, self.currentPlaybackCatalogId == catalogId else { return }
             self.playbackEpisodes = Self.episodeItems(from: detail)
+            self.playbackCoverURL = URL(string: detail.coverImage)
             self.updateEpisodeNavigationState()
         }
     }
@@ -510,6 +530,52 @@ public final class AppModel: @unchecked Sendable {
         }
         playerController.hasNextEpisode = sorted.indices.contains(index + 1)
         playerController.hasPreviousEpisode = sorted.indices.contains(index - 1)
+        refreshNowPlayingMetadata()
+    }
+
+    /// Republishes the Now Playing tile from what is known right now. Runs
+    /// with every navigation-state recompute because the two late arrivals
+    /// (the episode title from `playbackEpisodes`, the cover from the
+    /// detail fetch) both land through `updateEpisodeNavigationState`;
+    /// publishing once at play time showed a bare episode number and no
+    /// artwork for anything started from the Up Next shelf.
+    private func refreshNowPlayingMetadata() {
+        guard activeStreamURL != nil, let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode else { return }
+        let track = NowPlayingBridge.Track(
+            title: currentPlaybackTitle ?? playerController.title,
+            episodeNumber: Int(episode),
+            episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
+        )
+        let pageCover = selectedMediaDetails?.id == catalogId ? selectedMediaDetails?.coverURL : nil
+        nowPlaying.setTrack(
+            track,
+            elapsed: playerController.currentTime,
+            duration: playerController.duration,
+            rate: playerController.isPlaying ? playerController.playbackRate : 0,
+            coverURL: pageCover ?? playbackCoverURL ?? knownCovers[catalogId]
+        )
+        nowPlaying.setNavigation(
+            hasNext: playerController.hasNextEpisode,
+            hasPrevious: playerController.hasPreviousEpisode
+        )
+    }
+
+    /// The one place that follows "is an episode playing right now": every
+    /// `isPlaying` edge (`PlayerController.onPlayingStateChange`), each new
+    /// stream in `resolveAndPlay`, and `stopPlayback`. Anything whose
+    /// lifetime is "while video is on" hangs off this so a pause, a
+    /// transition and a close cannot each forget one of them.
+    private func syncPlaybackSession() {
+        guard activeStreamURL != nil else {
+            nowPlaying.clear()
+            return
+        }
+        nowPlaying.updateProgress(
+            elapsed: playerController.currentTime,
+            duration: playerController.duration,
+            rate: playerController.isPlaying ? playerController.playbackRate : 0
+        )
     }
 
     /// Initializes the headless Rust engine and opens the SQLite registry.
@@ -2004,6 +2070,14 @@ public final class AppModel: @unchecked Sendable {
         guard pauseEdgeChanged || secondChanged else { return }
         if secondChanged {
             lastRecordedSecond = stopTime
+            // Pause edges reach the tile through `syncPlaybackSession`;
+            // this is only the once-a-second elapsed time, three keys on a
+            // dictionary already built.
+            nowPlaying.updateProgress(
+                elapsed: currentTime,
+                duration: duration,
+                rate: isPaused ? 0 : playerController.playbackRate
+            )
         }
 
         let title = currentPlaybackTitle ?? "Anime"
@@ -2237,7 +2311,12 @@ public final class AppModel: @unchecked Sendable {
         withAnimation(.easeInOut(duration: 0.32)) {
             self.activeStreamURL = streamURL
         }
+        // Publishes the Now Playing tile as a side effect, here and not on
+        // the first position tick: media keys route to the app only once
+        // the tile is up with `playbackState == .playing`, and mpv has not
+        // yet been handed the URL, so this is before the first frame.
         updateEpisodeNavigationState()
+        syncPlaybackSession()
 
         // AniSkip is keyed by MAL id, so only anime (not the other catalogs
         // `resolveAndPlay` might grow) and only titles AniList actually has a
@@ -2329,7 +2408,9 @@ public final class AppModel: @unchecked Sendable {
         playerController.episodeList = []
         playbackEpisodes = []
         playbackEpisodesCatalogId = nil
+        playbackCoverURL = nil
         ContinuityManager.shared.stopAdvertising()
+        syncPlaybackSession()
 
         Task {
             await loadHistory()

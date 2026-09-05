@@ -23,7 +23,18 @@ public enum AppWindow {
 
 @Observable
 public final class PlayerController: @unchecked Sendable {
-    public var isPlaying: Bool = true
+    /// Written from four places (the transport methods below, mpv's own
+    /// `pause` observer in `MpvSurface`, and `AppModel.resolveAndPlay`), so
+    /// anything that has to follow every pause edge listens here rather
+    /// than at each writer. Fires on real transitions only: `resolveAndPlay`
+    /// assigns `true` twice per play and the mpv observer echoes back the
+    /// value a transport method just set.
+    public var isPlaying: Bool = true {
+        didSet {
+            if oldValue != isPlaying { onPlayingStateChange?(isPlaying) }
+        }
+    }
+    public var onPlayingStateChange: (@Sendable (_ isPlaying: Bool) -> Void)?
     public var currentTime: Double = 0.0 // seconds
     public var duration: Double = 0.0 // seconds
     public var title: String = ""

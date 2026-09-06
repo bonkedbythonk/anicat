@@ -258,35 +258,135 @@ query ($id: Int, $page: Int, $perPage: Int) {
 }
 "#;
 
-/// A voice actor's roles, most popular show first — POPULARITY_DESC surfaces
-/// what they are actually known for, where START_DATE_DESC would lead with
-/// unaired announcements. Prolific actors have 500+ credits, hence the paging.
+/// One character's own page: who they are, and everywhere they appear.
+///
+/// `description` is asked for as markdown (`asHtml: false`), unlike
+/// `MEDIA_CHARACTERS_QUERY` above — AniList bios are full of `~!spoiler!~`
+/// and `__bold__` markers that only the client can decide how to reveal, and
+/// the pre-parsed HTML has already thrown that structure away.
+///
+/// `media` caps at 25 per page server-side, so asking for more silently
+/// returns 25 anyway.
+pub const CHARACTER_DETAIL_QUERY: &str = r#"
+query ($id: Int, $perPage: Int) {
+  Character(id: $id) {
+    id
+    name { full native alternative }
+    image { large }
+    description(asHtml: false)
+    gender
+    age
+    favourites
+    dateOfBirth { year month day }
+    media(sort: [POPULARITY_DESC], perPage: $perPage) {
+      edges {
+        characterRole
+        node {
+          id type format
+          title { romaji english }
+          coverImage { large medium }
+          seasonYear
+        }
+        voiceActors(language: JAPANESE) { id name { full } image { medium large } languageV2 }
+      }
+    }
+  }
+}
+"#;
+
+/// One staff member's own page. Two separate credit lists because AniList
+/// keeps them apart: `characterMedia` is where they voiced someone,
+/// `staffMedia` is where they held a production role, and a person can be in
+/// both for the same show.
+///
+/// Sorted newest-first as a filmography. The previous, unshipped version of
+/// this query used POPULARITY_DESC on the grounds that it surfaces what an
+/// actor is known for; the cost of START_DATE_DESC is that announced-but-
+/// unaired titles lead the list. Both lists cap at 25 per page server-side.
 pub const STAFF_DETAIL_QUERY: &str = r#"
-query ($id: Int, $page: Int, $perPage: Int) {
+query ($id: Int, $perPage: Int) {
   Staff(id: $id) {
     id
     name { full native }
     image { large }
-    description(asHtml: true)
+    description(asHtml: false)
     languageV2
     primaryOccupations
-    age
     homeTown
-    yearsActive
     favourites
-    dateOfBirth { year month day }
-    characterMedia(page: $page, perPage: $perPage, sort: [POPULARITY_DESC]) {
-      pageInfo { hasNextPage total }
+    characterMedia(perPage: $perPage, sort: [START_DATE_DESC]) {
       edges {
         characterRole
         node {
-          id type
+          id type format
           title { romaji english }
           coverImage { large medium }
-          format status seasonYear averageScore
+          seasonYear
         }
-        characters { id name { full } image { large } }
+        characters { id name { full } image { medium large } }
       }
+    }
+    staffMedia(perPage: $perPage, sort: [START_DATE_DESC]) {
+      edges {
+        staffRole
+        node {
+          id type format
+          title { romaji english }
+          coverImage { large medium }
+          seasonYear
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// A forum thread and its first page of comments in one round trip.
+///
+/// `Thread` and `Page` are two roots of the same query rather than a nested
+/// pair: `Thread` has no comment connection at all, and `threadComments`
+/// only exists under `Page`.
+pub const THREAD_DETAIL_QUERY: &str = r#"
+query ($id: Int, $page: Int, $perPage: Int) {
+  Thread(id: $id) {
+    id
+    title
+    body(asHtml: false)
+    createdAt
+    replyCount
+    viewCount
+    isLocked
+    categories { id name }
+    user { id name avatar { medium large } }
+  }
+  Page(page: $page, perPage: $perPage) {
+    pageInfo { total currentPage lastPage hasNextPage }
+    threadComments(threadId: $id, sort: [ID]) {
+      id
+      comment(asHtml: false)
+      createdAt
+      likeCount
+      childComments
+      user { id name avatar { medium large } }
+    }
+  }
+}
+"#;
+
+/// Page 2 and beyond of `THREAD_DETAIL_QUERY`'s comment half. Kept as its own
+/// string rather than reusing that one with a page variable, so paging does
+/// not refetch the thread body on every scroll.
+pub const THREAD_COMMENTS_QUERY: &str = r#"
+query ($id: Int, $page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo { total currentPage lastPage hasNextPage }
+    threadComments(threadId: $id, sort: [ID]) {
+      id
+      comment(asHtml: false)
+      createdAt
+      likeCount
+      childComments
+      user { id name avatar { medium large } }
     }
   }
 }

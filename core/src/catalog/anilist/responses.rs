@@ -90,6 +90,87 @@ pub struct DiscussionUser {
     pub avatar: Option<super::types::StaffImage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterDetailResponse {
+    #[serde(rename = "Character")]
+    pub character: Option<super::types::CharacterNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaffDetailResponse {
+    #[serde(rename = "Staff")]
+    pub staff: Option<super::types::StaffDetailNode>,
+}
+
+/// `THREAD_DETAIL_QUERY` asks two roots at once, so neither `PageResponse`
+/// nor `DiscussionResponse` fits: both have a single top-level key and this
+/// has the thread beside the page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadDetailResponse {
+    #[serde(rename = "Thread")]
+    pub thread: Option<ThreadNode>,
+    #[serde(rename = "Page")]
+    pub page: Option<ThreadCommentPage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCommentsResponse {
+    #[serde(rename = "Page")]
+    pub page: Option<ThreadCommentPage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCommentPage {
+    #[serde(rename = "pageInfo")]
+    pub page_info: Option<PageInfo>,
+    /// Top-level comments only. A reply lives inside its parent's
+    /// `child_comments` blob and does not take a slot on the page, so
+    /// `page_info` counts fewer rows than the flattened list has.
+    #[serde(rename = "threadComments")]
+    pub thread_comments: Option<Vec<ThreadCommentNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadNode {
+    pub id: i64,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<i64>,
+    #[serde(rename = "replyCount")]
+    pub reply_count: Option<i32>,
+    #[serde(rename = "viewCount")]
+    pub view_count: Option<i32>,
+    #[serde(rename = "isLocked")]
+    pub is_locked: Option<bool>,
+    pub categories: Option<Vec<ThreadCategory>>,
+    pub user: Option<DiscussionUser>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCategory {
+    pub id: Option<i64>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadCommentNode {
+    pub id: i64,
+    pub comment: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<i64>,
+    #[serde(rename = "likeCount")]
+    pub like_count: Option<i32>,
+    pub user: Option<DiscussionUser>,
+    /// AniList declares replies as the untyped `Json` scalar, not as
+    /// `[ThreadComment]`, so there is no shape to deserialize into — an
+    /// arbitrarily nested blob arrives and `flatten_thread_comments` walks
+    /// it. A serde struct here would fail the whole thread the first time a
+    /// key moved.
+    #[serde(rename = "childComments")]
+    pub child_comments: Option<serde_json::Value>,
+}
+
 // --- MediaListCollection: the user's own lists -------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

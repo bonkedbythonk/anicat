@@ -18,6 +18,10 @@ use std::sync::Arc;
 
 use cache::AniListCache;
 
+/// AniList's documented ceiling on `Page(perPage:)`. Paging by a larger
+/// number than the server will actually return steps over comments.
+const THREAD_COMMENTS_PER_PAGE: i64 = 50;
+
 /// The catalog clients plus the response cache they share.
 ///
 /// A struct rather than three loose arguments because every caller that needs
@@ -362,6 +366,129 @@ impl Catalogs {
         Ok(threads)
     }
 
+    /// One character's own page: bio, birthday, and the titles they appear in.
+    pub async fn character_detail(
+        &self,
+        character_id: i64,
+    ) -> Result<anilist::types::CharacterNode, String> {
+        let key = AniListCache::key("character_detail", &[("id", &character_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(character_id));
+        vars.insert("perPage".to_string(), serde_json::json!(25));
+        let res: anilist::responses::CharacterDetailResponse = self
+            .anilist
+            .execute(anilist::queries::CHARACTER_DETAIL_QUERY, vars)
+            .await?;
+        let character = res
+            .character
+            .ok_or_else(|| format!("AniList has no character {character_id}"))?;
+        if let Ok(v) = serde_json::to_value(&character) {
+            self.cache.set(key, v, "character_detail");
+        }
+        Ok(character)
+    }
+
+    /// One staff member's own page: bio plus both credit lists.
+    pub async fn staff_detail(
+        &self,
+        staff_id: i64,
+    ) -> Result<anilist::types::StaffDetailNode, String> {
+        let key = AniListCache::key("staff_detail", &[("id", &staff_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(staff_id));
+        vars.insert("perPage".to_string(), serde_json::json!(25));
+        let res: anilist::responses::StaffDetailResponse = self
+            .anilist
+            .execute(anilist::queries::STAFF_DETAIL_QUERY, vars)
+            .await?;
+        let staff = res.staff.ok_or_else(|| format!("AniList has no staff member {staff_id}"))?;
+        if let Ok(v) = serde_json::to_value(&staff) {
+            self.cache.set(key, v, "staff_detail");
+        }
+        Ok(staff)
+    }
+
+    /// A forum thread with its first page of comments.
+    ///
+    /// Cached for far less time than the rest of this module: a thread on an
+    /// airing show gains replies while the episode page is open, and a reader
+    /// who reopens it to see the answer to their own comment must not be
+    /// served the copy from before they posted.
+    pub async fn thread_detail(
+        &self,
+        thread_id: i64,
+    ) -> Result<anilist::responses::ThreadDetailResponse, String> {
+        let key = AniListCache::key("thread_detail", &[("id", &thread_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(thread_id));
+        vars.insert("page".to_string(), serde_json::json!(1));
+        vars.insert("perPage".to_string(), serde_json::json!(THREAD_COMMENTS_PER_PAGE));
+        let res: anilist::responses::ThreadDetailResponse = self
+            .anilist
+            .execute(anilist::queries::THREAD_DETAIL_QUERY, vars)
+            .await?;
+        // A deleted thread answers HTTP 200 with a null `Thread` rather than
+        // an error, so caching the response unconditionally would keep
+        // answering "gone" for the next ten minutes — including for the
+        // moderator who is about to restore it. The caller turns the `None`
+        // into a not-found.
+        if res.thread.is_some() {
+            if let Ok(v) = serde_json::to_value(&res) {
+                self.cache.set(key, v, "thread_detail");
+            }
+        }
+        Ok(res)
+    }
+
+    /// Page 2 and beyond of a thread's comments. Page 1 arrives with
+    /// `thread_detail`, so a caller that starts here refetches what it has.
+    pub async fn thread_comments(
+        &self,
+        thread_id: i64,
+        page: i64,
+    ) -> Result<anilist::responses::ThreadCommentPage, String> {
+        let key = AniListCache::key(
+            "thread_comments",
+            &[("id", &thread_id.to_string()), ("page", &page.to_string())],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(thread_id));
+        vars.insert("page".to_string(), serde_json::json!(page.max(1)));
+        vars.insert("perPage".to_string(), serde_json::json!(THREAD_COMMENTS_PER_PAGE));
+        let res: anilist::responses::ThreadCommentsResponse = self
+            .anilist
+            .execute(anilist::queries::THREAD_COMMENTS_QUERY, vars)
+            .await?;
+        let page_data = res.page.unwrap_or(anilist::responses::ThreadCommentPage {
+            page_info: None,
+            thread_comments: None,
+        });
+        if let Ok(v) = serde_json::to_value(&page_data) {
+            self.cache.set(key, v, "thread_comments");
+        }
+        Ok(page_data)
+    }
+
     /// Creates or updates the signed-in user's list entry for a title.
     /// `status`/`score`/`progress` are each optional so a caller can change
     /// just one field — AniList's `SaveMediaListEntry` only touches the
@@ -417,5 +544,130 @@ impl Catalogs {
         self.cache.invalidate("media_detail");
         self.cache.invalidate("get_user_list");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Signed out on purpose: none of the three reads below needs a token,
+    /// and a test that quietly depended on one would pass only on the
+    /// developer's machine.
+    fn catalogs() -> Catalogs {
+        Catalogs::new(reqwest::Client::new(), None, None)
+    }
+
+    /// Live. `cargo test --lib catalog::tests -- --ignored --nocapture`
+    ///
+    /// These exist to prove the query strings are valid against the real
+    /// schema and that the responses deserialize — neither of which any
+    /// offline test can check, since a misspelled field is a server-side
+    /// GraphQL error and a wrong serde shape only shows up on real JSON.
+    #[tokio::test]
+    #[ignore]
+    async fn live_character_detail() {
+        let character = catalogs().character_detail(175776).await.expect("character 175776");
+        let name = character.name.as_ref().and_then(|n| n.full.as_deref()).unwrap_or("");
+        println!("character: {} ({} favourites)", name, character.favourites.unwrap_or(0));
+        assert!(name.contains("Frieren"), "unexpected character name: {name}");
+        let edges = character
+            .media
+            .as_ref()
+            .and_then(|m| m.edges.as_ref())
+            .expect("no appearances");
+        assert!(!edges.is_empty(), "character has no appearances");
+        // The point of the query: a role and a Japanese cast for at least
+        // one appearance. Both are edge fields, which is where a wrong
+        // nesting level would show up.
+        assert!(
+            edges.iter().any(|e| e.character_role.is_some()),
+            "no characterRole on any appearance"
+        );
+        assert!(
+            edges.iter().any(|e| e.voice_actors.as_ref().is_some_and(|v| !v.is_empty())),
+            "no voice actors on any appearance"
+        );
+    }
+
+    /// Live. The staff id is discovered rather than hardcoded: it comes off
+    /// the character above, so the test cannot rot on an id that was guessed
+    /// at and turns out to be someone else.
+    #[tokio::test]
+    #[ignore]
+    async fn live_staff_detail() {
+        let catalogs = catalogs();
+        let character = catalogs.character_detail(175776).await.expect("character 175776");
+        let staff_id = character
+            .media
+            .as_ref()
+            .and_then(|m| m.edges.as_ref())
+            .and_then(|edges| {
+                edges.iter().find_map(|e| e.voice_actors.as_ref()?.first().map(|v| v.id))
+            })
+            .expect("no voice actor to look up");
+        let staff = catalogs.staff_detail(staff_id).await.expect("staff detail");
+        let name = staff.name.as_ref().and_then(|n| n.full.as_deref()).unwrap_or("");
+        println!("staff {staff_id}: {name} ({:?})", staff.primary_occupations);
+        assert!(!name.is_empty(), "staff {staff_id} has no name");
+        let character_edges = staff
+            .character_media
+            .as_ref()
+            .and_then(|m| m.edges.as_ref())
+            .expect("no characterMedia");
+        assert!(!character_edges.is_empty(), "voice actor with no roles");
+        // `characters` is the field that distinguishes this connection from
+        // an ordinary relations list.
+        assert!(
+            character_edges
+                .iter()
+                .any(|e| e.characters.as_ref().is_some_and(|c| !c.is_empty())),
+            "no characters on any role"
+        );
+        // staffMedia is a second connection on the same query; an actor with
+        // no production credits is normal, so only the shape is asserted.
+        if let Some(edges) = staff.staff_media.as_ref().and_then(|m| m.edges.as_ref()) {
+            println!("production credits: {}", edges.len());
+        }
+    }
+
+    /// Live. The thread id comes from `media_discussions` for the same show,
+    /// because forum threads are deleted far more often than catalog entries
+    /// are.
+    #[tokio::test]
+    #[ignore]
+    async fn live_thread_detail() {
+        let catalogs = catalogs();
+        let threads = catalogs.media_discussions(154587).await.expect("discussions");
+        // The busiest thread, not the first with any replies: `replyCount`
+        // counts top-level comments too, so a thread that satisfies
+        // `> 0` can have no nested replies at all — and nested replies are
+        // the half of this response nothing else can check.
+        let thread_id = threads
+            .iter()
+            .max_by_key(|t| t.reply_count.unwrap_or(0))
+            .map(|t| t.id)
+            .expect("no discussion threads at all");
+        let detail = catalogs.thread_detail(thread_id).await.expect("thread detail");
+        let thread = detail.thread.expect("no Thread in response");
+        assert_eq!(thread.id, thread_id);
+        println!("thread {thread_id}: {:?} ({:?} replies)", thread.title, thread.reply_count);
+        let page = detail.page.expect("no Page beside the Thread");
+        let comments = page.thread_comments.unwrap_or_default();
+        assert!(!comments.is_empty(), "thread {thread_id} came back with no comments");
+        // Proves `childComments` arrives as the untyped Json scalar rather
+        // than erroring, which is the only part of the shape a fixture test
+        // cannot vouch for.
+        println!(
+            "{} top-level comments, {} of them with a reply blob",
+            comments.len(),
+            comments.iter().filter(|c| c.child_comments.is_some()).count()
+        );
+
+        let page_two = catalogs.thread_comments(thread_id, 2).await.expect("page 2");
+        println!(
+            "page 2: {} comments",
+            page_two.thread_comments.as_ref().map(|c| c.len()).unwrap_or(0)
+        );
     }
 }

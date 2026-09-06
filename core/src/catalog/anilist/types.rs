@@ -114,11 +114,27 @@ pub struct MediaConnection {
     pub edges: Option<Vec<MediaEdge>>,
 }
 
+/// AniList's own `MediaEdge`, which is reused for four different connections:
+/// a title's relations, a character's appearances, and both of a staff
+/// member's credit lists. Which fields are populated is decided by the query,
+/// not by the type — `relation_type` is null on a character appearance and
+/// `character_role` is null on a relation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaEdge {
     #[serde(rename = "relationType")]
     pub relation_type: Option<String>,
     pub node: Option<Box<MediaItem>>,
+    #[serde(rename = "characterRole")]
+    pub character_role: Option<String>,
+    /// The staff member's production role, free text ("Director", "Key
+    /// Animation") rather than an enum.
+    #[serde(rename = "staffRole")]
+    pub staff_role: Option<String>,
+    /// On `Staff.characterMedia`: the characters this actor voiced in that
+    /// title. Usually one, but a bit part can add several.
+    pub characters: Option<Vec<CharacterNode>>,
+    #[serde(rename = "voiceActors")]
+    pub voice_actors: Option<Vec<StaffNode>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +190,10 @@ pub struct CharacterNode {
     pub favourites: Option<i64>,
     #[serde(rename = "dateOfBirth")]
     pub date_of_birth: Option<FuzzyDate>,
+    /// Only `CHARACTER_DETAIL_QUERY` asks for this; on a cast-list node it is
+    /// absent. The cycle back through `MediaEdge::characters` is broken by
+    /// the `Vec` on that side, so neither type needs boxing here.
+    pub media: Option<MediaConnection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,13 +201,46 @@ pub struct StaffNode {
     pub id: i64,
     pub name: Option<StaffName>,
     pub image: Option<StaffImage>,
+    /// AniList's deprecated `StaffLanguage` enum. `MEDIA_CHARACTERS_QUERY`
+    /// still asks for it; newer queries ask for `language_v2`.
     pub language: Option<String>,
+    #[serde(rename = "languageV2")]
+    pub language_v2: Option<String>,
+}
+
+/// The full `Staff` record, as opposed to the name-and-portrait `StaffNode`
+/// that a cast list embeds. Separate rather than more optional fields on
+/// `StaffNode`, which is serialized into the cached cast list once per voice
+/// actor per show.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaffDetailNode {
+    pub id: i64,
+    pub name: Option<StaffName>,
+    pub image: Option<StaffImage>,
+    pub description: Option<String>,
+    #[serde(rename = "languageV2")]
+    pub language_v2: Option<String>,
+    #[serde(rename = "primaryOccupations")]
+    pub primary_occupations: Option<Vec<String>>,
+    #[serde(rename = "homeTown")]
+    pub home_town: Option<String>,
+    pub favourites: Option<i64>,
+    /// Titles they voiced a character in.
+    #[serde(rename = "characterMedia")]
+    pub character_media: Option<MediaConnection>,
+    /// Titles they held a production role on. A person can be in both lists
+    /// for the same show.
+    #[serde(rename = "staffMedia")]
+    pub staff_media: Option<MediaConnection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StaffName {
     pub full: Option<String>,
     pub native: Option<String>,
+    /// Other names the person or character goes by. Shared with AniList's
+    /// `CharacterName`, which is the same shape.
+    pub alternative: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

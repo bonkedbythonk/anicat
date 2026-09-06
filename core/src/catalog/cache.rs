@@ -207,9 +207,17 @@ impl AniListCache {
             "jikan_mal_id_miss" => Duration::from_secs(6 * 3600),
             "get_media_characters" => Duration::from_secs(6 * 3600),
             "get_media_discussions" => Duration::from_secs(30 * 60),
-            // A voice actor's filmography changes about as often as a
-            // season announcement, and one modal can page through it.
-            "get_staff" => Duration::from_secs(6 * 3600),
+            // A bio and a filmography change about as often as a season
+            // announcement, and both pages are re-entered constantly:
+            // tapping through a cast list is a walk between them.
+            "character_detail" => Duration::from_secs(6 * 3600),
+            "staff_detail" => Duration::from_secs(6 * 3600),
+            // Forum content is the one live thing here. A thread on an airing
+            // show gains replies while its page is open, and someone who
+            // posts a comment and reopens the thread must not be handed the
+            // copy from before they posted.
+            "thread_detail" => Duration::from_secs(10 * 60),
+            "thread_comments" => Duration::from_secs(5 * 60),
             // Search results are stable within a session; the real churn is
             // unique queries while typing, which no cache helps (debounce
             // does). This mainly spares repeats/back-navigation.
@@ -605,6 +613,10 @@ mod tests {
         assert!(AniListCache::ttl("get_discover") >= Duration::from_secs(3600));
         assert!(AniListCache::ttl("get_user_list") >= Duration::from_secs(10 * 60));
         assert!(AniListCache::ttl("search_media") >= Duration::from_secs(5 * 60));
+        assert!(AniListCache::ttl("character_detail") >= Duration::from_secs(3600));
+        assert!(AniListCache::ttl("staff_detail") >= Duration::from_secs(3600));
+        assert!(AniListCache::ttl("thread_detail") >= Duration::from_secs(5 * 60));
+        assert!(AniListCache::ttl("thread_comments") >= Duration::from_secs(5 * 60));
         // Unknown commands still fall back to the short default.
         assert_eq!(AniListCache::ttl("something_else"), Duration::from_secs(60));
     }

@@ -274,6 +274,13 @@ public struct MediaDetailView: View {
     @State private var selectedViewMode: EpisodeViewMode = .cards
     @State private var isSynopsisExpanded = false
     @State private var isBackHovered = false
+    /// Set from the scroll offset, but only ever as this Bool — see
+    /// `ScrollPassedThreshold` for why the offset itself never lands in state.
+    @State private var isHeaderCompact = false
+    /// +1 when the incoming tab sits further along the bar, -1 when it sits
+    /// behind: which way `tabTransition` slides.
+    @State private var tabSlide: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var detailTabNamespace
     @Namespace private var viewModeNamespace
     @Namespace private var audioNamespace
@@ -362,15 +369,33 @@ public struct MediaDetailView: View {
     /// (-mt-28 / 112pt) where the poster and title overlap the bottom hero gradient.
     private let bannerOverlap: CGFloat = 112
 
+    /// How far the page has to scroll before the compact header takes over:
+    /// far enough that the title in the poster column has left the top of the
+    /// viewport, so the two never name the title at once.
+    private static let compactHeaderThreshold: CGFloat = 260
+
     public var body: some View {
+        ZStack(alignment: .top) {
+            scrollBody
+            compactHeaderLayer
+        }
+    }
+
+    private var scrollBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
+                if #available(macOS 15.0, iOS 18.0, *) {
+                    EmptyView()
+                } else {
+                    ScrollThresholdProbe(threshold: Self.compactHeaderThreshold, passed: $isHeaderCompact)
+                }
                 banner
                 content
                 tabsSection
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .scrollPassedThreshold(Self.compactHeaderThreshold, passed: $isHeaderCompact)
         .background(SumiTheme.background)
         #if os(macOS)
         .onAppear {
@@ -408,13 +433,7 @@ public struct MediaDetailView: View {
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: 288)
-                .overlay {
-                    CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 1200) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Rectangle().fill(SumiTheme.card)
-                    }
-                }
+                .overlay { bannerImage }
                 .clipped()
 
             // `.hero-gradient`: the page ground at the bottom, a 60% black at
@@ -457,6 +476,125 @@ public struct MediaDetailView: View {
         }
         .frame(height: 288)
         .clipped()
+    }
+
+    /// The banner still, moving at half the scroll speed and dimming as it
+    /// goes.
+    ///
+    /// The effect is on the image and never on the 288pt container around it:
+    /// shifting the container down uncovers the bottom of the banner, while
+    /// the gap this leaves at the image's own top is always half the distance
+    /// already scrolled off screen and so can never be seen. `visualEffect`
+    /// reads the offset without publishing it, so none of this reaches the
+    /// page body — no state, no scroll tick.
+    private var bannerImage: some View {
+        // Read out here because the effect closure is @Sendable and cannot
+        // reach back into the view for it.
+        let isStill = reduceMotion
+        return CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 1200) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Rectangle().fill(SumiTheme.card)
+        }
+        .visualEffect { content, proxy in
+            let scrolled = max(0, -proxy.frame(in: .scrollView).minY)
+            return content
+                .offset(y: isStill ? 0 : scrolled * 0.5)
+                .brightness(-min(0.18, scrolled / 1600))
+        }
+    }
+
+    // MARK: - Compact header
+
+    /// The sticky bar that replaces the hero once it has scrolled away.
+    ///
+    /// An overlay on the scroll view, not a pinned section header: pinned
+    /// headers only exist for `List` and `LazyVStack` sections, and this page
+    /// is a plain `VStack` whose tabs bar is not a section header.
+    private var compactHeaderLayer: some View {
+        ZStack(alignment: .top) {
+            if isHeaderCompact {
+                compactHeader
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .offset(y: -8))
+                    )
+            }
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.2) : .snappy, value: isHeaderCompact)
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Color.clear
+                    .frame(width: 19, height: 28)
+                    .overlay {
+                        CachedAsyncImage(url: details.coverURL, maxPixelSize: 96) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(SumiTheme.card)
+                        }
+                    }
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                Text(details.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+            }
+            // The bar sits over the scroll view, and on macOS a view that
+            // hit-tests there eats the scroll wheel above it. Only the pill
+            // needs clicks; everything else stays transparent to the pointer
+            // so the page still scrolls under the bar.
+            .allowsHitTesting(false)
+
+            Spacer(minLength: 12)
+
+            if let episode = resumeTarget {
+                Button {
+                    onPlayEpisode(episode)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill").font(.system(size: 10))
+                        Text(compactActionLabel)
+                    }
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundColor(SumiTheme.background)
+                    .padding(.horizontal, 12)
+                    .frame(height: 26)
+                    .background(SumiTheme.indigo)
+                    .clipShape(Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.sumiPressable)
+            }
+        }
+        .padding(.horizontal, 56)
+        .padding(.vertical, 9)
+        .frame(maxWidth: 1150, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                SumiTheme.background.opacity(0.82)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The compact pill's label. Built from the same `resumeTarget` and
+    /// `resumeSecondsForTarget` as the full-size button, so the header and the
+    /// hero cannot disagree about whether there is a resume point.
+    private var compactActionLabel: String {
+        guard let target = resumeTarget else { return "Play" }
+        if resumeSecondsForTarget != nil { return "Resume EP \(target.number)" }
+        return "EP \(target.number)"
     }
 
     // MARK: - Content
@@ -545,7 +683,14 @@ public struct MediaDetailView: View {
     private var tabsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             tabBar
-            tabContent
+            // The two tabs overlap while they cross-fade. Left in the VStack
+            // they stacked instead, and the page grew by the whole height of
+            // the outgoing tab for the length of every switch.
+            ZStack(alignment: .topLeading) {
+                tabContent
+                    .id(activeTab)
+                    .transition(tabTransition)
+            }
         }
         .padding(.horizontal, 56)
         .padding(.bottom, 64)
@@ -1039,7 +1184,15 @@ public struct MediaDetailView: View {
                         Button {
                             if activeTab != tab {
                                 SumiHaptics.selection()
-                                withAnimation(.smooth) {
+                                let current = availableTabs.firstIndex(of: activeTab) ?? 0
+                                let target = availableTabs.firstIndex(of: tab) ?? 0
+                                withAnimation(.snappy) {
+                                    // Written in the same transaction as the
+                                    // tab itself: the incoming view is built
+                                    // during this update and captures the
+                                    // direction then, so a separate write can
+                                    // land late and slide the wrong way.
+                                    tabSlide = target >= current ? 1 : -1
                                     selectedTab = tab
                                 }
                             }
@@ -1161,6 +1314,22 @@ public struct MediaDetailView: View {
             }
         }
         .overlay(Rectangle().fill(SumiTheme.border).frame(height: 1), alignment: .bottom)
+    }
+
+    /// Content arrives from the side it is coming from: from the right for a
+    /// tab further along the bar, from the left for one behind it.
+    ///
+    /// Only the arriving side slides. A view's removal transition is recorded
+    /// when that view was last built — that is, during the *previous* switch,
+    /// carrying the `tabSlide` from then — so a departing panel given a
+    /// direction leaves the way the last change went, and reversing direction
+    /// sent both panels the same way at once.
+    private var tabTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(x: 12 * tabSlide)),
+            removal: .opacity
+        )
     }
 
     @ViewBuilder
@@ -1779,9 +1948,7 @@ private struct CompactEpisodeRow: View, Equatable {
             .buttonStyle(.sumiPressable)
 
             Button(action: { onToggleWatched(!episode.isWatched) }) {
-                Image(systemName: episode.isWatched ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16))
-                    .foregroundColor(episode.isWatched ? SumiTheme.indigo : SumiTheme.muted.opacity(0.3))
+                WatchedTick(isWatched: episode.isWatched, diameter: 16)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -1939,9 +2106,7 @@ private struct EpisodeRow: View, Equatable {
                 .padding(.top, 3)
 
             Button(action: { onToggleWatched(!episode.isWatched) }) {
-                Image(systemName: episode.isWatched ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundColor(episode.isWatched ? SumiTheme.indigo : SumiTheme.muted.opacity(0.4))
+                WatchedTick(isWatched: episode.isWatched, diameter: 18)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -2082,25 +2247,129 @@ private struct EpisodeRow: View, Equatable {
         )
     }
 
-    @ViewBuilder
     private var progressTick: some View {
-        if episode.isWatched {
+        EpisodeProgressBar(isWatched: episode.isWatched, percent: episode.progressPercent)
+    }
+}
+
+/// The fill along the bottom of an episode's thumbnail.
+///
+/// The bar stays mounted at zero rather than being inserted when there is
+/// something to show: an episode that becomes watched while the page is open
+/// (85% during playback, or the mark action) has to run out to the end, and a
+/// bar that appears already full pops instead.
+private struct EpisodeProgressBar: View {
+    let isWatched: Bool
+    let percent: Double?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Seeded from the props in `init` and animated from `onChange`, not
+    /// derived per body call — derived, a row that mounts watched would draw
+    /// the fill every time it scrolled back into the list.
+    @State private var fill: CGFloat
+
+    init(isWatched: Bool, percent: Double?) {
+        self.isWatched = isWatched
+        self.percent = percent
+        _fill = State(initialValue: Self.target(isWatched: isWatched, percent: percent))
+    }
+
+    /// A recorded position under 10% still shows a sliver: a bar too short to
+    /// see reads as "never started", which is a different thing.
+    private static func target(isWatched: Bool, percent: Double?) -> CGFloat {
+        if isWatched { return 1 }
+        guard let percent, percent > 0 else { return 0 }
+        return min(max(CGFloat(percent / 100), 0.1), 1)
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle().fill(SumiTheme.foreground.opacity(0.2))
             Rectangle()
                 .fill(SumiTheme.indigo)
-                .frame(height: 2.5)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-        } else if let percent = episode.progressPercent, percent > 0 {
-            let pct = min(max(CGFloat(percent / 100), 0.1), 1)
-            ZStack(alignment: .leading) {
-                Rectangle().fill(SumiTheme.foreground.opacity(0.2))
-                Rectangle()
-                    .fill(SumiTheme.indigo)
-                    .scaleEffect(x: pct, y: 1, anchor: .leading)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 2.5)
-            .frame(maxHeight: .infinity, alignment: .bottom)
+                .scaleEffect(x: fill, y: 1, anchor: .leading)
         }
+        // An episode with nothing recorded shows no bar at all, track
+        // included — that is what the thumbnail looked like before this was a
+        // permanently mounted view.
+        .opacity(fill > 0 ? 1 : 0)
+        .frame(maxWidth: .infinity)
+        .frame(height: 2.5)
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .onChange(of: Self.target(isWatched: isWatched, percent: percent)) { _, newTarget in
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.4)) {
+                fill = newTarget
+            }
+        }
+    }
+}
+
+/// The tick on an episode row's mark-watched control.
+///
+/// A stroked path with an animated `trim` rather than
+/// `Image(systemName: "checkmark.circle.fill")`: an episode crosses 85% while
+/// its own row is on screen, and a symbol can only pop into place there.
+private struct WatchedTick: View {
+    let isWatched: Bool
+    let diameter: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How much of the tick is drawn. Seeded in `init` rather than in
+    /// `onAppear`: an already-watched row scrolling in would otherwise render
+    /// its first frame with no tick, which flickers all the way down a
+    /// finished season.
+    @State private var drawn: CGFloat
+
+    init(isWatched: Bool, diameter: CGFloat) {
+        self.isWatched = isWatched
+        self.diameter = diameter
+        _drawn = State(initialValue: isWatched ? 1 : 0)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(SumiTheme.muted.opacity(0.4), lineWidth: 1.4)
+                .opacity(isWatched ? 0 : 1)
+            Circle()
+                .fill(SumiTheme.indigo)
+                .opacity(isWatched ? 1 : 0)
+            CheckmarkPath()
+                .trim(from: 0, to: drawn)
+                .stroke(
+                    SumiTheme.background,
+                    style: StrokeStyle(lineWidth: diameter * 0.13, lineCap: .round, lineJoin: .round)
+                )
+                .padding(diameter * 0.3)
+        }
+        .frame(width: diameter, height: diameter)
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : .snappy, value: isWatched)
+        .onChange(of: isWatched) { _, watched in
+            guard !reduceMotion else {
+                drawn = watched ? 1 : 0
+                return
+            }
+            // No extra bounce: an overshoot past 1 has no more tick to draw,
+            // so the stroke would finish early and then sit there while the
+            // spring settled.
+            withAnimation(.snappy(duration: 0.35, extraBounce: 0)) {
+                drawn = watched ? 1 : 0
+            }
+        }
+    }
+}
+
+/// The tick itself, as a path so it can be trimmed. Proportional to its rect,
+/// so the one shape serves both the card row and the compact row.
+private struct CheckmarkPath: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 

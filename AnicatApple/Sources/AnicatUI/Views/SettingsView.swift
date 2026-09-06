@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 public struct SettingsView: View {
     public enum SettingsTab: String, CaseIterable, Identifiable {
@@ -487,16 +484,14 @@ private struct AccountTabSection: View {
                     description: "Authorize Anicat to access your AniList account."
                 ) {
                     Button {
-                        #if os(macOS)
                         // Must match the client id the web build registers
                         // in web/src-tauri/src/commands/auth.rs — this one
                         // was wrong (20822 belongs to a third-party app,
                         // "Airin," not this one) and sent users through
                         // someone else's OAuth client instead of Anicat's own.
                         if let url = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token") {
-                            NSWorkspace.shared.open(url)
+                            Platform.openExternal(url)
                         }
-                        #endif
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "globe")
@@ -649,18 +644,16 @@ private struct MaintenanceTabSection: View {
         // Logs & Debugging Card
         SettingsCard(title: "Logs & Debugging") {
             Button {
-                #if os(macOS)
                 let report = """
                 Anicat Version: 1.0.0 (Native Apple Silicon ARM64)
-                Platform: macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+                Platform: \(Platform.osName) \(ProcessInfo.processInfo.operatingSystemVersionString)
                 Architecture: arm64
                 Signed In: \(isSignedIn)
                 AniList Viewer: \(username ?? "None")
                 Anime4K Upscaling: \(gpuUpscaling ? "Enabled" : "Disabled")
                 Timestamp: \(Date())
                 """
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(report, forType: .string)
+                Platform.copyToPasteboard(report)
                 withAnimation(.snappy) {
                     copyFeedback = "Debug report copied to clipboard!"
                 }
@@ -669,7 +662,6 @@ private struct MaintenanceTabSection: View {
                         copyFeedback = nil
                     }
                 }
-                #endif
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.on.doc")

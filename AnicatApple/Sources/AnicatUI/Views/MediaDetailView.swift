@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 public struct MediaDetailView: View {
     public enum DetailTab: String, CaseIterable, Identifiable {
@@ -1268,11 +1265,9 @@ public struct MediaDetailView: View {
 
         var body: some View {
             Button {
-                #if os(macOS)
                 if let threadURL {
-                    NSWorkspace.shared.open(threadURL)
+                    Platform.openExternal(threadURL)
                 }
-                #endif
             } label: {
                 rowContent
             }
@@ -1520,14 +1515,12 @@ private struct CharactersTabSection: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
                 ForEach(characters) { char in
                     Button {
-                        #if os(macOS)
                         // AniList's character page carries the bio and
                         // every other role/show this voice actor has —
                         // there's no reason to rebuild that here.
                         if let url = URL(string: "https://anilist.co/character/\(char.id)") {
-                            NSWorkspace.shared.open(url)
+                            Platform.openExternal(url)
                         }
-                        #endif
                     } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         Color.clear

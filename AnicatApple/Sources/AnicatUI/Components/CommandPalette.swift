@@ -88,7 +88,7 @@ public struct CommandPalette: View {
             .padding(.top, 140)
         }
         .onAppear { fieldFocused = true }
-        .onExitCommand(perform: onDismiss)
+        .sumiExitCommand(perform: onDismiss)
         // `.task(id:)` cancels the previous debounce automatically when
         // `query` changes again — same pattern as the Search tab's own
         // `.task(id: searchText)` — so only the last keystroke in a burst

@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 /// First-launch screen. One job: get an AniList token in, or let the
 /// viewer say "not now" and land on a home screen that explains itself.
@@ -55,9 +52,7 @@ public struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     step(number: 1, title: "Authorize in your browser") {
                         Button {
-                            #if os(macOS)
-                            NSWorkspace.shared.open(Self.authorizeURL)
-                            #endif
+                            Platform.openExternal(Self.authorizeURL)
                             tokenFieldFocused = true
                         } label: {
                             HStack(spacing: 8) {

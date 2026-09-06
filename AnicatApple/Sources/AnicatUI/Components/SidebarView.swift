@@ -1,9 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
 
 public struct SidebarView: View {
     public enum NavSection: String, CaseIterable, Identifiable, Sendable {
@@ -276,17 +271,11 @@ struct SumiLogoMark: View {
             Bundle.module.url(forResource: "anicat_logo", withExtension: "png"),
             Bundle.module.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
         ]
-        #if os(macOS)
         for case let url? in candidates {
-            if let nsImage = NSImage(contentsOf: url) { return Image(nsImage: nsImage) }
-        }
-        #else
-        for case let url? in candidates {
-            if let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {
-                return Image(uiImage: uiImage)
+            if let data = try? Data(contentsOf: url), let image = PlatformImage(data: data) {
+                return Image(platformImage: image)
             }
         }
-        #endif
         return nil
     }()
 }

@@ -94,7 +94,7 @@ public struct KeyboardShortcutsOverlay: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 40)
         }
-        .onExitCommand(perform: onDismiss)
+        .sumiExitCommand(perform: onDismiss)
     }
 
     private var header: some View {

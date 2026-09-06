@@ -158,3 +158,5 @@ AnicatApple/Sources/anicat_coreFFI/include/
 # outside a bundle (swift run / swift test) — never source.
 AnicatApple/.swiftpm/
 AnicatApple/anicat_image_cache/
+# iOS Simulator compile check (`swift build --triple arm64-apple-ios17.0-simulator --scratch-path .build-ios`)
+AnicatApple/.build-ios/

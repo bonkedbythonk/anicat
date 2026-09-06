@@ -149,7 +149,7 @@ public final class FPSMonitor: NSObject {
             let dropped = max(1, Int(round((dt - targetDuration) / targetDuration)))
             droppedFrames += dropped
             if logHitchesToConsole && frameMs > (targetDuration * 1000.0 + 7.0) {
-                print(String(format: "[FPS] ⚠️ Frame hitch: %.1fms (dropped %d frames, target %.1fms / %dHz)", frameMs, dropped, targetDuration * 1000.0, Int(nominalTargetFPS)))
+                print(String(format: "[FPS] frame hitch: %.1fms (dropped %d frames, target %.1fms / %dHz)", frameMs, dropped, targetDuration * 1000.0, Int(nominalTargetFPS)))
             }
         }
 

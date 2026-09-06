@@ -64,18 +64,65 @@ extension AppModel {
         if selectedMediaDetails?.id == catalogId, !selectedEpisodes.isEmpty {
             playbackEpisodes = selectedEpisodes
             playbackEpisodesCatalogId = catalogId
+            playbackMalId = selectedMediaDetails?.malId
             return
         }
         guard playbackEpisodesCatalogId != catalogId || playbackEpisodes.isEmpty else { return }
         playbackEpisodes = []
         playbackEpisodesCatalogId = catalogId
         playbackCoverURL = nil
+        // Cleared with the rest of the playing title's metadata, or the
+        // previous title's id would be handed to AniSkip for this one until
+        // the fetch below lands — the same wrong-title bug `playbackMalId`
+        // exists to fix.
+        playbackMalId = nil
         Task { [weak self] in
             guard let detail = try? await engine.mediaDetail(catalogId: catalogId, isManga: false) else { return }
             guard let self, self.currentPlaybackCatalogId == catalogId else { return }
             self.playbackEpisodes = Self.episodeItems(from: detail)
             self.playbackCoverURL = URL(string: detail.coverImage)
+            self.playbackMalId = detail.malId
             self.updateEpisodeNavigationState()
+            // This fetch runs alongside the resolve, so it usually lands
+            // after `resolveAndPlay` has already asked once and found no id.
+            // Asking again here is what makes AniSkip work for a play with
+            // no page open at all.
+            if let episode = self.currentPlaybackEpisode {
+                self.requestAniSkipTimes(catalogId: catalogId, episode: episode)
+            }
+        }
+    }
+
+    /// Fetches and applies the intro/outro windows for one episode, if the
+    /// playing title has a MyAnimeList id to key them by. Called twice per
+    /// episode at most — once when the resolve returns and once when the
+    /// detail fetch above lands — because whichever of the two knows the
+    /// MAL id first should be the one that starts the request.
+    func requestAniSkipTimes(catalogId: Int64, episode: Int64) {
+        guard currentPlaybackCatalog == .anilist else { return }
+        // The open page counts only when it *is* this title; otherwise its
+        // MAL id belongs to whatever the viewer navigated to since.
+        let pageMalId = selectedMediaDetails?.id == catalogId ? selectedMediaDetails?.malId : nil
+        guard let malId = playbackMalId ?? pageMalId else {
+            // Was silent — "AniSkip doesn't work" with nothing to say why is
+            // exactly this case: no MAL cross-reference means there was
+            // never going to be a request, not that one failed. It is not
+            // yet the final answer for a play with no page open: the detail
+            // fetch may still be in flight, and it asks again when it lands.
+            print("[AniSkip] no MAL id known for AniList id \(catalogId) — no skip times requested")
+            return
+        }
+        let episodeNumber = Int(episode)
+        let episodeLength = playerController.duration
+        Task { [weak self] in
+            let times = await AniSkipClient.skipTimes(malId: malId, episode: episodeNumber, episodeLengthSeconds: episodeLength)
+            guard let self else { return }
+            // The viewer may have already moved on (next/prev, closed the
+            // player) by the time this lands — a stale result applied to
+            // whatever's playing now would show the wrong episode's skip
+            // window.
+            guard self.currentPlaybackCatalogId == catalogId, self.currentPlaybackEpisode == episode else { return }
+            self.playerController.setAniSkipTimes(times)
         }
     }
 
@@ -486,6 +533,7 @@ extension AppModel {
         playbackEpisodes = []
         playbackEpisodesCatalogId = nil
         playbackCoverURL = nil
+        playbackMalId = nil
         ContinuityManager.shared.stopAdvertising()
         syncPlaybackSession()
 
@@ -718,26 +766,7 @@ extension AppModel {
         // `resolveAndPlay` might grow) and only titles AniList actually has a
         // MAL mapping for. Fire-and-forget: skip times are a nicety, not
         // worth delaying the return of `streamURL` over.
-        if catalog == .anilist, let malId = selectedMediaDetails?.malId {
-            let episodeNumber = Int(episode)
-            let episodeLength = self.playerController.duration
-            Task { [weak self] in
-                let times = await AniSkipClient.skipTimes(malId: malId, episode: episodeNumber, episodeLengthSeconds: episodeLength)
-                guard let self else { return }
-                // The viewer may have already moved on (next/prev, closed the
-                // player) by the time this lands — a stale result applied to
-                // whatever's playing now would show the wrong episode's skip
-                // window.
-                guard self.currentPlaybackCatalogId == catalogId, self.currentPlaybackEpisode == episode else { return }
-                self.playerController.setAniSkipTimes(times)
-            }
-        } else if catalog == .anilist {
-            // Was silent — "AniSkip doesn't work" with nothing to say why is
-            // exactly this case: AniList has no MAL cross-reference for this
-            // title at all, so there was never going to be a request to
-            // begin with, not a failed one.
-            print("[AniSkip] no MAL id for AniList id \(catalogId) — skip times unavailable for this title")
-        }
+        requestAniSkipTimes(catalogId: catalogId, episode: episode)
 
         // Apple Handoff: broadcast current playback activity to iPhone / iPad / Mac
         ContinuityManager.shared.advertisePlayback(

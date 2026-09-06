@@ -159,6 +159,12 @@ public final class AppModel: @unchecked Sendable {
     /// a play from the Up Next shelf opens no page, and the shelf's
     /// `QueueEntry` is not one of the arrays `syncKnownTitles` reads.
     var playbackCoverURL: URL?
+    /// MyAnimeList id of the *playing* title, which is what AniSkip is keyed
+    /// by. Filled from the same place `playbackEpisodes` is, because
+    /// `selectedMediaDetails` is the open page's — a play from the Up Next
+    /// shelf or from another show's page read either no id or the wrong
+    /// one, and AniSkip simply never fired there.
+    var playbackMalId: Int64?
     public var currentPlaybackCatalog: FfiCatalog = .anilist
     public var currentPlaybackCatalogId: Int64?
     public var currentPlaybackEpisode: Int64?

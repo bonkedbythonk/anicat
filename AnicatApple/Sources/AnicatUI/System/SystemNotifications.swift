@@ -17,10 +17,10 @@ import CoreGraphics
 public final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     public static let shared = SystemNotifications()
 
-    /// Settings' "Notify me about new episodes" switch. Nothing writes it
-    /// yet — the toggle is a follow-up — so the default matters: an unwritten
-    /// key reads as `false` from `UserDefaults.bool(forKey:)`, which would
-    /// ship the whole feature off.
+    /// Settings' "New Episode Alerts" switch, written there through
+    /// `@AppStorage`. The default matters: an unwritten key reads as `false`
+    /// from `UserDefaults.bool(forKey:)`, which would ship the whole feature
+    /// off for everyone who never opened Settings.
     public static let newEpisodesKey = "anicat_notify_new_episodes"
 
     public static var areNewEpisodeNotificationsEnabled: Bool {

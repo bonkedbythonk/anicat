@@ -23,6 +23,29 @@ enum SpotlightIndexer {
     /// a Spotlight hit hands the app the id string and nothing else.
     static let identifierPrefix = "anilist:"
 
+    /// Settings' "Spotlight indexing" switch. `SettingsView` writes it
+    /// through `@AppStorage`, which needs a literal at the property wrapper —
+    /// the two spellings must agree.
+    static let enabledKey = "anicat_spotlight_index"
+
+    /// Defaults to on. `UserDefaults.bool(forKey:)` answers `false` for a key
+    /// nothing has written, and `@AppStorage`'s default lives in the view, so
+    /// a plain `bool` read would have shipped indexing off for everyone who
+    /// never opened Settings.
+    static var isEnabled: Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: enabledKey) != nil else { return true }
+        return defaults.bool(forKey: enabledKey)
+    }
+
+    /// Drops everything this indexer has written. Called when the switch goes
+    /// off, so the rows leave the system index at once rather than lingering
+    /// until something else happens to replace them.
+    static func clear() async {
+        guard CSSearchableIndex.isIndexingAvailable() else { return }
+        try? await CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [domainIdentifier])
+    }
+
     struct Entry: Sendable, Hashable {
         let id: Int64
         let title: String
@@ -57,6 +80,11 @@ enum SpotlightIndexer {
     ///
     /// Sequential by design — see `thumbnailBudget`.
     static func reindex(_ entries: [Entry]) async {
+        // Ahead of the empty-entries guard below, which returns without
+        // touching the index either way: the switch turning off is what
+        // clears it, and a pass that ran here anyway would put the rows
+        // straight back on the next list change.
+        guard isEnabled else { return }
         // Empty means "the lists have not loaded yet", which is what the
         // launch pass sees — wiping the index on it would leave Spotlight
         // with nothing for as long as AniList takes to answer. Signing out

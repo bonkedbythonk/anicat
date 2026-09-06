@@ -129,9 +129,14 @@ public final class MpvMetalView: NSView {
     /// gaps), but the drawable size, which is what makes MoltenVK rebuild
     /// the swapchain, is applied at most once per 50ms. SwiftUI animates
     /// the mini-player's frame change by re-laying this view out on every
-    /// frame of the 0.28s animation; a swapchain rebuild per frame on top
+    /// frame of the minimize spring; a swapchain rebuild per frame on top
     /// of decoding and rendering is what made the whole app hitch each time
     /// the player was minimized or restored.
+    ///
+    /// The 50ms is a *trailing* debounce, not a rate limit, which is why the
+    /// spring's settling tail costs nothing extra: every layout pass cancels
+    /// the pending work item, so exactly one rebuild happens 50ms after the
+    /// frame stops moving, however long it took to get there.
     private func syncDrawableSize() {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale

@@ -105,6 +105,26 @@ public struct PlayerView: View {
         morphSource != nil && !hasShownFirstFrame && !reduceMotion
     }
 
+    /// One curve for the whole minimize/restore transition, read by both the
+    /// video frame and the chrome so the two cannot drift apart. Owned here
+    /// rather than at the call sites: every `isPlayerMinimized` mutation used
+    /// to carry its own `withAnimation(.smooth)`, which ran a second
+    /// transaction against this one — the same two-curves-one-change mistake
+    /// `closeDetail`'s comment in `RootView` records as "jitters, stops, pops
+    /// away".
+    private var minimizeCurve: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.4, extraBounce: 0.05)
+    }
+
+    /// The chrome does not cross-fade through the middle of the move: the
+    /// outgoing controls are gone within the first third and the incoming
+    /// ones only start in the last third, so at no point are two sets of
+    /// controls both legible over a frame that is still travelling.
+    private static let chromeTransition = AnyTransition.asymmetric(
+        insertion: .opacity.animation(.easeIn(duration: 0.13).delay(0.27)),
+        removal: .opacity.animation(.easeOut(duration: 0.13))
+    )
+
     /// The video's actual on-screen rect once letterboxed/pillarboxed to fit
     /// `container` — a MacBook's screen aspect ratio essentially never
     /// matches the video's, so the visible frame is a sub-rect of the window,
@@ -198,14 +218,19 @@ public struct PlayerView: View {
             y: windowSize.height - Self.miniSize.height / 2 - 24
         )
         ZStack {
-            // Background Canvas (Black) — only when full-size. Painting this
-            // unconditionally would black out the entire window even while
-            // minimized, defeating the whole point of minimizing: seeing and
-            // using the rest of the app behind the small mini-player box.
-            if !isMinimized {
-                Color.black
-                    .ignoresSafeArea()
-            }
+            // Background Canvas (Black). It has to reach 0 while minimized:
+            // left opaque it blacks out the whole window and defeats the
+            // point of minimizing, which is seeing and using the rest of the
+            // app behind the small box. Faded rather than branched on `if`
+            // so the app underneath un-dims continuously along the same
+            // spring the frame shrinks on, instead of popping back the
+            // instant the flag flips. `allowsHitTesting` is not
+            // optional here: a fully transparent `Color` still takes every
+            // click in the window.
+            Color.black
+                .opacity(isMinimized ? 0 : 1)
+                .allowsHitTesting(!isMinimized)
+                .ignoresSafeArea()
 
             // The episode still the play was started from, at the size and
             // place the video is about to occupy. It sits under the surface
@@ -277,7 +302,7 @@ public struct PlayerView: View {
                     }
                 }
                 .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
-                .animation(.easeInOut(duration: 0.28), value: isMinimized)
+                .animation(minimizeCurve, value: isMinimized)
 
             if !isMinimized {
                 // Buffering Spinner — covers both the initial resolve-to-first-frame
@@ -357,6 +382,7 @@ public struct PlayerView: View {
                     .allowsHitTesting(controller.areControlsVisible)
                 }
                 .animation(.smooth, value: controller.areControlsVisible)
+                .transition(Self.chromeTransition)
 
                 // AniSkip Floating Action Pill (Bottom Right). Kept floating
                 // over the video itself, unlike the rest of the chrome — it's a
@@ -418,9 +444,18 @@ public struct PlayerView: View {
                 }
                 .frame(width: Self.miniSize.width, height: Self.miniSize.height)
                 .position(miniCenter)
+                .transition(Self.chromeTransition)
             }
         }
-        .background(isMinimized ? Color.clear : Color.black)
+        .background(Color.black.opacity(isMinimized ? 0 : 1))
+        // Drives the branch swap above: without an animated transaction on
+        // this value SwiftUI runs no transition at all and the two chrome
+        // sets hard-cut, however staged `chromeTransition` is. The surface
+        // chain declares the same curve again next to the geometry it moves.
+        // Below `.background`, not above it: a value animation only covers
+        // what it wraps, and the backdrop added outside it would otherwise
+        // pop rather than un-dim with everything else.
+        .animation(minimizeCurve, value: isMinimized)
         .ignoresSafeArea(isMinimized ? [] : .all)
         #if os(macOS)
         .toolbar(.hidden, for: .windowToolbar)

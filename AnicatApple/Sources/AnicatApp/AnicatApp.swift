@@ -151,9 +151,11 @@ struct AnicatApp: App {
                         // not silently unpause it off-screen.
                         NSApp.activate(ignoringOtherApps: true)
                         AppWindow.main?.makeKeyAndOrderFront(nil)
-                        withAnimation(.smooth) {
-                            model.isPlayerMinimized = false
-                        }
+                        // Bare assignment: `PlayerView.minimizeCurve` owns
+                        // this transition, and a `withAnimation` here ran a
+                        // second transaction with a different curve against
+                        // it.
+                        model.isPlayerMinimized = false
                         if !model.playerController.isPlaying {
                             model.playerController.togglePlayPause()
                         }
@@ -193,9 +195,8 @@ struct AnicatApp: App {
                     // covering the whole window with no visible way back to
                     // the app. Minimizing (not stopping) it is what actually
                     // uncovers Settings.
-                    withAnimation(.smooth) {
-                        model.isPlayerMinimized = true
-                    }
+                    // Same as above: the curve lives in `PlayerView`.
+                    model.isPlayerMinimized = true
                     model.currentNavSection = .settings
                     AppWindow.main?.makeKeyAndOrderFront(nil)
                 },

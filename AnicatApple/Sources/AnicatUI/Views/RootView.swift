@@ -328,19 +328,21 @@ public struct RootView: View {
                             model.stopPlayback()
                         }
                     },
+                    // No `withAnimation` on either of these, and none at the
+                    // other two mutation sites in `AnicatApp`: `PlayerView`
+                    // owns the minimize curve (see its `minimizeCurve`), and
+                    // a `withAnimation(.smooth)` here ran a second
+                    // transaction with a different curve against it — the
+                    // same mistake `closeDetail`'s comment above records.
                     onMinimize: {
                         #if os(macOS)
                         NSCursor.setHiddenUntilMouseMoves(false)
                         #endif
-                        withAnimation(.smooth) {
-                            model.isPlayerMinimized = true
-                        }
+                        model.isPlayerMinimized = true
                     },
                     isMinimized: model.isPlayerMinimized,
                     onRestore: {
-                        withAnimation(.smooth) {
-                            model.isPlayerMinimized = false
-                        }
+                        model.isPlayerMinimized = false
                     },
                     morphSource: model.openingPlayerSourceKey.map {
                         EpisodeMorphSource(key: $0, namespace: playerNamespace)

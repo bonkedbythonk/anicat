@@ -224,7 +224,7 @@ public struct PlayerView: View {
                 VStack(spacing: 0) {
                     Group {
                         if controller.areControlsVisible {
-                            topBar.padding(.horizontal, SumiTheme.spaceLg)
+                            topBar(showsHairline: geometry.topOverlay == 0).padding(.horizontal, SumiTheme.spaceLg)
                         }
                     }
                     .frame(height: topGap)
@@ -248,7 +248,7 @@ public struct PlayerView: View {
 
                     Group {
                         if controller.areControlsVisible {
-                            PlayerBottomBar(controller: controller).padding(.horizontal, SumiTheme.spaceLg)
+                            PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0).padding(.horizontal, SumiTheme.spaceLg)
                         }
                     }
                     .frame(height: bottomGap)
@@ -377,7 +377,7 @@ public struct PlayerView: View {
     // 16:9 window the same row sits on the gradient scrim the body draws
     // under it. A single hairline at the bottom separates it from the
     // picture either way.
-    private var topBar: some View {
+    private func topBar(showsHairline: Bool) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: onClose) {
                 Image(systemName: "chevron.left")
@@ -485,9 +485,12 @@ public struct PlayerView: View {
         }
         .frame(maxHeight: .infinity)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(SumiTheme.border.opacity(0.6))
-                .frame(height: 1)
+            // Same rule as PlayerBottomBar.showsHairline: only over black.
+            if showsHairline {
+                Rectangle()
+                    .fill(SumiTheme.border.opacity(0.6))
+                    .frame(height: 1)
+            }
         }
     }
 
@@ -671,6 +674,12 @@ public struct PlayerView: View {
 
 private struct PlayerBottomBar: View {
     @Bindable var controller: PlayerController
+    /// The hairline exists to separate a bar sitting in solid letterbox
+    /// black from the picture above it. When the bar overlays the picture
+    /// (a 16:9 window, gradient scrim) the same line reads as a white
+    /// stripe across the video at the top of the fade, so it is drawn only
+    /// when the bar is fully inside the letterbox gap.
+    var showsHairline: Bool = true
 
     private var volumeIcon: String {
         if controller.isMuted || controller.volume == 0 { return "speaker.slash.fill" }
@@ -866,9 +875,11 @@ private struct PlayerBottomBar: View {
         .padding(.horizontal, 4)
         .frame(maxHeight: .infinity)
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(SumiTheme.border.opacity(0.6))
-                .frame(height: 1)
+            if showsHairline {
+                Rectangle()
+                    .fill(SumiTheme.border.opacity(0.6))
+                    .frame(height: 1)
+            }
         }
     }
 }

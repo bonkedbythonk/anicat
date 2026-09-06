@@ -523,6 +523,25 @@ public struct RootView: View {
                 }
             }
         }
+        // Not folded into `syncPlaybackSession`, which is otherwise the one
+        // place that follows "is an episode playing right now":
+        // `KeyboardBacklightDimmer` is `@MainActor` and owns `NSEvent`
+        // monitors, while `AppModel` is `@unchecked Sendable` and
+        // `syncPlaybackSession` runs on whatever thread mpv's pause observer
+        // was on. Reading both values here is also what registers the
+        // observation, so the pause edge arrives at all.
+        //
+        // No `initial: true`: the singleton is built lazily, so firing on
+        // appear would run the `dlopen` and the notification registrations
+        // at launch for a feature that defaults to off, and the call it
+        // would make (`stop()` on a false value) does nothing anyway.
+        .onChange(of: model.activeStreamURL != nil && model.playerController.isPlaying) { _, isWatching in
+            if isWatching {
+                KeyboardBacklightDimmer.shared.start()
+            } else {
+                KeyboardBacklightDimmer.shared.stop()
+            }
+        }
         #endif
     }
 

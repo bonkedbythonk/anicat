@@ -245,10 +245,30 @@ private struct PlayerTabSection: View {
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
+    // Same literal-key constraint as Discord below; `KeyboardDimSchedule`
+    // owns the readers and the defaults, and the two must agree.
+    @AppStorage("anicat_keyboard_dim") private var keyboardDim: Bool = false
+    @AppStorage("anicat_keyboard_dim_mode") private var keyboardDimMode: String = "night"
+    @AppStorage("anicat_keyboard_dim_from") private var keyboardDimFrom: Int = 20
+    @AppStorage("anicat_keyboard_dim_until") private var keyboardDimUntil: Int = 7
     // Key spelled out rather than `AppModel.discordPresenceKey`:
     // `@AppStorage` needs a literal at the property wrapper. `AppModel` owns
     // the reader and the default; the two must agree.
     @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+
+    private static let hourOptions = (0...23).map { String(format: "%02d:00", $0) }
+
+    /// The two hour keys are stored as integers so the dimmer can compare
+    /// them without parsing, and shown as "20:00" so the row reads as a
+    /// time. A dropdown of labels over an `Int` binding keeps both.
+    private func hourBinding(_ hour: Binding<Int>) -> Binding<String> {
+        Binding(
+            get: { String(format: "%02d:00", hour.wrappedValue) },
+            set: { label in
+                if let parsed = Int(label.prefix(2)) { hour.wrappedValue = parsed }
+            }
+        )
+    }
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -298,6 +318,56 @@ private struct PlayerTabSection: View {
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
             }
+
+            #if os(macOS)
+            Divider()
+                .background(SumiTheme.border)
+
+            // Keyboard Backlight
+            SettingField(
+                label: "Dim keyboard backlight while watching",
+                description: "Fades the keyboard backlight out after a few idle seconds during playback, and brings it straight back on the first key press, scroll or click."
+            ) {
+                SumiSwitch(isOn: $keyboardDim)
+            }
+
+            if keyboardDim {
+                Divider()
+                    .background(SumiTheme.border)
+
+                SettingField(
+                    label: "When",
+                    description: "Night only leaves the keyboard alone during the day."
+                ) {
+                    SumiSegmentedControl(
+                        options: [("always", "Always"), ("night", "Night only")],
+                        selection: $keyboardDimMode
+                    )
+                }
+
+                if keyboardDimMode == "night" {
+                    Divider()
+                        .background(SumiTheme.border)
+
+                    SettingField(
+                        label: "Night Hours",
+                        description: "Local time. The window may cross midnight."
+                    ) {
+                        HStack(spacing: 8) {
+                            Text("From")
+                                .font(.system(size: 12))
+                                .foregroundColor(SumiTheme.muted)
+                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimFrom), minWidth: 88)
+
+                            Text("Until")
+                                .font(.system(size: 12))
+                                .foregroundColor(SumiTheme.muted)
+                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimUntil), minWidth: 88)
+                        }
+                    }
+                }
+            }
+            #endif
 
             Divider()
                 .background(SumiTheme.border)

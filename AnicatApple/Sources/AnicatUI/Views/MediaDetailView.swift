@@ -262,6 +262,23 @@ public struct MediaDetailView: View {
     /// isn't wired to a shared namespace (or wasn't opened from a card at
     /// all, e.g. deep-linked).
     public var namespace: Namespace.ID?
+    /// The second shared namespace, for the episode-still-to-video morph.
+    /// Separate from `namespace` above rather than one namespace carrying
+    /// both kinds of key: the poster morph's namespace is handed over only
+    /// while a card open is in flight, and the episode morph has to work
+    /// from a page that was opened without one.
+    public var playerNamespace: Namespace.ID?
+    /// Which episode row is that morph's source, as
+    /// "episode:<catalogId>:<number>" — see
+    /// `AppModel.openingPlayerSourceKey`. At most one row is ever tagged.
+    public var playerSourceKey: String?
+
+    /// The one place this key is spelled. The play call site sets it and
+    /// the row compares against it; the two living in different files is
+    /// how a string built by hand in both drifts.
+    public nonisolated static func playerMorphKey(catalogId: Int64, episode: Int) -> String {
+        "episode:\(catalogId):\(episode)"
+    }
 
     @State private var selectedTab: DetailTab = .episodes
     let onTabChanged: (DetailTab) -> Void
@@ -312,6 +329,8 @@ public struct MediaDetailView: View {
         onDownloadEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         downloadStates: [Int: EpisodeDownloadState] = [:],
         namespace: Namespace.ID? = nil,
+        playerNamespace: Namespace.ID? = nil,
+        playerSourceKey: String? = nil,
         /// Restores whichever tab was open the last time this title was
         /// visited (threaded through by the caller's back/forward stack).
         /// `nil` falls back to the usual "episodes, unless this is a
@@ -348,6 +367,8 @@ public struct MediaDetailView: View {
         self.onDownloadEpisode = onDownloadEpisode
         self.downloadStates = downloadStates
         self.namespace = namespace
+        self.playerNamespace = playerNamespace
+        self.playerSourceKey = playerSourceKey
 
         let initial: DetailTab
         if let restoredTab {
@@ -1354,7 +1375,10 @@ public struct MediaDetailView: View {
                 onSetEpisodeWatched: onSetEpisodeWatched,
                 onLoadReleaseCandidates: onLoadReleaseCandidates,
                 onPlayWithRelease: onPlayWithRelease,
-                onDownloadEpisode: onDownloadEpisode
+                onDownloadEpisode: onDownloadEpisode,
+                catalogId: details.id,
+                playerNamespace: playerNamespace,
+                playerSourceKey: playerSourceKey
             )
         case .manga:
             MangaTabSection(chapters: mangaChapters, format: details.format, isLoading: isLoading, onReadChapter: onReadChapter)
@@ -1591,6 +1615,22 @@ public struct MediaDetailView: View {
     }
 }
 
+/// The `matchedGeometryEffect` pair for the one episode row a play was just
+/// started from. One struct rather than two loose optionals so `EpisodeRow.==`
+/// cannot compare the namespace and forget the id.
+/// `Sendable` so `EpisodeRow.==`, which is `nonisolated`, can compare it:
+/// every stored property of that row is main-actor isolated through `View`,
+/// and a non-`Sendable` one cannot be read from the `&&` autoclosure.
+public struct EpisodeMorphSource: Equatable, Sendable {
+    public let key: String
+    public let namespace: Namespace.ID
+
+    public init(key: String, namespace: Namespace.ID) {
+        self.key = key
+        self.namespace = namespace
+    }
+}
+
 /// One episode, as a compact row.
 /// The `.episodes` tab's list, pulled out of `MediaDetailView.tabContent` so
 /// `downloadStates` polling only re-evaluates this struct's own body, not
@@ -1607,6 +1647,11 @@ private struct EpisodeListSection: View {
     let onLoadReleaseCandidates: (Int) async -> [MediaDetailView.ReleaseCandidateItem]
     let onPlayWithRelease: (MediaDetailView.EpisodeItem, String) -> Void
     let onDownloadEpisode: (MediaDetailView.EpisodeItem) -> Void
+    /// Only to build the morph key below — this section otherwise knows
+    /// nothing about which title it is listing.
+    let catalogId: Int64
+    let playerNamespace: Namespace.ID?
+    let playerSourceKey: String?
 
     @State private var serverPickerEpisode: MediaDetailView.EpisodeItem?
     @State private var isLoadingServers = false
@@ -1616,6 +1661,14 @@ private struct EpisodeListSection: View {
     // call (once per EpisodeRow in the lazy list) adds O(n) work per render.
     // Stored in @State and rebuilt only when the inputs actually change.
     @State private var resumeTarget: MediaDetailView.EpisodeItem? = nil
+
+    private func morphSource(for episode: MediaDetailView.EpisodeItem) -> EpisodeMorphSource? {
+        guard let playerNamespace,
+              let playerSourceKey,
+              playerSourceKey == MediaDetailView.playerMorphKey(catalogId: catalogId, episode: episode.number)
+        else { return nil }
+        return EpisodeMorphSource(key: playerSourceKey, namespace: playerNamespace)
+    }
 
     private func computeResumeTarget() -> MediaDetailView.EpisodeItem? {
         if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
@@ -1673,7 +1726,14 @@ private struct EpisodeListSection: View {
                             onSelectServer: { name in
                                 serverPickerEpisode = nil
                                 onPlayWithRelease(episode, name)
-                            }
+                            },
+                            // A stored property, not a closure: `EpisodeRow.==`
+                            // excludes closures, so anything that gates the
+                            // morph has to take part in that comparison or
+                            // the row never re-renders when the key is set —
+                            // the source would go untagged and the whole
+                            // morph would silently do nothing.
+                            morphSource: morphSource(for: episode)
                         )
                         .equatable()
                     }
@@ -1995,6 +2055,10 @@ private struct EpisodeRow: View, Equatable {
     let serverCandidates: [MediaDetailView.ReleaseCandidateItem]
     let onCloseServerPicker: () -> Void
     let onSelectServer: (String) -> Void
+    /// Non-nil on exactly the row whose Play was just pressed, which makes
+    /// this row's still the source the player's placeholder flies out of.
+    /// Nil everywhere else, so only one view ever carries the id.
+    let morphSource: EpisodeMorphSource?
 
     @State private var isHovered = false
 
@@ -2015,6 +2079,7 @@ private struct EpisodeRow: View, Equatable {
             && lhs.isServerPickerOpen == rhs.isServerPickerOpen
             && lhs.isLoadingServers == rhs.isLoadingServers
             && lhs.serverCandidates == rhs.serverCandidates
+            && lhs.morphSource == rhs.morphSource
     }
 
     /// AniZip's `airdate` is a plain `YYYY-MM-DD`. Parsed as UTC to match how
@@ -2245,6 +2310,9 @@ private struct EpisodeRow: View, Equatable {
             RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                 .stroke(SumiTheme.border.opacity(0.4), lineWidth: 1)
         )
+        .ifLet(morphSource) { view, source in
+            view.matchedGeometryEffect(id: source.key, in: source.namespace)
+        }
     }
 
     private var progressTick: some View {

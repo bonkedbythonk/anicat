@@ -13,6 +13,15 @@ public struct RootView: View {
     // this namespace is gated per-shelf by `model.openingDetailSourceKey`,
     // not by catalog id alone — see that property's comment for why.
     @Namespace private var cardNamespace
+    // Shared between the episode rows (the detail page's and the Up Next
+    // shelf's) and the placeholder still inside the player, so pressing Play
+    // grows that row's thumbnail into the video frame. Its own namespace
+    // rather than more keys in `cardNamespace`: that one is handed over only
+    // while a card-driven detail open is in flight, and this morph has to
+    // work from a page opened any other way. Gated per-row by
+    // `model.openingPlayerSourceKey`, same as the poster morph is by
+    // `openingDetailSourceKey`.
+    @Namespace private var playerNamespace
     #if os(macOS)
     // Only exit fullscreen on close if we're the one who entered it — if the
     // window was already fullscreen (user did it manually before pressing
@@ -128,10 +137,18 @@ public struct RootView: View {
                                 discussions: model.selectedDiscussions,
                                 isLoading: model.isDetailLoading,
                                 onPlayEpisode: { ep in
-                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title)
+                                    playEpisode(
+                                        model: model, catalogId: details.id, episode: ep.number, title: details.title,
+                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                        morphThumbnailURL: ep.thumbnailURL
+                                    )
                                 },
                                 onPlayEpisodeFromStart: { ep in
-                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title, fromStart: true)
+                                    playEpisode(
+                                        model: model, catalogId: details.id, episode: ep.number, title: details.title, fromStart: true,
+                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                        morphThumbnailURL: ep.thumbnailURL
+                                    )
                                 },
                                 onReadChapter: { chapter in
                                     Task {
@@ -194,13 +211,19 @@ public struct RootView: View {
                                     await model.loadReleaseCandidates(episode: episode)
                                 },
                                 onPlayWithRelease: { ep, releaseName in
-                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title, chosenName: releaseName)
+                                    playEpisode(
+                                        model: model, catalogId: details.id, episode: ep.number, title: details.title, chosenName: releaseName,
+                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                        morphThumbnailURL: ep.thumbnailURL
+                                    )
                                 },
                                 onDownloadEpisode: { ep in
                                     Task { await model.startDownload(episode: ep.number) }
                                 },
                                 downloadStates: model.downloadStates,
                                 namespace: model.openingDetailSourceKey != nil ? cardNamespace : nil,
+                                playerNamespace: playerNamespace,
+                                playerSourceKey: model.openingPlayerSourceKey,
                                 restoredTab: model.restoredDetailTab,
                                 onTabChanged: { model.currentDetailTab = $0 }
                             )
@@ -318,7 +341,11 @@ public struct RootView: View {
                         withAnimation(.smooth) {
                             model.isPlayerMinimized = false
                         }
-                    }
+                    },
+                    morphSource: model.openingPlayerSourceKey.map {
+                        EpisodeMorphSource(key: $0, namespace: playerNamespace)
+                    },
+                    morphThumbnailURL: model.openingPlayerThumbnailURL
                 )
                 .transition(.opacity)
                 .zIndex(30)
@@ -568,6 +595,7 @@ public struct RootView: View {
             HomeSectionView(
                 model: model,
                 namespace: cardNamespace,
+                playerNamespace: playerNamespace,
                 onOpenDetail: openDetailFor
             )
         case .schedule:
@@ -774,12 +802,32 @@ public struct RootView: View {
 /// would otherwise make for a play with no page open.
 /// Shared with the menu bar's Resume: every shelf-style play goes through
 /// the show's page first, so the two entry points cannot drift apart.
-public func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title: String, coverURL: URL?) {
+/// `morphThumbnailURL` is the shelf row's still, when the caller has one on
+/// screen — the menu bar's Resume does not, and leaves it nil for a plain
+/// fade.
+public func playFromShelf(
+    model: AppModel,
+    catalogId: Int64,
+    episode: Int,
+    title: String,
+    coverURL: URL?,
+    morphThumbnailURL: URL? = nil
+) {
     // No poster morph on this path, deliberately: `UpNextQueueView` hands
     // its rows no namespace (its 104x60 landscape thumbnail interpolated
     // into a portrait poster reads as a squash), so a source key set here
     // would name a `matchedGeometryEffect` source that does not exist.
     model.openingDetailSourceKey = nil
+    // The player morph does not have that mismatch — landscape still into a
+    // landscape video frame — so it is wired. Set here rather than left to
+    // `playEpisode` below: this function opens the show's page first and can
+    // return before ever reaching it, and the flight starts from the shelf
+    // row, which by then is mounted but covered by that page. The placeholder
+    // is drawn above the page (the player is at zIndex 30), so the flight
+    // itself is visible; only its origin is not.
+    let morphKey = morphThumbnailURL.map { _ in
+        UpNextQueueView.playerMorphKey(catalogId: catalogId, episode: episode)
+    }
     // Cleared up front rather than by `playEpisode` on success: this
     // function can return before ever reaching it (cancelled during the page
     // load), and a Retry left over from an earlier failure would then re-run
@@ -793,7 +841,10 @@ public func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title
         guard !Task.isCancelled else { return }
         // Replaces `activeResolveTask` with the resolve's own task, so Cancel
         // targets whichever of the two stages is actually running.
-        playEpisode(model: model, catalogId: catalogId, episode: episode, title: title)
+        playEpisode(
+            model: model, catalogId: catalogId, episode: episode, title: title,
+            morphKey: morphKey, morphThumbnailURL: morphThumbnailURL
+        )
     }
 }
 
@@ -801,14 +852,23 @@ public func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title
 /// `HomeSectionView`) so the error banner's Retry button
 /// (`AppModel.errorRetryAction`) can re-run the exact same attempt rather
 /// than each site wiring its own retry closure by hand.
+/// `morphKey`/`morphThumbnailURL` name the row that was pressed, when there
+/// was one — its still is what flies into the video frame. Assigned here
+/// including the nil case, rather than only where a row exists: a play from
+/// somewhere with no row at all (Downloads, the retry closure) would
+/// otherwise inherit whatever the last play left set and fly a stale still.
 private func playEpisode(
     model: AppModel,
     catalogId: Int64,
     episode: Int,
     title: String,
     chosenName: String? = nil,
-    fromStart: Bool = false
+    fromStart: Bool = false,
+    morphKey: String? = nil,
+    morphThumbnailURL: URL? = nil
 ) {
+    model.openingPlayerSourceKey = morphKey
+    model.openingPlayerThumbnailURL = morphThumbnailURL
     model.activeResolveTask = Task {
         do {
             _ = try await model.resolveAndPlay(
@@ -850,6 +910,8 @@ private func playEpisode(
 private struct HomeSectionView: View {
     @Bindable var model: AppModel
     let namespace: Namespace.ID
+    /// The episode-still-to-video namespace, for the Up Next shelf's Play.
+    let playerNamespace: Namespace.ID
     // 5th arg is the shelf-scoped source key for the poster morph (e.g.
     // "watching:12345"), nil where there's no card to morph from.
     let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
@@ -943,6 +1005,8 @@ private struct HomeSectionView: View {
                             namespace: namespace,
                             openingSourceKey: model.openingDetailSourceKey,
                             shelfKey: "upnext",
+                            playerNamespace: playerNamespace,
+                            playerSourceKey: model.openingPlayerSourceKey,
                             onSelect: { entry in
                                 onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", "upnext:\(entry.id)")
                             },
@@ -955,7 +1019,8 @@ private struct HomeSectionView: View {
                                         catalogId: entry.id,
                                         episode: entry.nextEpisodeOrChapter,
                                         title: entry.title,
-                                        coverURL: entry.thumbnailURL
+                                        coverURL: entry.thumbnailURL,
+                                        morphThumbnailURL: entry.thumbnailURL
                                     )
                                 }
                             }

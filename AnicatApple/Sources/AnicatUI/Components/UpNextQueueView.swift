@@ -45,14 +45,29 @@ public struct UpNextQueueView: View {
     // the open — see `AppModel.openingDetailSourceKey`.
     public let openingSourceKey: String?
     public let shelfKey: String
+    /// The second namespace, for the thumbnail-to-video morph a Play press
+    /// starts. Distinct from `namespace` above because the two morphs have
+    /// different destinations and different lifetimes — see
+    /// `AppModel.openingPlayerSourceKey`.
+    public let playerNamespace: Namespace.ID?
+    /// Which row that morph starts from, as "upnext:<id>:<episode>".
+    public let playerSourceKey: String?
     public let onSelect: (QueueEntry) -> Void
     public let onPlay: (QueueEntry) -> Void
+
+    /// The one place the Up Next form of the key is spelled — the play call
+    /// site sets it and the row below compares against it.
+    public nonisolated static func playerMorphKey(catalogId: Int64, episode: Int) -> String {
+        "upnext:\(catalogId):\(episode)"
+    }
 
     public init(
         items: [QueueEntry],
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
         shelfKey: String = "upnext",
+        playerNamespace: Namespace.ID? = nil,
+        playerSourceKey: String? = nil,
         onSelect: @escaping (QueueEntry) -> Void,
         onPlay: @escaping (QueueEntry) -> Void
     ) {
@@ -60,8 +75,18 @@ public struct UpNextQueueView: View {
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
         self.shelfKey = shelfKey
+        self.playerNamespace = playerNamespace
+        self.playerSourceKey = playerSourceKey
         self.onSelect = onSelect
         self.onPlay = onPlay
+    }
+
+    private func morphSource(for entry: QueueEntry) -> EpisodeMorphSource? {
+        guard let playerNamespace,
+              let playerSourceKey,
+              playerSourceKey == Self.playerMorphKey(catalogId: entry.id, episode: entry.nextEpisodeOrChapter)
+        else { return nil }
+        return EpisodeMorphSource(key: playerSourceKey, namespace: playerNamespace)
     }
 
     public var body: some View {
@@ -78,6 +103,11 @@ public struct UpNextQueueView: View {
                     // Same call as `WeekStrip`, which never had a thumbnail
                     // wired up to it in the first place.
                     namespace: nil,
+                    // The player morph has no such mismatch: this 104x60
+                    // still is landscape and so is the video frame it grows
+                    // into, so the linear frame interpolation that made the
+                    // poster morph squash is exactly right here.
+                    morphSource: morphSource(for: entry),
                     onSelect: { onSelect(entry) },
                     onPlay: { onPlay(entry) }
                 )
@@ -106,6 +136,8 @@ public struct UpNextQueueView: View {
         let entry: QueueEntry
         let isFirst: Bool
         let namespace: Namespace.ID?
+        /// Non-nil on exactly the row whose Play was just pressed.
+        let morphSource: EpisodeMorphSource?
         let onSelect: () -> Void
         let onPlay: () -> Void
 
@@ -143,6 +175,9 @@ public struct UpNextQueueView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .ifLet(namespace) { view, namespace in
                             view.matchedGeometryEffect(id: entry.id, in: namespace)
+                        }
+                        .ifLet(morphSource) { view, source in
+                            view.matchedGeometryEffect(id: source.key, in: source.namespace)
                         }
 
                         // Info Column

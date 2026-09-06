@@ -25,6 +25,13 @@ public struct PlayerView: View {
     /// itself is unconditional.
     public let isMinimized: Bool
     public let onRestore: () -> Void
+    /// The `matchedGeometryEffect` pair naming the episode still this play
+    /// was started from, so the placeholder below can grow out of that row's
+    /// real on-screen frame. Nil for a play with no row behind it (menu-bar
+    /// Resume, Handoff, auto-next) — then the placeholder is skipped
+    /// entirely and the player's existing 0.32s fade is the whole entrance.
+    public let morphSource: EpisodeMorphSource?
+    public let morphThumbnailURL: URL?
     @State private var showInfoMenu = false
     @State private var showEpisodeList = false
     @State private var audioTracks: [PlayerTrack] = []
@@ -46,6 +53,15 @@ public struct PlayerView: View {
     /// searches with — but this episode's audio did not, and saying nothing
     /// is how the old control read as broken.
     @State private var audioSwitchNote: String?
+    /// Latched once per playback session, never reset: neither signal behind
+    /// it is one-shot on its own. `isBuffering` goes true again on every
+    /// mid-playback `paused-for-cache` stall and `awaitingNewFile` on every
+    /// auto-next, so a derived flag would blank the video back to the
+    /// placeholder in the middle of a binge. This view lives exactly as long
+    /// as the session does, so its `@State` resets when the player closes —
+    /// one intro per session, which is what it is for.
+    @State private var hasShownFirstFrame = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let miniSize = CGSize(width: 320, height: 180)
 
@@ -55,7 +71,9 @@ public struct PlayerView: View {
         onClose: @escaping () -> Void,
         onMinimize: @escaping () -> Void = {},
         isMinimized: Bool = false,
-        onRestore: @escaping () -> Void = {}
+        onRestore: @escaping () -> Void = {},
+        morphSource: EpisodeMorphSource? = nil,
+        morphThumbnailURL: URL? = nil
     ) {
         self.controller = controller
         self.streamURL = streamURL
@@ -63,6 +81,28 @@ public struct PlayerView: View {
         self.onMinimize = onMinimize
         self.isMinimized = isMinimized
         self.onRestore = onRestore
+        self.morphSource = morphSource
+        self.morphThumbnailURL = morphThumbnailURL
+    }
+
+    /// mpv has decoded and presented a frame of the file this session opened
+    /// with. `awaitingNewFile` is set by `resolveAndPlay` before
+    /// `activeStreamURL`, so this cannot read true in the gap before
+    /// `loadFile` runs; `isBuffering` is set by `loadFile` and cleared by the
+    /// first non-stale `time-pos`, which that method's own comment calls
+    /// proof a frame decoded. `videoDisplayWidth` deliberately is not part of
+    /// this: an audio-only or otherwise odd file never reports
+    /// `video-params/dw`, and waiting on it would strand the placeholder up
+    /// over a file that is playing fine.
+    private var firstFrameLanded: Bool {
+        !controller.awaitingNewFile && !controller.isBuffering
+    }
+
+    /// While true the video surface is transparent and the episode still is
+    /// what fills the video frame. Reduce Motion skips the whole thing: the
+    /// player's own 0.32s fade already is the plain-fade fallback.
+    private var isFlyingIn: Bool {
+        morphSource != nil && !hasShownFirstFrame && !reduceMotion
     }
 
     /// The video's actual on-screen rect once letterboxed/pillarboxed to fit
@@ -167,6 +207,32 @@ public struct PlayerView: View {
                     .ignoresSafeArea()
             }
 
+            // The episode still the play was started from, at the size and
+            // place the video is about to occupy. It sits under the surface
+            // and stays visible only because `isFlyingIn` holds that surface
+            // transparent — the host view and the Metal layer are both
+            // painted opaque black, so without that gate nothing beneath them
+            // can ever be seen. With a nil aspect ratio (mpv has not reported
+            // the decoded size yet, and `resolveAndPlay` clears it per
+            // episode) `videoRect` is the whole window, same fallback the
+            // chrome uses.
+            if isFlyingIn, let morphSource {
+                CachedAsyncImage(url: morphThumbnailURL, maxPixelSize: 1024) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.black
+                }
+                .frame(width: videoRect.width, height: videoRect.height)
+                .clipped()
+                .matchedGeometryEffect(id: morphSource.key, in: morphSource.namespace)
+                // Same reasoning as the detail page's poster:
+                // matchedGeometryEffect only animates the frame, so without
+                // an opacity transition the still snaps in at the row's size
+                // with no cross-fade while the player around it fades.
+                .transition(.opacity)
+                .allowsHitTesting(false)
+            }
+
             // Tap handling lives in `MpvEventCatcherView`, not a SwiftUI tap
             // gesture — stacking onTapGesture(count: 1) alongside
             // onTapGesture(count: 2) makes SwiftUI hold every single click
@@ -188,6 +254,16 @@ public struct PlayerView: View {
             // frame, for as long as the mini-player is up. That offscreen
             // pass was the app-wide lag while minimized.
             MpvSurface(controller: controller, streamURL: streamURL, cornerRadius: isMinimized ? 12 : 0)
+                // The one modifier the paragraph above does not rule out.
+                // Opacity is a plain layer property, so this neither moves
+                // the surface to a second call site nor reaches
+                // `dismantleNSView` the way an `if`/`else` or `.hidden()`
+                // would — that is what "minimize exits the stream" was. It
+                // also only leaves 1.0 for the length of one fade at the
+                // start of a session, and Core Animation skips the group
+                // pass entirely at exactly 1.0, so the mini-player's
+                // steady-state cost is unchanged.
+                .opacity(isFlyingIn ? 0 : 1)
                 .ignoresSafeArea(isMinimized ? [] : .all)
                 .frame(
                     width: isMinimized ? Self.miniSize.width : windowSize.width,
@@ -358,6 +434,16 @@ public struct PlayerView: View {
         // cancelled-nowhere timer running after the view goes away.
         .onDisappear {
             controller.cancelAutohide()
+        }
+        // Latched, not mirrored: see `hasShownFirstFrame`. The curve is the
+        // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
+        // the still handing over to the picture reads as one move with the
+        // dim rather than a second, faster thing happening on top of it.
+        .onChange(of: firstFrameLanded) { _, landed in
+            guard landed, !hasShownFirstFrame else { return }
+            withAnimation(.easeInOut(duration: 0.32)) {
+                hasShownFirstFrame = true
+            }
         }
         .onChange(of: showEpisodeList || showInfoMenu) { _, isOpen in
             controller.isMenuOpen = isOpen

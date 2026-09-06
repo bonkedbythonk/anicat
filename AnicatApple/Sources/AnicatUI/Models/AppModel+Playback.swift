@@ -632,6 +632,12 @@ extension AppModel {
         }
         self.activeStreamURL = nil
         self.isPlayerMinimized = false
+        // Leaving the key set would keep the row it names tagged as a
+        // `matchedGeometryEffect` source for the rest of the session, so the
+        // *next* play — one started from somewhere with no row at all — would
+        // fly its placeholder out of a stale episode still.
+        self.openingPlayerSourceKey = nil
+        self.openingPlayerThumbnailURL = nil
         self.currentPlaybackCatalogId = nil
         self.currentPlaybackEpisode = nil
         self.currentPlaybackTitle = nil

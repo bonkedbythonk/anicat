@@ -202,6 +202,22 @@ public final class AppModel: @unchecked Sendable {
     /// section was actually selected underneath.
     public var isPlayerMinimized: Bool = false
 
+    /// Which episode thumbnail this play was started from, as
+    /// "episode:<catalogId>:<number>" for a detail-page row or
+    /// "upnext:<catalogId>:<number>" for an Up Next row — the
+    /// `matchedGeometryEffect` id that flies that still into the video
+    /// frame. The two prefixes are deliberately different rather than one
+    /// shared "episode:" form: an Up Next play opens the show's page before
+    /// it resolves (see `playFromShelf`), so a shared key would leave the
+    /// shelf row *and* that page's own row for the same episode both tagged
+    /// as sources for one id — the undefined behavior
+    /// `openingDetailSourceKey` documents. Nil for any play with no row
+    /// behind it (menu-bar Resume, auto-next, Handoff); those just fade in.
+    public var openingPlayerSourceKey: String?
+    /// The still the key above names, so the player can draw it without
+    /// reaching back into whichever list the play came from.
+    public var openingPlayerThumbnailURL: URL?
+
     // PlayerController & Playback Tracking
     public let playerController = PlayerController()
     /// The system Now Playing tile and the media keys behind it. Fed from

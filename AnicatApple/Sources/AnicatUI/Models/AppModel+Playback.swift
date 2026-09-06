@@ -392,9 +392,13 @@ extension AppModel {
         let episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
         let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
         let catalog = currentPlaybackCatalog
+        // Read here rather than inside the closure: the queue runs behind
+        // whatever a stalled Discord write is doing, so a value read there
+        // is the setting as of whenever that unblocks, not as of this tick.
+        let discordEnabled = Self.isDiscordPresenceEnabled
 
         engineIOQueue.async {
-            if pauseEdgeChanged {
+            if pauseEdgeChanged, discordEnabled {
                 engine.discordSetPresence(
                     title: title,
                     episode: episode,
@@ -413,7 +417,7 @@ extension AppModel {
                     stopTime: stopTime,
                     duration: dur
                 )
-                if !isPaused {
+                if !isPaused, discordEnabled {
                     engine.discordSetPresence(
                         title: title,
                         episode: episode,
@@ -720,15 +724,17 @@ extension AppModel {
             timePositionSeconds: playerController.currentTime
         )
 
-        engine.discordSetPresence(
-            title: effectiveTitle,
-            episode: episode,
-            episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? "",
-            totalEpisodes: Int64(selectedMediaDetails?.episodeCount ?? 0),
-            pos: Int64(playerController.currentTime),
-            duration: Int64(playerController.duration),
-            paused: false
-        )
+        if Self.isDiscordPresenceEnabled {
+            engine.discordSetPresence(
+                title: effectiveTitle,
+                episode: episode,
+                episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? "",
+                totalEpisodes: Int64(selectedMediaDetails?.episodeCount ?? 0),
+                pos: Int64(playerController.currentTime),
+                duration: Int64(playerController.duration),
+                paused: false
+            )
+        }
 
         return streamURL
     }

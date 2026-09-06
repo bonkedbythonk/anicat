@@ -138,6 +138,33 @@ struct AnicatUITests {
         #expect(model.playerController.episodeNumber == 1)
     }
 
+    /// The setting is default-on, and `UserDefaults.bool(forKey:)` answers
+    /// `false` for an unwritten key — the exact shape that would have
+    /// shipped Discord presence off for everyone who never opened Settings,
+    /// since `@AppStorage`'s `= true` only supplies a default to the view.
+    @Test("Discord presence setting defaults to on when unwritten")
+    func testDiscordPresenceDefault() {
+        let defaults = UserDefaults.standard
+        let key = AppModel.discordPresenceKey
+        let saved = defaults.object(forKey: key)
+        defer {
+            if let saved {
+                defaults.set(saved, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        defaults.removeObject(forKey: key)
+        #expect(AppModel.isDiscordPresenceEnabled)
+
+        defaults.set(false, forKey: key)
+        #expect(!AppModel.isDiscordPresenceEnabled)
+
+        defaults.set(true, forKey: key)
+        #expect(AppModel.isDiscordPresenceEnabled)
+    }
+
     @Test("MediaDetailView onClose callback triggers")
     @MainActor
     func testMediaDetailViewOnClose() {

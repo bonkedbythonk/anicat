@@ -335,8 +335,64 @@ public final class AppModel: @unchecked Sendable {
     /// have nothing to show without it and say so rather than sitting empty.
     public var isSignedIn = false
 
+    /// Settings' "Discord Rich Presence" switch. Written by `@AppStorage`
+    /// in `SettingsView`, read here.
+    public static let discordPresenceKey = "anicat_discord_presence"
+
+    /// Defaults to on. `UserDefaults.bool(forKey:)` answers `false` for a
+    /// key nothing has written yet, and `@AppStorage`'s default lives in the
+    /// view, not in the store — so a plain `bool` read would have shipped
+    /// presence off for everyone who never opened Settings.
+    public static var isDiscordPresenceEnabled: Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: discordPresenceKey) != nil else { return true }
+        return defaults.bool(forKey: discordPresenceKey)
+    }
+
+    /// Last value acted on, so the observer below can tell a change to this
+    /// key from the many other keys `didChangeNotification` fires for.
+    private var lastDiscordPresenceEnabled = AppModel.isDiscordPresenceEnabled
+    private var defaultsObserver: NSObjectProtocol?
+
     public init() {
         setupPlayerCallbacks()
+        // `didChangeNotification` carries no key, so the edge check is the
+        // only thing separating a presence toggle from every other setting
+        // written while the app runs — without it, changing the theme would
+        // reconnect Discord.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let enabled = AppModel.isDiscordPresenceEnabled
+            guard enabled != self.lastDiscordPresenceEnabled else { return }
+            self.lastDiscordPresenceEnabled = enabled
+            self.applyDiscordPresenceSetting(enabled)
+        }
+    }
+
+    deinit {
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
+    }
+
+    /// Connects or disconnects Discord to match the setting. Turning it off
+    /// mid-episode has to clear what is already showing, not just stop
+    /// future updates: `discordDisconnect` drops the IPC socket, which is
+    /// what makes the activity disappear from the profile.
+    func applyDiscordPresenceSetting(_ enabled: Bool) {
+        guard let engine else { return }
+        engineIOQueue.async {
+            if enabled {
+                engine.discordConnect()
+            } else {
+                engine.discordClearPresence()
+                engine.discordDisconnect()
+            }
+        }
     }
 
     /// Jumps straight to an arbitrary episode number from the player's
@@ -400,7 +456,10 @@ public final class AppModel: @unchecked Sendable {
 
             // A no-op when Discord isn't running — the IPC connect just fails
             // and logs a warning on the Rust side.
-            coreEngine.discordConnect()
+            lastDiscordPresenceEnabled = Self.isDiscordPresenceEnabled
+            if lastDiscordPresenceEnabled {
+                coreEngine.discordConnect()
+            }
 
             // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS
             #if os(macOS)

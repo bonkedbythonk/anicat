@@ -245,6 +245,10 @@ private struct PlayerTabSection: View {
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
+    // Key spelled out rather than `AppModel.discordPresenceKey`:
+    // `@AppStorage` needs a literal at the property wrapper. `AppModel` owns
+    // the reader and the default; the two must agree.
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -293,6 +297,17 @@ private struct PlayerTabSection: View {
                 description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            // Discord Rich Presence
+            SettingField(
+                label: "Discord Rich Presence",
+                description: "Show the title, episode and position you are watching on your Discord profile. Has no effect when Discord is not running."
+            ) {
+                SumiSwitch(isOn: $discordPresence)
             }
         }
 

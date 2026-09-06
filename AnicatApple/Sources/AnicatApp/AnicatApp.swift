@@ -15,7 +15,10 @@ import CoreSpotlight
 /// right about.
 final class AppearanceLock: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        // The theme store owns the appearance now: Paper is light, Ink and
+        // OLED are dark, and a pinned darkAqua left menus and scrollers dark
+        // over a light ground.
+        ThemeStore.shared.applyToNativeChrome()
         _ = ScrollPocketWorkaround.disableScrollPocketsOnce
     }
 }
@@ -121,7 +124,7 @@ struct AnicatApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            ThemedRoot { RootView(model: model) }
                 .task {
                     await model.initialize()
                     // A notification tap or Spotlight hit that launched the
@@ -135,7 +138,6 @@ struct AnicatApp: App {
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     model.handleSpotlightActivity(activity)
                 }
-                .preferredColorScheme(.dark)
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
                 .background(WindowConfigurator())
                 .background(SystemIntegrationObserver(model: model))
@@ -265,7 +267,7 @@ struct AnicatApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            ThemedRoot { RootView(model: model) }
                 .task {
                     await model.initialize()
                     model.drainPendingDeepLink()
@@ -280,7 +282,6 @@ struct AnicatApp: App {
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     model.handleSpotlightActivity(activity)
                 }
-                .preferredColorScheme(.dark)
                 .background(SystemIntegrationObserver(model: model))
         }
     }

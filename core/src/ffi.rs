@@ -553,6 +553,12 @@ pub struct FfiTorrentChoice {
 pub struct SearchFilters {
     pub genre: Option<String>,
     pub year: Option<i32>,
+    /// `WINTER`/`SPRING`/`SUMMER`/`FALL`. Only sent alongside `year` — see
+    /// `build_search_variables`.
+    pub season: Option<String>,
+    /// One `MediaFormat`: `TV`, `TV_SHORT`, `MOVIE`, `SPECIAL`, `OVA`, `ONA`,
+    /// `MUSIC` for anime; `MANGA`, `NOVEL`, `ONE_SHOT` for manga.
+    pub format: Option<String>,
     pub min_score: Option<i32>,
     pub status: Option<String>,
     pub sort: Option<String>,
@@ -704,6 +710,8 @@ impl AnicatEngine {
             ("type", media_type.as_deref().unwrap_or("")),
             ("genre", filters.as_ref().and_then(|f| f.genre.as_deref()).unwrap_or("")),
             ("year", &year_str),
+            ("season", filters.as_ref().and_then(|f| f.season.as_deref()).unwrap_or("")),
+            ("format", filters.as_ref().and_then(|f| f.format.as_deref()).unwrap_or("")),
             ("min", &min_score_str),
             ("status", filters.as_ref().and_then(|f| f.status.as_deref()).unwrap_or("")),
             ("sort", filters.as_ref().and_then(|f| f.sort.as_deref()).unwrap_or("")),
@@ -2071,6 +2079,28 @@ fn build_search_variables(
         if let Some(y) = f.year {
             vars.insert("seasonYear".to_string(), serde_json::json!(y));
         }
+        if let Some(ref se) = f.season {
+            let trimmed = se.trim();
+            // AniList's `season` without a `seasonYear` matches that season in
+            // every year it has, so "WINTER" alone returns a list nobody asked
+            // for, ordered by popularity across three decades. Dropping it is
+            // the honest answer: the year dropdown is what makes it mean
+            // something.
+            if !trimmed.is_empty() && f.year.is_some() {
+                vars.insert("season".to_string(), serde_json::json!(trimmed));
+            }
+        }
+        // A NOVEL search is already `type: MANGA, format: [NOVEL]` — that pair
+        // is the whole definition of the mode, so a user format pick cannot be
+        // allowed to overwrite it or "Novels" would quietly search manga.
+        if mtype != "NOVEL" {
+            if let Some(ref fmt) = f.format {
+                let trimmed = fmt.trim();
+                if !trimmed.is_empty() {
+                    vars.insert("format".to_string(), serde_json::json!([trimmed]));
+                }
+            }
+        }
         if let Some(s) = f.min_score {
             vars.insert("averageScoreGreater".to_string(), serde_json::json!(s));
         }
@@ -2416,6 +2446,7 @@ mod tests {
             min_score: Some(80),
             status: Some("RELEASING".to_string()),
             sort: Some("SCORE_DESC".to_string()),
+            ..Default::default()
         };
         let vars = build_search_variables(None, Some("ANIME"), Some(&filters), 1);
         assert_eq!(vars.get("genre"), Some(&serde_json::json!(["Action"])));
@@ -2423,6 +2454,51 @@ mod tests {
         assert_eq!(vars.get("averageScoreGreater"), Some(&serde_json::json!(80)));
         assert_eq!(vars.get("status"), Some(&serde_json::json!("RELEASING")));
         assert_eq!(vars.get("sort"), Some(&serde_json::json!(["SCORE_DESC"])));
+    }
+
+    #[test]
+    fn season_rides_along_with_a_year() {
+        let filters = SearchFilters {
+            year: Some(2024),
+            season: Some("WINTER".to_string()),
+            ..Default::default()
+        };
+        let vars = build_search_variables(None, Some("ANIME"), Some(&filters), 1);
+        // Scalar `MediaSeason`, not a list — `format_in` takes an array,
+        // `season` does not, and the wrong shape only fails at the API.
+        assert_eq!(vars.get("season"), Some(&serde_json::json!("WINTER")));
+        assert_eq!(vars.get("seasonYear"), Some(&serde_json::json!(2024)));
+    }
+
+    #[test]
+    fn season_without_a_year_is_dropped() {
+        let filters = SearchFilters {
+            season: Some("SUMMER".to_string()),
+            ..Default::default()
+        };
+        let vars = build_search_variables(None, Some("ANIME"), Some(&filters), 1);
+        assert_eq!(vars.get("season"), None);
+    }
+
+    #[test]
+    fn format_filter_becomes_a_single_element_list() {
+        let filters = SearchFilters {
+            format: Some("MOVIE".to_string()),
+            ..Default::default()
+        };
+        let vars = build_search_variables(Some("Ghibli"), Some("ANIME"), Some(&filters), 1);
+        assert_eq!(vars.get("format"), Some(&serde_json::json!(["MOVIE"])));
+    }
+
+    #[test]
+    fn novel_media_type_keeps_its_format_against_a_filter() {
+        let filters = SearchFilters {
+            format: Some("MANGA".to_string()),
+            ..Default::default()
+        };
+        let vars = build_search_variables(Some("Slime"), Some("NOVEL"), Some(&filters), 1);
+        assert_eq!(vars.get("type"), Some(&serde_json::json!("MANGA")));
+        assert_eq!(vars.get("format"), Some(&serde_json::json!(["NOVEL"])));
     }
 
     #[test]

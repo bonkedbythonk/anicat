@@ -310,6 +310,20 @@ public struct PlayerView: View {
                 .animation(minimizeCurve, value: isMinimized)
 
             if !isMinimized {
+                // "Click outside cancels" for the next-episode card. Over the
+                // video and under the chrome, so pausing or scrubbing while
+                // the card is up still reaches the controls that do it —
+                // above the chrome this would have swallowed every one of
+                // them for the eight seconds the card lives.
+                if controller.nextEpisodeCountdown.isVisible {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            controller.cancelNextEpisodeCountdown()
+                        }
+                        .ignoresSafeArea()
+                }
+
                 // Buffering Spinner — covers both the initial resolve-to-first-frame
                 // stretch and any mid-playback stall, so the black canvas never
                 // sits with nothing on screen while mpv is still working.
@@ -397,6 +411,12 @@ public struct PlayerView: View {
                 skipOverlay
                     .frame(width: videoRect.width, height: videoRect.height)
                     .position(x: videoRect.midX, y: videoRect.midY)
+
+                // Same corner as the pill above, which is why the pill stands
+                // down while this is up rather than the two stacking.
+                nextEpisodeCard
+                    .frame(width: videoRect.width, height: videoRect.height)
+                    .position(x: videoRect.midX, y: videoRect.midY)
             } else {
                 // Mini-player chrome: a transparent tap-to-restore catcher
                 // over the whole small video (it sits above `MpvSurface`
@@ -451,6 +471,15 @@ public struct PlayerView: View {
         #if os(macOS)
         .onAppear {
             keyMonitor.onKey = { isSkipKey in
+                // The card supersedes the pill: while it is up, every key is
+                // "not now" and none of them is consumed, so the key the
+                // viewer actually pressed still does its usual job.
+                if controller.nextEpisodeCountdown.isVisible {
+                    withAnimation(.smooth) {
+                        controller.cancelNextEpisodeCountdown()
+                    }
+                    return false
+                }
                 guard isSkipKey, !controller.autoSkipEnabled,
                       controller.pendingSkipWindow != nil else { return false }
                 withAnimation(.snappy) {
@@ -461,6 +490,14 @@ public struct PlayerView: View {
             keyMonitor.start()
         }
         #endif
+        // The card is where Cancel lives, so it must not arm behind a
+        // mini-player the viewer cannot see it in; a minimized player falls
+        // back to `AppModel`'s own end-of-episode auto-next, exactly as
+        // before the card existed. `initial: true` because a play started
+        // straight into the mini-player never changes this value.
+        .onChange(of: isMinimized, initial: true) { _, minimized in
+            controller.isMiniPlayerActive = minimized
+        }
         // Latched, not mirrored: see `hasShownFirstFrame`. The curve is the
         // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
         // the still handing over to the picture reads as one move with the
@@ -501,8 +538,114 @@ public struct PlayerView: View {
     /// is on: the jump has already happened by the time a pill could be seen,
     /// and `skipFlashLabel` is what reports it instead.
     private var skipPillWindow: SkipWindow? {
-        guard !controller.autoSkipEnabled else { return nil }
+        guard !controller.autoSkipEnabled, !controller.nextEpisodeCountdown.isVisible else { return nil }
         return controller.pendingSkipWindow
+    }
+
+    /// The episode the card is offering. Read from `episodeList` rather than
+    /// from a value the controller could hold: that list is the same one the
+    /// next/prev buttons walk, so the card can never name an episode those
+    /// would not go to.
+    private var nextEpisodeItem: MediaDetailView.EpisodeItem? {
+        guard let index = controller.episodeList.firstIndex(where: { $0.number == controller.episodeNumber }),
+              controller.episodeList.indices.contains(index + 1) else { return nil }
+        return controller.episodeList[index + 1]
+    }
+
+    /// The countdown card. It changes nothing about *whether* the next
+    /// episode plays — the setting and the "is there a next episode" check
+    /// are the same ones `AppModel` already made — it only puts the decision
+    /// somewhere the viewer can see it and say no.
+    @ViewBuilder
+    private var nextEpisodeCard: some View {
+        if controller.nextEpisodeCountdown.isVisible, let next = nextEpisodeItem {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    HStack(alignment: .center, spacing: 12) {
+                        CachedAsyncImage(url: next.thumbnailURL, maxPixelSize: 320) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(SumiTheme.card)
+                        }
+                        .frame(width: 96, height: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Up next")
+                                .sumiTabularMono(size: 9.5, weight: .bold)
+                                .foregroundColor(SumiTheme.indigo)
+                            Text(next.title.isEmpty ? "Episode \(next.number)" : next.title)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 8) {
+                                Button("Play now") {
+                                    controller.playNextEpisodeNow()
+                                }
+                                .buttonStyle(.sumiPressable)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(SumiTheme.indigo)
+                                Button("Cancel") {
+                                    controller.cancelNextEpisodeCountdown()
+                                }
+                                .buttonStyle(.sumiPressable)
+                                .font(.system(size: 11))
+                                .foregroundColor(SumiTheme.muted)
+                            }
+                            .padding(.top, 2)
+                        }
+                        .frame(width: 168, alignment: .leading)
+
+                        countdownIndicator
+                    }
+                    .padding(12)
+                    .background(Color.black.opacity(0.82))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(SumiTheme.border.opacity(0.7), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.4), radius: 16, y: 6)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, controller.areControlsVisible ? 100 : 24)
+                }
+            }
+            .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+            .animation(.smooth, value: controller.nextEpisodeCountdown.phase)
+        }
+    }
+
+    /// The ring drains once per position tick (mpv reports `time-pos` on
+    /// every decoded frame), so the linear tween only has to cover the gap
+    /// between ticks. Reduce Motion gets the bare number instead: a ring is
+    /// motion whose only content is a count, and the count says it already.
+    @ViewBuilder
+    private var countdownIndicator: some View {
+        let remaining = controller.nextEpisodeCountdown.remaining(at: controller.currentTime)
+        let seconds = max(1, Int(remaining.rounded(.up)))
+        if reduceMotion {
+            Text("\(seconds)")
+                .sumiTabularMono(size: 20, weight: .bold)
+                .foregroundColor(SumiTheme.foreground)
+                .frame(width: 40, height: 40)
+        } else {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.18), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: controller.nextEpisodeCountdown.elapsedFraction(at: controller.currentTime))
+                    .stroke(SumiTheme.indigo, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.25), value: controller.currentTime)
+                Text("\(seconds)")
+                    .sumiTabularMono(size: 14, weight: .bold)
+                    .foregroundColor(SumiTheme.foreground)
+            }
+            .frame(width: 40, height: 40)
+        }
     }
 
     /// Bottom-right of the picture: the manual Skip pill, and above it the

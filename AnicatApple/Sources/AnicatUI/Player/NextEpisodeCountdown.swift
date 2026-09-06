@@ -53,11 +53,26 @@ public struct NextEpisodeCountdown: Equatable, Sendable {
         return true
     }
 
+    /// How close to the end of the file counts as the end of it.
+    static let endOfFileSlack: Double = 0.25
+
     /// Answers whether this tick is the one that expires the countdown —
     /// true exactly once, because it moves to `.fired` on the way out.
+    ///
+    /// The end-of-file condition is not a nicety. A chaptered release whose
+    /// last chapter is the ending gives a window that runs to the end of the
+    /// file, and auto-skip jumps to exactly there: position stops changing,
+    /// no more `time-pos` arrives, and a countdown that could only expire on
+    /// elapsed position-seconds would sit at eight forever — with
+    /// `isResolved` true, which also suppresses `AppModel`'s own
+    /// end-of-episode auto-next. Auto-next would simply never fire for
+    /// chaptered releases under the default settings.
     @discardableResult
-    public mutating func advance(to position: Double) -> Bool {
-        guard phase == .counting, position - armedAt >= Self.seconds else { return false }
+    public mutating func advance(to position: Double, duration: Double) -> Bool {
+        guard phase == .counting else { return false }
+        let counted = position - armedAt >= Self.seconds
+        let atEnd = duration > 0 && position >= duration - Self.endOfFileSlack
+        guard counted || atEnd else { return false }
         phase = .fired
         return true
     }

@@ -31,6 +31,10 @@ extension AppModel {
         hasAdvancedAniListForCurrentEpisode = false
         hasAutoAdvancedEpisode = false
         hasPreloadedNextEpisode = false
+        // Fifth flag, same rule: the countdown card's "cancelled" is scoped
+        // to one episode, and a cancel that survived into the next one would
+        // silently disable auto-next for the rest of the binge.
+        playerController.nextEpisodeCountdown.reset()
     }
 
     func setupPlayerCallbacks() {
@@ -523,7 +527,14 @@ extension AppModel {
         // next-episode path (episode list refresh, resume state, everything
         // `nextEpisode()`'s manual button already does) rather than
         // duplicating it here.
-        if !hasAutoAdvancedEpisode, dur > 0, Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds,
+        // `isResolved` is anything but `.idle`: the card either advanced the
+        // episode itself, or the viewer cancelled it. Both are decisions
+        // already taken for this episode, and this check firing on top of
+        // either would advance an episode the viewer had just said no to.
+        // An idle countdown means no card ever came up (minimized player,
+        // card turned off) and this behaves exactly as it always did.
+        if !hasAutoAdvancedEpisode, !playerController.nextEpisodeCountdown.isResolved,
+           dur > 0, Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds,
            playerController.autoPlayNextEnabled, playerController.hasNextEpisode {
             hasAutoAdvancedEpisode = true
             Task { await self.playAdjacentEpisode(offset: 1) }

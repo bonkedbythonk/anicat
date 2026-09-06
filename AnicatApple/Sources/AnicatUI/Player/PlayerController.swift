@@ -529,10 +529,16 @@ public final class PlayerController: @unchecked Sendable {
     /// decision `AppModel` already makes — same setting, same "is there a
     /// next episode" — and adds a window in which the viewer can say no.
     private func checkNextEpisodeCountdown() {
-        if nextEpisodeCountdown.advance(to: currentTime) {
+        armNextEpisodeCountdown()
+        // Arm first, expire second, in one pass. A window that ends at the
+        // end of the file arms the countdown at a position nothing will ever
+        // move past — there is no second tick to expire it in.
+        if nextEpisodeCountdown.advance(to: currentTime, duration: duration) {
             onNextEpisode?()
-            return
         }
+    }
+
+    private func armNextEpisodeCountdown() {
         guard nextEpisodeCountdown.phase == .idle,
               Self.isNextEpisodeCardEnabled,
               autoPlayNextEnabled,
@@ -542,9 +548,10 @@ public final class PlayerController: @unchecked Sendable {
               duration > 0 else { return }
         // The outro window from either source, or the last thirty seconds
         // when neither exists. Auto-skip, when it is on, has already jumped
-        // to the window's end by the time this runs, so the card arms there
-        // and counts its eight seconds over the next episode's own start
-        // rather than over an ending nobody is watching.
+        // past the ending by the time this runs, so the card arms at the
+        // window's end rather than at its start — and where that end is the
+        // end of the file, `advance`'s end-of-file condition is what expires
+        // it, since no position-seconds remain to count.
         let trigger = outroStartTime ?? (duration - Self.countdownTailSeconds)
         guard currentTime >= trigger else { return }
         nextEpisodeCountdown.arm(at: currentTime)

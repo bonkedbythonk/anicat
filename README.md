@@ -46,41 +46,51 @@ The app was rewritten from Tauri/React to Swift in 2026. An iPhone build is the 
 
 ## Install
 
-There is no packaged release of the native app yet. The DMGs on the
-[Releases page](https://github.com/bonkedbythonk/anicat/releases) and the
-`install_macos.sh` one-liner install the retired Tauri version. Build from
-source (below) until a release of the Swift app exists.
+No packaged release of the native app yet: the DMGs on the
+[Releases page](https://github.com/bonkedbythonk/anicat/releases) up to
+v5.8.0 and the `install_macos.sh` one-liner install the retired Tauri
+version. Until a 6.x release exists, build from source and install the
+result into `/Applications`:
+
+```bash
+bash scripts/package-anicat-macos-app.sh release install
+```
+
+The build is ad-hoc signed, not notarized. On first launch right-click the
+app and choose Open, or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Anicat.app
+```
 
 ---
 
 ## First-run Setup
 
-On first launch, Anicat walks you through setup automatically:
+On first launch Anicat walks you through setup:
 
-1. Pick a theme and configure basic preferences.
-2. Connect your AniList account: Settings opens the AniList authorization page in your browser, and you paste the redirect URL (or the token in it) back into the app. The token is stored in the local Keychain.
-3. Your library loads and the home screen populates.
+1. Connect your AniList account: Settings opens the AniList authorization page in your browser, and you paste the redirect URL (or the token in it) back into the app. The token is stored in the local Keychain.
+2. Your library loads and the home screen populates.
 
 AniList is only used for tracking. Playback and the episode list do not require an account.
-
-Cinema mode is catalogued by TMDB and needs a TMDB read access token in Settings. Its playback path is not wired into the Swift build yet.
 
 ---
 
 ## Features
 
-- **Up Next** — A single "continue where you left off" queue across every show in progress, plus a "Pick for me" random-episode button.
-- **Playback** — libmpv rendering inside the window: Anime4K upscaling, AniSkip intro/outro skip, sub/dub preference, resume position, auto-next, a corner mini-player so the rest of the app stays usable, and a sideways mode for a screen turned on its side. Anime streams straight from the swarm while it downloads, with candidates gathered from SubsPlease, AnimeTosho, Nyaa and SeaDex in one pass and the best two raced against each other.
-- **Manga Reader** — Single page, double page and vertical scroll, RTL/LTR, tap zones for page turns, and AniList progress sync.
-- **Light Novels** — In-app reader for Syosetu web novels.
-- **AniList Sync** — Progress, scores and list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85%. Inline editing from the detail page.
-- **Detail navigation** — Browser-style back and forward through relations and recommendations, with the poster morphing from the card you opened.
-- **Downloads** — Keep an episode's torrent for offline playback, tracked in the Downloads view.
-- **Schedule** — 7-day airing calendar, with a toggle between everything airing and just your watching list.
-- **Discovery** — Customizable home layout, and search with genre, year and score filters.
-- **Handoff** — Playback and reading hand off between Macs signed into the same Apple ID.
-- **Discord Rich Presence** — Shows what you are watching in your Discord status.
-- **Themes** — Ink & Index (default), Sakura Zen, Retro Manga.
+- **Up Next** — One "continue where you left off" queue across every show in progress, a "Pick for me" random-episode button, and a customizable home layout (Trending, Newly Releasing, Seasonal, Planning).
+- **Playback** — libmpv drawn inside the window through Metal, at the display's full refresh rate. Anime4K upscaling, AniSkip intro and outro skip keyed to the file's real length, resume position, auto-next with the next episode preloaded at 75%, a corner mini-player so the rest of the app stays usable, sideways mode for a rotated screen, and the display kept awake while a stream plays. Streams come straight from the swarm while they download: candidates are gathered from SubsPlease, AnimeTosho, Nyaa and SeaDex in one pass, the best two raced against each other, and the release that won is remembered for next time.
+- **Player info popover** — Audio and subtitle tracks listed by language and title, a Sub/Dub switch that keeps full subtitles, a release switcher that resumes at the same position, speed, and an optional keyboard backlight dimmer for night watching.
+- **Detail pages** — Episodes with thumbnails and air dates, cast with in-app character, voice actor and staff pages, relations and recommendations, AniList forum threads read in the app, and a "Start over" beside Resume. Browser-style back and forward, two-finger swipe included, with the poster morphing from the card you opened and the hero banner settling into a compact header as you scroll.
+- **Manga reader** — Single page, two-page spread, vertical scroll, RTL and LTR, tap zones and trackpad page turns, AniList progress sync. MangaDex first, MangaKatana when a title has been pulled from MangaDex.
+- **Light novels** — In-app reader for Syosetu web novels with typography controls and per-chapter progress.
+- **AniList sync** — Progress, scores and list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85%. Inline editing from the detail page; Planning shelves on the manga and novel pages.
+- **Library** — Every AniList status as a grid or table, anime and manga.
+- **Downloads and History** — Keep an episode's torrent for offline playback with Play, Reveal in Finder and Remove per row; a local watch log you can open, prune or clear.
+- **Schedule** — 7-day airing calendar, everything airing or just your watching list.
+- **Search** — Genre, year, season, format, score, status and sort filters.
+- **Continuity** — Handoff of playback and reading between Macs on the same Apple ID, Bonjour discovery of other instances.
+- **Discord Rich Presence** — Optional, off with one switch.
 - **Keyboard-driven** — A command palette and shortcuts for every view, with a built-in cheat sheet (`?`).
 
 ---
@@ -126,7 +136,10 @@ cd AnicatApple && swift test
 cd core && cargo test --lib && cargo clippy --lib --tests -- -D warnings
 ```
 
-`scripts/package-anicat-macos-app.sh` produces a standalone `.app` with libmpv's dependencies vendored in.
+`scripts/package-anicat-macos-app.sh release` produces a standalone `.app`
+in `AnicatApple/dist/`; add `install` to replace `/Applications/Anicat.app`
+with it. `bash AnicatApple/dev-run.sh` rebuilds a debug copy in `dist/` and
+relaunches it, and never touches the installed one.
 
 ---
 

@@ -16,9 +16,22 @@ public struct HistoryView: View {
     let namespace: Namespace.ID?
     let openingSourceKey: String?
     let onSelectFavourite: (MediaCard.Item) -> Void
+    /// Opens a log row's title. The second argument is the title as this view
+    /// resolved it from `titles`, or nil for an id no loaded list has named —
+    /// the caller has a catalog fetch and this view does not.
+    let onOpenTitle: ((Int64, String?) -> Void)?
+    /// Deletes one watch from the registry. Optional, and the menu item is
+    /// absent when it is nil: the engine exposes no per-row delete, so
+    /// without a caller supplying one there is nothing honest to offer.
+    let onRemoveActivity: ((ActivityRow) -> Void)?
+    /// Deletes the whole local watch log. Optional for the same reason.
+    /// Not `clearLocalRegistry` under another name — that also wipes resume
+    /// positions and provider overrides, and is already Settings' action.
+    let onClearHistory: (() -> Void)?
 
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @State private var favouritesType: String = "ANIME"
+    @State private var clearConfirming: Bool = false
 
     public init(
         viewer: ViewerProfile?,
@@ -26,7 +39,10 @@ public struct HistoryView: View {
         titles: [Int64: String],
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
-        onSelectFavourite: @escaping (MediaCard.Item) -> Void = { _ in }
+        onSelectFavourite: @escaping (MediaCard.Item) -> Void = { _ in },
+        onOpenTitle: ((Int64, String?) -> Void)? = nil,
+        onRemoveActivity: ((ActivityRow) -> Void)? = nil,
+        onClearHistory: (() -> Void)? = nil
     ) {
         self.viewer = viewer
         self.activity = activity
@@ -34,6 +50,9 @@ public struct HistoryView: View {
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
         self.onSelectFavourite = onSelectFavourite
+        self.onOpenTitle = onOpenTitle
+        self.onRemoveActivity = onRemoveActivity
+        self.onClearHistory = onClearHistory
     }
 
     /// SQLite writes `YYYY-MM-DD HH:MM:SS` in UTC.
@@ -98,7 +117,13 @@ public struct HistoryView: View {
             .padding(.top, 12)
 
             VStack(alignment: .leading, spacing: 12) {
-                SumiSectionHeader("Recent")
+                HStack {
+                    SumiSectionHeader("Recent")
+                    Spacer()
+                    if let onClearHistory, !activity.isEmpty {
+                        clearButton(onClearHistory)
+                    }
+                }
                 if activity.isEmpty {
                     SumiEmptyState(
                         headline: "Nothing watched yet",
@@ -227,25 +252,37 @@ public struct HistoryView: View {
         )
     }
 
+    /// The two-step confirm from Settings' maintenance buttons rather than a
+    /// dialog. The count goes in the confirm label because this is the one
+    /// unrecoverable action on the page and "Clear history" alone does not
+    /// say how much is about to go.
+    private func clearButton(_ action: @escaping () -> Void) -> some View {
+        Button {
+            if clearConfirming {
+                action()
+                clearConfirming = false
+            } else {
+                clearConfirming = true
+            }
+        } label: {
+            Text(clearConfirming ? "Clear \(activity.count) watches? Click again" : "Clear history")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(SumiTheme.dangerLight)
+                .padding(.horizontal, clearConfirming ? 10 : 0)
+                .padding(.vertical, 4)
+                .background(clearConfirming ? SumiTheme.danger.opacity(0.18) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .animation(.snappy, value: clearConfirming)
+    }
+
     private var log: some View {
         let stamp = SumiTimeFormatter.historyDateFormatter(timeFormat: timeFormat)
         return VStack(spacing: 0) {
             ForEach(Array(activity.prefix(60).enumerated()), id: \.offset) { index, row in
-                HStack(spacing: 12) {
-                    Text(titles[row.catalogId] ?? "Media \(row.catalogId)")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-                        .lineLimit(1)
-                    Text("— EP \(row.episodeNumber)")
-                        .sumiTabularMono(size: 11.5)
-                        .foregroundColor(SumiTheme.muted)
-                    Spacer(minLength: 12)
-                    Text(Self.parser.date(from: row.watchedAt).map { stamp.string(from: $0) } ?? "")
-                        .sumiTabularMono(size: 11.5)
-                        .foregroundColor(SumiTheme.muted)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                logRow(row, stamp: stamp)
 
                 if index < min(activity.count, 60) - 1 {
                     Rectangle().fill(SumiTheme.border).frame(height: 1)
@@ -257,5 +294,54 @@ public struct HistoryView: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func logRow(_ row: ActivityRow, stamp: DateFormatter) -> some View {
+        // An id no loaded list has named still shows, with the id — dropping
+        // the row would misreport how much was watched. It is still openable:
+        // the detail page fetches the title this view could not resolve.
+        let title = titles[row.catalogId]
+        let content = HStack(spacing: 12) {
+            Text(title ?? "Media \(row.catalogId)")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundColor(SumiTheme.foreground)
+                .lineLimit(1)
+            Text("— EP \(row.episodeNumber)")
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+            Spacer(minLength: 12)
+            Text(Self.parser.date(from: row.watchedAt).map { stamp.string(from: $0) } ?? "")
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+
+        let tappable = Group {
+            if let onOpenTitle {
+                Button { onOpenTitle(row.catalogId, title) } label: { content }
+                    .buttonStyle(.sumiPressable)
+            } else {
+                content
+            }
+        }
+
+        // Attached only when it would have an entry. An unconditional
+        // `.contextMenu` with both callbacks nil pops an empty menu on
+        // right-click, which reads as a broken row rather than an inert one.
+        if onOpenTitle != nil || onRemoveActivity != nil {
+            tappable.contextMenu {
+                if let onOpenTitle {
+                    Button("Open") { onOpenTitle(row.catalogId, title) }
+                }
+                if let onRemoveActivity {
+                    Button("Remove from history", role: .destructive) { onRemoveActivity(row) }
+                }
+            }
+        } else {
+            tappable
+        }
     }
 }

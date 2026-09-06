@@ -63,14 +63,37 @@ final class ImageDecodeCache: @unchecked Sendable {
         let config = URLSessionConfiguration.default
         let memoryCapacity = 50 * 1024 * 1024 // 50 MB
         let diskCapacity = 200 * 1024 * 1024 // 200 MB
+        // An absolute directory, not the bare name this used to pass. A
+        // relative `diskPath` is resolved against the process's working
+        // directory, which is `/` for anything launched from Finder or
+        // `open` — so every normal launch logged "NetworkStorageDB: failed
+        // to open read/write connection to DB @ anicat_image_cache/Cache.db"
+        // and ran with the memory cache alone. Cover art was refetched from
+        // AniList's CDN on every cold start while the 200 MB disk budget
+        // above was never once used.
         config.urlCache = URLCache(
             memoryCapacity: memoryCapacity,
             diskCapacity: diskCapacity,
-            diskPath: "anicat_image_cache"
+            directory: imageCacheDirectory()
         )
         config.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: config)
     }()
+
+    /// `nil` when the directory cannot be created, which leaves `URLCache`
+    /// on its own default location rather than on a path it cannot write.
+    private static func imageCacheDirectory() -> URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let directory = caches.appendingPathComponent("Anicat/images", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+        return directory
+    }
 
     private init() {
         cache.countLimit = 500

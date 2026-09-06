@@ -87,8 +87,14 @@ public struct PlayerView: View {
     /// nothing at all while they are hidden. The video is never shrunk to
     /// make room: an earlier version did that, and a 16:9 monitor then
     /// never showed the picture full-screen even with the chrome faded out.
+    // 48 for both, not 64 for the bottom: fullscreen on a 14-inch MacBook
+    // Pro is 1512x949 under the notch, so a 16:9 picture leaves 49pt of
+    // black above and below. The bottom bar is one row whose tallest item
+    // is the 30pt play button; at 64 it overlapped the picture by 15pt and
+    // showed a fade on the machine this app is mostly watched on, for
+    // nothing but padding.
     static let minTopBarHeight: CGFloat = 48
-    static let minBottomBarHeight: CGFloat = 64
+    static let minBottomBarHeight: CGFloat = 48
 
     /// Where the picture lands and how tall each bar is for a window of
     /// `windowSize`. Pure so it can be checked for the two geometries that

@@ -122,11 +122,33 @@ public final class MpvMetalView: NSView {
         syncDrawableSize()
     }
 
+    private var pendingDrawableSync: DispatchWorkItem?
+
+    /// The layer's frame follows the bounds immediately (Core Animation
+    /// scales the last drawable into it, so the picture never tears or
+    /// gaps), but the drawable size, which is what makes MoltenVK rebuild
+    /// the swapchain, is applied at most once per 50ms. SwiftUI animates
+    /// the mini-player's frame change by re-laying this view out on every
+    /// frame of the 0.28s animation; a swapchain rebuild per frame on top
+    /// of decoding and rendering is what made the whole app hitch each time
+    /// the player was minimized or restored.
     private func syncDrawableSize() {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        pendingDrawableSync?.cancel()
+        let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.metalLayer.drawableSize != target else { return }
+            self.metalLayer.drawableSize = target
+        }
+        pendingDrawableSync = work
+        if metalLayer.drawableSize == .zero || metalLayer.drawableSize.width <= 1 {
+            // First real size: apply now, mpv's context reads it at configure.
+            work.perform()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        }
     }
 }
 
@@ -204,6 +226,18 @@ public final class MpvHostView: NSView {
 
     func reportContainerSize() {
         coordinator?.controller.videoContainerSize = bounds.size
+    }
+
+    /// Rounded corners for the mini-player, applied on this layer rather
+    /// than through SwiftUI's `.clipShape`. A clip shape over a view whose
+    /// layer changes every frame becomes a mask layer, and Core Animation
+    /// then renders the 60fps video offscreen before masking it, every
+    /// frame, for as long as the mini-player is up. `cornerRadius` with
+    /// `masksToBounds` is handled during compositing.
+    public func setCornerRadius(_ radius: CGFloat) {
+        guard let layer, layer.cornerRadius != radius else { return }
+        layer.cornerRadius = radius
+        layer.masksToBounds = radius > 0
     }
 }
 
@@ -647,6 +681,13 @@ public final class MpvHostView: UIView {
     func reportContainerSize() {
         coordinator?.controller.videoContainerSize = bounds.size
     }
+
+    /// Same contract as the macOS host: see its `setCornerRadius`.
+    public func setCornerRadius(_ radius: CGFloat) {
+        guard layer.cornerRadius != radius else { return }
+        layer.cornerRadius = radius
+        layer.masksToBounds = radius > 0
+    }
 }
 
 /// Transparent, topmost, and the only thing that hears the touch. See
@@ -682,10 +723,13 @@ final class MpvEventCatcherView: UIView {
 public struct MpvSurface {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
+    /// See `MpvHostView.setCornerRadius`.
+    public let cornerRadius: CGFloat
 
-    public init(controller: PlayerController, streamURL: URL?) {
+    public init(controller: PlayerController, streamURL: URL?, cornerRadius: CGFloat = 0) {
         self.controller = controller
         self.streamURL = streamURL
+        self.cornerRadius = cornerRadius
     }
 
     /// The body of `makeNSView`/`makeUIView`. Shared so the two
@@ -713,6 +757,7 @@ public struct MpvSurface {
     fileprivate func updateHostView(_ view: MpvHostView, coordinator: Coordinator) {
         view.coordinator = coordinator
         coordinator.hostView = view
+        view.setCornerRadius(cornerRadius)
         #if os(macOS)
         coordinator.renderView = view.glView
         #endif

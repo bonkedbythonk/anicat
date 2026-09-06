@@ -169,14 +169,26 @@ public struct PlayerView: View {
             // is always the same call site — see the doc comment on
             // `isMinimized` for why that distinction is exactly what keeps
             // mpv alive across a minimize/restore instead of restarting it.
-            MpvSurface(controller: controller, streamURL: streamURL)
+            // Corner radius goes to the host layer and the shadow to a shape
+            // behind the video, never as modifiers on the surface itself: a
+            // `.clipShape` or `.shadow` on a view whose layer changes every
+            // frame makes Core Animation render the 60fps video offscreen
+            // (mask, then shadow computed from the rendered alpha) on every
+            // frame, for as long as the mini-player is up. That offscreen
+            // pass was the app-wide lag while minimized.
+            MpvSurface(controller: controller, streamURL: streamURL, cornerRadius: isMinimized ? 12 : 0)
                 .ignoresSafeArea(isMinimized ? [] : .all)
                 .frame(
                     width: isMinimized ? Self.miniSize.width : windowSize.width,
                     height: isMinimized ? Self.miniSize.height : windowSize.height
                 )
-                .clipShape(RoundedRectangle(cornerRadius: isMinimized ? 12 : 0))
-                .shadow(color: .black.opacity(isMinimized ? 0.45 : 0), radius: isMinimized ? 18 : 0, y: isMinimized ? 8 : 0)
+                .background {
+                    if isMinimized {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.black)
+                            .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+                    }
+                }
                 .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
                 .animation(.easeInOut(duration: 0.28), value: isMinimized)
 

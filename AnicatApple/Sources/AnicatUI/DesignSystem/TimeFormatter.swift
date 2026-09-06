@@ -55,6 +55,29 @@ public enum SumiTimeFormatter {
         return (is12 ? history12Formatter : history24Formatter).string(from: date)
     }
 
+    /// "3h ago" / "2d ago" for a forum post or comment. Not
+    /// `RelativeDateTimeFormatter`: its abbreviated style still emits
+    /// localized words of varying length ("3 hr. ago", "2 days ago"), which
+    /// wraps in the fixed-width mono line these are drawn in and stops the
+    /// column of dates down a comment thread from lining up.
+    public static func relativeShort(from date: Date, now: Date = Date()) -> String {
+        let seconds = max(0, now.timeIntervalSince(date))
+        switch seconds {
+        case ..<60: return "just now"
+        case ..<3_600: return "\(Int(seconds / 60))m ago"
+        case ..<86_400: return "\(Int(seconds / 3_600))h ago"
+        case ..<604_800: return "\(Int(seconds / 86_400))d ago"
+        case ..<2_629_800: return "\(Int(seconds / 604_800))w ago"
+        case ..<31_557_600: return "\(Int(seconds / 2_629_800))mo ago"
+        default: return "\(Int(seconds / 31_557_600))y ago"
+        }
+    }
+
+    /// AniList timestamps arrive as unix seconds over the FFI boundary.
+    public static func relativeShort(unixSeconds: Int64, now: Date = Date()) -> String {
+        relativeShort(from: Date(timeIntervalSince1970: TimeInterval(unixSeconds)), now: now)
+    }
+
     public static func timeFormatter(timeFormat: String? = nil) -> DateFormatter {
         let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
         return is12 ? time12Formatter : time24Formatter

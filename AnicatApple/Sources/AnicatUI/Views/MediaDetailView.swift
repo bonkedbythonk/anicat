@@ -231,6 +231,12 @@ public struct MediaDetailView: View {
     public let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
     public let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
     public let onExportAppleBooks: () -> Void
+    /// A character card in the Cast & Staff tab. Passed as a closure rather
+    /// than reaching for `AppModel` inside the private tab sections, which
+    /// know nothing about the model and are cheaper to re-evaluate for it.
+    public let onSelectCharacter: (Int64) -> Void
+    /// A row in the Discussions tab, by AniList forum thread id.
+    public let onSelectThread: (Int64) -> Void
     public let onClose: () -> Void
     /// `CURRENT`/`PLANNING`/`COMPLETED`/`PAUSED`/`DROPPED`/`REPEATING`.
     public let onSetListStatus: (String) -> Void
@@ -287,6 +293,8 @@ public struct MediaDetailView: View {
         onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
         onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)? = nil,
         onExportAppleBooks: @escaping () -> Void = {},
+        onSelectCharacter: @escaping (Int64) -> Void = { _ in },
+        onSelectThread: @escaping (Int64) -> Void = { _ in },
         onClose: @escaping () -> Void = {},
         onSetListStatus: @escaping (String) -> Void = { _ in },
         onToggleFavourite: @escaping () -> Void = {},
@@ -321,6 +329,8 @@ public struct MediaDetailView: View {
         self.onSelectRelation = onSelectRelation
         self.onSelectMediaId = onSelectMediaId
         self.onExportAppleBooks = onExportAppleBooks
+        self.onSelectCharacter = onSelectCharacter
+        self.onSelectThread = onSelectThread
         self.onClose = onClose
         self.onSetListStatus = onSetListStatus
         self.onToggleFavourite = onToggleFavourite
@@ -1180,7 +1190,7 @@ public struct MediaDetailView: View {
         case .manga:
             MangaTabSection(chapters: mangaChapters, format: details.format, isLoading: isLoading, onReadChapter: onReadChapter)
         case .characters:
-            CharactersTabSection(characters: characters)
+            CharactersTabSection(characters: characters, onSelectCharacter: onSelectCharacter)
         case .related:
             RelatedTabSection(
                 relations: relations,
@@ -1190,7 +1200,7 @@ public struct MediaDetailView: View {
                 onSelectMediaId: onSelectMediaId
             )
         case .discussions:
-            DiscussionsTabSection(discussions: discussions)
+            DiscussionsTabSection(discussions: discussions, onSelectThread: onSelectThread)
         case .more:
             RecommendationsTabSection(recommendations: recommendations, onSelectMediaId: onSelectMediaId)
         }
@@ -1296,22 +1306,12 @@ public struct MediaDetailView: View {
 
     fileprivate struct DiscussionRowView: View {
         let thread: MediaDetailView.DiscussionItem
+        let onSelect: () -> Void
 
         @State private var isHovered = false
 
-        // AniList's numeric thread id round-trips into its own forum URL —
-        // there's no in-app thread reader, and there doesn't need to be one
-        // just to make this tappable.
-        private var threadURL: URL? {
-            URL(string: "https://anilist.co/forum/thread/\(thread.id)")
-        }
-
         var body: some View {
-            Button {
-                if let threadURL {
-                    Platform.openExternal(threadURL)
-                }
-            } label: {
+            Button(action: onSelect) {
                 rowContent
             }
             .buttonStyle(.sumiPressable)
@@ -1550,6 +1550,7 @@ private struct MangaTabSection: View {
 
 private struct CharactersTabSection: View {
     let characters: [MediaDetailView.CharacterItem]
+    let onSelectCharacter: (Int64) -> Void
 
     var body: some View {
         if characters.isEmpty {
@@ -1558,12 +1559,7 @@ private struct CharactersTabSection: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
                 ForEach(characters) { char in
                     Button {
-                        // AniList's character page carries the bio and
-                        // every other role/show this voice actor has —
-                        // there's no reason to rebuild that here.
-                        if let url = URL(string: "https://anilist.co/character/\(char.id)") {
-                            Platform.openExternal(url)
-                        }
+                        onSelectCharacter(char.id)
                     } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         Color.clear
@@ -1682,6 +1678,7 @@ private struct RelatedTabSection: View {
 
 private struct DiscussionsTabSection: View {
     let discussions: [MediaDetailView.DiscussionItem]
+    let onSelectThread: (Int64) -> Void
 
     var body: some View {
         if discussions.isEmpty {
@@ -1689,7 +1686,9 @@ private struct DiscussionsTabSection: View {
         } else {
             VStack(spacing: 8) {
                 ForEach(discussions) { thread in
-                    MediaDetailView.DiscussionRowView(thread: thread)
+                    MediaDetailView.DiscussionRowView(thread: thread) {
+                        onSelectThread(thread.id)
+                    }
                 }
             }
         }

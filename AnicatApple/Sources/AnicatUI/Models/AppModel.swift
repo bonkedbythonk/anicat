@@ -3,6 +3,34 @@ import SwiftUI
 import Observation
 import AnicatCoreKit
 
+/// One entry of `AppModel.personPageStack`: the AniList records that used to
+/// be a `Platform.openExternal` out of the app. Identified by catalog id
+/// alone, because that is the whole address of one — there is nothing else
+/// to carry and nothing local to key it against.
+public enum PersonPage: Equatable, Hashable, Identifiable, Sendable {
+    case character(id: Int64)
+    case staff(id: Int64)
+    case thread(id: Int64)
+
+    public var id: String {
+        switch self {
+        case .character(let id): return "character-\(id)"
+        case .staff(let id): return "staff-\(id)"
+        case .thread(let id): return "thread-\(id)"
+        }
+    }
+
+    /// The page this replaced, kept as the "Open on AniList" destination on
+    /// each page so nothing that was reachable before became unreachable.
+    public var anilistURL: URL? {
+        switch self {
+        case .character(let id): return URL(string: "https://anilist.co/character/\(id)")
+        case .staff(let id): return URL(string: "https://anilist.co/staff/\(id)")
+        case .thread(let id): return URL(string: "https://anilist.co/forum/thread/\(id)")
+        }
+    }
+}
+
 @Observable
 public final class AppModel: @unchecked Sendable {
     // Progress/Discord IPC calls (recordProgress, discordSetPresence,
@@ -131,6 +159,34 @@ public final class AppModel: @unchecked Sendable {
     public var selectedRelations: [MediaDetailView.RelationItem] = []
     public var selectedRecommendations: [MediaDetailView.RecommendationItem] = []
     public var selectedDiscussions: [MediaDetailView.DiscussionItem] = []
+
+    // MARK: - People and threads
+
+    /// A stack, not a single page: a character page lists its voice actors,
+    /// a staff page lists the characters that actor voiced, and either one
+    /// can be opened from the other indefinitely. Back has to step through
+    /// that chain, so a lone `selectedCharacter?` would strand the reader on
+    /// the detail page two taps in.
+    public var personPageStack: [PersonPage] = []
+    /// Content for `personPageStack.last` only. Everything below the top is
+    /// re-fetched on the way back rather than kept, because these records
+    /// are large (a prolific staff member's credits run to hundreds of
+    /// entries) and the engine's own AniList cache makes the refetch cheap.
+    public var loadedCharacter: FfiCharacterDetail?
+    public var loadedStaff: FfiStaffDetail?
+    public var loadedThread: FfiThreadDetail?
+    /// Page 1 arrives inside `loadedThread`; `loadMoreThreadComments`
+    /// appends later pages here rather than replacing, so the list grows.
+    public var loadedThreadComments: [FfiThreadComment] = []
+    public var threadHasMoreComments = false
+    public var isLoadingMoreThreadComments = false
+    /// `threadDetail` already returned page 1, so the next fetch is page 2.
+    var threadCommentsNextPage: Int64 = 2
+    public var isPersonPageLoading = false
+    public var personPageError: String?
+    var activePersonPageTask: Task<Void, Never>?
+    var activeThreadCommentsTask: Task<Void, Never>?
+
     public var activeStreamURL: URL?
     /// Backgrounds the full-screen `PlayerView` without touching playback —
     /// mpv keeps running (audio, position tracking, everything) exactly as
@@ -667,6 +723,15 @@ public final class AppModel: @unchecked Sendable {
             closeReader()
             return true
         }
+        // Above the detail page, below every modal: a character/staff/thread
+        // page renders inside the content column on top of the detail page,
+        // so Escape has to pop it before the page it covers. Checked here,
+        // inside the one ordered ladder, rather than at the key monitor —
+        // a second copy of this order is what drifts.
+        if !personPageStack.isEmpty {
+            closePersonPage()
+            return true
+        }
         if selectedMediaDetails != nil {
             closeDetail()
             return true
@@ -679,6 +744,10 @@ public final class AppModel: @unchecked Sendable {
         shortcutsOpen = false
         stopPlayback()
         closeReader()
+        // Before `clearDetail()`, and unconditional: the person page draws
+        // over the detail page, so a section switch with a character page
+        // open left that character floating over the new section.
+        clearPersonPages()
         clearDetail()
         currentNavSection = section
     }

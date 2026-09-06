@@ -43,6 +43,12 @@ public struct RootView: View {
                             // sections while a title is open. Without it the
                             // detail view keeps rendering because its `if let
                             // details` branch wins over `currentNavSection`.
+                            // The person page draws over the detail page and
+                            // has to go with it — a sidebar click does not
+                            // route through `navigate(to:)`, so clearing it
+                            // there alone left a character page mounted over
+                            // whichever section was switched to.
+                            model.clearPersonPages()
                             model.clearDetail()
                             model.currentNavSection = section
                         }
@@ -160,6 +166,8 @@ public struct RootView: View {
                                     )
                                 },
                                 onExportAppleBooks: {},
+                                onSelectCharacter: { model.openCharacter(id: $0) },
+                                onSelectThread: { model.openThread(id: $0) },
                                 // Not wrapped in `withAnimation` here:
                                 // `closeDetail()` animates its own mutation
                                 // internally (see AppModel). Wrapping it again at
@@ -199,10 +207,31 @@ public struct RootView: View {
                             .id(details.id)
                             .transition(.opacity)
                             .zIndex(2)
+                            // Same reason `sectionContent` is gated on the
+                            // detail page: the detail page stays mounted
+                            // under an open character/staff/thread page, so
+                            // without this its cards keep taking clicks and
+                            // hover through the page covering them.
+                            .allowsHitTesting(!model.isPersonPageOpen)
+                        }
+
+                        // A character, staff or thread page covers the
+                        // detail page it was opened from, in the same
+                        // column. `.id` on the top of the stack so a
+                        // character -> voice actor -> character chain
+                        // re-mounts each time instead of reusing the
+                        // previous page's scroll offset and revealed
+                        // spoilers.
+                        if let page = model.personPageStack.last {
+                            PersonPageView(model: model)
+                                .id(page.id)
+                                .transition(.opacity)
+                                .zIndex(3)
                         }
                     }
                     .animation(.smooth(duration: 0.2), value: model.currentNavSection)
                     .animation(.easeInOut(duration: 0.32), value: model.selectedMediaDetails != nil)
+                    .animation(.easeInOut(duration: 0.32), value: model.personPageStack)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
@@ -695,6 +724,11 @@ public struct RootView: View {
     // inside the detail page, schedule taps, and any other non-card open
     // leave it nil, which just means a plain fade with no poster morph.
     private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false, sourceKey: String? = nil) {
+        // Every navigation to a *different* title funnels through here (a
+        // relation, a recommendation, a command-palette pick). A character
+        // page draws over the detail page, so without this a palette pick
+        // made from one left that character standing over the new title.
+        model.clearPersonPages()
         model.openingDetailSourceKey = sourceKey
         Task { await model.openDetail(id: id, title: title, coverURL: coverURL, isManga: isManga) }
     }
@@ -1110,7 +1144,11 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             guard model.selectedMediaDetails != nil else { return event }
 
             let canGoBack = true
-            let canGoForward = model.canGoForward
+            // Forward goes inert while a person page is open: redoing a
+            // detail-page step would swap the title *underneath* the
+            // character page and leave that character floating over a show
+            // it has nothing to do with.
+            let canGoForward = model.canGoForward && !model.isPersonPageOpen
 
             // Only trackpad / precise scrolling gestures participate in swipe navigation
             guard event.hasPreciseScrollingDeltas else { return event }
@@ -1165,7 +1203,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             if tracker.accumulatedDeltaX > threshold && isHorizontal && canGoBack {
                 tracker.reset()
                 tracker.isCooling = true
-                model.closeDetail()
+                model.popBackOne()
                 return nil
             }
 
@@ -1183,9 +1221,9 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [self] event in
             guard model.selectedMediaDetails != nil || model.canGoForward else { return event }
             if event.buttonNumber == 3 && model.selectedMediaDetails != nil {
-                model.closeDetail()
+                model.popBackOne()
                 return nil
-            } else if event.buttonNumber == 4 && model.canGoForward {
+            } else if event.buttonNumber == 4 && model.canGoForward && !model.isPersonPageOpen {
                 model.goForwardDetail()
                 return nil
             }
@@ -1253,13 +1291,13 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // Arrow keys in AppKit automatically include `.numericPad` and `.function`
         // flags, so we exclude explicit modifiers instead of checking a raw flag mask.
         if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 123 && model.selectedMediaDetails != nil {
-            model.closeDetail()
+            model.popBackOne()
             return nil
         }
 
         // Right arrow (keyCode 124) mirrors Left above — Alt+Right redoes
         // through `detailForwardStack`, matching a browser's Alt+Right/Cmd+].
-        if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 124 && model.canGoForward {
+        if isAlt && !isCmd && !isCtrl && !isShift && event.keyCode == 124 && model.canGoForward && !model.isPersonPageOpen {
             model.goForwardDetail()
             return nil
         }

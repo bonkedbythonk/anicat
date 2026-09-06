@@ -896,6 +896,13 @@ public struct MpvSurface {
             mpv_set_option_string(handle, "ytdl", "no")
             mpv_set_option_string(handle, "sub-auto", "fuzzy")
             mpv_set_option_string(handle, "slang", "en,eng,English")
+            // Pinned rather than inherited from whatever this build of mpv
+            // defaults to: the other settings of this option make mpv drop
+            // to a forced/signs track, or to none at all, once the audio it
+            // picks is English too, which is exactly the file a dub release
+            // opens as. `applySubtitlePreference` is then the only thing
+            // narrowing subtitles, and only when Dub was actually asked for.
+            mpv_set_option_string(handle, "subs-with-matching-audio", "yes")
             // A dual-audio release carries both tracks and mpv defaults to
             // the file's own flagged one (Japanese, on every release that
             // has one), so "Dubbed" played in Japanese no matter what the
@@ -1168,16 +1175,18 @@ public struct MpvSurface {
         }
 
         /// Selects the loaded file's audio track whose language matches the
-        /// Sub/Dub choice. Walks `track-list/N/...` sub-properties rather
-        /// than parsing the whole MPV_FORMAT_NODE list, same reason as
-        /// `fetchTrackInfo` below. A file with no track in the wanted
-        /// language is left alone — a single-audio sub release has nothing
-        /// to switch to, and forcing `aid` there would only mute it. Returns
-        /// whether a matching track was found, so the caller can say so
-        /// instead of reporting a switch that did not happen.
+        /// Sub/Dub choice, and the subtitle track that goes with it. Walks
+        /// `track-list/N/...` sub-properties rather than parsing the whole
+        /// MPV_FORMAT_NODE list, same reason as `trackList` below. A file
+        /// with no track in the wanted language is left alone — a
+        /// single-audio sub release has nothing to switch to, and forcing
+        /// `aid` there would only mute it. Returns whether a matching audio
+        /// track was found, so the caller can say so instead of reporting a
+        /// switch that did not happen.
         @discardableResult
         func selectAudioLanguage(preferDub: Bool) -> Bool {
             guard let mpv else { return false }
+            defer { applySubtitlePreference(preferDub: preferDub) }
             // Re-applied on the next file too: `alang` is a load-time option,
             // so setting it here is what makes the choice stick across an
             // auto-next transition within the same mpv instance.
@@ -1206,6 +1215,32 @@ public struct MpvSurface {
                 return true
             }
             return false
+        }
+
+        /// Puts `sid` where the new audio language wants it: a full English
+        /// track for Sub, a signs-and-songs one for Dub, and whatever the
+        /// viewer picked from the subtitle list over both.
+        ///
+        /// Nothing on this path used to write `sid`, so the track mpv chose
+        /// when the file loaded was the track the viewer kept for the rest
+        /// of the episode however many times the audio changed under it —
+        /// which is how a Sub, Dub, Sub round trip ended up on the signs
+        /// track the dub had been given.
+        private func applySubtitlePreference(preferDub: Bool) {
+            guard let mpv else { return }
+            let subtitles = trackList().subtitle
+            guard let wanted = PlayerTrack.preferredSubtitle(
+                preferDub: preferDub,
+                tracks: subtitles,
+                explicit: explicitSubtitleTrackId
+            ) else { return }
+            // Written even when the list says that track is already
+            // selected: this runs microseconds after the `aid` write above,
+            // and mpv's track reconfig has not finished by the time
+            // `mpv_set_property` returns, so those flags are the ones from
+            // before the audio switch. Setting `sid` to the track already
+            // showing costs nothing; trusting a stale flag costs the pick.
+            mpv_set_property_string(mpv, "sid", wanted)
         }
 
         /// The Sub/Dub preference, in the one vocabulary `anicat_sub_dub` is

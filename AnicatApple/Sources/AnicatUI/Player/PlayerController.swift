@@ -531,4 +531,47 @@ public struct PlayerTrack: Identifiable, Sendable, Hashable {
         "ro": "Romanian", "ron": "Romanian", "rum": "Romanian",
         "tl": "Filipino", "fil": "Filipino",
     ]
+
+    private static let englishCodes: Set<String> = ["en", "eng", "english"]
+
+    public var isEnglish: Bool {
+        if let lang, Self.englishCodes.contains(lang.lowercased()) { return true }
+        return title?.lowercased().contains("english") ?? false
+    }
+
+    /// A signs-and-songs track: the handful of lines a dub viewer still
+    /// wants (on-screen text, opening lyrics) rather than a full
+    /// translation. Release groups say so in the title as often as they set
+    /// the forced flag, so both have to count.
+    public var isSignsOnly: Bool {
+        let name = title?.lowercased() ?? ""
+        return isForced || name.contains("sign") || name.contains("song")
+    }
+
+    /// Which subtitle track a Sub/Dub toggle should land on, given what the
+    /// file carries and whatever the viewer last picked by hand. `nil` means
+    /// "leave `sid` where it is" — a release with nothing matching is not a
+    /// reason to strip the subtitles already showing.
+    ///
+    /// mpv runs its own subtitle selection when a file is loaded, and
+    /// nothing on the Sub/Dub path used to touch `sid` at all, so whatever
+    /// that selection had settled on for one audio language stayed put when
+    /// the audio changed under it: Sub after Dub kept the narrow signs
+    /// track it had been left with.
+    public static func preferredSubtitle(
+        preferDub: Bool,
+        tracks: [PlayerTrack],
+        explicit: String?
+    ) -> String? {
+        // A pick made by hand outranks both rules, a deliberate Off
+        // included, for as long as this file stays loaded.
+        if let explicit, explicit == off || tracks.contains(where: { $0.id == explicit }) {
+            return explicit
+        }
+        let english = tracks.filter(\.isEnglish)
+        if preferDub {
+            return (english.first(where: \.isSignsOnly) ?? tracks.first(where: \.isSignsOnly))?.id
+        }
+        return (english.first(where: { !$0.isSignsOnly }) ?? english.first)?.id
+    }
 }

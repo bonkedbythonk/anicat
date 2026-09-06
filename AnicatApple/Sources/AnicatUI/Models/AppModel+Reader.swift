@@ -25,8 +25,17 @@ extension AppModel {
             guard syosetuSession?.sourceURL == url else { return }
             syosetuSession?.info = info
             syosetuSession?.isLoading = false
-            if let first = info.chapters.first {
-                await loadSyosetuChapter(url: first.url, index: 0)
+            // Resume where this novel was left off rather than at chapter one:
+            // the stored chapter is what the Novels page offers to continue,
+            // and opening the same link had to mean the same thing as tapping
+            // that offer or the two would disagree.
+            let resume = NovelPreferences.lastNovel().flatMap { last -> Int? in
+                guard NovelPreferences.ncode(from: last.url) == NovelPreferences.ncode(from: url) else { return nil }
+                return info.chapters.indices.contains(last.chapter) ? last.chapter : nil
+            }
+            let start = resume ?? 0
+            if info.chapters.indices.contains(start) {
+                await loadSyosetuChapter(url: info.chapters[start].url, index: start)
             }
         } catch {
             guard syosetuSession?.sourceURL == url else { return }
@@ -47,6 +56,11 @@ extension AppModel {
             syosetuSession?.chapterTitle = chapter.title
             syosetuSession?.chapterText = chapter.text
             syosetuSession?.isLoading = false
+            NovelPreferences.setLastNovel(
+                url: sourceURL,
+                title: syosetuSession?.info?.title ?? chapter.title,
+                chapter: index
+            )
         } catch {
             guard syosetuSession?.sourceURL == sourceURL else { return }
             syosetuSession?.isLoading = false

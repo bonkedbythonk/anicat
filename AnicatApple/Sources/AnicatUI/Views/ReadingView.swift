@@ -172,17 +172,31 @@ public struct ReadingView: View {
     }
 
     private func syosetuLink(_ action: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
-            Button(action: action) {
-                Label("Open a Syosetu URL", systemImage: "link")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SumiTheme.muted)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Button(action: action) {
+                    Label("Open a Syosetu URL", systemImage: "link")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.muted)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Paste a ncode.syosetu.com link to read a novel the catalog has no text source for.")
+                Spacer()
             }
-            .buttonStyle(.sumiPressable)
-            .help("Paste a ncode.syosetu.com link to read a novel the catalog has no text source for.")
-            Spacer()
+            // Attached to the paste-a-link entry point rather than to a card:
+            // a novel read through the direct-URL reader is a Syosetu ncode
+            // and the shelves above are AniList entries, and nothing links the
+            // two (see `AppModel.SyosetuSession`). Text and not a button
+            // because the resume itself lives one step in, on the reader's own
+            // entry screen, where "Continue chapter N" actually continues.
+            if let last = NovelPreferences.lastNovel() {
+                Text("Last read: chapter \(last.chapter + 1) of \(last.title)")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.leading, 20)
+            }
         }
         .padding(.top, 24)
     }

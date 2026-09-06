@@ -144,4 +144,49 @@ struct ReaderPreferencesTests {
         #expect(ReaderPreferences.chapterProgress(from: "") == nil)
         #expect(ReaderPreferences.chapterProgress(from: "Oneshot") == nil)
     }
+
+    @Test("The ncode is the same whether the novel or a chapter link was pasted")
+    func ncodeExtraction() {
+        #expect(NovelPreferences.ncode(from: "https://ncode.syosetu.com/n2267be/") == "n2267be")
+        #expect(NovelPreferences.ncode(from: "https://ncode.syosetu.com/n2267be/12/") == "n2267be")
+        #expect(NovelPreferences.ncode(from: "https://ncode.syosetu.com/N2267BE") == "n2267be")
+        // A path segment that merely starts with n is not an ncode.
+        #expect(NovelPreferences.ncode(from: "https://ncode.syosetu.com/novelview/infotop/ncode/") == nil)
+        #expect(NovelPreferences.ncode(from: "https://example.com/some/novel") == nil)
+    }
+
+    @Test("A position key is per novel and per chapter, and a link with no ncode still gets one")
+    func positionKeys() {
+        #expect(NovelPreferences.positionKey(sourceURL: "https://ncode.syosetu.com/n2267be/", chapter: 3)
+                == "anicat_novel_pos_n2267be_3")
+        // The novel URL and one of its chapter URLs must key the same book, or
+        // the two ways of opening it keep separate positions.
+        #expect(NovelPreferences.positionKey(sourceURL: "https://ncode.syosetu.com/n2267be/12/", chapter: 3)
+                == NovelPreferences.positionKey(sourceURL: "https://ncode.syosetu.com/n2267be/", chapter: 3))
+        #expect(NovelPreferences.positionKey(sourceURL: "https://ncode.syosetu.com/n2267be/", chapter: 3)
+                != NovelPreferences.positionKey(sourceURL: "https://ncode.syosetu.com/n2267be/", chapter: 4))
+
+        let fallback = NovelPreferences.positionKey(sourceURL: "https://mirror.example/read?id=9", chapter: 2)
+        #expect(fallback.hasPrefix("anicat_novel_pos_"))
+        #expect(fallback.hasSuffix("_2"))
+        #expect(!fallback.contains("/"))
+    }
+
+    @Test("Typography reads back what was written, clamped to its range")
+    func typographyRoundTrip() {
+        let store = defaults("novel")
+        #expect(NovelPreferences.typography(defaults: store) == NovelTypography())
+
+        var settings = NovelTypography()
+        settings.fontSize = 21
+        settings.family = .geist
+        settings.theme = .sepia
+        NovelPreferences.setTypography(settings, defaults: store)
+        #expect(NovelPreferences.typography(defaults: store) == settings)
+
+        // A key written by an older build outside the range must not be able
+        // to render the reader unusable.
+        store.set(400.0, forKey: NovelPreferences.fontSizeKey)
+        #expect(NovelPreferences.typography(defaults: store).fontSize == NovelTypography.fontSizeRange.upperBound)
+    }
 }

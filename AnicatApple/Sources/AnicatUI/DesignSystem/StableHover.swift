@@ -23,9 +23,11 @@ final class HoverActivityMonitor {
     }
 
     private init() {
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+        // The tap, not a local monitor: responsive scrolling keeps trackpad
+        // events off the main thread's monitors, so hover was firing all
+        // through a scroll again.
+        monitor = ScrollEventTap.shared.subscribe { [weak self] _ in
             self?.lastScrollTime = CACurrentMediaTime()
-            return event
         }
     }
 }

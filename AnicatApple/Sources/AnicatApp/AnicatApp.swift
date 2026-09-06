@@ -143,14 +143,15 @@ struct AnicatApp: App {
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     model.handleSpotlightActivity(activity)
                 }
-                .frame(minWidth: 1080, idealWidth: 1440, minHeight: 700, idealHeight: 900)
+                .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
                 .background(WindowConfigurator())
                 .background(SystemIntegrationObserver(model: model))
         }
         .windowStyle(.hiddenTitleBar)
-        // First launch, before any autosaved frame exists. 16:10 like the
-        // MacBook panels it runs on, inside a 14-inch's 1512x982 points.
-        .defaultSize(width: 1440, height: 900)
+        // First launch, before any autosaved frame exists; after that the
+        // autosaved frame wins, so resizing once is enough. 1440x900 read
+        // as too big on a 14-inch panel, 1080x820 as a square.
+        .defaultSize(width: 1280, height: 820)
 
         MenuBarExtra {
             // `.window` style renders arbitrary SwiftUI in a popover instead of

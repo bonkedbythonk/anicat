@@ -34,33 +34,6 @@ public enum ResponsiveScrollingPatch {
             class_addMethod(meta, selector, imp, "B@:")
         }
 
-        // Responsive scrolling tracks the gesture on AppKit's event thread,
-        // and the main thread stops seeing the wheel events: a local
-        // NSEvent monitor counted 3 of 204 events once the flag above was
-        // on, so the two-finger swipe back from a detail page went dead.
-        // `wantsScrollEventsForSwipeTrackingOnAxis:` is the responder hook
-        // that asks the event thread to forward one axis; answering yes for
-        // horizontal brought 189 of 189 back to both the monitor and
-        // `scrollWheel:`. Only scroll views with nothing to scroll
-        // sideways answer yes, so horizontal shelves keep the responsive
-        // path for their own scrolling.
-        let swipeSelector = NSSelectorFromString("wantsScrollEventsForSwipeTrackingOnAxis:")
-        let swipeBlock: @convention(block) (AnyObject, Int) -> Bool = { object, axis in
-            // NSEvent.GestureAxis.horizontal == 1.
-            guard axis == 1, let scrollView = object as? NSScrollView else { return false }
-            // AppKit asks a responder this on the main thread.
-            return MainActor.assumeIsolated {
-                let contentWidth = scrollView.documentView?.frame.width ?? 0
-                return contentWidth <= scrollView.contentView.bounds.width + 0.5
-            }
-        }
-        let swipeImp = imp_implementationWithBlock(swipeBlock)
-        if let method = class_getInstanceMethod(cls, swipeSelector) {
-            method_setImplementation(method, swipeImp)
-        } else {
-            class_addMethod(cls, swipeSelector, swipeImp, "B@:q")
-        }
-
         // Horizontal shelves stay on the old path. With the event thread
         // tracking a shelf's momentum, a vertical swipe that starts before
         // the momentum ends is routed to the shelf and dropped: measured 1

@@ -1226,18 +1226,23 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // than view `@State` so wheel ticks do not re-evaluate `RootView` / `MediaDetailView`
         // at 120Hz during normal vertical scrolling.
         let tracker = self.swipeTracker
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self, tracker] event in
+        // A CGEvent tap, not a local NSEvent monitor: with responsive
+        // scrolling on, the monitor saw 2 of 133 trackpad events and the
+        // swipe went dead (see ScrollEventTap). Listen-only, so the scroll
+        // view still receives the gesture; on a detail page nothing scrolls
+        // sideways, so that costs nothing.
+        scrollMonitor = ScrollEventTap.shared.subscribe { [self, tracker] event in
             guard model.activeStreamURL == nil,
                   model.activeReadingSession == nil,
                   !model.paletteOpen,
                   !model.shortcutsOpen else {
-                return event
+                return
             }
 
             // Trackpad swipe navigation ONLY operates when a detail page is open.
             // On the home screen and other sections, all scroll wheel events belong
             // exclusively to the page's vertical feed and horizontal carousels.
-            guard model.selectedMediaDetails != nil else { return event }
+            guard model.selectedMediaDetails != nil else { return }
 
             let canGoBack = true
             // Forward goes inert while a person page is open: redoing a
@@ -1247,11 +1252,11 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             let canGoForward = model.canGoForward && !model.isPersonPageOpen
 
             // Only trackpad / precise scrolling gestures participate in swipe navigation
-            guard event.hasPreciseScrollingDeltas else { return event }
+            guard event.hasPreciseScrollingDeltas else { return }
 
             // Ignore inertial momentum tail after fingers lift to prevent double-popping
             if !event.momentumPhase.isEmpty {
-                return event
+                return
             }
 
             let now = Date()
@@ -1263,7 +1268,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                     tracker.isCooling = false
                 } else {
                     tracker.lastSwipeEventAt = now
-                    return event
+                    return
                 }
             }
 
@@ -1287,10 +1292,10 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
             if event.phase == .ended || event.phase == .cancelled {
                 tracker.reset()
-                return event
+                return
             }
 
-            guard !tracker.gestureDisqualified else { return event }
+            guard !tracker.gestureDisqualified else { return }
 
             let isHorizontal = abs(tracker.accumulatedDeltaX) > tracker.accumulatedDeltaY * 1.3
             let threshold: CGFloat = 50.0
@@ -1300,7 +1305,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 tracker.reset()
                 tracker.isCooling = true
                 model.popBackOne()
-                return nil
+                return
             }
 
             // Swipe left: Forward (redo detail navigation)
@@ -1308,10 +1313,10 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 tracker.reset()
                 tracker.isCooling = true
                 model.goForwardDetail()
-                return nil
+                return
             }
 
-            return event
+            return
         }
         // Buttons 3/4 are the standard back/forward side-buttons on 5-button mice in AppKit (0=left, 1=right, 2=middle).
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [self] event in
@@ -1332,8 +1337,8 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             NSEvent.removeMonitor(m)
             monitor = nil
         }
-        if let m = scrollMonitor {
-            NSEvent.removeMonitor(m)
+        if let id = scrollMonitor as? UUID {
+            ScrollEventTap.shared.unsubscribe(id)
             scrollMonitor = nil
         }
         if let m = mouseMonitor {

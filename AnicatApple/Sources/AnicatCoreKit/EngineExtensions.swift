@@ -97,3 +97,13 @@ extension AnicatEngine {
         return try await self.getMangaPages(chapterId: chapterId)
     }
 }
+
+// The people and thread records are value types of String/Int/arrays of the
+// same, but uniffi emits them without Sendable. CI's toolchain (stricter
+// than the local one) rejects returning them from the engine's nonisolated
+// async methods into a @MainActor task: "non-sendable result type
+// 'FfiCharacterDetail' cannot be sent from nonisolated context".
+extension FfiCharacterDetail: @unchecked Sendable {}
+extension FfiStaffDetail: @unchecked Sendable {}
+extension FfiThreadDetail: @unchecked Sendable {}
+extension FfiThreadCommentPage: @unchecked Sendable {}

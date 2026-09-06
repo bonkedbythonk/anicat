@@ -154,11 +154,30 @@ public struct SearchView: View {
         ("START_DATE_DESC", "Newest"), ("TITLE_ROMAJI", "Title A-Z")
     ]
 
+    /// Whether the Season dropdown is offered at all. AniList populates
+    /// `Media.season` for anime and leaves it null on very nearly every manga
+    /// and light novel, so a season picker there filters everything away.
+    private var showsSeasonFilter: Bool { searchType == "ANIME" }
+
+    /// The season actually sent. The engine drops `season` when no `year`
+    /// came with it, so "Winter" on its own ran a plain unfiltered browse
+    /// while the dropdown, the Clear button and the hidden Discover shelf all
+    /// claimed the page was filtered.
+    private var effectiveSeason: String {
+        guard showsSeasonFilter, !yearFilter.isEmpty else { return "" }
+        return seasonFilter
+    }
+
+    /// The Season dropdown holds a value the query cannot use yet.
+    private var showsSeasonYearHint: Bool {
+        showsSeasonFilter && !seasonFilter.isEmpty && yearFilter.isEmpty
+    }
+
     private var activeFilters: SearchFilters {
         SearchFilters(
             genre: genreFilter.isEmpty ? nil : genreFilter,
             year: Int32(yearFilter),
-            season: seasonFilter.isEmpty ? nil : seasonFilter,
+            season: effectiveSeason.isEmpty ? nil : effectiveSeason,
             format: effectiveFormat.isEmpty ? nil : effectiveFormat,
             minScore: Int32(minScoreFilter),
             status: statusFilter.isEmpty ? nil : statusFilter,
@@ -167,8 +186,16 @@ public struct SearchView: View {
     }
 
     private var hasActiveFilters: Bool {
-        !genreFilter.isEmpty || !yearFilter.isEmpty || !seasonFilter.isEmpty || !effectiveFormat.isEmpty
+        !genreFilter.isEmpty || !yearFilter.isEmpty || !effectiveSeason.isEmpty || !effectiveFormat.isEmpty
             || !minScoreFilter.isEmpty || !statusFilter.isEmpty || !sortFilter.isEmpty
+    }
+
+    /// What "Clear filters" is for, which is not the same question as
+    /// `hasActiveFilters`: a season with no year changes no query, so gating
+    /// the button on that predicate left the one dropdown that can strand
+    /// itself with no button to reset it.
+    private var hasAnyFilterSet: Bool {
+        hasActiveFilters || showsSeasonYearHint
     }
 
     private func commitSearch() {
@@ -251,13 +278,18 @@ public struct SearchView: View {
                     )
 
                     // Filter row. Always visible rather than behind a
-                    // disclosure toggle — the dropdowns fit on one line at
-                    // the page's own 1100pt cap, and a hidden panel is easy
-                    // to forget is holding a filter from an earlier search.
-                    HStack(spacing: 8) {
+                    // disclosure toggle — a hidden panel is easy to forget is
+                    // holding a filter from an earlier search. It wraps
+                    // instead of staying on one line: seven dropdowns showing
+                    // their longest labels overrun the 1020pt this page
+                    // leaves inside its 1100pt cap, and an `HStack` answered
+                    // that by pushing Sort and "Clear filters" off the edge.
+                    SumiWrapHStack(spacing: 8, lineSpacing: 8) {
                         SumiFilterDropdown(label: "Genre", options: Self.genreOptions, selected: $genreFilter)
                         SumiFilterDropdown(label: "Year", options: Self.yearOptions, selected: $yearFilter)
-                        SumiFilterDropdown(label: "Season", options: Self.seasonOptions, selected: $seasonFilter)
+                        if showsSeasonFilter {
+                            SumiFilterDropdown(label: "Season", options: Self.seasonOptions, selected: $seasonFilter)
+                        }
                         if let formatOptions {
                             SumiFilterDropdown(label: "Format", options: formatOptions, selected: $formatFilter)
                         }
@@ -265,7 +297,7 @@ public struct SearchView: View {
                         SumiFilterDropdown(label: "Status", options: Self.statusOptions, selected: $statusFilter)
                         SumiFilterDropdown(label: "Sort", options: Self.sortOptions, selected: $sortFilter)
 
-                        if hasActiveFilters {
+                        if hasAnyFilterSet {
                             Button {
                                 withAnimation(.snappy) {
                                     genreFilter = ""
@@ -286,10 +318,15 @@ public struct SearchView: View {
                             .buttonStyle(.sumiPressable)
                             .transition(.opacity)
                         }
-
-                        Spacer()
                     }
-                    .animation(.snappy, value: hasActiveFilters)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.snappy, value: hasAnyFilterSet)
+
+                    if showsSeasonYearHint {
+                        Text("Season needs a year")
+                            .font(.system(size: 11))
+                            .foregroundColor(SumiTheme.muted)
+                    }
                 }
                 .onChange(of: searchType) { _, newType in
                     // `commitSearch()` no-ops on an empty query with no

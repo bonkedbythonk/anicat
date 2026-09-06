@@ -362,3 +362,72 @@ public struct SumiPage<Content: View>: View {
         .background(SumiTheme.background)
     }
 }
+
+/// A horizontal row that wraps onto further lines instead of running past its
+/// container. `HStack` does neither: the search filter row's widest Anime
+/// state ("Genre Slice of Life", "Status Not Yet Released", "Sort Title A-Z"
+/// and "Clear filters" all at once) measures wider than the 1020pt of content
+/// the page's 1100pt cap leaves after its 40pt gutters, so the trailing
+/// dropdowns and the clear button were pushed off the right edge with nothing
+/// to scroll them back into view.
+public struct SumiWrapHStack: Layout {
+    private let spacing: CGFloat
+    private let lineSpacing: CGFloat
+
+    public init(spacing: CGFloat = 8, lineSpacing: CGFloat = 8) {
+        self.spacing = spacing
+        self.lineSpacing = lineSpacing
+    }
+
+    private struct Line {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func lines(_ subviews: Subviews, maxWidth: CGFloat) -> [Line] {
+        var result: [Line] = []
+        var current = Line()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let advance = current.indices.isEmpty ? size.width : size.width + spacing
+            // An empty line takes the subview whatever its width: a single
+            // item wider than `maxWidth` would otherwise be moved to a fresh
+            // line it does not fit on either, forever.
+            if !current.indices.isEmpty, current.width + advance > maxWidth {
+                result.append(current)
+                current = Line(indices: [index], width: size.width, height: size.height)
+            } else {
+                current.indices.append(index)
+                current.width += advance
+                current.height = max(current.height, size.height)
+            }
+        }
+        if !current.indices.isEmpty { result.append(current) }
+        return result
+    }
+
+    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let lines = lines(subviews, maxWidth: maxWidth)
+        let width = lines.map(\.width).max() ?? 0
+        let height = lines.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, lines.count - 1))
+        return CGSize(width: min(width, maxWidth), height: height)
+    }
+
+    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in lines(subviews, maxWidth: bounds.width) {
+            var x = bounds.minX
+            for index in line.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y + (line.height - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += line.height + lineSpacing
+        }
+    }
+}

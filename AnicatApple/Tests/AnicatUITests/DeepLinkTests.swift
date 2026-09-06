@@ -82,4 +82,11 @@ struct DeepLinkTests {
         #expect(DeepLink(url: URL(string: "ANICAT://Title/21")!) == .title(id: 21, isManga: false))
         #expect(DeepLink(url: URL(string: "anicat://section/Settings")!) == .section(.settings))
     }
+
+    @Test("A Spotlight identifier maps back to its title")
+    func spotlightIdentifier() {
+        #expect(SpotlightIndexer.deepLink(forIdentifier: "anilist:21") == .title(id: 21, isManga: false))
+        #expect(SpotlightIndexer.deepLink(forIdentifier: "anilist:") == nil)
+        #expect(SpotlightIndexer.deepLink(forIdentifier: "21") == nil)
+    }
 }

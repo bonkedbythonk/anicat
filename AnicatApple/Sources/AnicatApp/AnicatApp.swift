@@ -1,6 +1,7 @@
 import SwiftUI
 import AnicatUI
 import AnicatCoreKit
+import CoreSpotlight
 
 #if os(macOS)
 /// Pins the process to dark aqua at launch.
@@ -110,7 +111,9 @@ struct AnicatApp: App {
         // can be published before any scene exists: an App Intent is
         // constructed by the Shortcuts runtime and the notification delegate
         // by the system, and neither has a view to be handed the model
-        // through.
+        // through. `registerAsShared` also installs the notification
+        // delegate, which has to be in place before the first notification
+        // is *delivered*, not before the first one is scheduled.
         let model = AppModel()
         _model = State(initialValue: model)
         model.registerAsShared()
@@ -121,17 +124,21 @@ struct AnicatApp: App {
             RootView(model: model)
                 .task {
                     await model.initialize()
-                    // A link that launched the app got here before there was
-                    // an engine to route it with; this is where it finally
-                    // runs.
+                    // A notification tap or Spotlight hit that launched the
+                    // app got here before there was an engine to route it
+                    // with; this is where it finally runs.
                     model.drainPendingDeepLink()
                 }
                 .onOpenURL { url in
                     model.handleOpenURL(url)
                 }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    model.handleSpotlightActivity(activity)
+                }
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
                 .background(WindowConfigurator())
+                .background(SystemIntegrationObserver(model: model))
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -254,13 +261,18 @@ struct AnicatApp: App {
                     await model.initialize()
                     model.drainPendingDeepLink()
                 }
-                // The URL scheme is not a macOS feature: it has an iOS
-                // counterpart, and a scene that only wired it up on one
-                // platform would compile on the other and silently do nothing.
+                // The URL scheme, Spotlight and notifications are not macOS
+                // features: all three have iOS counterparts, and a scene that
+                // only wired them up on one platform would compile on the
+                // other and silently do nothing.
                 .onOpenURL { url in
                     model.handleOpenURL(url)
                 }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    model.handleSpotlightActivity(activity)
+                }
                 .preferredColorScheme(.dark)
+                .background(SystemIntegrationObserver(model: model))
         }
     }
 }

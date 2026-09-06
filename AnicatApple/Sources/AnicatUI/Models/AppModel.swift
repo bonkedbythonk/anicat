@@ -716,6 +716,22 @@ public final class AppModel: @unchecked Sendable {
     /// engine is up.
     public var pendingDeepLink: DeepLink?
 
+    /// The `<id>:<episode>` keys that had a new episode the last time
+    /// `refreshSystemIntegrations` looked. `nil` means "never looked": the
+    /// first observation of a session seeds this without notifying, because
+    /// every backlogged show on the watching list would otherwise fire a
+    /// notification at launch.
+    var lastKnownNewEpisodeKeys: Set<String>?
+
+    /// Same seed-then-compare shape as `lastKnownNewEpisodeKeys`, for
+    /// downloads that have reached `.done`.
+    var lastKnownCompletedDownloadIds: Set<String>?
+
+    /// Coalesces the Spotlight re-index. `refreshAll` writes five list
+    /// properties in a row and each write would otherwise start its own
+    /// index pass over the whole library.
+    var spotlightIndexTask: Task<Void, Never>?
+
     // MARK: - Syosetu novel reading
     //
     // Direct-URL only: the viewer pastes a `ncode.syosetu.com/nXXXXXX/` link

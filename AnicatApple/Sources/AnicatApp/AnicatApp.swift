@@ -76,6 +76,11 @@ struct WindowConfigurator: NSViewRepresentable {
         // by playback, so the window opts out of state restoration; the
         // frame itself still comes back through SwiftUI's own autosave.
         window.isRestorable = false
+        // Restoration off means the frame no longer comes back either, and
+        // the window opened at the 1080x820 minimum: small and nearly
+        // square. Frame autosave is separate from state restoration and
+        // keeps the last size and position without bringing fullscreen back.
+        window.setFrameAutosaveName("AnicatMainWindow")
         if window.styleMask.contains(.fullScreen), !AppWindow.isPlaybackActive {
             FullScreenGuard.set(false, on: window)
         }
@@ -138,11 +143,14 @@ struct AnicatApp: App {
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     model.handleSpotlightActivity(activity)
                 }
-                .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
+                .frame(minWidth: 1080, idealWidth: 1440, minHeight: 700, idealHeight: 900)
                 .background(WindowConfigurator())
                 .background(SystemIntegrationObserver(model: model))
         }
         .windowStyle(.hiddenTitleBar)
+        // First launch, before any autosaved frame exists. 16:10 like the
+        // MacBook panels it runs on, inside a 14-inch's 1512x982 points.
+        .defaultSize(width: 1440, height: 900)
 
         MenuBarExtra {
             // `.window` style renders arbitrary SwiftUI in a popover instead of

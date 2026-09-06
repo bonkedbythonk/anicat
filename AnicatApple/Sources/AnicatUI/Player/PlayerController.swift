@@ -165,6 +165,21 @@ public final class PlayerController: @unchecked Sendable {
     public var onSelectAudioTrack: (@Sendable (_ id: String) -> Void)?
     /// `nil` is the Off row.
     public var onSelectSubtitleTrack: (@Sendable (_ id: String?) -> Void)?
+
+    // The release picker, wired to the same engine call the detail page's
+    // "Stream Servers" popover uses. AppModel owns it: this controller
+    // knows the episode number but not the catalog id or the search title
+    // the indexers have to be asked with.
+    /// Answers with the releases and, separately, a message when the search
+    /// itself failed — an empty list and a failed search are different
+    /// things to say, and the popover has to say them differently.
+    public var onListReleases: (@Sendable (_ completion: @escaping @Sendable @MainActor (_ releases: [MediaDetailView.ReleaseCandidateItem], _ failure: String?) -> Void) -> Void)?
+    public var onSelectRelease: (@Sendable (_ name: String) -> Void)?
+    /// The release the playing file was resolved from, when the viewer
+    /// asked for one by name. `nil` after an ordinary play: the auto-pick
+    /// races candidates inside the engine and nothing reports back which
+    /// one won, so there is no honest row to tick.
+    public var currentReleaseName: String?
     /// Picks the audio track matching a Sub/Dub choice on the *loaded* file.
     /// Distinct from `onSelectAudioTrack`: `alang` only applies at file
     /// load, so switching the preference mid-episode has to select the

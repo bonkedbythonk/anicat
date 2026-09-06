@@ -33,6 +33,13 @@ public struct PlayerView: View {
     /// at a time: a release with a dozen subtitle tracks and both lists open
     /// is taller than the popover a 16:9 window has room for.
     @State private var expandedTrackList: TrackListKind?
+    @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
+    @State private var isLoadingReleases = false
+    @State private var releaseError: String?
+    /// What `releases` was fetched for, so reopening the popover does not
+    /// search again — see `loadReleases`. Title and episode both, not the
+    /// episode alone: episode 3 of the next show is a different list.
+    @State private var loadedReleasesKey: String?
     @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     /// Set when the loaded release has no track in the language just asked
     /// for. The preference still changed — it is what the next resolve
@@ -479,6 +486,7 @@ public struct PlayerView: View {
                 // Info / More Options
                 Button(action: {
                     refreshTracks()
+                    loadReleases()
                     showInfoMenu = true
                 }) {
                     Image(systemName: "info.circle")
@@ -641,9 +649,126 @@ public struct PlayerView: View {
                     }
                 }
             }
+
+            if controller.onListReleases != nil {
+                Divider()
+                releaseSection
+            }
         }
         .padding(16)
         .frame(width: 300)
+    }
+
+    /// The same releases the detail page's "Stream Servers" popover lists,
+    /// for the episode playing rather than the page open. Picking one
+    /// replays this episode from it, at the position it is at now.
+    private var releaseSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Release")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(SumiTheme.muted)
+                Spacer(minLength: 8)
+                if isLoadingReleases {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            if isLoadingReleases {
+                Text("Loading releases")
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
+            } else if let releaseError {
+                // Inline, never a sheet: the popover is over a playing
+                // episode, and a modal over it would be a worse failure
+                // than the one being reported.
+                Text(releaseError)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(SumiTheme.dangerLight)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if releases.isEmpty {
+                Text("No releases found.")
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(releases) { release in
+                            let isCurrent = release.name == controller.currentReleaseName
+                            Button {
+                                showInfoMenu = false
+                                controller.onSelectRelease?(release.name)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text(release.name)
+                                            .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                                            .foregroundColor(SumiTheme.foreground.opacity(isCurrent ? 1 : 0.8))
+                                            // 4, not the detail page's 2:
+                                            // the discriminator between two
+                                            // releases (resolution, codec,
+                                            // audio) sits at the end of the
+                                            // name, and 2 lines at this
+                                            // width truncates every one of
+                                            // them before reaching it. The
+                                            // section's own height cap is
+                                            // what keeps the popover from
+                                            // growing.
+                                            .lineLimit(4)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 6)
+                                        if isCurrent {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundColor(SumiTheme.indigo)
+                                        }
+                                    }
+                                    HStack(spacing: 6) {
+                                        if release.isDub {
+                                            Text("DUB")
+                                                .sumiTabularMono(size: 9.5, weight: .bold)
+                                                .foregroundColor(SumiTheme.indigo)
+                                        }
+                                        Text("\(release.seeders) seeders")
+                                            .sumiTabularMono(size: 10)
+                                            .foregroundColor(SumiTheme.muted)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(isCurrent ? SumiTheme.indigo.opacity(0.12) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+                    }
+                }
+                .frame(maxHeight: 180)
+            }
+        }
+    }
+
+    /// Fired when the popover opens, not when the player starts, and once
+    /// per episode after that. The search behind it is a live wave across
+    /// three indexers — the same one a resolve runs — and the popover is
+    /// opened far more often for the speed row than for this list, so
+    /// searching on every open would put a viewer nudging the speed up and
+    /// down in competition with the episode's own resolve and the N+1
+    /// preload for Nyaa's four-concurrent-query ceiling. A failed attempt
+    /// is not remembered, so reopening retries it.
+    private func loadReleases() {
+        guard let list = controller.onListReleases else { return }
+        let key = "\(controller.title)#\(controller.episodeNumber)"
+        guard loadedReleasesKey != key || releaseError != nil else { return }
+        loadedReleasesKey = key
+        isLoadingReleases = true
+        releaseError = nil
+        list { found, failure in
+            isLoadingReleases = false
+            releases = found
+            releaseError = failure
+        }
     }
 
     private func speedLabel(_ rate: Double) -> String {

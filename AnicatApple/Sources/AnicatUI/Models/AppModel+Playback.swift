@@ -53,6 +53,100 @@ extension AppModel {
         playerController.onSelectEpisode = { [weak self] number in
             Task { await self?.playSelectedEpisode(number) }
         }
+        playerController.onListReleases = { [weak self] completion in
+            Task { @MainActor in
+                guard let self else { return completion([], nil) }
+                do {
+                    completion(try await self.playbackReleaseCandidates(), nil)
+                } catch {
+                    completion([], error.localizedDescription)
+                }
+            }
+        }
+        playerController.onSelectRelease = { [weak self] name in
+            // Through `activeResolveTask`, like the detail page's own play
+            // path: the "Finding a stream" overlay this raises has a Cancel
+            // button, and that button cancels whatever task is parked
+            // there. Left unset it would have cancelled the previous play's
+            // task, hidden the overlay, and let this resolve land anyway.
+            self?.activeResolveTask = Task { [weak self] in
+                await self?.switchRelease(to: name)
+            }
+        }
+    }
+
+    /// The same "Stream Servers" list the detail page offers, for the
+    /// episode that is *playing*. Keyed on `currentPlayback*` rather than
+    /// `selectedMediaDetails`, which is the open page: a play from the Up
+    /// Next shelf opens no page at all, and the mini-player lets another
+    /// title's page be opened mid-episode. Throws rather than answering
+    /// with an empty list, because "the indexers returned nothing" and
+    /// "the search failed" are not the same thing to show.
+    public func playbackReleaseCandidates() async throws -> [MediaDetailView.ReleaseCandidateItem] {
+        guard let engine, let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode else { return [] }
+        let choices = try await engine.listReleaseCandidates(
+            catalog: currentPlaybackCatalog,
+            catalogId: catalogId,
+            episode: episode,
+            title: currentPlaybackTitle
+        )
+        return choices.map {
+            MediaDetailView.ReleaseCandidateItem(name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub)
+        }
+    }
+
+    /// Replays the current episode from a different release, where the
+    /// viewer had got to.
+    public func switchRelease(to releaseName: String) async {
+        guard let engine, let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode else { return }
+        let previousURL = activeStreamURL
+        let resumeAt = Int64(playerController.currentTime)
+        let duration = Int64(playerController.duration)
+        let catalog = currentPlaybackCatalog
+        // `resolveAndPlay` takes the position to open at from the registry,
+        // not from the player, and the once-a-second tick that writes it
+        // runs on `engineIOQueue`. Writing this one on that queue and
+        // waiting for it puts it behind any tick already in flight and in
+        // front of the read; written inline on this actor instead, a tick
+        // queued a moment ago could land after it and rewind the switch to
+        // wherever that tick had been.
+        if resumeAt > 0 {
+            await withCheckedContinuation { continuation in
+                engineIOQueue.async {
+                    try? engine.recordProgress(
+                        catalog: catalog,
+                        catalogId: catalogId,
+                        episodeNumber: episode,
+                        stopTime: resumeAt,
+                        duration: duration
+                    )
+                    continuation.resume()
+                }
+            }
+        }
+        do {
+            _ = try await resolveAndPlay(
+                catalog: catalog,
+                catalogId: catalogId,
+                episode: episode,
+                title: currentPlaybackTitle,
+                chosenName: releaseName
+            )
+            // A chosen release that resolves back to the stream already
+            // playing hands `MpvSurface.loadFile` a URL it has, so it opens
+            // no file and no MPV_EVENT_FILE_LOADED arrives to lower the
+            // gate `resolveAndPlay` raised — every position tick from here
+            // on would be dropped as the outgoing file's.
+            if activeStreamURL == previousURL {
+                playerController.awaitingNewFile = false
+            }
+        } catch is CancellationError {
+            // Cancel on the resolve overlay, not a failure.
+        } catch {
+            errorMessage = "Failed to switch release: \(error.localizedDescription)"
+        }
     }
 
     /// Points `playbackEpisodes` at the right list for `catalogId`: the open
@@ -610,14 +704,24 @@ extension AppModel {
         // From here on, anything mpv reports belongs to the outgoing file,
         // unless this is the same episode being asked for again: then no
         // new file will load, no FILE_LOADED will clear the gate, and the
-        // numbers mpv is emitting are the right file's already.
+        // numbers mpv is emitting are the right file's already. A named
+        // release is the exception — same episode, different file — and
+        // without that term the outgoing file's last ticks arrived against
+        // the dedup flags this call had just reset, re-firing the AniList
+        // advance and the N+1 preload, and auto-advancing outright when the
+        // switch happened near the end of an episode.
         let replayingCurrent = activeStreamURL != nil
             && currentPlaybackCatalogId == catalogId
             && currentPlaybackEpisode == episode
+            && chosenName == nil
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode
         self.playerController.awaitingNewFile = !replayingCurrent
+        // Only a release asked for by name is a release the player can tick
+        // in its list; an ordinary play is whatever the engine's own race
+        // landed on, which it does not report back.
+        self.playerController.currentReleaseName = chosenName
         ensurePlaybackEpisodes(for: catalogId, engine: engine)
         self.currentPlaybackTitle = effectiveTitle
         // A fresh play always opens full-screen, not stuck minimized from

@@ -208,6 +208,17 @@ extension AppModel {
         }
         let episodeNumber = Int(episode)
         let episodeLength = playerController.duration
+        // The first call lands before mpv has been handed the URL, when
+        // `duration` is 0 or still the previous file's. AniSkip picks the
+        // submission whose episode length is nearest the one sent, so a 0
+        // (or a 1440 s value for a 1420 s encode) returned windows a few
+        // seconds off the intro actually in this file. Ask again from the
+        // first duration tick instead of guessing.
+        guard episodeLength > 1, !playerController.awaitingNewFile else {
+            aniSkipAwaitingDuration = true
+            return
+        }
+        aniSkipAwaitingDuration = false
         Task { [weak self] in
             let times = await AniSkipClient.skipTimes(malId: malId, episode: episodeNumber, episodeLengthSeconds: episodeLength)
             guard let self else { return }
@@ -434,6 +445,10 @@ extension AppModel {
         guard let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode,
               let engine else { return }
+
+        if aniSkipAwaitingDuration, duration > 1, !playerController.awaitingNewFile {
+            requestAniSkipTimes(catalogId: catalogId, episode: episode)
+        }
 
         let rawStop = Int64(currentTime)
         let dur = Int64(duration)
@@ -731,6 +746,7 @@ extension AppModel {
         // Cleared up front rather than left showing the previous episode's
         // skip window for however long the fetch below takes.
         self.playerController.setAniSkipTimes(nil)
+        aniSkipAwaitingDuration = false
         // Same reasoning: a new episode's overlay shouldn't briefly letterbox
         // itself against the last episode's aspect ratio before mpv reports
         // the new one.

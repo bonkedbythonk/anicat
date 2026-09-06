@@ -221,6 +221,9 @@ public final class AppModel: @unchecked Sendable {
     /// shelf or from another show's page read either no id or the wrong
     /// one, and AniSkip simply never fired there.
     var playbackMalId: Int64?
+    /// Set when AniSkip was asked for before mpv reported the file's
+    /// duration; the first duration tick re-asks with the real length.
+    var aniSkipAwaitingDuration = false
     public var currentPlaybackCatalog: FfiCatalog = .anilist
     public var currentPlaybackCatalogId: Int64?
     public var currentPlaybackEpisode: Int64?

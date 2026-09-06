@@ -68,6 +68,17 @@ public struct MediaCard: View, Equatable {
         lhs.item == rhs.item && lhs.namespace == rhs.namespace
     }
 
+    /// The title lifts out of its resting dim on hover. `stableHover` is
+    /// macOS-only, so `isHovered` can never become true anywhere else and a
+    /// resting 0.8 would leave every title on iOS permanently dim.
+    private var titleOpacity: Double {
+        #if os(macOS)
+        isHovered ? 1.0 : 0.8
+        #else
+        1.0
+        #endif
+    }
+
     public var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 10) {
@@ -169,6 +180,9 @@ public struct MediaCard: View, Equatable {
                         .lineSpacing(1.5)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .topLeading)
+                        .opacity(titleOpacity)
+                        .offset(y: isHovered ? -1 : 0)
+                        .animation(.snappy, value: isHovered)
 
                     HStack(spacing: 6) {
                         if let score = item.score, score > 0 {

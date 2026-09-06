@@ -37,6 +37,13 @@ public struct SearchView: View {
 
     @State private var searchType: String = "ANIME"
 
+    /// 20ms per row, and nothing past the tenth card: the results grid is
+    /// lazy, so an uncapped delay would also be paid by every row the viewer
+    /// later scrolls into view.
+    private static let resultsEntrance = SumiGridEntrance(
+        step: 0.020, cap: 10, offset: CGSize(width: 0, height: 10)
+    )
+
     // Filters. Empty string means "Any" / no filter — kept as String state
     // (rather than optionals) because SumiFilterDropdown binds to a plain
     // String, and every value here maps straight onto an AniList enum or a
@@ -460,6 +467,7 @@ public struct SearchView: View {
                                     onSelectMedia(item, "search-results:\(item.id)")
                                 }
                                 .equatable()
+                                .sumiStaggeredEntrance(index: index, entrance: Self.resultsEntrance)
                                 // Firing the next page a few cards before the
                                 // true end means the next row is already
                                 // loading by the time the viewer scrolls to
@@ -475,6 +483,12 @@ public struct SearchView: View {
                         .padding(.horizontal, 40)
                         .opacity(isLoading ? 0.5 : 1)
                         .animation(.snappy, value: isLoading)
+                        // The first result's id, and deliberately not the
+                        // count: a page appended by `loadMore` leaves the id
+                        // alone, so those rows insert immediately instead of
+                        // all landing at once behind the saturated delay the
+                        // stagger's cap would give them.
+                        .animation(.smooth(duration: 0.3), value: results.first?.id ?? -1)
 
                         if isLoadingMore {
                             ProgressView()
@@ -488,9 +502,7 @@ public struct SearchView: View {
                             .padding(.horizontal, 40)
                     } else if !searchText.isEmpty || hasActiveFilters {
                         VStack(spacing: 8) {
-                            Image(systemName: "questionmark.folder")
-                                .font(.system(size: 36))
-                                .foregroundColor(SumiTheme.muted.opacity(0.4))
+                            BreathingIcon(systemName: "questionmark.folder")
                             Text(searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
@@ -512,5 +524,29 @@ public struct SearchView: View {
         // already sitting in `discoverItems` from startup — and flashed the
         // global loading scrim on every visit to Search for no new data.
         .onAppear { if discoverItems.isEmpty { onLoadDiscover(searchType) } }
+    }
+}
+
+/// The empty state's glyph, breathing so the panel does not read as a frozen
+/// error. Its own view so the repeating animation is torn down with the empty
+/// state instead of being left running against a `@State` on `SearchView`,
+/// which outlives it.
+private struct BreathingIcon: View {
+    let systemName: String
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 36))
+            .foregroundColor(SumiTheme.muted.opacity(0.4))
+            .scaleEffect(expanded ? 1.04 : 1.0)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.smooth(duration: 1.8).repeatForever(autoreverses: true)) {
+                    expanded = true
+                }
+            }
     }
 }

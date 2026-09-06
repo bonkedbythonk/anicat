@@ -154,8 +154,13 @@ struct AnicatApp: App {
                     ? Int(model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber))
                     : model.upNextItems.first.map { Int($0.nextEpisodeOrChapter) },
                 lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+                // "Airing today", not "airing at some point": `scheduleItems`
+                // is the whole forward schedule, so without the date test
+                // this listed episodes a fortnight out under a heading that
+                // says today. Watching-only, because a menu bar popover is
+                // the viewer's own queue and not a catalog listing.
                 airingItems: model.scheduleItems
-                    .filter(\.isWatching)
+                    .filter { $0.isWatching && Calendar.current.isDateInToday(Date(timeIntervalSince1970: TimeInterval($0.airingAt))) }
                     .map {
                         MenuBarView.AiringTodayItem(
                             id: $0.id,
@@ -164,6 +169,10 @@ struct AnicatApp: App {
                             countdownText: $0.countdownText
                         )
                     },
+                nowPlaying: model.activeStreamURL != nil ? model.playerController : nil,
+                onOpenAiringItem: { item in
+                    model.handleDeepLink(.title(id: item.id, isManga: false))
+                },
                 onResumeLastWatched: {
                     if model.activeStreamURL != nil {
                         // Restore the player if it was backgrounded (see

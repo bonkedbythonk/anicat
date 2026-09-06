@@ -20,7 +20,13 @@ public struct MenuBarView: View {
     public let lastWatchedEpisode: Int?
     public let lastWatchedThumbnailURL: URL?
     public let airingItems: [AiringTodayItem]
-    
+    /// Non-nil only while something is actually streaming. The transport row
+    /// is driven straight off the live controller rather than off copied
+    /// values: the popover has to follow a position that moves once a second
+    /// while it is open, and a snapshot taken when it opened would freeze.
+    public let nowPlaying: PlayerController?
+    public let onOpenAiringItem: (AiringTodayItem) -> Void
+
     public let onResumeLastWatched: () -> Void
     public let onOpenMainApp: () -> Void
     public let onOpenSettings: () -> Void
@@ -31,6 +37,8 @@ public struct MenuBarView: View {
         lastWatchedEpisode: Int? = nil,
         lastWatchedThumbnailURL: URL? = nil,
         airingItems: [AiringTodayItem] = [],
+        nowPlaying: PlayerController? = nil,
+        onOpenAiringItem: @escaping (AiringTodayItem) -> Void = { _ in },
         onResumeLastWatched: @escaping () -> Void = {},
         onOpenMainApp: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {},
@@ -40,6 +48,8 @@ public struct MenuBarView: View {
         self.lastWatchedEpisode = lastWatchedEpisode
         self.lastWatchedThumbnailURL = lastWatchedThumbnailURL
         self.airingItems = airingItems
+        self.nowPlaying = nowPlaying
+        self.onOpenAiringItem = onOpenAiringItem
         self.onResumeLastWatched = onResumeLastWatched
         self.onOpenMainApp = onOpenMainApp
         self.onOpenSettings = onOpenSettings
@@ -69,7 +79,7 @@ public struct MenuBarView: View {
             // Section: Quick Resume
             if let title = lastWatchedTitle, let ep = lastWatchedEpisode {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("CONTINUE WATCHING")
+                    Text(nowPlaying == nil ? "CONTINUE WATCHING" : "NOW PLAYING")
                         .sumiTabularMono(size: 10, weight: .semibold)
                         .foregroundColor(SumiTheme.muted.opacity(0.8))
 
@@ -114,6 +124,53 @@ public struct MenuBarView: View {
                         )
                     }
                     .buttonStyle(.sumiPressable)
+
+                    if let controller = nowPlaying {
+                        TransportRow(controller: controller)
+                    }
+                }
+            }
+
+            if !airingItems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("AIRING TODAY")
+                        .sumiTabularMono(size: 10, weight: .semibold)
+                        .foregroundColor(SumiTheme.muted.opacity(0.8))
+
+                    // Capped, and scrolled rather than grown: a heavy season
+                    // puts a dozen shows on one day, and a menu bar popover
+                    // taller than the screen is clipped by AppKit with no
+                    // scroll of its own.
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(airingItems) { item in
+                                Button {
+                                    onOpenAiringItem(item)
+                                    onOpenMainApp()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(item.title)
+                                                .font(.system(size: 12))
+                                                .foregroundColor(SumiTheme.foreground)
+                                                .lineLimit(1)
+                                            Text("EP \(item.episodeNumber)")
+                                                .sumiTabularMono(size: 9.5)
+                                                .foregroundColor(SumiTheme.muted)
+                                        }
+                                        Spacer(minLength: 6)
+                                        Text(item.countdownText)
+                                            .sumiTabularMono(size: 9.5)
+                                            .foregroundColor(SumiTheme.muted)
+                                    }
+                                    .padding(.vertical, 3)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 132)
                 }
             }
 
@@ -166,5 +223,81 @@ public struct MenuBarView: View {
         .padding(12)
         .frame(width: 260)
         .background(SumiTheme.background)
+    }
+}
+
+/// Scrubber, play/pause and next-episode for whatever is streaming, without
+/// having to bring the window forward first.
+private struct TransportRow: View {
+    /// `@Bindable`, not a plain `let`: `PlayerController` is `@Observable`,
+    /// and only a bindable reference makes this body re-run on the
+    /// once-a-second `currentTime` write that moves the bar.
+    @Bindable var controller: PlayerController
+
+    var body: some View {
+        VStack(spacing: 6) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(SumiTheme.foreground.opacity(0.16))
+                        .frame(height: 3)
+                    Capsule()
+                        .fill(SumiTheme.indigo)
+                        .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 3)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            // `isScrubbing` is what stops the position poll
+                            // from writing over the handle mid-drag; the seek
+                            // itself waits for the release, so dragging
+                            // across the bar does not fire a seek per pixel
+                            // into a torrent that has to fetch each one.
+                            controller.isScrubbing = true
+                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                            controller.currentTime = Double(fraction) * controller.duration
+                        }
+                        .onEnded { value in
+                            let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                            let target = Double(fraction) * controller.duration
+                            controller.isScrubbing = false
+                            controller.seek(to: target)
+                        }
+                )
+            }
+            .frame(height: 14)
+
+            HStack(spacing: 10) {
+                Text(controller.formattedCurrentTime)
+                    .sumiTabularMono(size: 9.5)
+                    .foregroundColor(SumiTheme.muted)
+
+                Spacer(minLength: 4)
+
+                Button(action: { controller.togglePlayPause() }) {
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.foreground)
+                }
+                .buttonStyle(.sumiPressable)
+
+                Button(action: { controller.nextEpisode() }) {
+                    Image(systemName: "forward.end.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(controller.hasNextEpisode ? SumiTheme.foreground : SumiTheme.muted.opacity(0.5))
+                }
+                .buttonStyle(.sumiPressable)
+                .disabled(!controller.hasNextEpisode)
+
+                Spacer(minLength: 4)
+
+                Text(controller.formattedDuration)
+                    .sumiTabularMono(size: 9.5)
+                    .foregroundColor(SumiTheme.muted)
+            }
+        }
+        .padding(.top, 2)
     }
 }

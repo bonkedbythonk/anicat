@@ -188,14 +188,21 @@ public extension SumiPalette {
         let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: clean).scanHexInt64(&int)
-        let channels = [
-            Double((int >> 16) & 0xFF) / 255.0,
-            Double((int >> 8) & 0xFF) / 255.0,
-            Double(int & 0xFF) / 255.0
-        ].map { channel -> Double in
-            channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        // Spelled out step by step: the array literal of three shifted
+        // divisions plus the mapped ternary was one expression, and CI's
+        // toolchain gave up type-checking it ("unable to type-check this
+        // expression in reasonable time") while the local one passed.
+        let red: Double = Double((int >> 16) & 0xFF) / 255.0
+        let green: Double = Double((int >> 8) & 0xFF) / 255.0
+        let blue: Double = Double(int & 0xFF) / 255.0
+        func linear(_ channel: Double) -> Double {
+            if channel <= 0.03928 { return channel / 12.92 }
+            return pow((channel + 0.055) / 1.055, 2.4)
         }
-        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+        let r: Double = 0.2126 * linear(red)
+        let g: Double = 0.7152 * linear(green)
+        let bl: Double = 0.0722 * linear(blue)
+        return r + g + bl
     }
 
     /// WCAG contrast ratio between two `#RRGGBB` strings, 1.0 to 21.0.

@@ -13,51 +13,30 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
     init(_ value: T) { self.value = value }
 }
 
-/// Which of the two ways of getting mpv's frames on screen is in use.
-///
-/// `.openGL` is the shipped path: libmpv's render API draws into our
-/// `NSOpenGLView` from `MpvRenderTarget`'s thread. `.vulkan` is the path
-/// the iOS port needs and macOS should move to: mpv's own `gpu-next` output
-/// through Vulkan-over-Metal (`macvk` context), drawing into a
-/// `CAMetalLayer` it creates inside the view we hand it as `wid`. No render
-/// context, no render thread, no CGL lock on our side, and OpenGL, which
-/// Apple deprecated in 2018 and Homebrew's mpv 0.41 no longer even offers
-/// as a GPU API, is out of the picture. Anime4K keeps working: `glsl-shaders`
-/// run inside gpu-next regardless of the backend underneath.
-///
-/// Selected by `anicat_render_backend` ("vulkan" or "opengl") read once per
-/// mpv instance, OpenGL until the Vulkan path has been verified against the
-/// cocoa-cb history in CLAUDE.md (a `wid` once meant mpv spawning its own
-/// window).
-private func log_backend(_ message: String) {
-    print("[libmpv] \(message)")
-}
-
+/// Only one way of getting mpv's frames on screen exists on macOS, and it
+/// is the render API below. Tried and rejected 2026-09-06: handing this
+/// view to mpv as `wid` with vo=gpu-next, gpu-api=vulkan, gpu-context=macvk.
+/// mpv's macOS backend does not embed; it created its own 1920x1080 window
+/// ("[vo/gpu-next] Window size: 1920x1080") and went fullscreen in it, the
+/// same behaviour the cocoa-cb notes describe. The render API is the only
+/// embedding path libmpv offers on macOS, and it offers it for OpenGL only,
+/// so OpenGL stays until mpv grows a Metal render API or we ship a patched
+/// libmpv (MPVKit's iOS build patches exactly this for CAMetalLayer wids).
 public enum MpvRenderBackend: String, Sendable {
     case openGL = "opengl"
-    case vulkan = "vulkan"
 
-    static var configured: MpvRenderBackend {
-        // The environment wins over defaults so a second process can be
-        // started on the other backend for comparison without touching
-        // the running app's setting.
-        let raw = ProcessInfo.processInfo.environment["ANICAT_RENDER_BACKEND"]
-            ?? UserDefaults.standard.string(forKey: "anicat_render_backend")
-            ?? ""
-        return MpvRenderBackend(rawValue: raw) ?? .openGL
-    }
+    static var configured: MpvRenderBackend { .openGL }
 }
 
 /// The view SwiftUI hosts. It owns pointer handling and reports its size to
-/// the controller; what fills it depends on the backend: an `MpvRenderView`
-/// child for OpenGL, or mpv's own layer-backed subview for Vulkan.
+/// the controller; the `MpvRenderView` child does the drawing. Kept as a
+/// separate host so the iOS twin can put a different child (MPVKit's
+/// CAMetalLayer target) under the same pointer handling and the same
+/// coordinator.
 ///
-/// Pointer events live on a transparent topmost subview rather than on this
-/// view or the render child: with the Vulkan backend mpv inserts its own
-/// `NSView` subclass that handles mouse events itself (for its input
-/// system, which we have disabled), and would otherwise swallow the click
-/// before it reached us. A catcher above everything makes the two backends
-/// behave the same.
+/// Pointer events live on a transparent topmost subview rather than on the
+/// render child, so a child that handles events itself (mpv's own view
+/// subclass, in a backend that inserts one) cannot swallow the click.
 @MainActor
 public final class MpvHostView: NSView {
     public weak var coordinator: MpvSurface.Coordinator?
@@ -557,28 +536,9 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            switch view.backend {
-            case .openGL:
-                // "libmpv" is the special vo name that opts into the render
-                // API instead of a normal window-owning vo — no "wid" is set.
-                mpv_set_option_string(handle, "vo", "libmpv")
-            case .vulkan:
-                // mpv owns the output: gpu-next over Vulkan, which MoltenVK
-                // maps onto Metal, drawing into a CAMetalLayer it creates in
-                // a subview of the view passed as `wid`. All three options
-                // and `wid` have to be set before mpv_initialize; after it
-                // the vo is already built.
-                mpv_set_option_string(handle, "vo", "gpu-next")
-                mpv_set_option_string(handle, "gpu-api", "vulkan")
-                mpv_set_option_string(handle, "gpu-context", "macvk")
-                // Nothing of mpv's own input handling: the event catcher
-                // above its subview is what hears the pointer, and mpv's
-                // key bindings would fight the app's.
-                mpv_set_option_string(handle, "input-cursor", "no")
-                mpv_set_option_string(handle, "input-vo-keyboard", "no")
-                var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(view).toOpaque()))
-                mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
-            }
+            // "libmpv" is the special vo name that opts into the render API
+            // instead of a normal window-owning vo — no "wid" is set at all.
+            mpv_set_option_string(handle, "vo", "libmpv")
             mpv_set_option_string(handle, "keep-open", "yes")
 
             // High-performance Apple Silicon settings.
@@ -615,36 +575,32 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            if view.backend == .openGL {
-                // `NSOpenGLContext` is explicitly non-Sendable, so the
-                // target that owns it is built inside the main-actor block
-                // rather than handing the context out of it.
-                let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
-                    view.glView?.openGLContext.map { MpvRenderTarget(glContext: $0) }
-                }
-                guard let target else {
-                    print("[libmpv] No OpenGL context on render view")
-                    mpv_destroy(handle)
-                    return
-                }
+            // `NSOpenGLContext` is explicitly non-Sendable, so the target
+            // that owns it is built inside the main-actor block rather than
+            // handing the context out of it.
+            let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
+                view.glView?.openGLContext.map { MpvRenderTarget(glContext: $0) }
+            }
+            guard let target else {
+                print("[libmpv] No OpenGL context on render view")
+                mpv_destroy(handle)
+                return
+            }
 
-                // Created on the render thread, which is the only thread
-                // that will ever touch it again.
-                let createStatus = target.create(mpv: handle)
-                if createStatus < 0 {
-                    print("[libmpv] Failed to create render context: \(createStatus)")
-                    mpv_destroy(handle)
-                    return
+            // Created on the render thread, which is the only thread that
+            // will ever touch it again.
+            let createStatus = target.create(mpv: handle)
+            if createStatus < 0 {
+                print("[libmpv] Failed to create render context: \(createStatus)")
+                mpv_destroy(handle)
+                return
+            }
+            self.renderTarget = target
+            MainActor.assumeIsolated {
+                if let gl = view.glView {
+                    let px = gl.convertToBacking(gl.bounds).size
+                    target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
                 }
-                self.renderTarget = target
-                MainActor.assumeIsolated {
-                    if let gl = view.glView {
-                        let px = gl.convertToBacking(gl.bounds).size
-                        target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
-                    }
-                }
-            } else {
-                log_backend("vulkan: mpv output attached to host view \(Unmanaged.passUnretained(view).toOpaque())")
             }
 
             self.mpv = handle

@@ -19,6 +19,15 @@ public final class AppModel: @unchecked Sendable {
     // land in the order they were issued.
     let engineIOQueue = DispatchQueue(label: "com.anicat.engine-io", qos: .utility)
 
+    /// Blocks until every progress/Discord write queued so far has run.
+    /// For tests that read the registry right after a position tick: the
+    /// writes are deliberately asynchronous (see the queue's comment) and
+    /// a synchronous read raced them, failing about two runs in three once
+    /// the suite grew enough parallel load.
+    func drainEngineIO() {
+        engineIOQueue.sync {}
+    }
+
     var activeDetailTask: Task<Void, Never>?
     var activeDetailExtrasTask: Task<Void, Never>?
     var activeLibraryTask: Task<Void, Never>?

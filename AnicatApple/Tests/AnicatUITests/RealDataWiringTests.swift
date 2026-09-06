@@ -75,6 +75,7 @@ struct RealDataWiringTests {
 
         // Simulate playback scrubber / time update
         model.handlePlaybackPositionChange(currentTime: 420.0, duration: 1420.0)
+        model.drainEngineIO()
 
         // Read directly from SQLite via engine.getProgress
         let progress = try engine.getProgress(catalog: .anilist, catalogId: 154587, episodeNumber: 3)
@@ -138,6 +139,7 @@ struct RealDataWiringTests {
 
         // Position exceeds total duration (e.g. 1500s on a 1400s file)
         model.handlePlaybackPositionChange(currentTime: 1500.0, duration: 1400.0)
+        model.drainEngineIO()
 
         let progress = try engine.getProgress(catalog: .anilist, catalogId: 154587, episodeNumber: 1)
         #expect(progress != nil)
@@ -147,6 +149,7 @@ struct RealDataWiringTests {
         model.playerController.currentTime = 2000.0
         model.playerController.duration = 1400.0
         model.stopPlayback()
+        model.drainEngineIO()
 
         let finalProgress = try engine.getProgress(catalog: .anilist, catalogId: 154587, episodeNumber: 1)
         #expect(finalProgress?.stopTime == 1400)

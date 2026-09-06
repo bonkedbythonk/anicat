@@ -13,8 +13,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
 SRC="$ROOT/AnicatApple"
 CONFIG="${1:-release}"
+# `install` as the second argument copies the finished bundle into
+# /Applications, which is how a non-development launch finds it.
+INSTALL="${2:-}"
 APP="$SRC/dist/Anicat.app"
 EXE_NAME="Anicat"
+ICON="$ROOT/assets/branding/icon.icns"
 
 echo "=== Building ($CONFIG) ==="
 (cd "$SRC" && swift build -c "$CONFIG")
@@ -50,6 +54,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>${VERSION}</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
@@ -59,6 +67,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Without the icns and CFBundleIconFile the Dock and Finder show the
+# generic application icon; the previous script never copied it.
+if [ -f "$ICON" ]; then
+    cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
+else
+    echo "package-anicat-macos-app: warning: no icon at $ICON" >&2
+fi
 
 if [ -d "$SRC/Sources/AnicatUI/Resources/Fonts" ]; then
     mkdir -p "$APP/Contents/Resources/Fonts"
@@ -90,3 +106,17 @@ if [ "$LEFTOVER" -ne 0 ]; then
 fi
 
 echo "package-anicat-macos-app: built $APP, zero Homebrew references"
+
+if [ "$INSTALL" = "install" ]; then
+    DEST="/Applications/Anicat.app"
+    echo "=== Installing to $DEST ==="
+    # A running copy keeps its old code pages, and a replaced binary under
+    # a running process is killed with "Code Signature Invalid".
+    pkill -x "$EXE_NAME" 2>/dev/null || true
+    rm -rf "$DEST"
+    ditto "$APP" "$DEST"
+    # Finder caches icons per bundle path; touching the bundle after the
+    # copy is what makes it re-read the new icns.
+    touch "$DEST"
+    echo "package-anicat-macos-app: installed $DEST (version $VERSION)"
+fi

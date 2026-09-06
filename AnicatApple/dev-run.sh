@@ -22,4 +22,13 @@ PLIST=dist/Anicat.app/Contents/Info.plist
     || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$PLIST"
+# Same icon as the packaged app, so the dev copy is not the generic icon
+# in the Dock and Cmd-Tab.
+ICON=../assets/branding/icon.icns
+if [ -f "$ICON" ]; then
+    mkdir -p dist/Anicat.app/Contents/Resources
+    cp "$ICON" dist/Anicat.app/Contents/Resources/AppIcon.icns
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$PLIST" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$PLIST"
+fi
 open dist/Anicat.app

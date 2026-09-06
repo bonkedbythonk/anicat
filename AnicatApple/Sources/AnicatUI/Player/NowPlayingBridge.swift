@@ -79,6 +79,12 @@ public final class NowPlayingBridge: @unchecked Sendable {
     /// change three keys and hand the same object back rather than
     /// rebuilding it from the controller each time.
     private var info: [String: Any] = [:]
+    /// What this bridge last published, for tests. `MPNowPlayingInfoCenter`
+    /// is one object per process, and the suites run in parallel: an
+    /// `AppModel` constructed by another test reaches `stopPlayback`, which
+    /// clears the centre from under a test that had just published to it.
+    /// Asserting on the bridge's own copy is deterministic.
+    var lastPublished: [String: Any]? { track == nil ? nil : info }
     private var track: Track?
     private var artworkURL: URL?
     private var artworkTask: Task<Void, Never>?

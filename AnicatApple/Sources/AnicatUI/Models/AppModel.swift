@@ -2424,7 +2424,12 @@ public final class AppModel: @unchecked Sendable {
         ContinuityManager.shared.stopAdvertising()
         syncPlaybackSession()
 
-        Task {
+        // Pinned to the main actor rather than inheriting the caller's
+        // context: from the app this is always main, but a test calling
+        // stopPlayback from a nonisolated context ran this on a cooperative
+        // thread, and reading selectedMediaDetails there while the main
+        // thread replaced it was a SIGBUS on a freed HeroBanner.Details.
+        Task { @MainActor in
             await loadHistory()
             if let currentDetails = selectedMediaDetails {
                 await loadDetail(id: currentDetails.id, isManga: Self.isMangaFormat(currentDetails.format))

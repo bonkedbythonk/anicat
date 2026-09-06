@@ -35,24 +35,25 @@ struct NowPlayingBridgeTests {
 
     @Test("a progress tick changes the timeline keys and nothing else; clear takes the tile down")
     func progressTickAndClear() {
+        // Read the bridge's own copy, not MPNowPlayingInfoCenter.default():
+        // that is process-wide and other suites clear it mid-test.
         let bridge = NowPlayingBridge()
-        let center = MPNowPlayingInfoCenter.default()
         bridge.setTrack(track, elapsed: 10, duration: 1440, rate: 1.0, coverURL: nil)
-        #expect(center.nowPlayingInfo?[MPMediaItemPropertyTitle] as? String == "Frieren")
-        #expect(center.nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double == 10)
+        #expect(bridge.lastPublished?[MPMediaItemPropertyTitle] as? String == "Frieren")
+        #expect(bridge.lastPublished?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double == 10)
 
         bridge.updateProgress(elapsed: 11, duration: 1440, rate: 0)
-        let after = center.nowPlayingInfo
+        let after = bridge.lastPublished
         #expect(after?[MPMediaItemPropertyTitle] as? String == "Frieren")
         #expect(after?[MPMediaItemPropertyArtist] as? String == "Episode 3 - Killing Magic")
         #expect(after?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double == 11)
         #expect(after?[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 0)
 
         bridge.clear()
-        #expect(center.nowPlayingInfo == nil)
+        #expect(bridge.lastPublished == nil)
         // A tick after clear must not resurrect a tile for a stopped player.
         bridge.updateProgress(elapsed: 12, duration: 1440, rate: 1.0)
-        #expect(center.nowPlayingInfo == nil)
+        #expect(bridge.lastPublished == nil)
     }
 
     @Test("attach enables the transport commands and mirrors the controller's neighbours")

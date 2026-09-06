@@ -20,8 +20,23 @@ public struct MangaReaderView: View {
     public enum ReadingDirection: String, CaseIterable, Identifiable {
         case rtl = "RTL (Manga)"
         case ltr = "LTR (Webtoon/Comic)"
-        
+
         public var id: String { rawValue }
+    }
+
+    /// How a reading mode takes pointer and keyboard input. Pointer and
+    /// keyboard are one decision, not two: a mode that turns a page on an
+    /// arrow key is the same mode that splits the frame into tap zones, and
+    /// a mode that scrolls has to let both the scroll wheel and the arrow
+    /// keys reach the scroll view.
+    public enum InputMode {
+        /// Outer thirds turn the page, the middle third toggles the
+        /// controls, and left/right arrows turn the page.
+        case pageTurn
+        /// The scroll view owns the gesture: nothing is laid over it, the
+        /// tap to toggle the controls rides on the page rows inside the
+        /// scroll content, and arrow keys are passed on untouched.
+        case scroll
     }
 
     public let title: String
@@ -107,6 +122,12 @@ public struct MangaReaderView: View {
     /// In webtoon mode `current` is the page whose row most recently came
     /// into view, which while scrolling down is the last visible one; the
     /// window beyond it is what the scroll is about to reveal.
+    /// Webtoon scrolls, every other mode turns pages. `nonisolated` for the
+    /// same reason as the members below it.
+    nonisolated static func inputMode(for mode: ReadingMode) -> InputMode {
+        mode == .webtoon ? .scroll : .pageTurn
+    }
+
     nonisolated static func prefetchIndices(current: Int, pageCount: Int, mode: ReadingMode) -> [Int] {
         let shown: Set<Int>
         let candidates: [Int]
@@ -196,14 +217,18 @@ public struct MangaReaderView: View {
                 // by scrolling, and a left/right split there would fight the scroll gesture.
                 // Middle third toggles controls (matches the old whole-page tap);
                 // outer thirds turn pages, mirrored by reading direction.
+                //
+                // Webtoon gets no overlay at all. A full-size `Color.clear`
+                // with an `onTapGesture` was laid over the ScrollView to
+                // toggle the controls, and it ate every scroll event before
+                // the scroll view saw one: the trackpad did nothing in
+                // webtoon mode, while keyboard scrolling still worked because
+                // that arrives through the responder chain rather than as a
+                // hit-tested gesture. Its tap now rides on the page rows
+                // inside the scroll content, where a tap gesture and a scroll
+                // coexist.
                 .overlay {
-                    if readingMode == .webtoon {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation(.smooth) { showControls.toggle() }
-                            }
-                    } else {
+                    if Self.inputMode(for: readingMode) == .pageTurn {
                         HStack(spacing: 0) {
                             Color.clear
                                 .contentShape(Rectangle())
@@ -239,11 +264,21 @@ public struct MangaReaderView: View {
         }
         .focusable()
         .focused($isFocused)
+        // The focus above exists only so the arrow keys below reach this
+        // view; without this the system also drew its default focus ring,
+        // a blue rectangle around the entire reader for as long as it was
+        // open.
+        .focusEffectDisabled()
+        // `.ignored` rather than `.handled` in webtoon mode: `.handled`
+        // swallows the key even when nothing acts on it, and the scroll view
+        // gets its arrow-key scrolling through that same responder chain.
         .onKeyPress(.leftArrow) {
+            guard Self.inputMode(for: readingMode) == .pageTurn else { return .ignored }
             turnPage(forward: readingDirection == .rtl)
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            guard Self.inputMode(for: readingMode) == .pageTurn else { return .ignored }
             turnPage(forward: readingDirection == .ltr)
             return .handled
         }
@@ -301,6 +336,16 @@ public struct MangaReaderView: View {
                             )
                     }
                     .id(index)
+                    // The controls toggle lives on the row rather than on an
+                    // overlay above the ScrollView, which is what used to
+                    // swallow the trackpad. `contentShape` because the loaded
+                    // page is aspect-fitted and does not fill the row it is
+                    // drawn in, so the letterboxed strip either side would
+                    // otherwise not be tappable.
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.smooth) { showControls.toggle() }
+                    }
                     .onAppear {
                         currentPageIndex = index
                         onPageChanged(index)

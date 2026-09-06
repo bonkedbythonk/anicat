@@ -98,6 +98,16 @@ struct MangaReaderPrefetchTests {
         #expect(small == 1000)
     }
 
+    @Test("Only the paged modes take tap zones and arrow keys; webtoon leaves both to the scroll view")
+    func inputModePerReadingMode() {
+        #expect(Reader.inputMode(for: .single) == .pageTurn)
+        #expect(Reader.inputMode(for: .double) == .pageTurn)
+        #expect(Reader.inputMode(for: .webtoon) == .scroll)
+        // Every mode is covered, so adding one cannot silently fall into the
+        // scroll branch and lose its page turns.
+        #expect(Reader.ReadingMode.allCases.filter { Reader.inputMode(for: $0) == .scroll } == [.webtoon])
+    }
+
     @Test("Cache keys tell fits apart and spell the unconstrained axis without infinity")
     func cacheKeys() {
         #expect(ImageFit.maxPixelSize(400).cacheKeySuffix == "#400")

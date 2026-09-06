@@ -261,7 +261,7 @@ final class MpvEventCatcherView: NSView {
         if event.clickCount >= 2 {
             if let window = AppWindow.main ?? NSApp.keyWindow {
                 AppWindow.setToolbarVisible(false)
-                window.toggleFullScreen(nil)
+                FullScreenGuard.toggle(on: window)
             }
         }
     }

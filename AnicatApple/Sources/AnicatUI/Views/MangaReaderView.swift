@@ -288,7 +288,7 @@ public struct MangaReaderView: View {
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 wasFullScreenBeforeOpen = window.styleMask.contains(.fullScreen)
                 if !wasFullScreenBeforeOpen {
-                    window.toggleFullScreen(nil)
+                    FullScreenGuard.toggle(on: window)
                 }
             }
             #endif
@@ -298,7 +298,7 @@ public struct MangaReaderView: View {
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
-                    window.toggleFullScreen(nil)
+                    FullScreenGuard.toggle(on: window)
                 }
             }
             #endif
@@ -309,7 +309,7 @@ public struct MangaReaderView: View {
         #if os(macOS)
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
-                window.toggleFullScreen(nil)
+                FullScreenGuard.toggle(on: window)
             }
         }
         #endif
@@ -433,7 +433,7 @@ public struct MangaReaderView: View {
             // Fullscreen Toggle Button
             Button(action: {
                 #if os(macOS)
-                (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
+                if let window = NSApp.keyWindow ?? NSApp.mainWindow { FullScreenGuard.toggle(on: window) }
                 #endif
             }) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")

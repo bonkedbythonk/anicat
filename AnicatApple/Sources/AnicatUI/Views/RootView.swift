@@ -512,13 +512,13 @@ public struct RootView: View {
                 AppWindow.setToolbarVisible(false)
                 if !wasPlaying, !window.styleMask.contains(.fullScreen) {
                     enteredFullscreenForPlayback = true
-                    window.toggleFullScreen(nil)
+                    FullScreenGuard.set(true, on: window)
                 }
             } else {
                 AppWindow.setToolbarVisible(false)
                 NSCursor.setHiddenUntilMouseMoves(false)
                 if wasPlaying, enteredFullscreenForPlayback, window.styleMask.contains(.fullScreen) {
-                    window.toggleFullScreen(nil)
+                    FullScreenGuard.set(false, on: window)
                     enteredFullscreenForPlayback = false
                 }
             }
@@ -1354,7 +1354,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                     if model.activeStreamURL != nil {
                         AppWindow.setToolbarVisible(false)
                     }
-                    window.toggleFullScreen(nil)
+                    FullScreenGuard.toggle(on: window)
                 }
                 return nil
             }

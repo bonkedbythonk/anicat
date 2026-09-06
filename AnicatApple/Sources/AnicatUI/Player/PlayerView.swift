@@ -865,7 +865,7 @@ private struct PlayerBottomBar: View {
                 Button(action: {
                         if let window = AppWindow.main ?? NSApp.keyWindow {
                             AppWindow.setToolbarVisible(false)
-                            window.toggleFullScreen(nil)
+                            FullScreenGuard.toggle(on: window)
                         }
                 }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")

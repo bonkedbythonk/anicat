@@ -61,6 +61,7 @@ struct WindowConfigurator: NSViewRepresentable {
         guard let window else { return }
         _ = ScrollPocketWorkaround.disableScrollPocketsOnce
         AppWindow.main = window
+        FullScreenGuard.attach(to: window)
         window.delegate = AnicatWindowDelegate.shared
         window.acceptsMouseMovedEvents = true
         window.toolbar = nil

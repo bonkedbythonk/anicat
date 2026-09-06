@@ -85,14 +85,11 @@ struct WindowConfigurator: NSViewRepresentable {
         ScrollPocketWorkaround.disableScrollPockets(in: window.contentView)
     }
 }
-#endif
 
 @main
 struct AnicatApp: App {
     @State private var model = AppModel()
-    #if os(macOS)
     @NSApplicationDelegateAdaptor(AppearanceLock.self) private var appearanceLock
-    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -101,16 +98,11 @@ struct AnicatApp: App {
                     await model.initialize()
                 }
                 .preferredColorScheme(.dark)
-                #if os(macOS)
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
                 .background(WindowConfigurator())
-                #endif
         }
-        #if os(macOS)
         .windowStyle(.hiddenTitleBar)
-        #endif
 
-        #if os(macOS)
         MenuBarExtra {
             // `.window` style renders arbitrary SwiftUI in a popover instead of
             // a plain NSMenu, which is what makes the real MenuBarView (cover
@@ -200,6 +192,28 @@ struct AnicatApp: App {
             }
         }
         .menuBarExtraStyle(.window)
-        #endif
     }
 }
+
+#else
+
+/// The iOS entry point. Nothing the macOS one does above has an iOS
+/// counterpart: there is no window to configure, no app delegate needed to
+/// pin the appearance (`.preferredColorScheme(.dark)` covers a UIKit scene,
+/// which resolves colours through SwiftUI's environment rather than an
+/// `NSAppearance`), and no menu bar to extend.
+@main
+struct AnicatApp: App {
+    @State private var model = AppModel()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView(model: model)
+                .task {
+                    await model.initialize()
+                }
+                .preferredColorScheme(.dark)
+        }
+    }
+}
+#endif

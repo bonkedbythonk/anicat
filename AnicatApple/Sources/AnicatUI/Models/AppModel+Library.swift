@@ -50,7 +50,7 @@ extension AppModel {
     func syncKnownTitles() {
         var titles: [Int64: String] = [:]
         var covers: [Int64: URL] = [:]
-        for item in watchingItems + trendingItems + libraryItems + mangaReading + novelReading + searchResults {
+        for item in watchingItems + trendingItems + libraryItems + mangaReading + novelReading + mangaPlanning + novelPlanning + searchResults {
             titles[item.id] = item.title
             if let cover = item.coverImageURL { covers[item.id] = cover }
         }
@@ -278,15 +278,14 @@ extension AppModel {
         let reading = Self.splitByFormat(readingRows)
         mangaReading = reading.manga
         novelReading = reading.novel
+        let planning = await loadPlanningShelves()
+        mangaPlanning = planning.manga
+        novelPlanning = planning.novel
     }
 
     /// The `PLANNING` half of the reading shelves — one list request, split
-    /// the same way `loadReadingShelves` splits `CURRENT`.
-    ///
-    /// Returns rather than assigns because the two shelves it produces have
-    /// nowhere to be stored yet: Swift allows no stored properties in an
-    /// extension, so `mangaPlanning`/`novelPlanning` have to be declared on
-    /// `AppModel` itself. Until they are, the caller holds the result.
+    /// the same way `loadReadingShelves` splits `CURRENT`. Skipped signed
+    /// out: `PLANNING` is a per-user list and the request would only 401.
     public func loadPlanningShelves() async -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
         guard let engine, isSignedIn else { return ([], []) }
         let rows = (try? await engine.userList(status: "PLANNING", mediaType: "MANGA")) ?? []

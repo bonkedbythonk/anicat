@@ -610,6 +610,7 @@ public struct RootView: View {
             ReadingView(
                 config: .manga,
                 reading: model.mangaReading,
+                planning: model.mangaPlanning,
                 trending: model.mangaTrending,
                 isSignedIn: model.isSignedIn,
                 namespace: cardNamespace,
@@ -619,24 +620,22 @@ public struct RootView: View {
                 onBrowse: { model.currentNavSection = .search }
             )
         case .novels:
-            ZStack(alignment: .topTrailing) {
-                ReadingView(
-                    config: .novels,
-                    reading: model.novelReading,
-                    trending: model.novelTrending,
-                    isSignedIn: model.isSignedIn,
-                    namespace: cardNamespace,
-                    openingSourceKey: model.openingDetailSourceKey,
-                    onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
-                    onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
-                    onBrowse: { model.currentNavSection = .search }
-                )
+            ReadingView(
+                config: .novels,
+                reading: model.novelReading,
+                planning: model.novelPlanning,
+                trending: model.novelTrending,
+                isSignedIn: model.isSignedIn,
+                namespace: cardNamespace,
+                openingSourceKey: model.openingDetailSourceKey,
+                onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
+                onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
+                onBrowse: { model.currentNavSection = .search },
                 // AniList/RanobeDB entries above have no linked text source
                 // yet (see `AppModel.SyosetuSession`'s comment) — this is the
                 // only way into a novel's actual chapter text today.
-                SumiOutlineButton("Read a Syosetu link", systemImage: "link", action: { showSyosetuReader = true })
-                    .padding(20)
-            }
+                onOpenSyosetu: { showSyosetuReader = true }
+            )
             .sheet(isPresented: $showSyosetuReader) {
                 SyosetuReaderView(model: model)
                     .frame(minWidth: 560, minHeight: 640)
@@ -650,10 +649,21 @@ public struct RootView: View {
                 openingSourceKey: model.openingDetailSourceKey,
                 onSelectFavourite: { item in
                     openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga, sourceKey: "history-fav:\(item.id)")
+                },
+                onOpenTitle: { id, title in
+                    openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
                 }
             )
         case .downloads:
-            DownloadsView(downloads: model.libraryDownloads)
+            DownloadsView(
+                downloads: model.libraryDownloads,
+                onPlay: { download in
+                    playEpisode(model: model, catalogId: download.catalogId, episode: download.episode, title: download.title)
+                },
+                onRemove: { download in
+                    model.libraryDownloads.removeAll { $0.id == download.id }
+                }
+            )
         }
     }
 
@@ -699,7 +709,9 @@ public struct RootView: View {
 /// It also means `resolveAndPlay` finds the title's episodes in
 /// `selectedEpisodes` and skips the detail fetch `ensurePlaybackEpisodes`
 /// would otherwise make for a play with no page open.
-private func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title: String, coverURL: URL?) {
+/// Shared with the menu bar's Resume: every shelf-style play goes through
+/// the show's page first, so the two entry points cannot drift apart.
+public func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title: String, coverURL: URL?) {
     // No poster morph on this path, deliberately: `UpNextQueueView` hands
     // its rows no namespace (its 104x60 landscape thumbnail interpolated
     // into a portrait poster reads as a squash), so a source key set here

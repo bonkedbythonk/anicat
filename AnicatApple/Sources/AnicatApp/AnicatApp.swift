@@ -148,17 +148,19 @@ struct AnicatApp: App {
                         }
                     } else if let first = model.upNextItems.first {
                         if first.unit != "CH" {
-                            Task {
-                                do {
-                                    _ = try await model.resolveAndPlay(
-                                        catalogId: first.id,
-                                        episode: Int64(first.nextEpisodeOrChapter),
-                                        title: first.title
-                                    )
-                                } catch {
-                                    model.errorMessage = "Failed to play episode \(first.nextEpisodeOrChapter): \(error.localizedDescription)"
-                                }
-                            }
+                            // Same sequence as the Up Next shelf: the show's
+                            // page opens first, so the viewer lands on a page
+                            // with a Cancel and an episode list rather than a
+                            // bare spinner over whatever was on screen.
+                            NSApp.activate(ignoringOtherApps: true)
+                            AppWindow.main?.makeKeyAndOrderFront(nil)
+                            playFromShelf(
+                                model: model,
+                                catalogId: first.id,
+                                episode: first.nextEpisodeOrChapter,
+                                title: first.title,
+                                coverURL: model.knownCovers[first.id] ?? first.thumbnailURL
+                            )
                         } else {
                             Task { @MainActor in
                                 await model.openDetail(id: first.id, isManga: true)

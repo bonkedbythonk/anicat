@@ -323,6 +323,8 @@ public final class AppModel: @unchecked Sendable {
     public var mangaReading: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
     public var novelTrending: [MediaCard.Item] = []
     public var novelReading: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
+    public var mangaPlanning: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
+    public var novelPlanning: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
     public var viewer: ViewerProfile?
     public var activity: [ActivityRow] = []
 

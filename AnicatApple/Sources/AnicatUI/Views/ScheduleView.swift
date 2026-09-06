@@ -1,4 +1,5 @@
 import SwiftUI
+import AnicatCoreKit
 
 public struct ScheduleView: View {
     public struct ScheduleItem: Identifiable, Sendable, Codable, Equatable {
@@ -37,9 +38,25 @@ public struct ScheduleView: View {
 
     public let items: [ScheduleItem]
     public let onSelectItem: (ScheduleItem) -> Void
+    /// The visible month's airing slots, keyed and fetched by the model.
+    /// Separate from `items`, which is only the *next* episode of each title
+    /// the home page already had — see `CalendarView`'s note.
+    public let calendarSlots: [FfiAiringSlot]
+    public let isCalendarLoading: Bool
+    /// Fired with a date inside whichever month the calendar wants; the model
+    /// deduplicates by month key, so calling it on every appear costs nothing
+    /// once the month is cached.
+    public let onRequestMonth: (Date) -> Void
+    public let onSelectSlot: (FfiAiringSlot) -> Void
 
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @State private var watchingOnly: Bool = true
+    /// "week" or "month". Week is the default: it answers "what is on
+    /// tonight", which is what this section is opened for.
+    @State private var mode: String = "week"
+    /// Owned here rather than in `CalendarView` so switching to the week tab
+    /// and back returns to the month that was being looked at.
+    @State private var calendarMonth: Date = Date()
     @Namespace private var toggleNamespace
 
     // Cached result of the O(n log n) group+sort — rebuilt only when `items`
@@ -48,9 +65,17 @@ public struct ScheduleView: View {
 
     public init(
         items: [ScheduleItem],
+        calendarSlots: [FfiAiringSlot] = [],
+        isCalendarLoading: Bool = false,
+        onRequestMonth: @escaping (Date) -> Void = { _ in },
+        onSelectSlot: @escaping (FfiAiringSlot) -> Void = { _ in },
         onSelectItem: @escaping (ScheduleItem) -> Void
     ) {
         self.items = items
+        self.calendarSlots = calendarSlots
+        self.isCalendarLoading = isCalendarLoading
+        self.onRequestMonth = onRequestMonth
+        self.onSelectSlot = onSelectSlot
         self.onSelectItem = onSelectItem
     }
 
@@ -155,7 +180,24 @@ public struct ScheduleView: View {
                 }
                 .padding(.horizontal, SumiTheme.spaceMd)
 
-                if groupedItems.isEmpty {
+                SumiSegmentedControl(
+                    options: [("week", "Week"), ("month", "Calendar")],
+                    selection: $mode
+                )
+                .fixedSize()
+                .padding(.horizontal, SumiTheme.spaceMd)
+
+                if mode == "month" {
+                    CalendarView(
+                        month: $calendarMonth,
+                        slots: calendarSlots,
+                        isLoading: isCalendarLoading,
+                        watchingOnly: watchingOnly,
+                        timeFormat: timeFormat,
+                        onSelectSlot: onSelectSlot
+                    )
+                    .padding(.horizontal, SumiTheme.spaceMd)
+                } else if groupedItems.isEmpty {
                     SumiEmptyState(
                         headline: watchingOnly ? "No watching shows airing soon" : "No airing shows found",
                         detail: watchingOnly ? "Shows you are currently watching with upcoming episodes will appear here." : "Airing schedules will appear here for ongoing shows."
@@ -178,6 +220,16 @@ public struct ScheduleView: View {
         .onAppear { recomputeGroups() }
         .onChange(of: items) { _, _ in recomputeGroups() }
         .onChange(of: watchingOnly) { _, _ in recomputeGroups() }
+        // Asked for on every entry into the calendar tab and on every page,
+        // not once on appear: the month cache is keyed per month, so the
+        // request that is already answered is dropped by the model rather
+        // than gated by a flag here.
+        .onChange(of: mode) { _, next in
+            if next == "month" { onRequestMonth(calendarMonth) }
+        }
+        .onChange(of: calendarMonth) { _, next in
+            if mode == "month" { onRequestMonth(next) }
+        }
     }
 }
 

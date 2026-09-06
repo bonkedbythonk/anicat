@@ -390,6 +390,11 @@ public final class AppModel: @unchecked Sendable {
     /// without a second per-month loading flag.
     public var calendarLoadingMonths: Set<String> = []
 
+    /// Which month the calendar is showing. Mirrored out of the view so the
+    /// section can hand `CalendarView` the right entry of `calendarMonths` —
+    /// the view owns the paging, this is only which key to read.
+    public var calendarVisibleMonth: Date = Date()
+
     /// The Stats page's snapshot, filled on section open. Refreshed there
     /// and nowhere else: `watchStats` reads the local registry synchronously,
     /// so there is nothing to gain from holding it warm.

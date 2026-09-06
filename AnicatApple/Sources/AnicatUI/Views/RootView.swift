@@ -601,7 +601,18 @@ public struct RootView: View {
                 onOpenDetail: openDetailFor
             )
         case .schedule:
-            ScheduleView(items: model.scheduleItems) { item in
+            ScheduleView(
+                items: model.scheduleItems,
+                calendarSlots: model.calendarMonths[AppModel.calendarMonthKey(model.calendarVisibleMonth)] ?? [],
+                isCalendarLoading: model.calendarLoadingMonths.contains(AppModel.calendarMonthKey(model.calendarVisibleMonth)),
+                onRequestMonth: { month in
+                    model.calendarVisibleMonth = month
+                    Task { await model.loadCalendarMonth(month) }
+                },
+                onSelectSlot: { slot in
+                    openDetailFor(id: slot.catalogId, title: slot.title, coverURL: URL(string: slot.coverImage), isManga: false)
+                }
+            ) { item in
                 openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
             }
         case .search:

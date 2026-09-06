@@ -39,7 +39,7 @@ public final class BonjourDiscovery: @unchecked Sendable {
     // MARK: - macOS: Advertise Local Swarm Server
 
     /// Advertises the Mac's running torrent stream server over Bonjour.
-    public func startAdvertising(port: UInt16, nodeName: String = Host.current().localizedName ?? "MacBook") {
+    public func startAdvertising(port: UInt16, nodeName: String = Platform.deviceName) {
         guard listener == nil else { return }
 
         do {

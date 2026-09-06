@@ -38,27 +38,26 @@ extension Color {
 // MARK: - Sumi Ledger Theme Tokens
 
 public enum SumiTheme {
-    // MARK: - Colors (Adaptive Dark / Light)
-    
-    /// Sumi Ink (Dark #161310) / Washi Paper (Light #F1ECE2)
-    /// `let` not `var`: the underlying NSColor is itself dynamic (resolves per-appearance
-    /// at draw time via nsColorOrUIColor's closure), so caching it doesn't break theme
-    /// switching — it just stops every card/row in a scrolling grid from re-allocating
-    /// a fresh dynamic NSColor on every access.
-    public static let background: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#161310",
-            lightHex: "#F1ECE2"
-        )
-    )
+    // MARK: - Colors
+    //
+    // Every token is a computed property over `ThemeStore.shared.palette`.
+    // They used to be `static let` dynamic `NSColor`s that answered the dark
+    // or the light hex depending on the `NSAppearance` they were drawn under.
+    // That cannot survive three explicit palettes: with OLED selected on a Mac
+    // set to Light, the appearance-driven colour and the palette disagree and
+    // every token silently answers with the wrong skin. The palette is now the
+    // only chooser, and `ThemeStore.colorScheme` / `nsAppearance` exist purely
+    // to tell native chrome which side it landed on.
+    //
+    // Reading a token is a struct field load, not a hex parse: `SumiPalette`
+    // resolves each `Color` once at construction, which is what keeps a
+    // scrolling grid from re-scanning a hex string per card per frame.
 
-    /// Card Ink (Dark #1E1A15) / Light Card (#FAF7F0)
-    public static let card: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#1E1A15",
-            lightHex: "#FAF7F0"
-        )
-    )
+    /// Sumi Ink / Washi Paper / true black, depending on the palette.
+    public static var background: Color { ThemeStore.shared.palette.background }
+
+    /// The raised surface a card, sheet or row sits on.
+    public static var card: Color { ThemeStore.shared.palette.card }
 
     // index.css defines `--card-color` and `--surface-color` as two separate
     // tokens that happen to share a value in every skin. Keeping both names
@@ -67,52 +66,30 @@ public enum SumiTheme {
     // actually splits the two values only has to change this one line.
     public static var surface: Color { card }
 
-    /// Primary Foreground Text (#EDE7DC dark / #26221B light)
-    public static let foreground: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#EDE7DC",
-            lightHex: "#26221B"
-        )
-    )
+    /// Primary foreground text.
+    public static var foreground: Color { ThemeStore.shared.palette.foreground }
 
-    /// Muted Text (55% alpha dark / 65% alpha light)
-    public static let muted: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#EDE7DC",
-            lightHex: "#26221B",
-            darkAlpha: 0.55,
-            lightAlpha: 0.65
-        )
-    )
+    /// Secondary text: the foreground at the palette's muted alpha.
+    public static var muted: Color { ThemeStore.shared.palette.muted }
 
-    /// Hairline Border (10% alpha dark / 12% alpha light)
-    public static let border: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#EDE7DC",
-            lightHex: "#26221B",
-            darkAlpha: 0.10,
-            lightAlpha: 0.12
-        )
-    )
+    /// Hairline border: the foreground at the palette's border alpha.
+    public static var border: Color { ThemeStore.shared.palette.border }
 
-    /// The Single Accent: Aizome Indigo (#8FB8DC dark / #33617F light)
-    public static let indigo: Color = Color(
-        nsColorOrUIColor(
-            darkHex: "#8FB8DC",
-            lightHex: "#33617F"
-        )
-    )
+    /// The single accent, Aizome Indigo. Honours `palette.accentOverride`, so
+    /// a future poster-derived accent needs no change at any call site.
+    public static var indigo: Color { ThemeStore.shared.palette.indigo }
 
-    public static let indigoLight = Color(hex: "#A8C9E6")
-    
-    // Status Colors (Shared across themes)
-    public static let danger = Color(hex: "#EF4444")
-    public static let dangerLight = Color(hex: "#F87171")
-    public static let success = Color(hex: "#22C55E")
-    public static let successLight = Color(hex: "#4ADE80")
-    public static let warning = Color(hex: "#EAB308")
-    public static let warningLight = Color(hex: "#FACC15")
-    
+    public static var indigoLight: Color { ThemeStore.shared.palette.indigoLight }
+
+    // Status colours. Palette-scoped rather than shared: the `#F87171` that
+    // reads as an error on Ink's near-black ground is a pale wash on Paper.
+    public static var danger: Color { ThemeStore.shared.palette.danger }
+    public static var dangerLight: Color { ThemeStore.shared.palette.dangerLight }
+    public static var success: Color { ThemeStore.shared.palette.success }
+    public static var successLight: Color { ThemeStore.shared.palette.successLight }
+    public static var warning: Color { ThemeStore.shared.palette.warning }
+    public static var warningLight: Color { ThemeStore.shared.palette.warningLight }
+
     /// The muted foreground at the alpha the poster tick's track uses, and
     /// the same 10% wash behind a progress bar or a shortcut chip.
     public static var foregroundWash: Color { foreground.opacity(0.10) }
@@ -130,60 +107,6 @@ public enum SumiTheme {
     public static let spaceMd: CGFloat = 16
     public static let spaceLg: CGFloat = 24
     
-    // MARK: - Dynamic Color Helper
-    #if os(macOS)
-    private static func nsColorOrUIColor(
-        darkHex: String,
-        lightHex: String,
-        darkAlpha: Double = 1.0,
-        lightAlpha: Double = 1.0
-    ) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let hex = isDark ? darkHex : lightHex
-            let alpha = isDark ? darkAlpha : lightAlpha
-            return nsColorFromHex(hex, alpha: alpha)
-        }
-    }
-    
-    private static func nsColorFromHex(_ hex: String, alpha: Double) -> NSColor {
-        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: clean).scanHexInt64(&int)
-        return NSColor(
-            srgbRed: CGFloat((int >> 16) & 0xFF) / 255.0,
-            green: CGFloat((int >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(int & 0xFF) / 255.0,
-            alpha: CGFloat(alpha)
-        )
-    }
-    #else
-    private static func nsColorOrUIColor(
-        darkHex: String,
-        lightHex: String,
-        darkAlpha: Double = 1.0,
-        lightAlpha: Double = 1.0
-    ) -> UIColor {
-        UIColor { traitCollection in
-            let isDark = traitCollection.userInterfaceStyle == .dark
-            let hex = isDark ? darkHex : lightHex
-            let alpha = isDark ? darkAlpha : lightAlpha
-            return uiColorFromHex(hex, alpha: alpha)
-        }
-    }
-    
-    private static func uiColorFromHex(_ hex: String, alpha: Double) -> UIColor {
-        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: clean).scanHexInt64(&int)
-        return UIColor(
-            red: CGFloat((int >> 16) & 0xFF) / 255.0,
-            green: CGFloat((int >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(int & 0xFF) / 255.0,
-            alpha: CGFloat(alpha)
-        )
-    }
-    #endif
 }
 
 // MARK: - Typography Modifiers

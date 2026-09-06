@@ -211,6 +211,17 @@ private struct GeneralTabSection: View {
     VStack(alignment: .leading, spacing: 20) {
         // Appearance Card
         SettingsCard(title: "Appearance") {
+            SettingField(
+                label: "Theme",
+                description: "Ink & Index is the original warm dark skin. Paper is its light counterpart, OLED a true black for panels that switch pixels off. Follow system uses Paper by day and Ink by night.",
+                isStacked: true
+            ) {
+                ThemePicker()
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
             // Time Format
             SettingField(
                 label: "Time Format",
@@ -1014,6 +1025,86 @@ private struct SettingField<Trailing: View>: View {
             }
             .padding(.vertical, 2)
         }
+    }
+}
+
+/// The theme row: one swatch per option, drawn in that option's own colours.
+///
+/// Reads `ThemeStore.shared` rather than keeping an `@AppStorage("anicat_theme")`
+/// of its own. The store already writes that key, and a second writer for one
+/// setting is how a picker ends up showing a theme the app is not using.
+private struct ThemePicker: View {
+    @State private var store = ThemeStore.shared
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(AnicatTheme.allCases) { theme in
+                let isSelected = store.theme == theme
+                Button {
+                    guard !isSelected else { return }
+                    SumiHaptics.selection()
+                    store.select(theme)
+                } label: {
+                    VStack(spacing: 7) {
+                        ThemeSwatch(
+                            palette: theme.previewPalette(systemIsDark: ThemeStore.systemPrefersDark),
+                            isSelected: isSelected
+                        )
+
+                        Text(theme.displayName)
+                            .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                            .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .help(theme.caption)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// A palette in miniature: its ground, one card on it, its accent. Drawn from
+/// the palette handed in rather than from `SumiTheme`, which is the whole
+/// point — the OLED swatch has to look like OLED while Paper is in force.
+private struct ThemeSwatch: View {
+    let palette: SumiPalette
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.background)
+
+            VStack(alignment: .leading, spacing: 5) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(palette.card)
+                    .frame(width: 44, height: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(palette.border, lineWidth: 1)
+                    )
+
+                HStack(spacing: 4) {
+                    Capsule()
+                        .fill(palette.indigo)
+                        .frame(width: 20, height: 5)
+
+                    Capsule()
+                        .fill(palette.muted)
+                        .frame(width: 12, height: 5)
+                }
+            }
+            .padding(9)
+        }
+        .frame(width: 72, height: 44)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border, lineWidth: isSelected ? 2 : 1)
+        )
     }
 }
 

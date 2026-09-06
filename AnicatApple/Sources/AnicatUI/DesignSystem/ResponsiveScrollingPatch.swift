@@ -60,6 +60,35 @@ public enum ResponsiveScrollingPatch {
         } else {
             class_addMethod(cls, swipeSelector, swipeImp, "B@:q")
         }
+
+        // Horizontal shelves stay on the old path. With the event thread
+        // tracking a shelf's momentum, a vertical swipe that starts before
+        // the momentum ends is routed to the shelf and dropped: measured 1
+        // of 2 and then 2 of 3 vertical swipes lost in a nested test view,
+        // 0 of 2 with responsive scrolling off. The flag is per class, so a
+        // shelf is moved to a runtime subclass that answers no, at the
+        // moment it joins a window and before AppKit reads the flag. Shelf
+        // scrolling itself falls back to the 60 Hz cadence; the page keeps
+        // 120 Hz, and the vertical swipe landed 3 of 3 after the swap.
+        guard let shelfClass = objc_allocateClassPair(cls, "AnicatShelfScrollView", 0),
+              let shelfMeta = object_getClass(shelfClass) else { return }
+        let shelfFlag: @convention(block) (AnyObject) -> Bool = { _ in false }
+        class_addMethod(shelfMeta, selector, imp_implementationWithBlock(shelfFlag), "B@:")
+        objc_registerClassPair(shelfClass)
+        let moveSelector = NSSelectorFromString("viewWillMoveToWindow:")
+        typealias MoveFn = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        guard let moveMethod = class_getInstanceMethod(cls, moveSelector) else { return }
+        let originalMove = unsafeBitCast(method_getImplementation(moveMethod), to: MoveFn.self)
+        let moveBlock: @convention(block) (AnyObject, AnyObject?) -> Void = { object, window in
+            if window != nil, object_getClass(object) == cls, let scrollView = object as? NSScrollView {
+                let isShelf = MainActor.assumeIsolated {
+                    scrollView.hasHorizontalScroller && !scrollView.hasVerticalScroller
+                }
+                if isShelf { object_setClass(object, shelfClass) }
+            }
+            originalMove(object, moveSelector, window)
+        }
+        method_setImplementation(moveMethod, imp_implementationWithBlock(moveBlock))
     }()
 }
 #else

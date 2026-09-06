@@ -543,6 +543,24 @@ public final class PlayerController: @unchecked Sendable {
     /// every skip window — chapter-derived and AniSkip alike — against
     /// `currentTime`, and then gives the next-episode card its tick.
     public func checkIntroStatus() {
+        // Nothing here can be trusted mid-resolve. `chapters` is still the
+        // outgoing file's — only `MPV_EVENT_FILE_LOADED` replaces it — while
+        // `currentTime` and `duration` are already the incoming episode's,
+        // both written by `resolveAndPlay` before the load. Auto-skip on that
+        // pair jumps a window this file does not have, and `loadFile` reads
+        // the seeked `currentTime` straight back as `--start`: the episode
+        // opens at a timestamp taken from the previous one's chapter list.
+        // That is the failure `awaitingNewFile` exists to prevent, reached
+        // through a door its own comment does not cover — the `duration`
+        // didSet above, which fires one line after `currentTime` is set.
+        guard !awaitingNewFile else {
+            activeSkipWindow = nil
+            pendingSkipWindow = nil
+            isIntroActive = false
+            isOutroActive = false
+            return
+        }
+
         let windows = skipWindows
         if autoSkipEnabled,
            let active = windows.first(where: { $0.contains(currentTime) }),

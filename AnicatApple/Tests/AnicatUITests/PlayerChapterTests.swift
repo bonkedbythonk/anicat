@@ -157,6 +157,32 @@ struct SkipSourceTests {
         #expect(controller.skipWindows.count == 2)
     }
 
+    /// `resolveAndPlay` writes the incoming episode's `currentTime` and
+    /// `duration` before the load, while `chapters` is still the outgoing
+    /// file's until mpv reports the new one. Auto-skipping on that pair seeks
+    /// to a window this file does not have, and `loadFile` reads the seeked
+    /// position back as `--start` — the episode would open at a timestamp
+    /// taken from the previous one's chapter list.
+    @Test("Nothing auto-skips while a resolve is in flight")
+    func noSkipMidResolve() {
+        let controller = PlayerController()
+        controller.autoSkipEnabled = true
+        controller.setChapters([
+            PlayerChapter(title: "Opening", time: 60),
+            PlayerChapter(title: "Part B", time: 150),
+        ], duration: 1420)
+        controller.awaitingNewFile = true
+        controller.currentTime = 90
+        controller.checkIntroStatus()
+        #expect(controller.currentTime == 90)
+        #expect(controller.pendingSkipWindow == nil)
+        #expect(!controller.isIntroActive)
+        // And it resumes the moment the new file lands.
+        controller.awaitingNewFile = false
+        controller.checkIntroStatus()
+        #expect(controller.currentTime == 150)
+    }
+
     @Test("A new file with no chapters drops the previous episode's windows")
     func chaptersClearedPerFile() {
         let controller = PlayerController()

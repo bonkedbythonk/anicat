@@ -547,6 +547,16 @@ public struct PlayerView: View {
         // straight into the mini-player never changes this value.
         .onChange(of: isMinimized, initial: true) { _, minimized in
             controller.isMiniPlayerActive = minimized
+            #if os(macOS)
+            // The two window modes are mutually exclusive by construction and
+            // nothing else enforces it. PiP hides the minimize button, but
+            // `isPlayerMinimized` is also flipped from the menu bar, and the
+            // result was the 320x180 mini-player drawn inside the 480x270
+            // floating window — a box in a box.
+            if minimized {
+                PictureInPicture.shared.exit()
+            }
+            #endif
         }
         // The always-present base for the ambient glow, and the whole of it
         // on any machine or build where frame sampling turns out not to be

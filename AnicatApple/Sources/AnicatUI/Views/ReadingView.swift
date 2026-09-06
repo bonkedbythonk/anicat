@@ -1,15 +1,17 @@
 import SwiftUI
 
 /// Manga and Light Novels are the same page with different sources: a resume
-/// queue at the top, then a shelf of what you are reading and a shelf of what
-/// is trending. Light novels are AniList's `NOVEL` format under the `MANGA`
-/// type, not a type of their own, which is why one view serves both.
+/// queue at the top, then a shelf of what you are reading, a shelf of what you
+/// have planned, and a shelf of what is trending. Light novels are AniList's
+/// `NOVEL` format under the `MANGA` type, not a type of their own, which is
+/// why one view serves both.
 public struct ReadingView: View {
     public struct Config: Sendable {
         let title: String
         let unit: String
         let browseLabel: String
         let readingShelf: String
+        let planningShelf: String
         let trendingShelf: String
 
         public static let manga = Config(
@@ -17,6 +19,7 @@ public struct ReadingView: View {
             unit: "CH",
             browseLabel: "Browse all manga",
             readingShelf: "Reading",
+            planningShelf: "Planning",
             trendingShelf: "Trending manga"
         )
         public static let novels = Config(
@@ -24,12 +27,16 @@ public struct ReadingView: View {
             unit: "CH",
             browseLabel: "Browse all novels",
             readingShelf: "Reading",
+            planningShelf: "Planning",
             trendingShelf: "Trending novels"
         )
     }
 
     let config: Config
     let reading: [MediaCard.Item]
+    /// The AniList `PLANNING` bucket for this type. Empty rather than absent
+    /// when signed out, so the shelf simply does not render.
+    let planning: [MediaCard.Item]
     let trending: [MediaCard.Item]
     let isSignedIn: Bool
     let namespace: Namespace.ID?
@@ -39,8 +46,8 @@ public struct ReadingView: View {
     // came from — see `AppModel.openingDetailSourceKey`.
     let openingSourceKey: String?
     // 2nd arg is the source key ("reading-queue:<id>", "reading-shelf:<id>",
-    // or "reading-trending:<id>") — this view knows which shelf a tap came
-    // from, the caller doesn't.
+    // "reading-planning:<id>" or "reading-trending:<id>") — this view knows
+    // which shelf a tap came from, the caller doesn't.
     let onSelect: (MediaCard.Item, String) -> Void
     let onRead: (MediaCard.Item, String) -> Void
     let onBrowse: () -> Void
@@ -48,6 +55,7 @@ public struct ReadingView: View {
     public init(
         config: Config,
         reading: [MediaCard.Item],
+        planning: [MediaCard.Item] = [],
         trending: [MediaCard.Item],
         isSignedIn: Bool,
         namespace: Namespace.ID? = nil,
@@ -58,6 +66,7 @@ public struct ReadingView: View {
     ) {
         self.config = config
         self.reading = reading
+        self.planning = planning
         self.trending = trending
         self.isSignedIn = isSignedIn
         self.namespace = namespace
@@ -99,7 +108,7 @@ public struct ReadingView: View {
                 SumiOutlineButton(config.browseLabel, systemImage: "arrow.right", action: onBrowse)
             }
 
-            if !isSignedIn && reading.isEmpty && trending.isEmpty {
+            if !isSignedIn && reading.isEmpty && planning.isEmpty && trending.isEmpty {
                 SumiEmptyState(
                     headline: "Nothing here yet",
                     detail: "Connect AniList in Settings to see what you are reading."
@@ -125,6 +134,17 @@ public struct ReadingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     SumiSectionHeader(config.readingShelf, trailing: "\(reading.count) titles")
                     shelf(reading, shelfKey: "reading-shelf")
+                }
+                .padding(.top, 20)
+            }
+
+            // Between Reading and Trending on purpose: what you picked out
+            // yourself but have not started is closer to what you are reading
+            // than a global trending list is.
+            if !planning.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    SumiSectionHeader(config.planningShelf, trailing: "\(planning.count) titles")
+                    shelf(planning, shelfKey: "reading-planning")
                 }
                 .padding(.top, 20)
             }

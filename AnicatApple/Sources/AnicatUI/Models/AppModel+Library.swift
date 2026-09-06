@@ -275,8 +275,37 @@ extension AppModel {
 
         mangaTrending = trendingManga.map(Self.card)
         novelTrending = novels.map(Self.card)
-        mangaReading = readingRows.filter { $0.format != "NOVEL" }.map(Self.card)
-        novelReading = readingRows.filter { $0.format == "NOVEL" }.map(Self.card)
+        let reading = Self.splitByFormat(readingRows)
+        mangaReading = reading.manga
+        novelReading = reading.novel
+    }
+
+    /// The `PLANNING` half of the reading shelves — one list request, split
+    /// the same way `loadReadingShelves` splits `CURRENT`.
+    ///
+    /// Returns rather than assigns because the two shelves it produces have
+    /// nowhere to be stored yet: Swift allows no stored properties in an
+    /// extension, so `mangaPlanning`/`novelPlanning` have to be declared on
+    /// `AppModel` itself. Until they are, the caller holds the result.
+    public func loadPlanningShelves() async -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
+        guard let engine, isSignedIn else { return ([], []) }
+        let rows = (try? await engine.userList(status: "PLANNING", mediaType: "MANGA")) ?? []
+        return Self.splitByFormat(rows)
+    }
+
+    /// Splits one `MANGA`-type AniList list into the manga tab's shelf and the
+    /// light novel tab's, preserving the order AniList returned — the lists
+    /// are sorted by the user's own list order, and re-sorting here would
+    /// throw that away.
+    ///
+    /// `format` is the only thing telling the two apart: AniList has no
+    /// separate novel type, so both tabs are fed from a single request rather
+    /// than paying for two round trips that would return overlapping rows.
+    static func splitByFormat(_ rows: [MediaSummary]) -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
+        (
+            manga: rows.filter { $0.format != "NOVEL" }.map(card),
+            novel: rows.filter { $0.format == "NOVEL" }.map(card)
+        )
     }
 
     /// The History view: the AniList profile when signed in, and the local

@@ -54,6 +54,47 @@ public enum Platform {
         return false
         #endif
     }
+
+    /// The OS name the debug report prints. Hardcoding "macOS" there would
+    /// have the iPhone build hand a support report claiming to come from a
+    /// Mac, which is exactly the field a reader trusts without checking.
+    public static var osName: String {
+        #if os(macOS)
+        return "macOS"
+        #else
+        return "iOS"
+        #endif
+    }
+
+    /// The name this machine advertises over Bonjour. Foundation's `Host`
+    /// exists only on macOS, so naming it directly in `BonjourDiscovery`
+    /// broke the iOS build in a file that is otherwise pure Network.
+    public static var deviceName: String {
+        #if canImport(AppKit)
+        return Host.current().localizedName ?? "MacBook"
+        #elseif canImport(UIKit)
+        // Not `UIDevice.current.name`: this is read as a default argument, so
+        // a main-actor-isolated source would drag every caller of
+        // `startAdvertising` onto the main actor. The hostname carries the
+        // same user-set device name with a ".local" suffix.
+        return ProcessInfo.processInfo.hostName.replacingOccurrences(of: ".local", with: "")
+        #endif
+    }
+}
+
+public extension View {
+    /// Escape-to-dismiss for the overlays that own the whole screen.
+    /// `onExitCommand` is macOS-only and iOS has no keyboard shortcut layer
+    /// yet, so the modifier disappears there rather than every call site
+    /// growing an `#if`.
+    @ViewBuilder
+    func sumiExitCommand(perform action: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        self.onExitCommand(perform: action)
+        #else
+        self
+        #endif
+    }
 }
 
 public extension Image {

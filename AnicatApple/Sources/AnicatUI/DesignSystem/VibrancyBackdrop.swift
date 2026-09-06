@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 /// The sidebar's backdrop: a macOS vibrancy material with a tint over it.
@@ -22,15 +24,15 @@ public struct VibrancyBackdrop: View {
     public init() {}
 
     public var body: some View {
-        #if os(macOS)
         ZStack {
+            #if os(macOS)
             VisualEffectView(material: .sidebar, blending: .behindWindow)
+            #else
+            VisualEffectView()
+            #endif
             // rgba(22, 19, 16, 0.62) — the ink at 62%, not the surface colour.
             Color(hex: "#161310").opacity(0.62)
         }
-        #else
-        Color(hex: "#161310").opacity(0.62)
-        #endif
     }
 }
 
@@ -54,5 +56,17 @@ struct VisualEffectView: NSViewRepresentable {
         view.material = material
         view.blendingMode = blending
     }
+}
+#else
+/// The iOS twin. There is no desktop behind an iOS window, so nothing
+/// corresponds to `.behindWindow` and the material can only blur the app's
+/// own content underneath the sidebar. `.systemThinMaterial` is the closest
+/// stand-in for AppKit's `.sidebar` and, like it, follows light/dark itself.
+struct VisualEffectView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    }
+
+    func updateUIView(_ view: UIVisualEffectView, context: Context) {}
 }
 #endif

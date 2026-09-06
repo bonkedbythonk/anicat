@@ -1,9 +1,9 @@
 import SwiftUI
 import Observation
 import QuartzCore
+
 #if os(macOS)
 import AppKit
-#endif
 
 // MARK: - FPSMonitor
 
@@ -46,9 +46,7 @@ public final class FPSMonitor: NSObject {
     public var isExpanded: Bool = false
     public var logHitchesToConsole: Bool = true
 
-    #if os(macOS)
     private var displayLink: CADisplayLink?
-    #endif
 
     private var lastTimestamp: CFTimeInterval = 0
     private var lastUIUpdateTime: CFTimeInterval = 0
@@ -88,7 +86,6 @@ public final class FPSMonitor: NSObject {
         windowMainThreadMs.removeAll(keepingCapacity: true)
         watcherShouldStop = false
 
-        #if os(macOS)
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let link = screen.displayLink(target: self, selector: #selector(onFrame(_:)))
         // Pin to the display's max refresh rate. Without this, ProMotion treats
@@ -101,7 +98,6 @@ public final class FPSMonitor: NSObject {
         link.preferredFrameRateRange = CAFrameRateRange(minimum: maxFPS, maximum: maxFPS, preferred: maxFPS)
         link.add(to: .main, forMode: .common)
         self.displayLink = link
-        #endif
 
         // Start the main-thread hitch watcher on a background thread
         let thread = Thread { [weak self] in self?.runWatcher() }
@@ -114,10 +110,8 @@ public final class FPSMonitor: NSObject {
     public func stop() {
         isRunning = false
         watcherShouldStop = true
-        #if os(macOS)
         displayLink?.invalidate()
         displayLink = nil
-        #endif
         lastTimestamp = 0
     }
 
@@ -135,7 +129,6 @@ public final class FPSMonitor: NSObject {
 
     // MARK: - Display link (frame rate)
 
-    #if os(macOS)
     @objc private func onFrame(_ link: CADisplayLink) {
         let ts = link.timestamp
         let targetDuration = link.duration > 0 ? link.duration : (1.0 / 120.0)
@@ -188,7 +181,6 @@ public final class FPSMonitor: NSObject {
             }
         }
     }
-    #endif
 
     // MARK: - Main-thread watcher
 
@@ -491,3 +483,16 @@ public struct FPSHUDView: View {
         }
     }
 }
+#else
+/// The HUD is a macOS development diagnostic: an `NSScreen` display link
+/// feeds it and only the Cmd+Shift+D monitor ever reveals it, neither of
+/// which iOS has. `RootView` still mounts the overlay unconditionally, so
+/// the name has to survive even though nothing behind it does.
+public struct FPSHUDView: View {
+    public init() {}
+
+    public var body: some View {
+        EmptyView()
+    }
+}
+#endif

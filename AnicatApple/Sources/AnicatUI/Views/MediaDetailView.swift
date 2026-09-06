@@ -223,6 +223,10 @@ public struct MediaDetailView: View {
     public let isLoading: Bool
     
     public let onPlayEpisode: (EpisodeItem) -> Void
+    /// Same episode as `onPlayEpisode`, ignoring the recorded resume
+    /// position. Only ever offered next to a "Resume" primary action, so it
+    /// is not wired into the episode rows.
+    public let onPlayEpisodeFromStart: (EpisodeItem) -> Void
     public let onReadChapter: (MangaChapterItem) -> Void
     public let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
     public let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
@@ -278,6 +282,7 @@ public struct MediaDetailView: View {
         discussions: [DiscussionItem] = [],
         isLoading: Bool = false,
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
+        onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
         onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
         onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)? = nil,
@@ -311,6 +316,7 @@ public struct MediaDetailView: View {
         self.discussions = discussions
         self.isLoading = isLoading
         self.onPlayEpisode = onPlayEpisode
+        self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
         self.onReadChapter = onReadChapter
         self.onSelectRelation = onSelectRelation
         self.onSelectMediaId = onSelectMediaId
@@ -658,6 +664,32 @@ public struct MediaDetailView: View {
                 .buttonStyle(.sumiPressable)
                 .disabled(resumeTarget == nil)
                 .opacity(resumeTarget == nil ? 0.5 : 1)
+
+                // Only offered when the primary button actually says
+                // "Resume": next to "Play Episode 1" there is nothing to
+                // start over from and the control would be noise.
+                if let episode = resumeTarget, resumeSecondsForTarget != nil {
+                    Button {
+                        onPlayEpisodeFromStart(episode)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "gobackward").font(.system(size: 12))
+                            Text("Start over")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 16)
+                        .frame(height: 40)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
             } else if let first = mangaChapters.first {
                 Button {
                     onReadChapter(first)
@@ -783,9 +815,20 @@ public struct MediaDetailView: View {
         return episodes.first(where: { !$0.isWatched }) ?? episodes.first
     }
 
+    /// The recorded position the primary button would resume from, or nil
+    /// when it would start the episode anyway. The single source for both
+    /// the "Resume mm:ss" label and whether "Start over" is offered, so the
+    /// two cannot disagree about whether there is a resume point.
+    private var resumeSecondsForTarget: Int? {
+        guard let target = resumeTarget,
+              let seconds = details.resumeSeconds, seconds > 0,
+              target.number == details.resumeEpisode else { return nil }
+        return seconds
+    }
+
     private var primaryActionLabel: String {
         guard let target = resumeTarget else { return "Nothing to play" }
-        if let seconds = details.resumeSeconds, seconds > 0, target.number == details.resumeEpisode {
+        if let seconds = resumeSecondsForTarget {
             return "Resume Episode \(target.number) · \(Self.clock(seconds))"
         }
         return target.isWatched ? "Rewatch Episode \(target.number)" : "Play Episode \(target.number)"

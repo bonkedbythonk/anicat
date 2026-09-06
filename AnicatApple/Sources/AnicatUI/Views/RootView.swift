@@ -124,6 +124,9 @@ public struct RootView: View {
                                 onPlayEpisode: { ep in
                                     playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title)
                                 },
+                                onPlayEpisodeFromStart: { ep in
+                                    playEpisode(model: model, catalogId: details.id, episode: ep.number, title: details.title, fromStart: true)
+                                },
                                 onReadChapter: { chapter in
                                     Task {
                                         await model.openReader(
@@ -692,14 +695,22 @@ public struct RootView: View {
 /// `HomeSectionView`) so the error banner's Retry button
 /// (`AppModel.errorRetryAction`) can re-run the exact same attempt rather
 /// than each site wiring its own retry closure by hand.
-private func playEpisode(model: AppModel, catalogId: Int64, episode: Int, title: String, chosenName: String? = nil) {
+private func playEpisode(
+    model: AppModel,
+    catalogId: Int64,
+    episode: Int,
+    title: String,
+    chosenName: String? = nil,
+    fromStart: Bool = false
+) {
     model.activeResolveTask = Task {
         do {
             _ = try await model.resolveAndPlay(
                 catalogId: catalogId,
                 episode: Int64(episode),
                 title: title,
-                chosenName: chosenName
+                chosenName: chosenName,
+                fromStart: fromStart
             )
             model.errorRetryAction = nil
         } catch is CancellationError {
@@ -710,7 +721,14 @@ private func playEpisode(model: AppModel, catalogId: Int64, episode: Int, title:
             model.errorRetryAction = { [weak model] in
                 model?.errorMessage = nil
                 guard let model else { return }
-                playEpisode(model: model, catalogId: catalogId, episode: episode, title: title, chosenName: chosenName)
+                playEpisode(
+                    model: model,
+                    catalogId: catalogId,
+                    episode: episode,
+                    title: title,
+                    chosenName: chosenName,
+                    fromStart: fromStart
+                )
             }
         }
     }

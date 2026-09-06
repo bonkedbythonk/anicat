@@ -534,12 +534,18 @@ extension AppModel {
     }
 
     /// Resolves a torrent release and prepares the stream URL for playback.
+    ///
+    /// `fromStart` plays the episode from 0 regardless of what the registry
+    /// has recorded for it — the detail page's "Start over" next to
+    /// "Resume". Progress recording is untouched: the tick overwrites the
+    /// stored position from wherever this play actually reaches.
     public func resolveAndPlay(
         catalog: FfiCatalog = .anilist,
         catalogId: Int64,
         episode: Int64,
         title: String? = nil,
-        chosenName: String? = nil
+        chosenName: String? = nil,
+        fromStart: Bool = false
     ) async throws -> URL {
         let effectiveTitle = title ?? self.selectedMediaDetails?.title ?? self.knownTitles[catalogId] ?? "Anime"
         self.playerController.title = effectiveTitle
@@ -587,7 +593,15 @@ extension AppModel {
         // estimate-of-an-estimate byte offset would tell the Rust pre-buffer
         // gate to warm the wrong part of the file.
         var resumeFraction: Double?
-        if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
+        // Skipped wholesale for "Start over" rather than zeroed afterwards:
+        // `resumeFraction` has to stay nil so the Rust pre-buffer gate warms
+        // the head of the file, and `initialTime` has to stay 0 so
+        // `MpvSurface` omits `--start` (it only passes one for
+        // `currentTime > 0`). The recorded duration below is still worth
+        // reading for the progress bar, so the fallback that fills it from
+        // the AniList runtime keeps working either way.
+        if !fromStart,
+           let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
             if initialTime > 0, initialDuration > 0 {
@@ -683,6 +697,15 @@ extension AppModel {
         // transition.
         withAnimation(.easeInOut(duration: 0.32)) {
             self.activeStreamURL = streamURL
+        }
+        // Replaying the episode already loaded produces the same stream URL,
+        // so `MpvSurface` sees no change and never reopens the file — the
+        // `--start` argument that normally carries `fromStart` is only read
+        // when a file is opened. Without an explicit seek, "Start over" on
+        // the loaded episode set `currentTime` to 0 and the next position
+        // tick put it straight back.
+        if fromStart, replayingCurrent {
+            self.playerController.seek(to: 0)
         }
         // Publishes the Now Playing tile as a side effect, here and not on
         // the first position tick: media keys route to the app only once

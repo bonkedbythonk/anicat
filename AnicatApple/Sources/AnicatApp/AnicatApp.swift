@@ -91,6 +91,12 @@ struct AnicatApp: App {
     @State private var model = AppModel()
     @NSApplicationDelegateAdaptor(AppearanceLock.self) private var appearanceLock
 
+    init() {
+        // AppKit reads the class flag when a scroll view is created, so the
+        // patch has to land before the first scene builds its views.
+        _ = ResponsiveScrollingPatch.applyOnce
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(model: model)

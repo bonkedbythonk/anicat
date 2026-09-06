@@ -51,6 +51,12 @@ public struct ReadingView: View {
     let onSelect: (MediaCard.Item, String) -> Void
     let onRead: (MediaCard.Item, String) -> Void
     let onBrowse: () -> Void
+    /// Opens the direct-URL novel reader. Only the novels tab passes one, and
+    /// it renders as a footnote under the shelves rather than as a button
+    /// floating over them: pasting a raw Syosetu link is the fallback for the
+    /// catalog entries that carry no linked text source, not the way into the
+    /// section. Nil on the manga tab, where it has no meaning.
+    let onOpenSyosetu: (() -> Void)?
 
     public init(
         config: Config,
@@ -62,7 +68,8 @@ public struct ReadingView: View {
         openingSourceKey: String? = nil,
         onSelect: @escaping (MediaCard.Item, String) -> Void,
         onRead: @escaping (MediaCard.Item, String) -> Void,
-        onBrowse: @escaping () -> Void
+        onBrowse: @escaping () -> Void,
+        onOpenSyosetu: (() -> Void)? = nil
     ) {
         self.config = config
         self.reading = reading
@@ -74,6 +81,7 @@ public struct ReadingView: View {
         self.onSelect = onSelect
         self.onRead = onRead
         self.onBrowse = onBrowse
+        self.onOpenSyosetu = onOpenSyosetu
     }
 
     /// Only titles with progress belong in the resume queue. A "reading" entry
@@ -156,7 +164,27 @@ public struct ReadingView: View {
                 }
                 .padding(.top, 20)
             }
+
+            if let onOpenSyosetu {
+                syosetuLink(onOpenSyosetu)
+            }
         }
+    }
+
+    private func syosetuLink(_ action: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Button(action: action) {
+                Label("Open a Syosetu URL", systemImage: "link")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+            .help("Paste a ncode.syosetu.com link to read a novel the catalog has no text source for.")
+            Spacer()
+        }
+        .padding(.top, 24)
     }
 
     private func shelf(_ items: [MediaCard.Item], shelfKey: String) -> some View {

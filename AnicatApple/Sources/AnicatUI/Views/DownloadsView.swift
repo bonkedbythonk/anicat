@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Downloads: the offline queue.
 ///
@@ -8,10 +11,50 @@ import SwiftUI
 /// this just renders whatever `libraryDownloads` currently says.
 public struct DownloadsView: View {
     let downloads: [AppModel.LibraryDownload]
+    /// Opens the title at this episode. Optional because the core has no
+    /// play-from-local-file entry point: there is nothing this view can hand
+    /// a finished file to, so what the caller wires up is the detail page,
+    /// and an unwired caller shows no Play button rather than a dead one.
+    let onPlay: ((AppModel.LibraryDownload) -> Void)?
+    /// Drops the row from `libraryDownloads`. Optional for the same reason:
+    /// the list is model state this view only reads.
+    let onRemove: ((AppModel.LibraryDownload) -> Void)?
     @State private var tab = "queue"
 
-    public init(downloads: [AppModel.LibraryDownload]) {
+    public init(
+        downloads: [AppModel.LibraryDownload],
+        onPlay: ((AppModel.LibraryDownload) -> Void)? = nil,
+        onRemove: ((AppModel.LibraryDownload) -> Void)? = nil
+    ) {
         self.downloads = downloads
+        self.onPlay = onPlay
+        self.onRemove = onRemove
+    }
+
+    /// A row can be removed once its download has stopped moving. Removing a
+    /// `.downloading` row would put it straight back: `AppModel.startDownload`
+    /// polls every second and re-adds the row through `setLibraryDownload`
+    /// until the download reaches a terminal state, and there is no engine
+    /// call to cancel one in flight — so the button is not offered rather
+    /// than offered and silently undone.
+    ///
+    /// `nonisolated` because `View` is `@MainActor` and a static member
+    /// inherits that; the tests run off the main actor — see the note on
+    /// `MangaReaderView.prefetchIndices` for what that isolation did to the
+    /// test process.
+    nonisolated static func isRemovable(_ state: MediaDetailView.EpisodeDownloadState) -> Bool {
+        switch state {
+        case .downloading: return false
+        case .notStarted, .done, .failed: return true
+        }
+    }
+
+    /// Where a finished download landed, or nil while it is still coming
+    /// down. The only thing that distinguishes a row with a Play and a Reveal
+    /// from a row with neither.
+    nonisolated static func donePath(_ state: MediaDetailView.EpisodeDownloadState) -> String? {
+        if case .done(let path) = state { return path }
+        return nil
     }
 
     private var queued: [AppModel.LibraryDownload] {
@@ -49,7 +92,7 @@ public struct DownloadsView: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(shown) { item in
-                            DownloadRow(item: item)
+                            DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
                         }
                     }
                 }
@@ -61,6 +104,13 @@ public struct DownloadsView: View {
 
 private struct DownloadRow: View {
     let item: AppModel.LibraryDownload
+    let onPlay: ((AppModel.LibraryDownload) -> Void)?
+    let onRemove: ((AppModel.LibraryDownload) -> Void)?
+
+    @State private var removeConfirming = false
+
+    private var donePath: String? { DownloadsView.donePath(item.state) }
+    private var isRemovable: Bool { DownloadsView.isRemovable(item.state) }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -84,11 +134,78 @@ private struct DownloadRow: View {
 
             Spacer(minLength: 12)
 
+            actions
+
             statusView
         }
         .padding(10)
         .background(SumiTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        // Leaving the row and coming back should not still be one click away
+        // from deleting it.
+        .onHover { inside in if !inside { removeConfirming = false } }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack(spacing: 4) {
+            if let onPlay, donePath != nil {
+                iconButton("play.fill", help: "Play episode \(item.episode)") { onPlay(item) }
+            }
+
+            #if os(macOS)
+            if let path = donePath {
+                iconButton("folder", help: "Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
+            }
+            #endif
+
+            if let onRemove, isRemovable {
+                // Two-step confirm, same shape as Settings' maintenance
+                // buttons: the label becomes the question rather than a sheet
+                // interrupting a page that is otherwise all one-click rows.
+                Button {
+                    if removeConfirming {
+                        onRemove(item)
+                        removeConfirming = false
+                    } else {
+                        removeConfirming = true
+                    }
+                } label: {
+                    Group {
+                        if removeConfirming {
+                            Text("Remove?")
+                                .font(.system(size: 11, weight: .semibold))
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11.5))
+                        }
+                    }
+                    .foregroundColor(SumiTheme.dangerLight)
+                    .frame(height: 24)
+                    .padding(.horizontal, removeConfirming ? 8 : 6)
+                    .background(removeConfirming ? SumiTheme.danger.opacity(0.18) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .help(removeConfirming ? "Click again to remove this row" : "Remove from the list")
+            }
+        }
+        .animation(.snappy, value: removeConfirming)
+    }
+
+    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11.5))
+                .foregroundColor(SumiTheme.muted)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .help(help)
     }
 
     @ViewBuilder

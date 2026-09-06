@@ -370,7 +370,7 @@ extension AppModel {
             if append { isLoadingMoreSearchDiscover = false } else { isLoading = false }
         }
         do {
-            let filters = SearchFilters(genre: nil, year: nil, minScore: nil, status: nil, sort: "TRENDING_DESC")
+            let filters = SearchFilters(genre: nil, year: nil, season: nil, format: nil, minScore: nil, status: nil, sort: "TRENDING_DESC")
             let summaries = try await engine.searchCatalog(query: "", mediaType: mediaType, filters: filters, page: page)
             await recordAniListSuccess()
             let cards = summaries.map { Self.card($0) }
@@ -514,8 +514,13 @@ extension AppModel {
         append: Bool = false
     ) async {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Every field of SearchFilters has to be listed here: this is the
+        // guard that decides whether a query-less browse runs at all, so a
+        // field missing from it makes that filter's dropdown look dead —
+        // picking it clears the results instead of searching.
         let hasActiveFilter = filters.map {
-            $0.genre != nil || $0.year != nil || $0.minScore != nil || $0.status != nil || $0.sort != nil
+            $0.genre != nil || $0.year != nil || $0.season != nil || $0.format != nil
+                || $0.minScore != nil || $0.status != nil || $0.sort != nil
         } ?? false
         guard let engine, !trimmedQuery.isEmpty || hasActiveFilter else {
             activeSearchTask?.cancel()

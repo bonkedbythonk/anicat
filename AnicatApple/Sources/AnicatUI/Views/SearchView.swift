@@ -43,6 +43,8 @@ public struct SearchView: View {
     // literal year/score the backend already validates.
     @State private var genreFilter: String = ""
     @State private var yearFilter: String = ""
+    @State private var seasonFilter: String = ""
+    @State private var formatFilter: String = ""
     @State private var minScoreFilter: String = ""
     @State private var statusFilter: String = ""
     @State private var sortFilter: String = ""
@@ -105,6 +107,39 @@ public struct SearchView: View {
         return [("", "Any")] + (1970...currentYear).reversed().map { (String($0), String($0)) }
     }
 
+    private static let seasonOptions: [(value: String, label: String)] = [
+        ("", "Any"), ("WINTER", "Winter"), ("SPRING", "Spring"), ("SUMMER", "Summer"), ("FALL", "Fall")
+    ]
+
+    private static let animeFormatOptions: [(value: String, label: String)] = [
+        ("", "Any"), ("TV", "TV"), ("TV_SHORT", "TV Short"), ("MOVIE", "Movie"),
+        ("SPECIAL", "Special"), ("OVA", "OVA"), ("ONA", "ONA"), ("MUSIC", "Music")
+    ]
+
+    private static let mangaFormatOptions: [(value: String, label: String)] = [
+        ("", "Any"), ("MANGA", "Manga"), ("NOVEL", "Novel"), ("ONE_SHOT", "One Shot")
+    ]
+
+    /// `nil` hides the dropdown: the Novels mode *is* `type: MANGA, format:
+    /// [NOVEL]`, and the engine refuses to let a filter overwrite that, so a
+    /// format picker there would be a control whose every setting is ignored.
+    private var formatOptions: [(value: String, label: String)]? {
+        switch searchType {
+        case "NOVEL": return nil
+        case "MANGA": return Self.mangaFormatOptions
+        default: return Self.animeFormatOptions
+        }
+    }
+
+    /// The format actually sent. `formatFilter` survives a media-type toggle,
+    /// and "TV" under Manga is not a filter AniList can honour — the dropdown
+    /// already falls back to showing "Any" for a value outside its own option
+    /// list, so what is displayed and what is searched agree here.
+    private var effectiveFormat: String {
+        guard let options = formatOptions, options.contains(where: { $0.value == formatFilter }) else { return "" }
+        return formatFilter
+    }
+
     private static let scoreOptions: [(value: String, label: String)] = [
         ("", "Any"), ("90", "90+"), ("80", "80+"), ("70", "70+"), ("60", "60+"), ("50", "50+")
     ]
@@ -123,6 +158,8 @@ public struct SearchView: View {
         SearchFilters(
             genre: genreFilter.isEmpty ? nil : genreFilter,
             year: Int32(yearFilter),
+            season: seasonFilter.isEmpty ? nil : seasonFilter,
+            format: effectiveFormat.isEmpty ? nil : effectiveFormat,
             minScore: Int32(minScoreFilter),
             status: statusFilter.isEmpty ? nil : statusFilter,
             sort: sortFilter.isEmpty ? nil : sortFilter
@@ -130,7 +167,8 @@ public struct SearchView: View {
     }
 
     private var hasActiveFilters: Bool {
-        !genreFilter.isEmpty || !yearFilter.isEmpty || !minScoreFilter.isEmpty || !statusFilter.isEmpty || !sortFilter.isEmpty
+        !genreFilter.isEmpty || !yearFilter.isEmpty || !seasonFilter.isEmpty || !effectiveFormat.isEmpty
+            || !minScoreFilter.isEmpty || !statusFilter.isEmpty || !sortFilter.isEmpty
     }
 
     private func commitSearch() {
@@ -213,12 +251,16 @@ public struct SearchView: View {
                     )
 
                     // Filter row. Always visible rather than behind a
-                    // disclosure toggle — five dropdowns fit on one line at
+                    // disclosure toggle — the dropdowns fit on one line at
                     // the page's own 1100pt cap, and a hidden panel is easy
                     // to forget is holding a filter from an earlier search.
                     HStack(spacing: 8) {
                         SumiFilterDropdown(label: "Genre", options: Self.genreOptions, selected: $genreFilter)
                         SumiFilterDropdown(label: "Year", options: Self.yearOptions, selected: $yearFilter)
+                        SumiFilterDropdown(label: "Season", options: Self.seasonOptions, selected: $seasonFilter)
+                        if let formatOptions {
+                            SumiFilterDropdown(label: "Format", options: formatOptions, selected: $formatFilter)
+                        }
                         SumiFilterDropdown(label: "Score", options: Self.scoreOptions, selected: $minScoreFilter)
                         SumiFilterDropdown(label: "Status", options: Self.statusOptions, selected: $statusFilter)
                         SumiFilterDropdown(label: "Sort", options: Self.sortOptions, selected: $sortFilter)
@@ -228,6 +270,8 @@ public struct SearchView: View {
                                 withAnimation(.snappy) {
                                     genreFilter = ""
                                     yearFilter = ""
+                                    seasonFilter = ""
+                                    formatFilter = ""
                                     minScoreFilter = ""
                                     statusFilter = ""
                                     sortFilter = ""

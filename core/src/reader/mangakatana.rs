@@ -159,27 +159,84 @@ fn parse_manga_page(html: &str) -> (String, String, Vec<ChapterRow>) {
     (title, cover_image, chapters)
 }
 
-fn parse_chapter_number(title: &str) -> Option<String> {
-    let re = Regex::new(r"Chapter\s+(\d+(?:\.\d+)?)").unwrap();
-    re.captures(title).map(|c| c[1].to_string())
+/// The chapter number as MangaKatana wrote it, plus its numeric value.
+///
+/// Both are needed. The string is what crosses the FFI, unchanged, so a
+/// half chapter stays "127.5" rather than being re-rendered from a float;
+/// the value is the only thing ordering may compare, because sorting the
+/// string puts "10" ahead of "9".
+///
+/// The first `Chapter N` token wins, which is what makes a title like
+/// `Chapter 13: ... Debt Total is "10.8" Million Yen...` parse as 13 and
+/// not as 10.8, and what lets a `Vol.02 Chapter 1` prefix pass through.
+fn parse_chapter_number(title: &str) -> Option<(String, f64)> {
+    let re = Regex::new(r"(?i)Chapter\s+(\d+(?:\.\d+)?)").unwrap();
+    let text = re.captures(title)?.get(1)?.as_str().to_string();
+    let value = text.parse::<f64>().ok()?;
+    Some((text, value))
+}
+
+/// The volume a chapter states, when it states one.
+///
+/// Only a tiebreak, never the primary key — see `parse_chapter_list`.
+fn parse_volume_number(title: &str) -> Option<f64> {
+    let re = Regex::new(r"(?i)Vol\.?\s*(\d+(?:\.\d+)?)").unwrap();
+    re.captures(title)?.get(1)?.as_str().parse::<f64>().ok()
+}
+
+/// The manga's own chapter table, sliced out of the page.
+///
+/// `class="chapter"` is not unique to that table: the page's related-manga
+/// sidebar reuses the same class for anchors pointing at *other* titles.
+/// Measured on the Tomodachi Game page, scanning the whole document
+/// returned 151 anchors for a 131-chapter manga — the 20 extras were
+/// `bloody-junkie.7490/c9.5`, `kakegurui-twin.16848/c80` and friends. They
+/// are appended after the real ones, so flipping document order put them at
+/// the *front*: the first row the reader offered was "Chapter 9.5" of an
+/// unrelated manga.
+///
+/// An absent container yields no chapters rather than falling back to the
+/// whole page. A page that has stopped matching this shape is not one whose
+/// chapters can be trusted, and an empty list is a failure someone can see,
+/// where a list contaminated with another manga's chapters reads as a
+/// working one.
+fn chapter_table(html: &str) -> &str {
+    let Some(start) = html.find(r#"class="chapters"#) else { return "" };
+    let rest = &html[start..];
+    match rest.find("</table>") {
+        Some(end) => &rest[..end],
+        None => rest,
+    }
 }
 
 fn parse_chapter_list(html: &str) -> Vec<ChapterRow> {
     let anchor_re = Regex::new(r#"class="chapter"><a href="([^"]+)">([^<]+)</a>"#).unwrap();
-    let mut rows: Vec<ChapterRow> = Vec::new();
-    for cap in anchor_re.captures_iter(html) {
+    let mut rows: Vec<(f64, f64, ChapterRow)> = Vec::new();
+    for cap in anchor_re.captures_iter(chapter_table(html)) {
         let href = cap[1].to_string();
         // MangaKatana's own titles carry raw `&quot;`/`&amp;` entities;
         // decoding just the handful that actually show up in chapter names
         // avoids pulling in a whole HTML-entity crate for four escapes.
         let raw_title = html_unescape(cap[2].trim());
-        let Some(number) = parse_chapter_number(&raw_title) else { continue };
+        let Some((number, value)) = parse_chapter_number(&raw_title) else { continue };
+        let volume = parse_volume_number(&raw_title).unwrap_or(0.0);
         let url = if href.starts_with("http") { href } else { format!("{BASE_URL}{href}") };
-        rows.push(ChapterRow { number, title: raw_title, id: url, pages: 1 });
+        rows.push((value, volume, ChapterRow { number, title: raw_title, id: url, pages: 1 }));
     }
-    // The site lists newest first; readers expect ascending order.
-    rows.reverse();
-    rows
+    // Ordered by the parsed number rather than by reversing document order:
+    // the page ships its own sort toggle (`id="reverse_order"`), so which end
+    // the newest chapter sits at is not something the markup promises.
+    //
+    // Volume breaks a tie because some titles number per volume — "Secret
+    // Chaser" lists `Vol.02 Chapter 1` and `Vol.01 Chapter 1`, which parse to
+    // the same number, and a stable sort then leaves them in document order,
+    // which is newest-first: volume 2 offered ahead of volume 1.
+    rows.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    rows.into_iter().map(|(_, _, r)| r).collect()
 }
 
 fn html_unescape(s: &str) -> String {

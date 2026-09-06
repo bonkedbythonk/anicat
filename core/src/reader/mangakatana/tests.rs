@@ -64,9 +64,116 @@ fn chapter_list_is_reordered_ascending_and_entities_decoded() {
 #[test]
 fn chapters_missing_a_parseable_number_are_dropped_not_guessed() {
     let html = r#"
-        <div class="chapter"><a href="https://mangakatana.com/manga/x.1/extra">Extra Special</a></div>
+        <div class="chapters"><table><tbody>
+        <tr><td><div class="chapter"><a href="https://mangakatana.com/manga/x.1/extra">Extra Special</a></div></td></tr>
+        </tbody></table></div>
     "#;
     assert!(parse_chapter_list(html).is_empty());
+}
+
+#[test]
+fn the_related_manga_sidebar_does_not_contribute_chapters() {
+    // The regression this file exists for. MangaKatana's related-manga
+    // sidebar reuses `class="chapter"` for anchors pointing at other
+    // titles, and they sit *after* the real table — so once the list was
+    // flipped to ascending they landed at the front, and the first row the
+    // reader offered was chapter 9.5 of a manga nobody had opened.
+    let html = r#"
+        <div class="chapters"><table><tbody>
+        <tr><td><div class="chapter"><a href="https://mangakatana.com/manga/tomodachi-game.3175/c2">Chapter 2</a></div></td></tr>
+        <tr><td><div class="chapter"><a href="https://mangakatana.com/manga/tomodachi-game.3175/c1">Chapter 1</a></div></td></tr>
+        </tbody></table></div>
+        <div class="uk-panel">
+        <div class="chapter"><a href="https://mangakatana.com/manga/bloody-junkie.7490/c9.5">Chapter 9.5</a></div>
+        <div class="chapter"><a href="https://mangakatana.com/manga/kakegurui-twin.16848/c80">Chapter 80</a></div>
+        </div>
+    "#;
+    let rows = parse_chapter_list(html);
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter().all(|r| r.id.contains("/tomodachi-game.3175/")),
+        "a foreign manga's chapter got in: {:?}",
+        rows.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+    assert_eq!(rows[0].number, "1");
+    assert_eq!(rows[1].number, "2");
+}
+
+#[test]
+fn a_page_without_the_chapter_table_yields_nothing_rather_than_the_whole_document() {
+    let html = r#"
+        <h1 class="heading">Some Manga</h1>
+        <div class="chapter"><a href="https://mangakatana.com/manga/other.1/c5">Chapter 5</a></div>
+    "#;
+    assert!(parse_chapter_list(html).is_empty());
+}
+
+#[test]
+fn ordering_is_numeric_not_lexicographic() {
+    // The parsed number is a String on `ChapterRow` because it crosses the
+    // FFI exactly as the site wrote it; comparing those strings puts "10"
+    // ahead of "9" and hands the reader a second kind of mixed-up list.
+    let html = r#"
+        <div class="chapters"><table><tbody>
+        <tr><td><div class="chapter"><a href="/manga/x.1/c9">Chapter 9</a></div></td></tr>
+        <tr><td><div class="chapter"><a href="/manga/x.1/c10">Chapter 10</a></div></td></tr>
+        <tr><td><div class="chapter"><a href="/manga/x.1/c100">Chapter 100</a></div></td></tr>
+        </tbody></table></div>
+    "#;
+    let rows = parse_chapter_list(html);
+    assert_eq!(rows.iter().map(|r| r.number.as_str()).collect::<Vec<_>>(), vec!["9", "10", "100"]);
+}
+
+#[test]
+fn ordering_holds_whichever_way_the_site_sorted_the_table() {
+    // The page carries a sort toggle (`id="reverse_order"`), so oldest-first
+    // markup is a shape that reaches this parser too — the old blind
+    // `reverse()` turned exactly that case upside down.
+    let ascending = r#"
+        <div class="chapters"><table><tbody>
+        <tr><td><div class="chapter"><a href="/manga/x.1/c1">Chapter 1</a></div></td></tr>
+        <tr><td><div class="chapter"><a href="/manga/x.1/c2">Chapter 2</a></div></td></tr>
+        </tbody></table></div>
+    "#;
+    let rows = parse_chapter_list(ascending);
+    assert_eq!(rows.iter().map(|r| r.number.as_str()).collect::<Vec<_>>(), vec!["1", "2"]);
+}
+
+#[test]
+fn real_chapter_name_shapes_parse_to_the_chapter_and_not_a_number_in_the_title() {
+    // Every one of these is a name captured from the live Tomodachi Game
+    // page. The debt one is the trap: "10.8" appears inside the title, so a
+    // parse that takes the last number rather than the first `Chapter N`
+    // token files chapter 13 between 10 and 11.
+    let cases = [
+        ("Chapter 127.5: Epilogue: The Paths They Each Followed...", "127.5"),
+        ("Chapter 127 [END]", "127"),
+        ("Chapter 7.1: Special 1: Ken-chan, Are You Okay?", "7.1"),
+        ("Chapter 13: You Guys' Group C's Current Debt Total is \"10.8\" Million Yen...", "13"),
+        ("Vol.02 Chapter 1", "1"),
+    ];
+    for (title, want) in cases {
+        let got = parse_chapter_number(title).unwrap_or_else(|| panic!("no number in {title:?}"));
+        assert_eq!(got.0, want, "for {title:?}");
+    }
+    assert_eq!(parse_chapter_number("Extra Special"), None);
+}
+
+#[test]
+fn volume_breaks_a_tie_between_chapters_that_share_a_number() {
+    // "Secret Chaser" numbers per volume: both rows parse to chapter 1, and
+    // a stable sort with no tiebreak leaves them in document order, which is
+    // newest-first — volume 2 offered ahead of volume 1.
+    let html = r#"
+        <div class="chapters"><table><tbody>
+        <tr><td><div class="chapter"><a href="/manga/secret-chaser.14238/v2c1">Vol.02 Chapter 1</a></div></td></tr>
+        <tr><td><div class="chapter"><a href="/manga/secret-chaser.14238/v1c1">Vol.01 Chapter 1 : The Red Penguin</a></div></td></tr>
+        </tbody></table></div>
+    "#;
+    let rows = parse_chapter_list(html);
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].id.ends_with("/v1c1"), "volume 1 must come first, got {}", rows[0].id);
+    assert!(rows[1].id.ends_with("/v2c1"));
 }
 
 #[test]
@@ -102,7 +209,24 @@ async fn live_tomodachi_game_has_full_chapters_on_mangakatana() {
     assert!(!hits.is_empty(), "no search hits");
     let detail = client.detail(&hits[0].id).await.unwrap();
     println!("title={} chapters={}", detail.title, detail.chapters.len());
+    println!(
+        "first={:?} last={:?}",
+        detail.chapters.first().map(|c| &c.title),
+        detail.chapters.last().map(|c| &c.title)
+    );
     assert!(detail.chapters.len() > 100, "expected the full run, got {}", detail.chapters.len());
+
+    // A count alone passed straight through the sidebar bug: 151 anchors for
+    // a 131-chapter manga still cleared "> 100". These are the two properties
+    // that actually broke.
+    for c in &detail.chapters {
+        assert!(c.id.starts_with(&hits[0].id), "chapter from another manga: {} ({})", c.title, c.id);
+    }
+    let nums: Vec<f64> = detail.chapters.iter().map(|c| c.number.parse::<f64>().unwrap()).collect();
+    assert!(
+        nums.windows(2).all(|w| w[0] <= w[1]),
+        "chapter numbers are not ascending: {nums:?}"
+    );
 }
 
 #[tokio::test]

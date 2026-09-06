@@ -266,6 +266,11 @@ private struct PlayerTabSection: View {
     // `@AppStorage` needs a literal at the property wrapper. `AppModel` owns
     // the reader and the default; the two must agree.
     @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+    // `FeedbackDefaults` owns the readers and the defaults; the literals here
+    // and the ones there must agree.
+    @AppStorage("anicat_sounds") private var interfaceSounds: Bool = false
+    @AppStorage("anicat_sounds_volume") private var interfaceSoundVolume: Double = 0.3
+    @AppStorage("anicat_haptics") private var haptics: Bool = true
 
     private static let hourOptions = (0...23).map { String(format: "%02d:00", $0) }
 
@@ -389,6 +394,64 @@ private struct PlayerTabSection: View {
                 description: "Show the title, episode and position you are watching on your Discord profile. Has no effect when Discord is not running."
             ) {
                 SumiSwitch(isOn: $discordPresence)
+            }
+        }
+
+        // Feedback Card
+        SettingsCard(title: "Feedback") {
+            SettingField(
+                label: "Interface Sounds",
+                description: "Short synthesised blips when a tab changes, the player opens or closes, a back swipe lands and an episode is marked watched. Off by default, because every one of them fires during ordinary navigation."
+            ) {
+                SumiSwitch(isOn: $interfaceSounds)
+            }
+
+            if interfaceSounds {
+                Divider()
+                    .background(SumiTheme.border)
+
+                SettingField(
+                    label: "Sound Volume",
+                    description: "Relative to the system output level. These play over a running episode, so the default sits low."
+                ) {
+                    HStack(spacing: 12) {
+                        Slider(value: $interfaceSoundVolume, in: 0...1)
+                            .frame(width: 130)
+                            .tint(SumiTheme.indigo)
+
+                        Text("\(Int(interfaceSoundVolume * 100))%")
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted)
+                            .frame(width: 38, alignment: .trailing)
+
+                        Button {
+                            AppSounds.tabChange.play()
+                        } label: {
+                            Text("Test")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(SumiTheme.background)
+                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                        .stroke(SumiTheme.border, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.sumiPressable)
+                    }
+                }
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Haptic Feedback",
+                description: "A trackpad tick when a back swipe crosses the distance that commits it, and when a seek snaps to a chapter or skip boundary. A Mac without a Force Touch trackpad feels nothing either way."
+            ) {
+                SumiSwitch(isOn: $haptics)
             }
         }
 

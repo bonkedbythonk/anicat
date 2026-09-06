@@ -549,6 +549,58 @@ pub struct WatchProgress {
     pub duration: i64,
 }
 
+/// The audio and subtitle tracks chosen for one title. Languages, not track
+/// indexes — see the `title_track_prefs` migration for why.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTrackPreference {
+    pub audio_lang: Option<String>,
+    pub subtitle_lang: Option<String>,
+    /// The track's own name, for packs that ship two tracks of one language
+    /// ("Signs & Songs" beside "Full Subtitles").
+    pub subtitle_title: Option<String>,
+}
+
+/// One day of the activity calendar.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDayCount {
+    /// `YYYY-MM-DD`, in the device's own timezone.
+    pub date: String,
+    pub episodes: i32,
+    pub seconds: i64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTitleCount {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub episodes: i32,
+    pub seconds: i64,
+}
+
+/// What the local watch history adds up to. Nothing here comes from AniList:
+/// it tracks whole episodes and records no time of day, so a calendar, a
+/// streak and an hour histogram can only be built from this device's rows.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiWatchStats {
+    pub total_watch_seconds: i64,
+    /// Episodes past 85%, the same threshold the player advances progress at.
+    pub episodes_watched: i32,
+    /// Distinct titles with any playback recorded, 85% gate or not — one
+    /// abandoned four seconds in still counts as started.
+    pub titles_started: i32,
+    /// Oldest first, ending today, with untouched days present and zeroed.
+    /// `episodes` here counts every episode touched that day rather than only
+    /// the finished ones, so it does not match `episodes_watched` and is not
+    /// meant to.
+    pub per_day: Vec<FfiDayCount>,
+    pub current_streak_days: i32,
+    pub longest_streak_days: i32,
+    pub top_titles: Vec<FfiTitleCount>,
+    /// 0-23 local. 0 when there is no history at all.
+    pub busiest_hour: i32,
+    pub first_watch_at: Option<String>,
+}
+
 /// What to resolve. Mirrors `ResolveTarget`, minus the borrowed slices and the
 /// franchise-shape fields the engine works out for itself.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1880,6 +1932,81 @@ impl AnicatEngine {
                 rating: row.rating,
             })
             .collect())
+    }
+
+    /// What this device's watch history adds up to: lifetime totals, plus a
+    /// `days`-long calendar strip. Local registry only, so it answers signed
+    /// out and during an AniList outage.
+    pub fn watch_stats(&self, days: i32) -> FfiResult<FfiWatchStats> {
+        let rows = self
+            .registry
+            .progress_rows()
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        // `chrono::Local` is read here, at the edge, and handed to an
+        // aggregation that takes any timezone — the day boundaries that
+        // decide every streak in there would otherwise be untestable off the
+        // host's own clock.
+        let stats = crate::db::stats::aggregate(&rows, days, &chrono::Local::now());
+        Ok(FfiWatchStats {
+            total_watch_seconds: stats.total_watch_seconds,
+            episodes_watched: stats.episodes_watched,
+            titles_started: stats.titles_started,
+            per_day: stats
+                .per_day
+                .into_iter()
+                .map(|d| FfiDayCount { date: d.date, episodes: d.episodes, seconds: d.seconds })
+                .collect(),
+            current_streak_days: stats.current_streak_days,
+            longest_streak_days: stats.longest_streak_days,
+            top_titles: stats
+                .top_titles
+                .into_iter()
+                .map(|t| FfiTitleCount {
+                    catalog: Catalog::parse(&t.catalog)
+                        .map(FfiCatalog::from)
+                        .unwrap_or(FfiCatalog::Anilist),
+                    catalog_id: t.catalog_id,
+                    episodes: t.episodes,
+                    seconds: t.seconds,
+                })
+                .collect(),
+            busiest_hour: stats.busiest_hour,
+            first_watch_at: stats.first_watch_at,
+        })
+    }
+
+    /// Remembers the audio and subtitle tracks the viewer picked for a title,
+    /// so the next episode opens the same way.
+    ///
+    /// Every argument is written, `None` included: "no subtitles" is a choice
+    /// the next episode has to honor, and a merge that skipped nulls could
+    /// not record it.
+    pub fn record_title_track_preference(
+        &self,
+        catalog_id: i64,
+        audio_lang: Option<String>,
+        subtitle_lang: Option<String>,
+        subtitle_title: Option<String>,
+    ) -> FfiResult<()> {
+        self.registry
+            .set_title_track_preference(
+                Catalog::Anilist,
+                catalog_id,
+                &crate::db::service::TrackPreference { audio_lang, subtitle_lang, subtitle_title },
+            )
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    pub fn title_track_preference(&self, catalog_id: i64) -> FfiResult<Option<FfiTrackPreference>> {
+        let pref = self
+            .registry
+            .title_track_preference(Catalog::Anilist, catalog_id)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(pref.map(|p| FfiTrackPreference {
+            audio_lang: p.audio_lang,
+            subtitle_lang: p.subtitle_lang,
+            subtitle_title: p.subtitle_title,
+        }))
     }
 
     /// A forum thread with its first page of comments, replies flattened in.

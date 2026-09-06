@@ -4,7 +4,26 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::schema::{migrate, Catalog};
+use super::stats::ProgressRow;
 use crate::torrent::RememberedRelease;
+
+/// The audio and subtitle tracks chosen for one title, by language rather
+/// than by track index — see the `title_track_prefs` migration.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TrackPreference {
+    pub audio_lang: Option<String>,
+    pub subtitle_lang: Option<String>,
+    pub subtitle_title: Option<String>,
+}
+
+/// `datetime('now')` writes `YYYY-MM-DD HH:MM:SS` with no zone marker, and it
+/// is always UTC. Parsed here, at the one boundary that knows that, so the
+/// aggregation upstream deals in real instants.
+fn parse_watched_at(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .map(|naive| naive.and_utc())
+}
 
 /// An episode's playback position, as stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +169,112 @@ impl Registry {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    /// Every watch ever recorded, for the statistics page.
+    ///
+    /// Unbounded and unfiltered on purpose: only `per_day` is windowed, and
+    /// the lifetime totals, the longest streak and the busiest hour all read
+    /// the whole table. Narrowing this by date in SQL would quietly leave six
+    /// of the eight figures describing the window instead of the library.
+    ///
+    /// A row whose `watched_at` will not parse is skipped rather than
+    /// failing the query — one unreadable timestamp must not cost the viewer
+    /// their whole history.
+    pub fn progress_rows(&self) -> Result<Vec<ProgressRow>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, episode_number, stop_time, duration, watched_at
+                 FROM watch_history",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (catalog, catalog_id, episode_number, stop_time, duration, watched_at) =
+                row.map_err(|e| e.to_string())?;
+            let Some(parsed) = parse_watched_at(&watched_at) else {
+                log::warn!("watch_history: unreadable watched_at {watched_at:?}, skipping row");
+                continue;
+            };
+            out.push(ProgressRow {
+                catalog,
+                catalog_id,
+                episode_number,
+                stop_time,
+                duration,
+                watched_at: parsed,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The audio and subtitle tracks the viewer last chose for a title.
+    pub fn title_track_preference(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+    ) -> Result<Option<TrackPreference>, String> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT audio_lang, subtitle_lang, subtitle_title FROM title_track_prefs
+             WHERE catalog = ?1 AND catalog_id = ?2",
+            params![catalog.as_str(), catalog_id],
+            |r| {
+                Ok(TrackPreference {
+                    audio_lang: r.get(0)?,
+                    subtitle_lang: r.get(1)?,
+                    subtitle_title: r.get(2)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    /// Replaces the whole preference for a title.
+    ///
+    /// Every column is written, `None` included: turning subtitles off is a
+    /// choice the next episode has to honor, and merging only the non-null
+    /// fields would make it impossible to record.
+    pub fn set_title_track_preference(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        pref: &TrackPreference,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO title_track_prefs
+                 (catalog, catalog_id, audio_lang, subtitle_lang, subtitle_title, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+             ON CONFLICT(catalog, catalog_id) DO UPDATE SET
+                 audio_lang = excluded.audio_lang,
+                 subtitle_lang = excluded.subtitle_lang,
+                 subtitle_title = excluded.subtitle_title,
+                 updated_at = excluded.updated_at",
+            params![
+                catalog.as_str(),
+                catalog_id,
+                pref.audio_lang,
+                pref.subtitle_lang,
+                pref.subtitle_title
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn set_provider_slug(
         &self,
         catalog: Catalog,
@@ -259,6 +384,7 @@ impl Registry {
             DELETE FROM provider_slugs;
             DELETE FROM local_library;
             DELETE FROM media_prefs;
+            DELETE FROM title_track_prefs;
             COMMIT;",
         )
         .map_err(|e| e.to_string())
@@ -338,7 +464,67 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
+    }
+
+    #[test]
+    fn a_track_preference_round_trips_and_is_replaced_whole() {
+        let db = Registry::open_in_memory().unwrap();
+        assert_eq!(db.title_track_preference(Catalog::Anilist, 21).unwrap(), None);
+
+        let dubbed = TrackPreference {
+            audio_lang: Some("eng".into()),
+            subtitle_lang: Some("eng".into()),
+            subtitle_title: Some("Signs & Songs".into()),
+        };
+        db.set_title_track_preference(Catalog::Anilist, 21, &dubbed).unwrap();
+        assert_eq!(db.title_track_preference(Catalog::Anilist, 21).unwrap(), Some(dubbed));
+
+        // Switching to subbed with subtitles off has to clear the columns,
+        // not merge around them.
+        let subbed = TrackPreference {
+            audio_lang: Some("jpn".into()),
+            subtitle_lang: None,
+            subtitle_title: None,
+        };
+        db.set_title_track_preference(Catalog::Anilist, 21, &subbed).unwrap();
+        assert_eq!(db.title_track_preference(Catalog::Anilist, 21).unwrap(), Some(subbed));
+
+        db.clear_all().unwrap();
+        assert_eq!(db.title_track_preference(Catalog::Anilist, 21).unwrap(), None);
+    }
+
+    #[test]
+    fn an_episode_watched_twice_is_one_row_and_counts_once() {
+        // The upsert on (catalog, catalog_id, episode_number) is what makes
+        // the aggregation's "count each episode once" true; nothing
+        // downstream dedupes, so this is where that contract is pinned.
+        let db = Registry::open_in_memory().unwrap();
+        db.record_progress(Catalog::Anilist, 21, 1, 1400, 1400).unwrap();
+        db.record_progress(Catalog::Anilist, 21, 1, 1390, 1400).unwrap();
+
+        let rows = db.progress_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        let stats = crate::db::stats::aggregate(&rows, 7, &chrono::Utc::now());
+        assert_eq!(stats.total_watch_seconds, 1390);
+        assert_eq!(stats.episodes_watched, 1);
+        assert_eq!(stats.titles_started, 1);
+    }
+
+    #[test]
+    fn progress_rows_parse_the_stored_utc_timestamp() {
+        let db = Registry::open_in_memory().unwrap();
+        db.record_progress(Catalog::Anilist, 21, 1, 100, 1400).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE watch_history SET watched_at = '2026-01-30 23:30:00'",
+                [],
+            )
+            .unwrap();
+        }
+        let rows = db.progress_rows().unwrap();
+        assert_eq!(rows[0].watched_at.to_rfc3339(), "2026-01-30T23:30:00+00:00");
     }
 
     #[test]

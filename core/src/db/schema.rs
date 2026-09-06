@@ -129,6 +129,38 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 3 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- The audio and subtitle tracks the viewer last chose for a
+            -- title, so episode 2 opens the way they left episode 1. Stored
+            -- by language rather than by track index: a track order is a
+            -- property of one release's mux, and the next episode is
+            -- routinely a different one. `subtitle_title` is the tie-break
+            -- for the packs that ship several tracks of the same language
+            -- (\"Signs & Songs\" beside \"Full Subtitles\").
+            --
+            -- A NULL column means 'no preference recorded', which is not the
+            -- same as 'no subtitles' — the player falls back to its global
+            -- default there.
+            CREATE TABLE IF NOT EXISTS title_track_prefs (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                audio_lang TEXT,
+                subtitle_lang TEXT,
+                subtitle_title TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 3)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

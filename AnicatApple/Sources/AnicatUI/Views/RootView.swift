@@ -691,6 +691,37 @@ public struct RootView: View {
 
 }
 
+/// A shelf's Play/Resume button: open the show's page first, then start the
+/// stream on top of it. Closing the player then lands on the episode list of
+/// what was just watched instead of back on the home feed, and a resolve
+/// failure has the page it belongs to underneath it rather than a shelf.
+///
+/// It also means `resolveAndPlay` finds the title's episodes in
+/// `selectedEpisodes` and skips the detail fetch `ensurePlaybackEpisodes`
+/// would otherwise make for a play with no page open.
+private func playFromShelf(model: AppModel, catalogId: Int64, episode: Int, title: String, coverURL: URL?) {
+    // No poster morph on this path, deliberately: `UpNextQueueView` hands
+    // its rows no namespace (its 104x60 landscape thumbnail interpolated
+    // into a portrait poster reads as a squash), so a source key set here
+    // would name a `matchedGeometryEffect` source that does not exist.
+    model.openingDetailSourceKey = nil
+    // Cleared up front rather than by `playEpisode` on success: this
+    // function can return before ever reaching it (cancelled during the page
+    // load), and a Retry left over from an earlier failure would then re-run
+    // that older attempt against a page the viewer has since left.
+    model.errorRetryAction = nil
+    model.activeResolveTask = Task {
+        await model.openDetail(id: catalogId, title: title, coverURL: coverURL, isManga: false)
+        // Cancel pressed while the page was still loading. Without this the
+        // resolve below still ran to completion — `resolveAndPlay` only
+        // checks cancellation after its 120s-budget FFI call returns.
+        guard !Task.isCancelled else { return }
+        // Replaces `activeResolveTask` with the resolve's own task, so Cancel
+        // targets whichever of the two stages is actually running.
+        playEpisode(model: model, catalogId: catalogId, episode: episode, title: title)
+    }
+}
+
 /// Shared by every `resolveAndPlay` call site (across both `RootView` and
 /// `HomeSectionView`) so the error banner's Retry button
 /// (`AppModel.errorRetryAction`) can re-run the exact same attempt rather
@@ -844,7 +875,13 @@ private struct HomeSectionView: View {
                                 if entry.unit == "CH" {
                                     onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, "upnext:\(entry.id)")
                                 } else {
-                                    playEpisode(model: model, catalogId: entry.id, episode: entry.nextEpisodeOrChapter, title: entry.title)
+                                    playFromShelf(
+                                        model: model,
+                                        catalogId: entry.id,
+                                        episode: entry.nextEpisodeOrChapter,
+                                        title: entry.title,
+                                        coverURL: entry.thumbnailURL
+                                    )
                                 }
                             }
                         )

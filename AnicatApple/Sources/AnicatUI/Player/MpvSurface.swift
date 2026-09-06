@@ -1310,6 +1310,143 @@ public struct MpvSurface {
             return value.isEmpty ? nil : value
         }
 
+        /// Samples a frame if one is due and it is a sane moment to ask for
+        /// one, and publishes the result. Nothing is asked of mpv during a
+        /// resolve or a cache stall: `screenshot-raw` blocks on a core that
+        /// is itself waiting on the swarm, which is the one situation where a
+        /// slow screenshot would be the player's own fault.
+        func sampleAmbientIfDue() async {
+            // Checked before the main-actor hop below, not after: this runs
+            // on every 50ms idle tick, and hopping twenty times a second to
+            // read three booleans that matter once every three seconds is
+            // the whole cost of the feature in the steady state.
+            guard !ambientSamplingGaveUp,
+                  CFAbsoluteTimeGetCurrent() - lastAmbientSampleAt >= Self.ambientSampleInterval
+            else { return }
+            let ready = await MainActor.run {
+                !self.controller.awaitingNewFile && !self.controller.isBuffering && self.controller.isPlaying
+            }
+            guard ready, let edges = sampleAmbientEdges() else {
+                if ambientSamplingGaveUp {
+                    await MainActor.run { self.controller.ambientSamplingStopped() }
+                }
+                return
+            }
+            await MainActor.run {
+                self.controller.ambientEdges = edges
+                self.controller.ambientSource = .frame
+            }
+        }
+
+        /// When the last ambient sample was taken, and how many of them ran
+        /// long. See `sampleAmbientEdges` for the budget.
+        private var lastAmbientSampleAt: CFAbsoluteTime = 0
+        private var slowAmbientSamples = 0
+        private var ambientSamplingGaveUp = false
+        /// How often a frame is sampled for the ambient glow.
+        private static let ambientSampleInterval: CFAbsoluteTime = 3
+        /// `screenshot-raw` runs on mpv's core lock, so a slow one is a slow
+        /// frame. Three over budget and the feature stops asking for the rest
+        /// of the session rather than costing playback on this machine.
+        private static let ambientSampleBudget: CFAbsoluteTime = 0.015
+        private static let ambientSlowSampleLimit = 3
+
+        /// One `screenshot-raw` reduced to four edge colours, or nil when it
+        /// is not due, not possible, or has been given up on.
+        ///
+        /// Called from the event loop rather than from a timer of its own.
+        /// `stop()` blocks on `eventLoopStopped` before it frees anything,
+        /// precisely because a second thread touching `mpv` at the same
+        /// moment was a crash; a sampling queue would be exactly that second
+        /// thread, and nothing in `stop()` waits for one.
+        func sampleAmbientEdges() -> AmbientEdges? {
+            guard !ambientSamplingGaveUp, let mpv else { return nil }
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - lastAmbientSampleAt >= Self.ambientSampleInterval else { return nil }
+            lastAmbientSampleAt = now
+            guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true else { return nil }
+
+            var result = mpv_node()
+            var status: Int32 = -1
+            "screenshot-raw".withCString { command in
+                "video".withCString { flags in
+                    // Built by zero-init and member assignment rather than
+                    // through the imported union's initialiser: the name
+                    // Swift generates for an anonymous C union is not
+                    // something to pin a build to.
+                    var values = [mpv_node(), mpv_node()]
+                    values[0].format = MPV_FORMAT_STRING
+                    values[0].u.string = UnsafeMutablePointer(mutating: command)
+                    values[1].format = MPV_FORMAT_STRING
+                    values[1].u.string = UnsafeMutablePointer(mutating: flags)
+                    values.withUnsafeMutableBufferPointer { buffer in
+                        var list = mpv_node_list()
+                        list.num = 2
+                        list.values = buffer.baseAddress
+                        withUnsafeMutablePointer(to: &list) { listPointer in
+                            var args = mpv_node()
+                            args.format = MPV_FORMAT_NODE_ARRAY
+                            args.u.list = listPointer
+                            status = mpv_command_node(mpv, &args, &result)
+                        }
+                    }
+                }
+            }
+            guard status >= 0 else {
+                // "video" is refused by a build without the screenshot code,
+                // and by an audio-only file. Neither is worth retrying every
+                // three seconds for the rest of the episode.
+                print("[ambient] screenshot-raw unavailable (\(status)); falling back to the episode still")
+                ambientSamplingGaveUp = true
+                return nil
+            }
+            defer { mpv_free_node_contents(&result) }
+            let edges = Self.edges(fromScreenshot: result)
+            let elapsed = CFAbsoluteTimeGetCurrent() - now
+            if elapsed > Self.ambientSampleBudget {
+                slowAmbientSamples += 1
+                print(String(format: "[ambient] screenshot-raw took %.1fms (over budget %d/%d)",
+                             elapsed * 1000, slowAmbientSamples, Self.ambientSlowSampleLimit))
+                if slowAmbientSamples >= Self.ambientSlowSampleLimit {
+                    print("[ambient] frame sampling is too slow on this machine; falling back to the episode still")
+                    ambientSamplingGaveUp = true
+                    return nil
+                }
+            }
+            return edges
+        }
+
+        /// Walks the map `screenshot-raw` answers with (`w`, `h`, `stride`,
+        /// `format`, `data`) down to four colours.
+        private static func edges(fromScreenshot node: mpv_node) -> AmbientEdges? {
+            guard node.format == MPV_FORMAT_NODE_MAP, let list = node.u.list else { return nil }
+            var width = 0, height = 0, stride = 0
+            var order: AmbientGlow.PixelOrder?
+            var data: UnsafeRawPointer?
+            var size = 0
+            for index in 0..<Int(list.pointee.num) {
+                guard let keyPointer = list.pointee.keys?[index],
+                      let value = list.pointee.values?[index] else { continue }
+                switch String(cString: keyPointer) {
+                case "w": width = Int(value.u.int64)
+                case "h": height = Int(value.u.int64)
+                case "stride": stride = Int(value.u.int64)
+                case "format":
+                    order = value.u.string.map { AmbientGlow.PixelOrder.named(String(cString: $0)) } ?? nil
+                case "data":
+                    if let bytes = value.u.ba {
+                        data = UnsafeRawPointer(bytes.pointee.data)
+                        size = bytes.pointee.size
+                    }
+                default: continue
+                }
+            }
+            guard let order, let data, size >= stride * height,
+                  let grid = AmbientGlow.grid(bytes: data, width: width, height: height, stride: stride, order: order)
+            else { return nil }
+            return AmbientGlow.edges(fromGrid: grid)
+        }
+
         /// mpv's `chapter-list` for the loaded file, read through the string
         /// property form rather than `MPV_FORMAT_NODE`: the node form hands
         /// back a map that has to be walked and freed with
@@ -1350,6 +1487,11 @@ public struct MpvSurface {
                         guard let self = self, self.isRunning else {
                             break
                         }
+                        // The 50ms idle tick is where the ambient glow's
+                        // frame sampling rides: no timer, no second thread on
+                        // the handle, and `sampleAmbientEdges` does nothing
+                        // until three seconds have passed.
+                        await self.sampleAmbientIfDue()
                         continue
                     }
                     guard let self = self, self.isRunning else {

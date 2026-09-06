@@ -67,6 +67,8 @@ public struct PlayerView: View {
     @State private var keyMonitor = PlayerKeyMonitor()
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
 
     private static let miniSize = CGSize(width: 320, height: 180)
 
@@ -301,15 +303,32 @@ public struct PlayerView: View {
                 )
                 .background {
                     if isMinimized {
+                        // The halo is a second shadow on the shape already
+                        // behind the video, not a modifier on the surface:
+                        // a shadow on the layer mpv redraws is the offscreen
+                        // pass the comment above rules out. One colour rather
+                        // than four — at 320x180 the four edges read as noise.
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.black)
                             .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+                            .shadow(
+                                color: (glowEdges?.mean.color ?? .clear).opacity(glowEdges == nil ? 0 : 0.5),
+                                radius: 26
+                            )
+                            .animation(reduceMotion ? nil : .smooth(duration: 1.5), value: controller.ambientEdges)
                     }
                 }
                 .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
                 .animation(minimizeCurve, value: isMinimized)
 
             if !isMinimized {
+                // Above `MpvSurface`, never below it: the host view paints
+                // itself black across the whole window (see `MpvHostView`),
+                // so anything behind the surface is invisible whatever the
+                // letterboxing does. It is confined to the bars, and the
+                // chrome that shares them draws over it.
+                ambientGlowLayer(geometry: geometry, windowSize: windowSize)
+
                 // "Click outside cancels" for the next-episode card. Over the
                 // video and under the chrome, so pausing or scrubbing while
                 // the card is up still reaches the controls that do it —
@@ -363,7 +382,11 @@ public struct PlayerView: View {
                     .frame(maxWidth: .infinity)
                     .background(alignment: .top) {
                         VStack(spacing: 0) {
-                            Color.black.frame(height: naturalTop)
+                            // Clear where the glow is on: this fill is the
+                            // letterbox black, and painting it over the bleed
+                            // would be painting over the whole feature.
+                            (glowEdges == nil ? Color.black : Color.clear)
+                                .frame(height: naturalTop)
                             if topGap > naturalTop, controller.areControlsVisible {
                                 LinearGradient(
                                     colors: [Color.black.opacity(0.78), Color.black.opacity(0)],
@@ -395,7 +418,8 @@ public struct PlayerView: View {
                                 )
                                 .frame(height: bottomGap - naturalBottom)
                             }
-                            Color.black.frame(height: naturalBottom)
+                            (glowEdges == nil ? Color.black : Color.clear)
+                                .frame(height: naturalBottom)
                         }
                     }
                     .allowsHitTesting(controller.areControlsVisible)
@@ -498,6 +522,20 @@ public struct PlayerView: View {
         .onChange(of: isMinimized, initial: true) { _, minimized in
             controller.isMiniPlayerActive = minimized
         }
+        // The always-present base for the ambient glow, and the whole of it
+        // on any machine or build where frame sampling turns out not to be
+        // affordable. Computed once per episode and before mpv has decoded
+        // anything, so the bars are lit from the first frame rather than
+        // three seconds into it.
+        .task(id: ambientThumbnailURL) {
+            guard let url = ambientThumbnailURL else {
+                controller.ambientThumbnailColor = nil
+                return
+            }
+            let color = await AmbientGlow.averageColor(of: url)
+            guard !Task.isCancelled else { return }
+            controller.ambientThumbnailColor = color
+        }
         // Latched, not mirrored: see `hasShownFirstFrame`. The curve is the
         // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
         // the still handing over to the picture reads as one move with the
@@ -532,6 +570,73 @@ public struct PlayerView: View {
             return "Buffering \(percent)%"
         }
         return "Buffering…"
+    }
+
+    /// The colours the letterbox bars (and the mini-player's halo) bleed
+    /// right now, or nil when the glow is off. Reduce Transparency turns it
+    /// off outright: the whole effect is a translucent wash of the picture
+    /// over the app's own black, which is the thing that setting asks not to
+    /// happen.
+    private var glowEdges: AmbientEdges? {
+        guard ambientGlowEnabled, !reduceTransparency,
+              controller.ambientSource != .none else { return nil }
+        return controller.ambientEdges
+    }
+
+    /// The still the fallback colour is taken from: the playing episode's,
+    /// which the morph source only sometimes is (a menu-bar Resume or an
+    /// auto-next has no row behind it).
+    private var ambientThumbnailURL: URL? {
+        controller.episodeList.first { $0.number == controller.episodeNumber }?.thumbnailURL
+            ?? morphThumbnailURL
+    }
+
+    /// The bleed itself: one gradient per bar, running from the colour at the
+    /// picture's edge to nothing at the window's. No blur — the colour is
+    /// already the mean of an edge strip, so there is no detail left in it
+    /// for a blur to soften, and a blur filter over a layer that sits beside
+    /// 60fps video is an offscreen pass this file's other comments already
+    /// record the cost of.
+    @ViewBuilder
+    private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
+        if let edges = glowEdges {
+            let video = geometry.videoRect
+            ZStack(alignment: .topLeading) {
+                if video.minY > 0 {
+                    bleed(edges.top, from: .bottom)
+                        .frame(width: windowSize.width, height: video.minY)
+                        .position(x: windowSize.width / 2, y: video.minY / 2)
+                }
+                if video.maxY < windowSize.height {
+                    let height = windowSize.height - video.maxY
+                    bleed(edges.bottom, from: .top)
+                        .frame(width: windowSize.width, height: height)
+                        .position(x: windowSize.width / 2, y: video.maxY + height / 2)
+                }
+                if video.minX > 0 {
+                    bleed(edges.left, from: .trailing)
+                        .frame(width: video.minX, height: windowSize.height)
+                        .position(x: video.minX / 2, y: windowSize.height / 2)
+                }
+                if video.maxX < windowSize.width {
+                    let width = windowSize.width - video.maxX
+                    bleed(edges.right, from: .leading)
+                        .frame(width: width, height: windowSize.height)
+                        .position(x: video.maxX + width / 2, y: windowSize.height / 2)
+                }
+            }
+            .frame(width: windowSize.width, height: windowSize.height)
+            .allowsHitTesting(false)
+            .animation(reduceMotion ? nil : .smooth(duration: 1.5), value: controller.ambientEdges)
+        }
+    }
+
+    private func bleed(_ rgb: AmbientRGB, from edge: UnitPoint) -> some View {
+        LinearGradient(
+            colors: [rgb.color.opacity(0.55), rgb.color.opacity(0)],
+            startPoint: edge,
+            endPoint: UnitPoint(x: 1 - edge.x, y: 1 - edge.y)
+        )
     }
 
     /// The window the Skip pill is offering, if any. Nothing while auto-skip

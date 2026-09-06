@@ -190,6 +190,44 @@ public final class PlayerController: @unchecked Sendable {
     /// A minimized player falls back to `AppModel`'s own end-of-episode
     /// auto-next, exactly as before this card existed.
     public var isMiniPlayerActive: Bool = false
+
+    /// Where the ambient glow's colours are coming from right now. The
+    /// episode still is the base and is always computed; frame sampling
+    /// replaces it once a `screenshot-raw` has come back cheaply enough, and
+    /// hands back to it if the sampler gives up.
+    public enum AmbientSource: Sendable, Equatable {
+        case none
+        case thumbnail
+        case frame
+    }
+    public var ambientEdges: AmbientEdges = .neutral
+    public var ambientSource: AmbientSource = .none
+    /// Set by the player from the playing episode's still, once per episode.
+    public var ambientThumbnailColor: AmbientRGB? {
+        didSet {
+            guard ambientSource != .frame else { return }
+            if let ambientThumbnailColor {
+                ambientEdges = AmbientEdges(uniform: ambientThumbnailColor)
+                ambientSource = .thumbnail
+            } else {
+                ambientEdges = .neutral
+                ambientSource = .none
+            }
+        }
+    }
+
+    /// Frame sampling gave up (too slow, or unsupported by this build of
+    /// mpv). Falls back to whatever the episode still produced.
+    public func ambientSamplingStopped() {
+        guard ambientSource == .frame else { return }
+        if let ambientThumbnailColor {
+            ambientEdges = AmbientEdges(uniform: ambientThumbnailColor)
+            ambientSource = .thumbnail
+        } else {
+            ambientEdges = .neutral
+            ambientSource = .none
+        }
+    }
     public var nextEpisodeCountdown = NextEpisodeCountdown()
     /// How long before the end the card comes up for a file with no outro
     /// window from either source.

@@ -38,7 +38,18 @@ public final class BonjourDiscovery: @unchecked Sendable {
 
     // MARK: - macOS: Advertise Local Swarm Server
 
+    /// TXT-record key carrying the stream server's port. The listener that
+    /// publishes the service binds a port of its own, so the advertised
+    /// endpoint's port is not the one a peer should fetch from.
+    static let streamPortTXTKey = "port"
+
     /// Advertises the Mac's running torrent stream server over Bonjour.
+    ///
+    /// `port` is the Rust range server's port, which it has already bound.
+    /// The listener is given `.any` instead: binding the same port a second
+    /// time is EADDRINUSE, which `NWListener` surfaced as
+    /// "Advertising failed: POSIXErrorCode 22 Invalid argument" on every
+    /// single launch, so the service was never published at all.
     public func startAdvertising(port: UInt16, nodeName: String = Platform.deviceName) {
         guard listener == nil else { return }
 
@@ -47,19 +58,31 @@ public final class BonjourDiscovery: @unchecked Sendable {
             let params = NWParameters(tls: nil, tcp: tcpOptions)
             params.includePeerToPeer = true
 
-            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            let listener = try NWListener(using: params, on: .any)
+            var txtRecord = NWTXTRecord()
+            txtRecord[Self.streamPortTXTKey] = String(port)
             listener.service = NWListener.Service(
                 name: nodeName,
                 type: Self.serviceType,
-                domain: Self.serviceDomain
+                domain: Self.serviceDomain,
+                txtRecord: txtRecord
             )
+
+            // The listener exists only to publish the service and to give a
+            // browsing peer something to connect to so its host address
+            // resolves. Nothing is ever served over these connections, and a
+            // connection left neither accepted nor cancelled holds a socket
+            // for as long as the peer keeps it open.
+            listener.newConnectionHandler = { connection in
+                connection.cancel()
+            }
 
             listener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in
                     switch state {
                     case .ready:
                         self?.isAdvertising = true
-                        print("[Bonjour] Advertising Anicat local stream node on port \(port)")
+                        print("[Bonjour] Advertising Anicat local stream node, stream port \(port)")
                     case .failed(let error):
                         self?.isAdvertising = false
                         print("[Bonjour] Advertising failed: \(error)")
@@ -91,8 +114,11 @@ public final class BonjourDiscovery: @unchecked Sendable {
         let params = NWParameters()
         params.includePeerToPeer = true
 
+        // `.bonjourWithTXTRecord`, not `.bonjour`: the plain descriptor
+        // reports every result with `metadata == .none`, and the stream port
+        // is only in the TXT record.
         let browser = NWBrowser(
-            for: .bonjour(type: Self.serviceType, domain: Self.serviceDomain),
+            for: .bonjourWithTXTRecord(type: Self.serviceType, domain: Self.serviceDomain),
             using: params
         )
 
@@ -114,6 +140,12 @@ public final class BonjourDiscovery: @unchecked Sendable {
             // every other candidate from ever being attempted.
             for result in results {
                 guard case .service(let name, _, _, _) = result.endpoint else { continue }
+                // The peer's stream port comes from the TXT record, not from
+                // the resolved endpoint: the advertising listener binds its
+                // own port precisely because it cannot bind the stream
+                // server's (see `startAdvertising`), so the endpoint's port
+                // belongs to a listener that serves nothing.
+                let advertisedPort = Self.streamPort(from: result.metadata)
                 let connection = NWConnection(to: result.endpoint, using: .tcp)
                 connection.stateUpdateHandler = { [weak self, weak connection] state in
                     guard let self, let connection else { return }
@@ -133,14 +165,18 @@ public final class BonjourDiscovery: @unchecked Sendable {
                         case .name(let n, _): hostString = n
                         @unknown default: return
                         }
+                        // A peer old enough to have advertised on the stream
+                        // port itself publishes no TXT record, and for that
+                        // one the endpoint's port is the right answer.
+                        let streamPort = advertisedPort ?? port.rawValue
                         Task { @MainActor in
                             self.discoveredMacNode = DiscoveredNode(
                                 id: name,
                                 name: name,
                                 host: hostString,
-                                port: port.rawValue
+                                port: streamPort
                             )
-                            print("[Bonjour] Discovered local Mac stream server: \(name) at \(hostString):\(port.rawValue)")
+                            print("[Bonjour] Discovered local Mac stream server: \(name) at \(hostString):\(streamPort)")
                         }
                     case .failed, .cancelled:
                         self.pendingResolves.removeAll { $0 === connection }
@@ -155,6 +191,16 @@ public final class BonjourDiscovery: @unchecked Sendable {
 
         browser.start(queue: .main)
         self.browser = browser
+    }
+
+    /// Reads the stream port a peer published in its Bonjour TXT record.
+    /// `nil` for anything that did not publish one, or published something
+    /// that is not a port.
+    static func streamPort(from metadata: NWBrowser.Result.Metadata) -> UInt16? {
+        guard case .bonjour(let txtRecord) = metadata,
+              let raw = txtRecord[streamPortTXTKey],
+              let port = UInt16(raw), port > 0 else { return nil }
+        return port
     }
 
     public func stopBrowsing() {

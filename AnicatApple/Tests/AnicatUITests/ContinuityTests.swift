@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Network
 @testable import AnicatUI
 
 @Suite("Apple Continuity & Ecosystem Synergy Tests")
@@ -54,5 +55,34 @@ struct ContinuityTests {
     func testBonjourServiceType() {
         #expect(BonjourDiscovery.serviceType == "_anicat-stream._tcp")
         #expect(BonjourDiscovery.serviceDomain == "local.")
+    }
+
+    /// The advertising listener binds its own port, so a peer that reads the
+    /// port off the resolved endpoint fetches from a listener that serves
+    /// nothing. The TXT record is the only place the stream port exists.
+    @Test("Bonjour TXT record carries the stream port")
+    func testBonjourStreamPortFromTXTRecord() {
+        var txtRecord = NWTXTRecord()
+        txtRecord[BonjourDiscovery.streamPortTXTKey] = "51413"
+        #expect(BonjourDiscovery.streamPort(from: .bonjour(txtRecord)) == 51413)
+
+        // No TXT record at all is an older peer, which advertised on the
+        // stream port itself — the caller falls back to the endpoint's port
+        // rather than refusing the peer.
+        #expect(BonjourDiscovery.streamPort(from: .none) == nil)
+
+        var empty = NWTXTRecord()
+        empty["something-else"] = "51413"
+        #expect(BonjourDiscovery.streamPort(from: .bonjour(empty)) == nil)
+
+        // Port 0 means "pick one for me" when binding and is never a real
+        // destination, so it must not be handed to a caller as one.
+        var zero = NWTXTRecord()
+        zero[BonjourDiscovery.streamPortTXTKey] = "0"
+        #expect(BonjourDiscovery.streamPort(from: .bonjour(zero)) == nil)
+
+        var garbage = NWTXTRecord()
+        garbage[BonjourDiscovery.streamPortTXTKey] = "not-a-port"
+        #expect(BonjourDiscovery.streamPort(from: .bonjour(garbage)) == nil)
     }
 }

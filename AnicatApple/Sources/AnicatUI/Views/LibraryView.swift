@@ -16,6 +16,13 @@ public struct LibraryView: View {
 
     @AppStorage("anicat_library_layout") private var layout: String = "grid"
 
+    /// Which way the cards enter, signed by the tab or type change that
+    /// caused the reload. Recorded when the tab flips rather than when the
+    /// items land, which works because the two are hundreds of milliseconds
+    /// apart: `status`/`mediaType` set a `Task` going and only its result
+    /// replaces `items`.
+    @State private var entranceSlide: CGFloat = 12
+
     public init(
         items: [MediaCard.Item],
         isLoading: Bool,
@@ -48,6 +55,23 @@ public struct LibraryView: View {
             ("PAUSED", "Paused"),
             ("DROPPED", "Dropped"),
         ]
+    }
+
+    /// The count and first id are the half that matters: they change when the
+    /// reload lands, which is the moment the entrance has to animate on.
+    /// Keying the animation on `status` alone spent it on the tap, hundreds of
+    /// milliseconds before the items moved, and the new cards then arrived
+    /// with nothing left to animate them.
+    private var contentKey: String {
+        "\(mediaType)/\(status)/\(items.count)/\(items.first?.id ?? -1)"
+    }
+
+    private var cardEntrance: SumiGridEntrance {
+        SumiGridEntrance(step: 0.015, cap: 12, offset: CGSize(width: entranceSlide, height: 0))
+    }
+
+    private func tabIndex(_ key: String) -> Int {
+        tabs.firstIndex { $0.key == key } ?? 0
     }
 
     public var body: some View {
@@ -84,16 +108,35 @@ public struct LibraryView: View {
                         detail: "Search for \(mediaType.lowercased()) and add them to your list."
                     )
                 } else if layout == "grid" {
-                    SumiPosterGrid(items: items, namespace: namespace, openingSourceKey: openingSourceKey, shelfKey: "library", onSelect: onSelect)
-                        .opacity(isLoading ? 0.5 : 1)
+                    SumiPosterGrid(
+                        items: items,
+                        namespace: namespace,
+                        openingSourceKey: openingSourceKey,
+                        shelfKey: "library",
+                        entrance: cardEntrance,
+                        onSelect: onSelect
+                    )
+                    .opacity(isLoading ? 0.5 : 1)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
                     LibraryTable(items: items, mediaType: mediaType, onSelect: onSelect)
                         .opacity(isLoading ? 0.5 : 1)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
             .animation(.snappy, value: isLoading)
             .animation(.smooth, value: status)
+            .animation(.smooth(duration: 0.3), value: contentKey)
             .animation(.smooth, value: layout)
+        }
+        .onChange(of: status) { old, new in
+            entranceSlide = tabIndex(new) >= tabIndex(old) ? 12 : -12
+        }
+        // Its own handler rather than folding into the one above: an
+        // Anime/Manga switch keeps `status`, so without this the cards enter
+        // from whichever side the last *tab* change happened to set.
+        .onChange(of: mediaType) { _, new in
+            entranceSlide = new == "MANGA" ? 12 : -12
         }
     }
 }

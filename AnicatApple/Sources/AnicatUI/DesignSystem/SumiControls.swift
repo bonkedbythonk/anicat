@@ -307,6 +307,10 @@ public struct SumiPosterGrid: View {
     // the same screen — see `AppModel.openingDetailSourceKey`.
     let openingSourceKey: String?
     let shelfKey: String
+    // Off unless the caller swaps this grid's contents under the viewer. The
+    // Reading and History grids load once and never change, so an entrance
+    // there would only ever play on the first paint.
+    let entrance: SumiGridEntrance?
     let onSelect: (MediaCard.Item) -> Void
 
     public init(
@@ -314,12 +318,14 @@ public struct SumiPosterGrid: View {
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
         shelfKey: String = "grid",
+        entrance: SumiGridEntrance? = nil,
         onSelect: @escaping (MediaCard.Item) -> Void
     ) {
         self.items = items
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
         self.shelfKey = shelfKey
+        self.entrance = entrance
         self.onSelect = onSelect
     }
 
@@ -329,11 +335,12 @@ public struct SumiPosterGrid: View {
             alignment: .leading,
             spacing: 20
         ) {
-            ForEach(items) { item in
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 MediaCard(
                     item: item,
                     namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
                 ) { onSelect(item) }
+                .sumiStaggeredEntrance(index: index, entrance: entrance)
             }
         }
     }

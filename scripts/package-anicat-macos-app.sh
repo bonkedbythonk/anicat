@@ -107,6 +107,17 @@ fi
 
 echo "package-anicat-macos-app: built $APP, zero Homebrew references"
 
+# `zip` as the second argument writes the release archive next to the
+# bundle. ditto with --keepParent is what Finder's Compress does; a plain
+# `zip -r` drops the resource forks and the app arrives with a broken
+# signature.
+if [ "$INSTALL" = "zip" ]; then
+    ZIP="$SRC/dist/Anicat-${VERSION}-macos-arm64.zip"
+    rm -f "$ZIP"
+    ditto -c -k --keepParent "$APP" "$ZIP"
+    echo "package-anicat-macos-app: wrote $ZIP ($(du -h "$ZIP" | cut -f1))"
+fi
+
 if [ "$INSTALL" = "install" ]; then
     DEST="/Applications/Anicat.app"
     echo "=== Installing to $DEST ==="

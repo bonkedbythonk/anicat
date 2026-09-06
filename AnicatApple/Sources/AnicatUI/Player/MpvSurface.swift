@@ -796,6 +796,11 @@ public struct MpvSurface {
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
         private var sidewaysSavedHwdec: String?
+        /// The `sid` the viewer picked from the subtitle list, so a later
+        /// Sub/Dub toggle re-applies it rather than running the language
+        /// rule over the top of it. Scoped to one file: track ids mean
+        /// nothing across releases, so `loadFile` clears it.
+        private var explicitSubtitleTrackId: String?
         // Signaled once by the event-loop task's own thread when it has
         // actually stopped touching `mpv`, so `stop()` can block until that
         // happens before it frees the render context or destroys the
@@ -947,9 +952,6 @@ public struct MpvSurface {
             controller.onSetPause = { [weak self] paused in
                 self?.setPaused(paused)
             }
-            controller.onCycleAudioTrack = { [weak self] in
-                self?.runCommand(["cycle", "audio"])
-            }
             controller.onSelectAudioLanguage = { [weak self] preferDub, completion in
                 // Off the main thread: `selectAudioLanguage` walks
                 // `track-list/N/...` with blocking property reads.
@@ -958,11 +960,19 @@ public struct MpvSurface {
                     Task { @MainActor in completion(switched) }
                 }
             }
-            controller.onCycleSubtitleTrack = { [weak self] in
-                self?.runCommand(["cycle", "sub"])
+            controller.onFetchTracks = { [weak self] completion in
+                // Same reason as above, more so: this reads five
+                // sub-properties per track over the whole list.
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let tracks = self?.trackList() ?? (audio: [], subtitle: [])
+                    Task { @MainActor in completion(tracks.audio, tracks.subtitle) }
+                }
             }
-            controller.onFetchTrackInfo = { [weak self] in
-                self?.fetchTrackInfo() ?? (audio: "-", subtitle: "-")
+            controller.onSelectAudioTrack = { [weak self] id in
+                self?.selectAudioTrack(id: id)
+            }
+            controller.onSelectSubtitleTrack = { [weak self] id in
+                self?.selectSubtitleTrack(id: id)
             }
             controller.onSetVolume = { [weak self] volume in
                 self?.setVolume(volume)
@@ -1029,6 +1039,11 @@ public struct MpvSurface {
             pendingStreamURL = url
             guard let mpv = mpv else { return }
             lastLoadedURL = url
+            // Below the guard above, never over it: `updateNSView` calls
+            // this on every SwiftUI update with the URL already playing,
+            // and clearing there would drop the viewer's subtitle pick on
+            // the next unrelated redraw.
+            explicitSubtitleTrackId = nil
             // paused-for-cache stays false until mpv has actually started
             // decoding, so the initial "resolving the first frame" stretch
             // has no property to key off — set it optimistically here and
@@ -1163,12 +1178,6 @@ public struct MpvSurface {
         @discardableResult
         func selectAudioLanguage(preferDub: Bool) -> Bool {
             guard let mpv else { return false }
-            func stringProperty(_ name: String) -> String? {
-                guard let cstr = mpv_get_property_string(mpv, name) else { return nil }
-                defer { mpv_free(cstr) }
-                let value = String(cString: cstr)
-                return value.isEmpty ? nil : value
-            }
             // Re-applied on the next file too: `alang` is a load-time option,
             // so setting it here is what makes the choice stick across an
             // auto-next transition within the same mpv instance.
@@ -1209,25 +1218,56 @@ public struct MpvSurface {
             preferDub ? "en,eng,English" : "ja,jpn,Japanese,en,eng,English"
         }
 
-        /// mpv exposes the currently-selected track's language/title as
-        /// nested sub-properties (e.g. "current-tracks/audio/lang") — no
-        /// need to pull and parse the full MPV_FORMAT_NODE track-list for
-        /// just "what's playing right now".
-        func fetchTrackInfo() -> (audio: String, subtitle: String) {
-            guard let mpv else { return (audio: "-", subtitle: "-") }
-            func stringProperty(_ name: String) -> String? {
-                guard let cstr = mpv_get_property_string(mpv, name) else { return nil }
-                defer { mpv_free(cstr) }
-                let value = String(cString: cstr)
-                return value.isEmpty ? nil : value
+        /// The loaded file's audio and subtitle tracks, for the info
+        /// popover's pickers. Walks `track-list/N/...` sub-properties for
+        /// the same reason `selectAudioLanguage` does: reading them one
+        /// string at a time needs no MPV_FORMAT_NODE parsing, and the
+        /// alternative would be the only place in this file that does.
+        func trackList() -> (audio: [PlayerTrack], subtitle: [PlayerTrack]) {
+            guard let countString = stringProperty("track-list/count"),
+                  let count = Int(countString) else { return (audio: [], subtitle: []) }
+            var audio: [PlayerTrack] = []
+            var subtitle: [PlayerTrack] = []
+            for index in 0..<count {
+                guard let type = stringProperty("track-list/\(index)/type"),
+                      type == "audio" || type == "sub",
+                      let id = stringProperty("track-list/\(index)/id") else { continue }
+                let track = PlayerTrack(
+                    id: id,
+                    lang: stringProperty("track-list/\(index)/lang"),
+                    title: stringProperty("track-list/\(index)/title"),
+                    isSelected: stringProperty("track-list/\(index)/selected") == "yes",
+                    isForced: stringProperty("track-list/\(index)/forced") == "yes"
+                )
+                if type == "audio" { audio.append(track) } else { subtitle.append(track) }
             }
-            let audio = stringProperty("current-tracks/audio/lang")
-                ?? stringProperty("current-tracks/audio/title")
-                ?? "Off"
-            let subtitle = stringProperty("current-tracks/sub/lang")
-                ?? stringProperty("current-tracks/sub/title")
-                ?? "Off"
             return (audio: audio, subtitle: subtitle)
+        }
+
+        func selectAudioTrack(id: String) {
+            guard let mpv else { return }
+            mpv_set_property_string(mpv, "aid", id)
+        }
+
+        /// `nil` is the Off row. The id is remembered so a later Sub/Dub
+        /// toggle re-applies it instead of overruling a choice the viewer
+        /// made by hand — see `PlayerTrack.preferredSubtitle`.
+        func selectSubtitleTrack(id: String?) {
+            guard let mpv else { return }
+            let value = id ?? PlayerTrack.off
+            explicitSubtitleTrackId = value
+            mpv_set_property_string(mpv, "sid", value)
+        }
+
+        /// One mpv string property, or `nil` when it is unset — mpv returns
+        /// an empty string for a track with no language tag, and every
+        /// caller here wants that to read as "absent".
+        func stringProperty(_ name: String) -> String? {
+            guard let mpv else { return nil }
+            guard let cstr = mpv_get_property_string(mpv, name) else { return nil }
+            defer { mpv_free(cstr) }
+            let value = String(cString: cstr)
+            return value.isEmpty ? nil : value
         }
 
         private func startEventLoop() {
@@ -1322,10 +1362,10 @@ public struct MpvSurface {
             isRunning = false
             controller.onSeek = nil
             controller.onSetPause = nil
-            controller.onCycleAudioTrack = nil
             controller.onSelectAudioLanguage = nil
-            controller.onCycleSubtitleTrack = nil
-            controller.onFetchTrackInfo = nil
+            controller.onFetchTracks = nil
+            controller.onSelectAudioTrack = nil
+            controller.onSelectSubtitleTrack = nil
             controller.onSetVolume = nil
             controller.onSetMuted = nil
             controller.onSetSpeed = nil

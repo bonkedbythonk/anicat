@@ -27,8 +27,12 @@ public struct PlayerView: View {
     public let onRestore: () -> Void
     @State private var showInfoMenu = false
     @State private var showEpisodeList = false
-    @State private var audioTrackLabel = "-"
-    @State private var subtitleTrackLabel = "-"
+    @State private var audioTracks: [PlayerTrack] = []
+    @State private var subtitleTracks: [PlayerTrack] = []
+    /// Which of the two track lists is unfolded in the popover, at most one
+    /// at a time: a release with a dozen subtitle tracks and both lists open
+    /// is taller than the popover a 16:9 window has room for.
+    @State private var expandedTrackList: TrackListKind?
     @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     /// Set when the loaded release has no track in the language just asked
     /// for. The preference still changed — it is what the next resolve
@@ -474,7 +478,7 @@ public struct PlayerView: View {
 
                 // Info / More Options
                 Button(action: {
-                    refreshTrackLabels()
+                    refreshTracks()
                     showInfoMenu = true
                 }) {
                     Image(systemName: "info.circle")
@@ -559,19 +563,23 @@ public struct PlayerView: View {
 
             Divider()
 
-            infoMenuRow(label: "Audio", value: audioTrackLabel) {
-                controller.onCycleAudioTrack?()
-                refreshTrackLabels()
+            trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
+                controller.onSelectAudioTrack?(track.id)
+                refreshTracks()
             }
-            infoMenuRow(label: "Subtitles", value: subtitleTrackLabel) {
-                controller.onCycleSubtitleTrack?()
-                refreshTrackLabels()
+            // An Off row in the list rather than a toggle beside it:
+            // turning subtitles off is one of the values mpv takes for
+            // `sid`, and a separate control would be a second place the
+            // same state has to be read back from.
+            trackPicker(kind: .subtitle, label: "Subtitles", rows: subtitleRows) { track in
+                controller.onSelectSubtitleTrack?(track.id == PlayerTrack.off ? nil : track.id)
+                refreshTracks()
             }
 
-            // The cycle button above steps to whatever track is next, which
-            // on a dual-audio release is not a way to ask for a language.
-            // This row is the actual Sub/Dub choice, shared with Settings
-            // and the detail page through `anicat_sub_dub`.
+            // Picking a track above names one track in this release. This
+            // row is the standing Sub/Dub choice, shared with Settings and
+            // the detail page through `anicat_sub_dub`, and it is what the
+            // next episode's resolve searches with.
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("Sub / Dub")
@@ -590,7 +598,7 @@ public struct PlayerView: View {
                                 audioSwitchNote = switched
                                     ? nil
                                     : "No \(wantsDub ? "English" : "Japanese") audio track in this release — applies from the next episode."
-                                refreshTrackLabels()
+                                refreshTracks()
                             }
                         } label: {
                             Text(option == "Dubbed" ? "Dub" : "Sub")
@@ -642,40 +650,115 @@ public struct PlayerView: View {
         rate == rate.rounded() ? "\(Int(rate))x" : String(format: "%.2gx", rate)
     }
 
-    private func infoMenuRow(label: String, value: String, onCycle: @escaping () -> Void) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(SumiTheme.muted)
-            Spacer()
-            Text(value)
-                .sumiTabularMono(size: 12)
-            Button(action: onCycle) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11))
+    enum TrackListKind: Hashable {
+        case audio
+        case subtitle
+    }
+
+    /// The subtitle list plus its Off row. Off reads as current whenever no
+    /// real track does, which is also the state a file with no subtitles at
+    /// all is in — there is nothing else for the row to say there.
+    private var subtitleRows: [PlayerTrack] {
+        [PlayerTrack(
+            id: PlayerTrack.off,
+            lang: nil,
+            title: nil,
+            isSelected: !subtitleTracks.contains(where: \.isSelected),
+            isForced: false
+        )] + subtitleTracks
+    }
+
+    /// A label row that unfolds into the track list underneath it. Not a
+    /// `Menu`: the styles that make one look like the rest of this popover
+    /// (`.borderlessButton`) are macOS-only, and the popover has the height
+    /// for an inline list at the widths the player runs at.
+    private func trackPicker(
+        kind: TrackListKind,
+        label: String,
+        rows: [PlayerTrack],
+        onSelect: @escaping (PlayerTrack) -> Void
+    ) -> some View {
+        let isExpanded = expandedTrackList == kind
+        let current = rows.first(where: \.isSelected)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button {
+                expandedTrackList = isExpanded ? nil : kind
+            } label: {
+                HStack(spacing: 8) {
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(SumiTheme.muted)
+                    Spacer(minLength: 8)
+                    Text(current?.label ?? "-")
+                        .sumiTabularMono(size: 12)
+                        .foregroundColor(SumiTheme.foreground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .help("Cycle \(label.lowercased())")
-            .accessibilityLabel("Cycle \(label.lowercased())")
+            .disabled(rows.isEmpty)
+
+            if isExpanded, !rows.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(rows) { track in
+                            Button {
+                                expandedTrackList = nil
+                                onSelect(track)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(track.label)
+                                        .font(.system(size: 12, weight: track.isSelected ? .semibold : .regular))
+                                        .foregroundColor(track.isSelected ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 8)
+                                    if track.isSelected {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(SumiTheme.indigo)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(track.isSelected ? SumiTheme.indigo.opacity(0.12) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+                    }
+                }
+                // A dual-audio release carries two or three audio tracks and
+                // some carry a dozen subtitle ones; unbounded, the popover
+                // grew past the window on the latter.
+                .frame(maxHeight: 168)
+            }
         }
     }
 
-    /// Read once now and once after a beat: `mpv_command` returning is not
-    /// the track reconfig having finished, so the immediate read reports the
-    /// track that was playing *before* the switch and the row looked stuck
-    /// on the old language.
-    private func refreshTrackLabels() {
-        readTrackLabels()
+    /// Read once now and once after a beat: `mpv_set_property` returning is
+    /// not the track reconfig having finished, so the immediate read still
+    /// reports the track that was playing *before* the switch, and the
+    /// checkmark sat on the row the viewer had just moved off.
+    private func refreshTracks() {
+        readTracks()
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 250_000_000)
-            readTrackLabels()
+            readTracks()
         }
     }
 
-    private func readTrackLabels() {
-        guard let info = controller.onFetchTrackInfo?() else { return }
-        audioTrackLabel = info.audio
-        subtitleTrackLabel = info.subtitle
+    private func readTracks() {
+        controller.onFetchTracks? { audio, subtitle in
+            audioTracks = audio
+            subtitleTracks = subtitle
+        }
     }
 }
 

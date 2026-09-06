@@ -152,19 +152,24 @@ public final class PlayerController: @unchecked Sendable {
     public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?
     public var isScrubbing: Bool = false
 
-    // Info / more-options menu: cycling audio/subtitle tracks is an mpv
-    // command (no separate track-picker UI to build against a full
-    // track-list yet), and reading back the current one is a synchronous
-    // mpv property read — both safe to call straight from the main thread,
-    // so these aren't state, just callbacks the menu invokes on demand.
-    public var onCycleAudioTrack: (@Sendable () -> Void)?
-    public var onCycleSubtitleTrack: (@Sendable () -> Void)?
-    public var onFetchTrackInfo: (@Sendable () -> (audio: String, subtitle: String))?
+    // Info / more-options menu: the audio and subtitle pickers. Not state
+    // on this object — the list only means anything for the file mpv has
+    // open right now, so the popover asks for it when it opens rather than
+    // something keeping a copy in step with every load.
+    /// Answers through `completion`, on the main actor, for the same reason
+    /// `onSelectAudioLanguage` does: the walk behind it is one blocking mpv
+    /// property read per field per track, each waiting on mpv's core lock,
+    /// and a release with a dozen subtitle tracks is well over a hundred of
+    /// them.
+    public var onFetchTracks: (@Sendable (_ completion: @escaping @Sendable @MainActor (_ audio: [PlayerTrack], _ subtitle: [PlayerTrack]) -> Void) -> Void)?
+    public var onSelectAudioTrack: (@Sendable (_ id: String) -> Void)?
+    /// `nil` is the Off row.
+    public var onSelectSubtitleTrack: (@Sendable (_ id: String?) -> Void)?
     /// Picks the audio track matching a Sub/Dub choice on the *loaded* file.
-    /// Distinct from `onCycleAudioTrack`: `alang` only applies at file load,
-    /// so switching the preference mid-episode has to select the track by
-    /// language itself, and a blind cycle lands on whatever track is next
-    /// rather than on the language that was asked for. Answers whether a
+    /// Distinct from `onSelectAudioTrack`: `alang` only applies at file
+    /// load, so switching the preference mid-episode has to select the
+    /// track by language itself rather than by an id the caller would have
+    /// had to read the track list to know. Answers whether a
     /// track in that language existed at all: most nyaa releases carry a
     /// single audio track, so the honest outcome of asking for a dub on one
     /// of those is "nothing here to switch to" — a caller that assumed
@@ -443,4 +448,87 @@ public final class PlayerController: @unchecked Sendable {
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
     }
+}
+
+/// One track out of mpv's `track-list`, flattened to what the info
+/// popover's pickers need. Here rather than in `MpvSurface` so the label
+/// and the subtitle preference rule stay outside that file's AppKit and
+/// libmpv island: both are pure, and neither can be exercised at all from
+/// a test that has to bring up mpv first.
+public struct PlayerTrack: Identifiable, Sendable, Hashable {
+    /// mpv's own track id, in the string form `aid` and `sid` are set with.
+    public let id: String
+    public let lang: String?
+    public let title: String?
+    public let isSelected: Bool
+    public let isForced: Bool
+
+    /// The `sid` value that turns subtitles off. mpv spells it as a word,
+    /// not an empty string.
+    public static let off = "no"
+
+    public init(id: String, lang: String?, title: String?, isSelected: Bool, isForced: Bool) {
+        self.id = id
+        self.lang = lang
+        self.title = title
+        self.isSelected = isSelected
+        self.isForced = isForced
+    }
+
+    /// "English", "English (Signs & Songs)", "Track 3".
+    public var label: String {
+        if id == Self.off { return "Off" }
+        let name = lang.map(Self.languageName)
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = (trimmed?.isEmpty == false) ? trimmed : nil
+        switch (name, detail) {
+        case let (name?, detail?): return "\(name) (\(detail))"
+        case let (name?, nil): return name
+        case let (nil, detail?): return detail
+        case (nil, nil): return "Track \(id)"
+        }
+    }
+
+    /// Spells out the ISO 639 codes a release actually carries. Not
+    /// `Locale.localizedString(forLanguageCode:)`: that answers in the
+    /// viewer's own language, and the three-letter bibliographic codes
+    /// Matroska files are tagged with ("ger", "chi", "dut") are not the
+    /// ones it maps. An unlisted code is shown raw rather than guessed at.
+    public static func languageName(_ code: String) -> String {
+        let key = code.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return languageNames[key] ?? code
+    }
+
+    private static let languageNames: [String: String] = [
+        "en": "English", "eng": "English", "english": "English",
+        "ja": "Japanese", "jp": "Japanese", "jpn": "Japanese", "japanese": "Japanese",
+        "es": "Spanish", "spa": "Spanish",
+        "fr": "French", "fra": "French", "fre": "French",
+        "de": "German", "deu": "German", "ger": "German",
+        "it": "Italian", "ita": "Italian",
+        "pt": "Portuguese", "por": "Portuguese",
+        "ru": "Russian", "rus": "Russian",
+        "zh": "Chinese", "zho": "Chinese", "chi": "Chinese",
+        "ko": "Korean", "kor": "Korean",
+        "ar": "Arabic", "ara": "Arabic",
+        "nl": "Dutch", "nld": "Dutch", "dut": "Dutch",
+        "pl": "Polish", "pol": "Polish",
+        "sv": "Swedish", "swe": "Swedish",
+        "no": "Norwegian", "nor": "Norwegian",
+        "da": "Danish", "dan": "Danish",
+        "fi": "Finnish", "fin": "Finnish",
+        "tr": "Turkish", "tur": "Turkish",
+        "th": "Thai", "tha": "Thai",
+        "vi": "Vietnamese", "vie": "Vietnamese",
+        "id": "Indonesian", "ind": "Indonesian",
+        "ms": "Malay", "msa": "Malay", "may": "Malay",
+        "hi": "Hindi", "hin": "Hindi",
+        "he": "Hebrew", "heb": "Hebrew",
+        "uk": "Ukrainian", "ukr": "Ukrainian",
+        "cs": "Czech", "ces": "Czech", "cze": "Czech",
+        "hu": "Hungarian", "hun": "Hungarian",
+        "el": "Greek", "ell": "Greek", "gre": "Greek",
+        "ro": "Romanian", "ron": "Romanian", "rum": "Romanian",
+        "tl": "Filipino", "fil": "Filipino",
+    ]
 }

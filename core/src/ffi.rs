@@ -279,6 +279,160 @@ pub struct FfiDiscussion {
     pub replied_at: Option<i64>,
 }
 
+/// One voice actor, as listed under a character appearance.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiVoiceActor {
+    pub id: i64,
+    pub name: String,
+    pub image_url: Option<String>,
+    /// AniList's `languageV2`: free text ("Japanese", "English"), not the
+    /// screaming-case `StaffLanguage` enum the cast list's `language` uses.
+    pub language: Option<String>,
+}
+
+/// One title a character appears in.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCharacterAppearance {
+    pub catalog_id: i64,
+    /// "ANIME" or "MANGA". A character page mixes both, and the row has to
+    /// know which detail page to open.
+    pub media_type: Option<String>,
+    pub format: Option<String>,
+    pub title: String,
+    pub cover_image: String,
+    pub year: Option<i32>,
+    /// "MAIN", "SUPPORTING" or "BACKGROUND".
+    pub character_role: Option<String>,
+    pub voice_actors: Vec<FfiVoiceActor>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCharacterDetail {
+    pub id: i64,
+    pub name: String,
+    pub native_name: Option<String>,
+    pub alternative_names: Vec<String>,
+    pub image_url: Option<String>,
+    /// Raw AniList markdown, deliberately not pre-parsed HTML: bios are full
+    /// of `~!spoiler!~` markers, and only the client can decide whether to
+    /// reveal one.
+    pub description: Option<String>,
+    pub gender: Option<String>,
+    /// Free text on AniList ("13", "1000+", "17-18"), not a number.
+    pub age: Option<String>,
+    /// Split rather than formatted into one string because AniList birthdays
+    /// routinely have a month and day and no year at all, which no single
+    /// date string can express without inventing one.
+    pub birth_year: Option<i32>,
+    pub birth_month: Option<i32>,
+    pub birth_day: Option<i32>,
+    pub favourites: i32,
+    pub appearances: Vec<FfiCharacterAppearance>,
+}
+
+/// A character named on a staff credit. Not `FfiCharacter`, which carries the
+/// cast-list fields (role in *this* show, voice actor) that mean nothing here
+/// — the staff member being looked at *is* the voice actor.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCreditCharacter {
+    pub id: i64,
+    pub name: String,
+    pub image_url: Option<String>,
+}
+
+/// A title this person voiced a character in.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiStaffCharacterCredit {
+    pub catalog_id: i64,
+    pub media_type: Option<String>,
+    pub format: Option<String>,
+    pub title: String,
+    pub cover_image: String,
+    pub year: Option<i32>,
+    pub character_role: Option<String>,
+    pub characters: Vec<FfiCreditCharacter>,
+}
+
+/// A title this person held a production role on.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiStaffMediaCredit {
+    pub catalog_id: i64,
+    pub media_type: Option<String>,
+    pub format: Option<String>,
+    pub title: String,
+    pub cover_image: String,
+    pub year: Option<i32>,
+    /// Free text ("Director", "Key Animation", "Theme Song Performance"),
+    /// not an enum.
+    pub staff_role: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiStaffDetail {
+    pub id: i64,
+    pub name: String,
+    pub native_name: Option<String>,
+    pub image_url: Option<String>,
+    /// Raw markdown, same reasoning as `FfiCharacterDetail::description`.
+    pub description: Option<String>,
+    pub primary_occupations: Vec<String>,
+    pub home_town: Option<String>,
+    pub language: Option<String>,
+    pub favourites: i32,
+    /// The two lists are kept apart because AniList keeps them apart, and a
+    /// person can appear in both for the same show — a director who also
+    /// voiced a bit part would otherwise collapse into one ambiguous row.
+    pub character_credits: Vec<FfiStaffCharacterCredit>,
+    pub media_credits: Vec<FfiStaffMediaCredit>,
+}
+
+/// One comment, already flattened out of AniList's nested reply blob.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiThreadComment {
+    pub id: i64,
+    /// `None` for a top-level comment. Replies arrive inline, immediately
+    /// after their parent, so a list view can indent on `depth` without
+    /// building a tree first.
+    pub parent_id: Option<i64>,
+    pub depth: i32,
+    /// Markdown, as posted.
+    pub body: String,
+    pub author_name: Option<String>,
+    pub author_avatar_url: Option<String>,
+    pub created_at: i64,
+    pub like_count: i32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiThreadCommentPage {
+    pub comments: Vec<FfiThreadComment>,
+    /// Counts top-level comments only — replies come inline inside their
+    /// parent and take no slot on the page, so this can be false while the
+    /// list is far longer than the page size.
+    pub has_next_page: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiThreadDetail {
+    pub id: i64,
+    pub title: String,
+    /// Markdown, as posted.
+    pub body: String,
+    pub author_name: Option<String>,
+    pub author_avatar_url: Option<String>,
+    pub created_at: i64,
+    /// AniList's own reply total for the thread, which counts replies as well
+    /// as top-level comments — it will not match `comments.len()`.
+    pub reply_count: i32,
+    pub view_count: i32,
+    pub is_locked: bool,
+    pub categories: Vec<String>,
+    /// The first page of comments. Same caveat as
+    /// `FfiThreadCommentPage::has_next_page`.
+    pub comments: Vec<FfiThreadComment>,
+    pub has_next_page: bool,
+}
+
 /// Everything the detail page draws.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MediaDetail {
@@ -1434,6 +1588,299 @@ impl AnicatEngine {
             })
             .collect())
     }
+
+    /// One character's own page, for the rows a cast list links to.
+    pub async fn character_detail(&self, character_id: i64) -> FfiResult<FfiCharacterDetail> {
+        let c = self
+            .catalogs
+            .character_detail(character_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        let name = c.name.clone();
+        let dob = c.date_of_birth.clone();
+        Ok(FfiCharacterDetail {
+            id: c.id,
+            name: name
+                .as_ref()
+                .and_then(|n| n.full.clone().or_else(|| n.native.clone()))
+                .unwrap_or_default(),
+            native_name: name.as_ref().and_then(|n| n.native.clone()),
+            alternative_names: name
+                .as_ref()
+                .and_then(|n| n.alternative.clone())
+                .unwrap_or_default(),
+            image_url: c.image.as_ref().and_then(|i| i.large.clone().or_else(|| i.medium.clone())),
+            description: c.description.clone(),
+            gender: c.gender.clone(),
+            age: c.age.clone(),
+            birth_year: dob.as_ref().and_then(|d| d.year),
+            birth_month: dob.as_ref().and_then(|d| d.month),
+            birth_day: dob.as_ref().and_then(|d| d.day),
+            favourites: c.favourites.unwrap_or(0) as i32,
+            appearances: media_edges(c.media.as_ref())
+                .filter_map(|edge| {
+                    let node = edge.node.as_ref()?;
+                    Some(FfiCharacterAppearance {
+                        catalog_id: node.id,
+                        media_type: node.media_type.clone(),
+                        format: node.format.clone(),
+                        title: edge_title(node),
+                        cover_image: edge_cover(node),
+                        year: edge_year(node),
+                        character_role: edge.character_role.clone(),
+                        voice_actors: edge
+                            .voice_actors
+                            .as_deref()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|va| FfiVoiceActor {
+                                id: va.id,
+                                name: va
+                                    .name
+                                    .as_ref()
+                                    .and_then(|n| n.full.clone().or_else(|| n.native.clone()))
+                                    .unwrap_or_default(),
+                                image_url: va
+                                    .image
+                                    .as_ref()
+                                    .and_then(|i| i.medium.clone().or_else(|| i.large.clone())),
+                                language: va.language_v2.clone().or_else(|| va.language.clone()),
+                            })
+                            .collect(),
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// One staff member's own page, for the rows a cast list links to.
+    pub async fn staff_detail(&self, staff_id: i64) -> FfiResult<FfiStaffDetail> {
+        let s = self
+            .catalogs
+            .staff_detail(staff_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(FfiStaffDetail {
+            id: s.id,
+            name: s
+                .name
+                .as_ref()
+                .and_then(|n| n.full.clone().or_else(|| n.native.clone()))
+                .unwrap_or_default(),
+            native_name: s.name.as_ref().and_then(|n| n.native.clone()),
+            image_url: s.image.as_ref().and_then(|i| i.large.clone().or_else(|| i.medium.clone())),
+            description: s.description.clone(),
+            primary_occupations: s.primary_occupations.clone().unwrap_or_default(),
+            home_town: s.home_town.clone(),
+            language: s.language_v2.clone(),
+            favourites: s.favourites.unwrap_or(0) as i32,
+            character_credits: media_edges(s.character_media.as_ref())
+                .filter_map(|edge| {
+                    let node = edge.node.as_ref()?;
+                    Some(FfiStaffCharacterCredit {
+                        catalog_id: node.id,
+                        media_type: node.media_type.clone(),
+                        format: node.format.clone(),
+                        title: edge_title(node),
+                        cover_image: edge_cover(node),
+                        year: edge_year(node),
+                        character_role: edge.character_role.clone(),
+                        characters: edge
+                            .characters
+                            .as_deref()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|ch| FfiCreditCharacter {
+                                id: ch.id,
+                                name: ch
+                                    .name
+                                    .as_ref()
+                                    .and_then(|n| n.full.clone().or_else(|| n.native.clone()))
+                                    .unwrap_or_default(),
+                                image_url: ch
+                                    .image
+                                    .as_ref()
+                                    .and_then(|i| i.medium.clone().or_else(|| i.large.clone())),
+                            })
+                            .collect(),
+                    })
+                })
+                .collect(),
+            media_credits: media_edges(s.staff_media.as_ref())
+                .filter_map(|edge| {
+                    let node = edge.node.as_ref()?;
+                    Some(FfiStaffMediaCredit {
+                        catalog_id: node.id,
+                        media_type: node.media_type.clone(),
+                        format: node.format.clone(),
+                        title: edge_title(node),
+                        cover_image: edge_cover(node),
+                        year: edge_year(node),
+                        staff_role: edge.staff_role.clone(),
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// A forum thread with its first page of comments, replies flattened in.
+    pub async fn thread_detail(&self, thread_id: i64) -> FfiResult<FfiThreadDetail> {
+        let res = self
+            .catalogs
+            .thread_detail(thread_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        // Not `Network`, unlike every other failure here: forum threads get
+        // deleted, and a UI that read a deletion as a connection problem
+        // would sit there retrying it.
+        let thread = res
+            .thread
+            .ok_or_else(|| AnicatError::NotFound { msg: format!("thread {thread_id}") })?;
+        let (comments, has_next_page) = match res.page {
+            Some(page) => (
+                flatten_thread_comments(page.thread_comments.unwrap_or_default()),
+                page.page_info.and_then(|p| p.has_next_page).unwrap_or(false),
+            ),
+            None => (Vec::new(), false),
+        };
+        Ok(FfiThreadDetail {
+            id: thread.id,
+            title: thread.title.unwrap_or_default(),
+            body: thread.body.unwrap_or_default(),
+            author_name: thread.user.as_ref().and_then(|u| u.name.clone()),
+            author_avatar_url: thread
+                .user
+                .as_ref()
+                .and_then(|u| u.avatar.as_ref())
+                .and_then(|a| a.medium.clone().or_else(|| a.large.clone())),
+            created_at: thread.created_at.unwrap_or(0),
+            reply_count: thread.reply_count.unwrap_or(0),
+            view_count: thread.view_count.unwrap_or(0),
+            is_locked: thread.is_locked.unwrap_or(false),
+            categories: thread
+                .categories
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|c| c.name)
+                .collect(),
+            comments,
+            has_next_page,
+        })
+    }
+
+    /// Page 2 and beyond of a thread's comments. Page 1 comes back with
+    /// `thread_detail`, so the first call here is for page 2.
+    pub async fn thread_comments(
+        &self,
+        thread_id: i64,
+        page: i64,
+    ) -> FfiResult<FfiThreadCommentPage> {
+        let res = self
+            .catalogs
+            .thread_comments(thread_id, page)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(FfiThreadCommentPage {
+            comments: flatten_thread_comments(res.thread_comments.unwrap_or_default()),
+            has_next_page: res.page_info.and_then(|p| p.has_next_page).unwrap_or(false),
+        })
+    }
+}
+
+/// The edges of an optional `MediaConnection`, as an iterator, so the three
+/// credit lists above do not each repeat the same two `as_ref` hops.
+fn media_edges(
+    connection: Option<&anilist::types::MediaConnection>,
+) -> impl Iterator<Item = &anilist::types::MediaEdge> {
+    connection.and_then(|c| c.edges.as_deref()).unwrap_or_default().iter()
+}
+
+fn edge_title(node: &anilist::types::MediaItem) -> String {
+    node.title
+        .as_ref()
+        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+        .unwrap_or_default()
+}
+
+fn edge_cover(node: &anilist::types::MediaItem) -> String {
+    node.cover_image
+        .as_ref()
+        .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+        .unwrap_or_default()
+}
+
+fn edge_year(node: &anilist::types::MediaItem) -> Option<i32> {
+    node.season_year.or_else(|| node.start_date.as_ref().and_then(|d| d.year))
+}
+
+/// Turns AniList's comment tree into one indentable list.
+///
+/// Only top-level comments come back as `ThreadComment` objects; a reply
+/// lives inside its parent's `childComments`, which AniList declares as the
+/// untyped `Json` scalar. So this walks raw `Value`s and takes every field
+/// leniently: a blob that returns `false` instead of an array, or an object
+/// that lost a key, has to mean "no replies" rather than fail the thread.
+///
+/// Order is pre-order — a comment, then its whole subtree, then the next
+/// comment — so a list view can render straight through and indent on
+/// `depth`. Recursion depth is bounded by serde_json's own 128-level parse
+/// limit, which the blob already passed to get here.
+fn flatten_thread_comments(
+    nodes: Vec<anilist::responses::ThreadCommentNode>,
+) -> Vec<FfiThreadComment> {
+    let mut out = Vec::new();
+    for node in nodes {
+        out.push(FfiThreadComment {
+            id: node.id,
+            parent_id: None,
+            depth: 0,
+            body: node.comment.unwrap_or_default(),
+            author_name: node.user.as_ref().and_then(|u| u.name.clone()),
+            author_avatar_url: node
+                .user
+                .as_ref()
+                .and_then(|u| u.avatar.as_ref())
+                .and_then(|a| a.medium.clone().or_else(|| a.large.clone())),
+            created_at: node.created_at.unwrap_or(0),
+            like_count: node.like_count.unwrap_or(0),
+        });
+        push_child_comments(&mut out, node.child_comments.as_ref(), node.id, 1);
+    }
+    out
+}
+
+fn push_child_comments(
+    out: &mut Vec<FfiThreadComment>,
+    raw: Option<&serde_json::Value>,
+    parent_id: i64,
+    depth: i32,
+) {
+    let Some(items) = raw.and_then(|v| v.as_array()) else { return };
+    for item in items {
+        // A reply with no readable id is dropped along with its own subtree:
+        // those grandchildren have no valid `parent_id` to point at, and
+        // attaching them to this comment's parent would silently reparent
+        // someone else's conversation under the wrong post.
+        let Some(id) = item.get("id").and_then(|v| v.as_i64()) else { continue };
+        out.push(FfiThreadComment {
+            id,
+            parent_id: Some(parent_id),
+            depth,
+            body: item.get("comment").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            author_name: item
+                .pointer("/user/name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            author_avatar_url: item
+                .pointer("/user/avatar/medium")
+                .or_else(|| item.pointer("/user/avatar/large"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            created_at: item.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(0),
+            like_count: item.get("likeCount").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        });
+        push_child_comments(out, item.get("childComments"), id, depth + 1);
+    }
 }
 
 impl AnicatEngine {
@@ -2068,6 +2515,146 @@ mod tests {
         let (_, sequel) = relations(&m);
         // Season 2 (2021) is closer next season than Season 3 (2024)
         assert_eq!(sequel.map(|s| s.catalog_id), Some(21));
+    }
+
+    fn thread_comment_fixture() -> Vec<anilist::responses::ThreadCommentNode> {
+        // Shaped like AniList's own reply blob: two levels of nesting, one
+        // leaf whose `childComments` is null, and one reply that arrived
+        // without an id.
+        serde_json::from_value(serde_json::json!([
+            {
+                "id": 1,
+                "comment": "top level",
+                "createdAt": 1700000000,
+                "likeCount": 4,
+                "user": { "id": 7, "name": "aoi", "avatar": { "medium": "https://a/med.png", "large": "https://a/large.png" } },
+                "childComments": [
+                    {
+                        "id": 2,
+                        "comment": "reply",
+                        "createdAt": 1700000100,
+                        "likeCount": 1,
+                        "user": { "id": 8, "name": "kenji", "avatar": { "large": "https://k/large.png" } },
+                        "childComments": [
+                            {
+                                "id": 3,
+                                "comment": "reply to the reply",
+                                "createdAt": 1700000200,
+                                "likeCount": 0,
+                                "user": { "id": 7, "name": "aoi" },
+                                "childComments": null
+                            }
+                        ]
+                    },
+                    {
+                        "comment": "no id, and a subtree that dies with it",
+                        "childComments": [ { "id": 99, "comment": "orphan" } ]
+                    }
+                ]
+            },
+            {
+                "id": 4,
+                "comment": "second top level",
+                "createdAt": 1700000300,
+                "likeCount": 0,
+                "user": { "id": 9, "name": "mei", "avatar": { "medium": "https://m/med.png" } },
+                "childComments": false
+            }
+        ]))
+        .expect("fixture does not deserialize")
+    }
+
+    #[test]
+    fn replies_flatten_in_reading_order_with_parent_and_depth() {
+        let flat = flatten_thread_comments(thread_comment_fixture());
+        // Pre-order: a comment, then its whole subtree, then the next one.
+        // The id-less reply and its child are gone, so 4 of the 6 survive.
+        let shape: Vec<(i64, Option<i64>, i32)> =
+            flat.iter().map(|c| (c.id, c.parent_id, c.depth)).collect();
+        assert_eq!(
+            shape,
+            vec![(1, None, 0), (2, Some(1), 1), (3, Some(2), 2), (4, None, 0)]
+        );
+    }
+
+    #[test]
+    fn a_reply_without_an_id_takes_its_subtree_with_it() {
+        // Keeping the grandchild would have reparented it onto comment 1,
+        // which is someone else's post.
+        let flat = flatten_thread_comments(thread_comment_fixture());
+        assert!(!flat.iter().any(|c| c.id == 99), "orphaned grandchild was kept");
+    }
+
+    #[test]
+    fn a_non_array_child_comments_means_no_replies_not_a_failure() {
+        // AniList sends `false` for a comment nobody replied to.
+        let flat = flatten_thread_comments(thread_comment_fixture());
+        assert_eq!(flat.iter().filter(|c| c.parent_id == Some(4)).count(), 0);
+    }
+
+    #[test]
+    fn nested_reply_fields_survive_the_untyped_blob() {
+        let flat = flatten_thread_comments(thread_comment_fixture());
+        let reply = flat.iter().find(|c| c.id == 2).expect("reply 2 missing");
+        assert_eq!(reply.body, "reply");
+        assert_eq!(reply.author_name.as_deref(), Some("kenji"));
+        // No medium avatar on this one, so the large one stands in.
+        assert_eq!(reply.author_avatar_url.as_deref(), Some("https://k/large.png"));
+        assert_eq!(reply.created_at, 1700000100);
+        assert_eq!(reply.like_count, 1);
+
+        // A reply whose user has no avatar object at all must not invent one.
+        let leaf = flat.iter().find(|c| c.id == 3).expect("reply 3 missing");
+        assert_eq!(leaf.author_avatar_url, None);
+    }
+
+    /// Live. `cargo test --lib ffi::tests -- --ignored --nocapture`
+    ///
+    /// The fixture tests above check this flattening against a blob this
+    /// file wrote, which proves nothing about the key names inside
+    /// `childComments`: AniList declares it as the untyped `Json` scalar, so
+    /// unlike every other field in these three queries there is no schema to
+    /// check `comment`/`createdAt`/`likeCount`/`user.name` against. A reply
+    /// whose keys moved still flattens — into an empty body with no author —
+    /// so this asserts one real reply survived intact.
+    #[tokio::test]
+    #[ignore]
+    async fn live_replies_keep_their_fields_through_the_untyped_blob() {
+        let catalogs = Catalogs::new(reqwest::Client::new(), None, None);
+        let threads = catalogs.media_discussions(154587).await.expect("discussions");
+        let thread_id = threads
+            .iter()
+            .max_by_key(|t| t.reply_count.unwrap_or(0))
+            .map(|t| t.id)
+            .expect("no discussion threads at all");
+        let detail = catalogs.thread_detail(thread_id).await.expect("thread detail");
+        let comments = detail.page.and_then(|p| p.thread_comments).unwrap_or_default();
+        let flat = flatten_thread_comments(comments);
+        println!("thread {thread_id}: {} comments once flattened", flat.len());
+        match flat.iter().find(|c| c.depth >= 1) {
+            Some(reply) => {
+                assert!(
+                    !reply.body.is_empty(),
+                    "reply {} flattened to an empty body: the childComments key names moved",
+                    reply.id
+                );
+                assert!(reply.author_name.is_some(), "reply {} lost its author", reply.id);
+                assert!(reply.parent_id.is_some(), "reply {} has no parent", reply.id);
+                println!("deepest reply: depth {} by {:?}", reply.depth, reply.author_name);
+            }
+            // Not a failure: a thread where nobody replied to anybody is a
+            // perfectly ordinary thread. It just proves nothing here.
+            None => println!("thread {thread_id} has no nested replies; key names unproven"),
+        }
+    }
+
+    #[test]
+    fn top_level_comments_prefer_the_medium_avatar() {
+        // Matches `media_discussions`, which sizes thread rows the same way.
+        let flat = flatten_thread_comments(thread_comment_fixture());
+        let top = flat.first().expect("empty");
+        assert_eq!(top.author_avatar_url.as_deref(), Some("https://a/med.png"));
+        assert_eq!(top.like_count, 4);
     }
 }
 

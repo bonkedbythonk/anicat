@@ -65,6 +65,16 @@ struct WindowConfigurator: NSViewRepresentable {
         window.delegate = AnicatWindowDelegate.shared
         window.acceptsMouseMovedEvents = true
         window.toolbar = nil
+        // Quit (or a reinstall's kill) during fullscreen playback and AppKit
+        // restores the window straight into fullscreen at the next launch,
+        // black until Escape forces a layout: playback drove that fullscreen,
+        // not the viewer, and it is gone. Fullscreen is decided per session
+        // by playback, so the window opts out of state restoration; the
+        // frame itself still comes back through SwiftUI's own autosave.
+        window.isRestorable = false
+        if window.styleMask.contains(.fullScreen), !AppWindow.isPlaybackActive {
+            FullScreenGuard.set(false, on: window)
+        }
         // Overlay-style titlebar, like Tauri's `titleBarStyle: "Overlay"`:
         // the content runs under the traffic lights with no title text and no
         // background strip. Traffic lights stay (Tauri's `decorations: true`),

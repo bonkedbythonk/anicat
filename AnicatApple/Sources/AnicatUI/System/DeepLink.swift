@@ -89,6 +89,7 @@ public enum DeepLink: Equatable, Sendable {
         case "novels": return .novels
         case "search": return .search
         case "history": return .history
+        case "stats": return .stats
         case "downloads": return .downloads
         case "settings": return .settings
         default: return nil
@@ -104,6 +105,7 @@ public enum DeepLink: Equatable, Sendable {
         case .novels: return "novels"
         case .search: return "search"
         case .history: return "history"
+        case .stats: return "stats"
         case .downloads: return "downloads"
         case .settings: return "settings"
         }

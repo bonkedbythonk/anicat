@@ -9,6 +9,7 @@ public struct SidebarView: View {
         case novels = "novels"
         case search = "search"
         case history = "profile"
+        case stats = "stats"
         case downloads = "downloads"
         case settings = "settings"
 
@@ -23,6 +24,7 @@ public struct SidebarView: View {
             case .novels: return "Light Novels"
             case .search: return "Search"
             case .history: return "History"
+            case .stats: return "Stats"
             case .downloads: return "Downloads"
             case .settings: return "Settings"
             }
@@ -35,17 +37,22 @@ public struct SidebarView: View {
             case .manga: return "M"
             case .novels: return "N"
             case .search: return "/"
+            case .stats: return "T"
             case .downloads: return "D"
             default: return nil
             }
         }
 
+        /// The 1-9 keys, in the order they were bound. Appended to, never
+        /// inserted into: `fromNumberKey` caps at nine, so a new case slotted
+        /// in the middle would silently renumber every shortcut a user has
+        /// already learned rather than take the next free digit.
         public static let numberedSections: [NavSection] = [
-            .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads
+            .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads, .stats
         ]
 
         public static let browseItems: [NavSection] = [
-            .upNext, .schedule, .library, .manga, .novels, .search, .history
+            .upNext, .schedule, .library, .manga, .novels, .search, .history, .stats
         ]
 
         public static let systemItems: [NavSection] = [.downloads, .settings]
@@ -62,8 +69,12 @@ public struct SidebarView: View {
             Self.displayOrder.firstIndex(of: self) ?? 0
         }
 
+        /// Capped at 9 rather than at `numberedSections.count`: the list is
+        /// now longer than the digits there are keys for, and a bare count
+        /// bound would claim a "10" nobody can press as a single keystroke.
+        /// The tenth entry is reachable by its letter instead.
         public static func fromNumberKey(_ num: Int) -> NavSection? {
-            guard num >= 1 && num <= numberedSections.count else { return nil }
+            guard num >= 1, num <= 9, num <= numberedSections.count else { return nil }
             return numberedSections[num - 1]
         }
 
@@ -73,6 +84,7 @@ public struct SidebarView: View {
             case "l": return .library
             case "m": return .manga
             case "n": return .novels
+            case "t": return .stats
             case "d": return .downloads
             default: return nil
             }

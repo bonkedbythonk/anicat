@@ -753,6 +753,20 @@ public struct RootView: View {
                     openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
                 }
             )
+        case .stats:
+            StatsView(
+                stats: model.watchStatsSnapshot,
+                knownTitles: model.knownTitles,
+                knownCovers: model.knownCovers,
+                // Reloaded on every entry into the section and nowhere else.
+                // The other obvious trigger is "after progress is recorded",
+                // which lives in the playback path; every panel here but the
+                // streak has a day's resolution, so an open is soon enough.
+                onLoad: { model.loadWatchStats() },
+                onSelectTitle: { id, title in
+                    openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
+                }
+            )
         case .downloads:
             DownloadsView(
                 downloads: model.libraryDownloads,
@@ -1513,7 +1527,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 return nil
             }
 
-            // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), D (Downloads)
+            // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), T (Stats), D (Downloads)
             if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)

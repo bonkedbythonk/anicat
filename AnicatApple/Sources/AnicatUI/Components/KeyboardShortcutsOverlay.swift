@@ -43,6 +43,7 @@ public struct KeyboardShortcutsOverlay: View {
                 ShortcutItem(id: "library", label: "Library", keys: ["L"]),
                 ShortcutItem(id: "manga", label: "Manga", keys: ["M"]),
                 ShortcutItem(id: "novels", label: "Light Novels", keys: ["N"]),
+                ShortcutItem(id: "stats", label: "Stats", keys: ["T"]),
                 ShortcutItem(id: "downloads", label: "Downloads", keys: ["D"]),
                 ShortcutItem(id: "shortcuts", label: "Show keyboard shortcuts", keys: ["?"]),
                 ShortcutItem(id: "dismiss", label: "Dismiss overlay or view", keys: ["Esc"])

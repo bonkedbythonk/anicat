@@ -92,6 +92,7 @@ extension AppModel {
         smartPicks = snapshot.smartPicks
         newlyReleasingItems = snapshot.newlyReleasing
         seasonalItems = snapshot.seasonal
+        becauseYouWatched = snapshot.becauseYouWatched ?? []
     }
 
     func persistHomeCache() {
@@ -108,7 +109,8 @@ extension AppModel {
             planning: planningItems,
             smartPicks: smartPicks,
             newlyReleasing: newlyReleasingItems,
-            seasonal: seasonalItems
+            seasonal: seasonalItems,
+            becauseYouWatched: becauseYouWatched
         ))
     }
 
@@ -171,14 +173,22 @@ extension AppModel {
         async let seasonalTask = engine.discover(
             mediaType: "ANIME", status: nil, season: season, seasonYear: Int32(year), limit: 24
         )
+        // Skipped signed out rather than left to answer empty: the shelf is
+        // derived from the viewer's own list, so signed out the round trip
+        // can only ever come back with nothing.
+        async let recommendedTask: [FfiRecommendationRow] = isSignedIn
+            ? ((try? await engine.recommendationsForViewer(limit: 24)) ?? [])
+            : []
 
         let planning = await planningTask
         let newlyReleasing = (try? await newlyReleasingTask) ?? []
         let seasonal = (try? await seasonalTask) ?? []
+        let recommended = await recommendedTask
 
         planningItems = planning.map(Self.card)
         newlyReleasingItems = newlyReleasing.map(Self.card)
         seasonalItems = seasonal.map(Self.card)
+        becauseYouWatched = recommended.map(Self.recommendationCard)
 
         let planningIds = Set(planningItems.map(\.id))
         let fill = trendingItems.filter { !planningIds.contains($0.id) }
@@ -224,6 +234,29 @@ extension AppModel {
                 guard let p = progress, let r = released else { return false }
                 return s.listStatus == "CURRENT" && p < r
             }()
+        )
+    }
+
+    /// A recommendation card: the recommended title, captioned with the entry
+    /// it was recommended from.
+    ///
+    /// The caption rides in `playlistReason`, and `progress` is cleared even
+    /// where AniList reported one: `MediaCard` draws the reason only for a
+    /// card with no progress, so an already-started recommendation would show
+    /// "3/12" and no attribution at all — the one thing this shelf's cards
+    /// exist to say.
+    static func recommendationCard(_ row: FfiRecommendationRow) -> MediaCard.Item {
+        let base = card(row.media)
+        return MediaCard.Item(
+            id: base.id,
+            title: base.title,
+            coverImageURL: base.coverImageURL,
+            isManga: base.isManga,
+            score: base.score,
+            progress: nil,
+            totalEpisodesOrChapters: base.totalEpisodesOrChapters,
+            hasNewEpisode: false,
+            playlistReason: "Because you watched \(row.becauseTitle)"
         )
     }
 

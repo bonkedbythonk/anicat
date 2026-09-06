@@ -29,6 +29,12 @@ enum HomeCache {
         var smartPicks: [MediaCard.Item]
         var newlyReleasing: [MediaCard.Item]
         var seasonal: [MediaCard.Item]
+        /// Optional, and every field added here after it must be too:
+        /// synthesized `Codable` fails the whole decode on a missing
+        /// non-optional key, so a snapshot written by an older build would
+        /// take `load()` to nil and cost the render-then-refresh launch this
+        /// file exists for.
+        var becauseYouWatched: [MediaCard.Item]?
     }
 
     private static let fileURL: URL = {

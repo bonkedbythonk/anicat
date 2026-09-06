@@ -1101,6 +1101,13 @@ private struct HomeSectionView: View {
     @ViewBuilder
     private func homeDiscoverRow(id: String, title: String) -> some View {
         switch id {
+        case "becauseYouWatched":
+            // No skeleton branch: signed out the engine answers with an
+            // empty list rather than an error, so a placeholder here would
+            // sit on the page forever for anyone without a token.
+            if !model.becauseYouWatched.isEmpty {
+                mediaRow(title: title, count: model.becauseYouWatched.count, items: model.becauseYouWatched, shelfKey: "because")
+            }
         case "planning":
             if model.isSignedIn {
                 if !model.planningItems.isEmpty {

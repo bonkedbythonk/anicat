@@ -370,6 +370,31 @@ public final class AppModel: @unchecked Sendable {
     public var newlyReleasingItems: [MediaCard.Item] = []
     public var seasonalItems: [MediaCard.Item] = []
 
+    // MARK: - Discovery and stats
+
+    /// AniList's own recommendations for the viewer's list, already carrying
+    /// the "because you watched X" attribution in each card's
+    /// `playlistReason`. Empty signed out — the engine answers with nothing
+    /// rather than erroring, so the shelf simply does not draw.
+    public var becauseYouWatched: [MediaCard.Item] = []
+
+    /// The month calendar's airing slots, keyed `"YYYY-MM"` of the *visible*
+    /// month. Each entry holds that month plus a week either side, so a slot
+    /// shown in a leading or trailing pad cell is already there and paging
+    /// back and forth does not refetch. In memory only: `FfiAiringSlot` is a
+    /// uniffi type with no `Codable` conformance, and the schedule is stale
+    /// within the hour anyway.
+    public var calendarMonths: [String: [FfiAiringSlot]] = [:]
+
+    /// Month keys with a fetch in flight, so the grid can draw a skeleton
+    /// without a second per-month loading flag.
+    public var calendarLoadingMonths: Set<String> = []
+
+    /// The Stats page's snapshot, filled on section open. Refreshed there
+    /// and nowhere else: `watchStats` reads the local registry synchronously,
+    /// so there is nothing to gain from holding it warm.
+    public var watchStatsSnapshot: FfiWatchStats?
+
     /// One configurable home row: which one, its display title, and whether
     /// the user has it shown. Reorder is the array order itself.
     public struct HomeRowConfig: Codable, Identifiable, Equatable, Sendable {
@@ -379,6 +404,7 @@ public final class AppModel: @unchecked Sendable {
     }
 
     static let defaultHomeRows: [HomeRowConfig] = [
+        HomeRowConfig(id: "becauseYouWatched", title: "Because you watched", visible: true),
         HomeRowConfig(id: "planning", title: "Planning", visible: true),
         HomeRowConfig(id: "smartPlaylist", title: "Smart Picks", visible: true),
         HomeRowConfig(id: "trending", title: "Trending Now", visible: true),

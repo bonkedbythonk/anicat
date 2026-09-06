@@ -22,6 +22,15 @@ PLIST=dist/Anicat.app/Contents/Info.plist
     || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$PLIST"
+# `anicat://` URL scheme. Deleted first, then rebuilt: `Add` on a key that
+# already exists exits non-zero, and this script runs under `set -e` on every
+# rebuild, so an incremental Add would abort the run the second time.
+/usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string Anicat" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string anicat" "$PLIST"
 # Same icon as the packaged app, so the dev copy is not the generic icon
 # in the Dock and Cmd-Tab.
 ICON=../assets/branding/icon.icns

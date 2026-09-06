@@ -695,6 +695,27 @@ public final class AppModel: @unchecked Sendable {
 
     public var libraryDownloads: [LibraryDownload] = []
 
+    // MARK: - System
+    //
+    // State for the macOS integration surfaces — URL scheme, App Intents,
+    // Spotlight, notifications, dock badge. The behaviour lives in
+    // `AppModel+System.swift`; only the storage is here.
+
+    /// The running model, for callers that arrive from outside the view tree
+    /// and so have no way to be handed it: an App Intent is constructed by
+    /// the Shortcuts/Siri runtime, not by SwiftUI. `nonisolated(unsafe)`
+    /// rather than an actor-isolated global because every read is already on
+    /// the main actor and isolating it would make `AnicatApp.init` — which is
+    /// where it is set — unable to write it.
+    public nonisolated(unsafe) static weak var shared: AppModel?
+
+    /// A destination that arrived before `initialize()` had finished. Every
+    /// route into the app (`openDetail`, `playFromShelf`) bails on a nil
+    /// engine, so a notification tap or Spotlight hit that launches the app
+    /// cold used to open the app and then do nothing at all. Drained once the
+    /// engine is up.
+    public var pendingDeepLink: DeepLink?
+
     // MARK: - Syosetu novel reading
     //
     // Direct-URL only: the viewer pastes a `ncode.syosetu.com/nXXXXXX/` link

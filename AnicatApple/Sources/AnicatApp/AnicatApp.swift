@@ -99,13 +99,21 @@ struct WindowConfigurator: NSViewRepresentable {
 
 @main
 struct AnicatApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
     @NSApplicationDelegateAdaptor(AppearanceLock.self) private var appearanceLock
 
     init() {
         // AppKit reads the class flag when a scroll view is created, so the
         // patch has to land before the first scene builds its views.
         _ = ResponsiveScrollingPatch.applyOnce
+        // Built here rather than as a property initializer so the instance
+        // can be published before any scene exists: an App Intent is
+        // constructed by the Shortcuts runtime and the notification delegate
+        // by the system, and neither has a view to be handed the model
+        // through.
+        let model = AppModel()
+        _model = State(initialValue: model)
+        model.registerAsShared()
     }
 
     var body: some Scene {
@@ -113,6 +121,13 @@ struct AnicatApp: App {
             RootView(model: model)
                 .task {
                     await model.initialize()
+                    // A link that launched the app got here before there was
+                    // an engine to route it with; this is where it finally
+                    // runs.
+                    model.drainPendingDeepLink()
+                }
+                .onOpenURL { url in
+                    model.handleOpenURL(url)
                 }
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
@@ -224,13 +239,26 @@ struct AnicatApp: App {
 /// `NSAppearance`), and no menu bar to extend.
 @main
 struct AnicatApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        let model = AppModel()
+        _model = State(initialValue: model)
+        model.registerAsShared()
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
                 .task {
                     await model.initialize()
+                    model.drainPendingDeepLink()
+                }
+                // The URL scheme is not a macOS feature: it has an iOS
+                // counterpart, and a scene that only wired it up on one
+                // platform would compile on the other and silently do nothing.
+                .onOpenURL { url in
+                    model.handleOpenURL(url)
                 }
                 .preferredColorScheme(.dark)
         }

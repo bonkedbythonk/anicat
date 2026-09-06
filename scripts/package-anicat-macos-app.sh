@@ -64,6 +64,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <true/>
     <key>ATSApplicationFontsPath</key>
     <string>Fonts</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>Anicat</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>anicat</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

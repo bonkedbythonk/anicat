@@ -2,6 +2,8 @@ import Foundation
 #if os(macOS)
 import AppKit
 import IOKit.pwr_mgt
+#else
+import UIKit
 #endif
 
 /// Holds a power-management assertion for as long as an episode is playing.
@@ -81,9 +83,37 @@ public final class SleepBlocker: @unchecked Sendable {
             }
         )
         #else
-        return SleepBlocker(create: { _ in nil }, release: { _ in })
+        // iOS has no assertion object: the idle timer is one process-wide
+        // flag, so the id is a constant that exists only to drive the same
+        // held/not-held state machine the IOKit path uses. Returning nil
+        // instead would leave `isHolding` false forever and every release
+        // a no-op.
+        return SleepBlocker(
+            create: { _ in
+                setIdleTimerDisabled(true)
+                return 1
+            },
+            release: { _ in
+                setIdleTimerDisabled(false)
+            }
+        )
         #endif
     }
+
+    #if !os(macOS)
+    /// `UIApplication` is main-actor isolated and `hold`/`release` are called
+    /// from whatever thread the playback state changed on. Plain
+    /// `DispatchQueue.main.async` rather than a `Task`: the main queue is
+    /// FIFO, so a hold immediately followed by a release cannot land
+    /// inverted and leave the screen pinned awake after playback stopped.
+    private static func setIdleTimerDisabled(_ disabled: Bool) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                UIApplication.shared.isIdleTimerDisabled = disabled
+            }
+        }
+    }
+    #endif
 
     public var isHolding: Bool {
         lock.lock()

@@ -156,14 +156,14 @@ public struct PlayerView: View {
                     .ignoresSafeArea()
             }
 
-            #if os(macOS)
-            // Click handling lives in MpvRenderView.mouseDown, not a SwiftUI
-            // tap gesture — stacking onTapGesture(count: 1) alongside
+            // Tap handling lives in `MpvEventCatcherView`, not a SwiftUI tap
+            // gesture — stacking onTapGesture(count: 1) alongside
             // onTapGesture(count: 2) makes SwiftUI hold every single click
             // for ~300ms to see whether a second one is coming before it
             // fires, which read as exactly the "click has a lot of delay"
             // lag reported against this screen. AppKit's mouseDown already
-            // carries `clickCount` with no such wait.
+            // carries `clickCount` with no such wait, and the iOS catcher
+            // installs one single-tap recognizer for the same reason.
             //
             // Frame/position/corner-radius vary with `isMinimized`, but this
             // is always the same call site — see the doc comment on
@@ -179,23 +179,6 @@ public struct PlayerView: View {
                 .shadow(color: .black.opacity(isMinimized ? 0.45 : 0), radius: isMinimized ? 18 : 0, y: isMinimized ? 8 : 0)
                 .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
                 .animation(.easeInOut(duration: 0.28), value: isMinimized)
-            #else
-            VStack {
-                Spacer()
-                Image(systemName: "film")
-                    .font(.system(size: 64))
-                    .foregroundColor(SumiTheme.muted.opacity(0.4))
-                Text(controller.title)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground.opacity(0.7))
-                    .padding(.top, 8)
-                Spacer()
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                controller.togglePlayPause()
-            }
-            #endif
 
             if !isMinimized {
                 // Buffering Spinner — covers both the initial resolve-to-first-frame
@@ -345,6 +328,11 @@ public struct PlayerView: View {
         .onContinuousHover { _ in
             controller.showControlsBriefly()
         }
+        #endif
+        // Not inside the guard above: the autohide timer and the menu-open
+        // gate are the player's own state, and leaving them macOS-only would
+        // fade the controls out from under an open sheet on iOS and leave a
+        // cancelled-nowhere timer running after the view goes away.
         .onDisappear {
             controller.cancelAutohide()
         }
@@ -352,12 +340,13 @@ public struct PlayerView: View {
             controller.isMenuOpen = isOpen
             if isOpen {
                 controller.areControlsVisible = true
+                #if os(macOS)
                 NSCursor.setHiddenUntilMouseMoves(false)
+                #endif
             } else {
                 controller.showControlsBriefly()
             }
         }
-        #endif
         .animation(.smooth, value: controller.areControlsVisible)
         .animation(.snappy, value: controller.isBuffering)
         }
@@ -856,14 +845,16 @@ private struct PlayerBottomBar: View {
                 .help(rotateHelpText)
                 .accessibilityLabel(rotateHelpText)
 
-                // Fullscreen
+                // Fullscreen. The whole control is compiled out on iOS
+                // rather than guarding only its action: there is no window
+                // to toggle there, and a button that reliably does nothing
+                // reads as a broken player rather than a missing feature.
+                #if os(macOS)
                 Button(action: {
-                        #if os(macOS)
                         if let window = AppWindow.main ?? NSApp.keyWindow {
                             AppWindow.setToolbarVisible(false)
                             window.toggleFullScreen(nil)
                         }
-                        #endif
                 }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 14))
@@ -872,6 +863,7 @@ private struct PlayerBottomBar: View {
                 .buttonStyle(.sumiPressable)
                 .help("Toggle Fullscreen (F)")
                 .accessibilityLabel("Toggle Fullscreen (F)")
+                #endif
         }
         // Flat, not a floating panel — same reasoning as `topBar`: this bar
         // sits in the video's own bottom letterbox gap (already solid

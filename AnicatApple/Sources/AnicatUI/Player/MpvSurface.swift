@@ -1,9 +1,12 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
 import OpenGL.GL
+#else
+import UIKit
+#endif
 import Libmpv
 
-#if os(macOS)
 /// Carries a non-`Sendable` value across an explicit `@Sendable` closure
 /// boundary. Safe here specifically because the receiving closure only ever
 /// reads it once, after the sender has already stopped touching it — not a
@@ -36,10 +39,17 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
 /// open/close cycles, no window of mpv's own, zero libmpv frames on the
 /// main thread under `sample`.
 public enum MpvRenderBackend: String, Sendable {
+    // Declared only on macOS, so every `switch` over this enum elsewhere in
+    // the file is exhaustive on iOS with the Metal case alone — there is no
+    // OpenGL on iOS at all, so an `.openGL` branch there would be a dead
+    // arm the compiler still demands a body for.
+    #if os(macOS)
     case openGL = "opengl"
+    #endif
     case metal = "metal"
 
     static var configured: MpvRenderBackend {
+        #if os(macOS)
         // The environment wins over defaults so a second process can be
         // started on the other backend without touching the running
         // app's setting.
@@ -47,6 +57,11 @@ public enum MpvRenderBackend: String, Sendable {
             ?? UserDefaults.standard.string(forKey: "anicat_render_backend")
             ?? ""
         return MpvRenderBackend(rawValue: raw) ?? .metal
+        #else
+        // Not a lookup that happens to fail: the escape hatch does not exist
+        // on iOS, so the setting has nothing to select and is ignored.
+        return .metal
+        #endif
     }
 }
 
@@ -67,6 +82,7 @@ final class MpvMetalLayer: CAMetalLayer {
     }
 }
 
+#if os(macOS)
 /// The `.metal` child: a layer-hosting view whose layer is the
 /// `MpvMetalLayer` mpv renders into. mpv's `moltenvk` context reads the
 /// layer's `drawableSize` when it (re)configures and lets the swapchain
@@ -526,8 +542,144 @@ public final class MpvRenderTarget: @unchecked Sendable {
         }
     }
 }
+#else
 
-public struct MpvSurface: NSViewRepresentable {
+/// The iOS `.metal` child. UIKit has no layer-hosting concept, so the layer
+/// is claimed through `layerClass` instead: the view's own backing layer
+/// *is* the `MpvMetalLayer`, which is what keeps UIKit from swapping in a
+/// plain `CALayer` the way an assigned one would be.
+@MainActor
+public final class MpvMetalView: UIView {
+    public override class var layerClass: AnyClass { MpvMetalLayer.self }
+
+    var metalLayer: MpvMetalLayer { layer as! MpvMetalLayer }
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = true
+        backgroundColor = .black
+        metalLayer.framebufferOnly = true
+        metalLayer.backgroundColor = UIColor.black.cgColor
+        syncDrawableSize()
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        syncDrawableSize()
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        syncDrawableSize()
+    }
+
+    func syncDrawableSize() {
+        // `UIScreen.main` only as a fallback: it is the wrong screen on an
+        // external display and deprecated besides, but a view that has not
+        // reached a window yet has no screen of its own to ask.
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        metalLayer.contentsScale = scale
+        metalLayer.frame = bounds
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    }
+}
+
+/// The iOS twin of `MpvHostView`, same contract: it owns touch handling and
+/// reports its size to the controller, and the `MpvMetalView` under it does
+/// the drawing for the one backend iOS has.
+@MainActor
+public final class MpvHostView: UIView {
+    public weak var coordinator: MpvSurface.Coordinator?
+    /// Immutable after init, so safe to read from the coordinator's setup
+    /// path without a hop.
+    public nonisolated let backend: MpvRenderBackend
+    public private(set) var metalView: MpvMetalView?
+    private let eventCatcher = MpvEventCatcherView(frame: .zero)
+
+    public init(frame: CGRect, backend: MpvRenderBackend) {
+        self.backend = backend
+        super.init(frame: frame)
+        isOpaque = true
+        backgroundColor = .black
+        let metal = MpvMetalView(frame: bounds)
+        metal.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(metal)
+        metalView = metal
+        eventCatcher.frame = bounds
+        eventCatcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(eventCatcher)
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    /// mpv adds its subview at the end; keep the catcher above it.
+    public override func didAddSubview(_ subview: UIView) {
+        super.didAddSubview(subview)
+        if subview !== eventCatcher, eventCatcher.superview === self {
+            bringSubviewToFront(eventCatcher)
+        }
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        eventCatcher.coordinator = coordinator
+        // Before `attachMpv`, not after: UIKit runs `didMoveToWindow` ahead
+        // of the first `layoutSubviews`, so mpv's moltenvk context would
+        // otherwise configure its swapchain against the layer's default
+        // drawable size rather than the one this view is about to have.
+        metalView?.syncDrawableSize()
+        coordinator?.attachMpv(to: self)
+        reportContainerSize()
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        reportContainerSize()
+    }
+
+    func reportContainerSize() {
+        coordinator?.controller.videoContainerSize = bounds.size
+    }
+}
+
+/// Transparent, topmost, and the only thing that hears the touch. See
+/// `MpvHostView`.
+@MainActor
+final class MpvEventCatcherView: UIView {
+    weak var coordinator: MpvSurface.Coordinator?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.numberOfTapsRequired = 1
+        addGestureRecognizer(tap)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    /// One recognizer, deliberately: there is no fullscreen to toggle on
+    /// iOS, so a second double-tap recognizer would buy nothing and cost
+    /// every single tap the double-tap timeout before it could fire. A
+    /// double tap therefore flips play/pause twice and nets out, the same
+    /// trade-off the macOS catcher's `clickCount` comment records.
+    @objc private func handleTap() {
+        coordinator?.controller.togglePlayPause()
+    }
+}
+#endif
+
+public struct MpvSurface {
     @Bindable public var controller: PlayerController
     public let streamURL: URL?
 
@@ -536,29 +688,38 @@ public struct MpvSurface: NSViewRepresentable {
         self.streamURL = streamURL
     }
 
-    public func makeNSView(context: Context) -> MpvHostView {
+    /// The body of `makeNSView`/`makeUIView`. Shared so the two
+    /// representable conformances below are nothing but their required
+    /// spellings — everything they actually do is the same.
+    @MainActor
+    fileprivate func makeHostView(coordinator: Coordinator) -> MpvHostView {
         let view = MpvHostView(frame: .zero, backend: MpvRenderBackend.configured)
-        view.coordinator = context.coordinator
-        context.coordinator.hostView = view
-        context.coordinator.renderView = view.glView
-        context.coordinator.controller = controller
+        view.coordinator = coordinator
+        coordinator.hostView = view
+        #if os(macOS)
+        coordinator.renderView = view.glView
+        #endif
+        coordinator.controller = controller
 
         if let streamURL {
-            context.coordinator.setPendingStreamURL(streamURL.absoluteString)
+            coordinator.setPendingStreamURL(streamURL.absoluteString)
         }
 
         return view
     }
 
-    public func updateNSView(_ nsView: MpvHostView, context: Context) {
-        let coordinator = context.coordinator
-        nsView.coordinator = coordinator
-        coordinator.hostView = nsView
-        coordinator.renderView = nsView.glView
+    /// The body of `updateNSView`/`updateUIView`.
+    @MainActor
+    fileprivate func updateHostView(_ view: MpvHostView, coordinator: Coordinator) {
+        view.coordinator = coordinator
+        coordinator.hostView = view
+        #if os(macOS)
+        coordinator.renderView = view.glView
+        #endif
         coordinator.controller = controller
 
-        if nsView.window != nil && coordinator.mpvHandle == nil {
-            coordinator.attachMpv(to: nsView)
+        if view.window != nil && coordinator.mpvHandle == nil {
+            coordinator.attachMpv(to: view)
         }
 
         if let streamURL {
@@ -571,22 +732,20 @@ public struct MpvSurface: NSViewRepresentable {
         coordinator.applyAnime4K(enabled: controller.isAnime4KEnabled)
     }
 
-    public static func dismantleNSView(_ nsView: MpvHostView, coordinator: Coordinator) {
-        coordinator.stop()
-    }
-
     public func makeCoordinator() -> Coordinator {
         Coordinator(controller: controller)
     }
 
     public final class Coordinator: NSObject, @unchecked Sendable {
         private var mpv: OpaquePointer?
+        #if os(macOS)
         /// Everything render-context related lives here, on its own thread.
         /// Set once in `setupMpv`, released by the teardown worker in `stop()`.
         public private(set) var renderTarget: MpvRenderTarget?
+        fileprivate weak var renderView: MpvRenderView?
+        #endif
         private var isRunning = false
         fileprivate var controller: PlayerController
-        fileprivate weak var renderView: MpvRenderView?
         fileprivate weak var hostView: MpvHostView?
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
@@ -630,10 +789,12 @@ public struct MpvSurface: NSViewRepresentable {
             }
 
             switch view.backend {
+            #if os(macOS)
             case .openGL:
                 // "libmpv" is the special vo name that opts into the render
                 // API instead of a normal window-owning vo — no "wid" is set.
                 mpv_set_option_string(handle, "vo", "libmpv")
+            #endif
             case .metal:
                 // See MpvRenderBackend. `wid` is the CAMetalLayer pointer;
                 // MPVKit's moltenvk context bridges it back and creates the
@@ -700,6 +861,7 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
+            #if os(macOS)
             if view.backend == .openGL {
                 // `NSOpenGLContext` is explicitly non-Sendable, so the
                 // target that owns it is built inside the main-actor block
@@ -729,6 +891,7 @@ public struct MpvSurface: NSViewRepresentable {
                     }
                 }
             }
+            #endif
 
             self.mpv = handle
             self.isRunning = true
@@ -914,6 +1077,12 @@ public struct MpvSurface: NSViewRepresentable {
         }
 
         func applyAnime4K(enabled: Bool) {
+            #if !os(macOS)
+            // iOS does not upscale, by decision: the shader chain is tuned
+            // for a MacBook's thermals and the setting is not offered there,
+            // so nothing on iOS ever sends `glsl-shaders`.
+            _ = enabled
+            #else
             guard let mpv = mpv, enabled != lastAnime4KState else { return }
             lastAnime4KState = enabled
 
@@ -930,6 +1099,7 @@ public struct MpvSurface: NSViewRepresentable {
             } else {
                 print("[libmpv] Applied Anime4K 6-shader pipeline")
             }
+            #endif
         }
 
         // Backward compatibility overload
@@ -1148,9 +1318,13 @@ public struct MpvSurface: NSViewRepresentable {
             // task (see `startEventLoop`), except that closure gets away
             // without a box because its capture list is inferred, not a
             // plain `DispatchQueue.global().async` closure's stricter one.
-            let handles = UnsafeSendableBox((target: self.renderTarget, mpv: self.mpv))
-            self.renderTarget = nil
+            // `MpvRenderTarget` needs no box; it is `@unchecked Sendable`.
+            let handle = UnsafeSendableBox(self.mpv)
             self.mpv = nil
+            #if os(macOS)
+            let renderTarget = self.renderTarget
+            self.renderTarget = nil
+            #endif
             // Plain GCD, not a Swift `Task`: `DispatchSemaphore.wait()` is a
             // real thread block, and Swift's concurrency checker refuses to
             // compile it inside an `async` closure (blocking a cooperative
@@ -1165,12 +1339,43 @@ public struct MpvSurface: NSViewRepresentable {
                 // the main thread at all: the old `DispatchQueue.main.sync`
                 // hop here could land while the main thread was inside
                 // `reshape()` holding the same CGL lock.
-                handles.value.target?.destroy()
-                if let mpv = handles.value.mpv {
+                #if os(macOS)
+                renderTarget?.destroy()
+                #endif
+                if let mpv = handle.value {
                     mpv_destroy(mpv)
                 }
             }
         }
+    }
+}
+
+#if os(macOS)
+extension MpvSurface: NSViewRepresentable {
+    public func makeNSView(context: Context) -> MpvHostView {
+        makeHostView(coordinator: context.coordinator)
+    }
+
+    public func updateNSView(_ nsView: MpvHostView, context: Context) {
+        updateHostView(nsView, coordinator: context.coordinator)
+    }
+
+    public static func dismantleNSView(_ nsView: MpvHostView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+}
+#else
+extension MpvSurface: UIViewRepresentable {
+    public func makeUIView(context: Context) -> MpvHostView {
+        makeHostView(coordinator: context.coordinator)
+    }
+
+    public func updateUIView(_ uiView: MpvHostView, context: Context) {
+        updateHostView(uiView, coordinator: context.coordinator)
+    }
+
+    public static func dismantleUIView(_ uiView: MpvHostView, coordinator: Coordinator) {
+        coordinator.stop()
     }
 }
 #endif

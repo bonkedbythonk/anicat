@@ -2,6 +2,8 @@ import Foundation
 import MediaPlayer
 #if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 /// Publishes the playing episode to the system's Now Playing surface (the
@@ -180,15 +182,19 @@ public final class NowPlayingBridge: @unchecked Sendable {
         }
     }
 
+    /// The one place `PlatformImage` is not enough: the request handler's
+    /// return type is the same typealias on both platforms, but only
+    /// `NSImage` takes the point size at construction — a `UIImage` carries
+    /// its scale instead, and the tile derives the size from the CGImage.
     private static func artwork(from image: CGImage) -> MPMediaItemArtwork {
         let bounds = CGSize(width: image.width, height: image.height)
         #if canImport(AppKit)
         return MPMediaItemArtwork(boundsSize: bounds) { _ in
-            NSImage(cgImage: image, size: bounds)
+            PlatformImage(cgImage: image, size: bounds)
         }
         #else
         return MPMediaItemArtwork(boundsSize: bounds) { _ in
-            UIImage(cgImage: image)
+            PlatformImage(cgImage: image)
         }
         #endif
     }

@@ -23,11 +23,44 @@ pub struct FuzzyDate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaStudioConnection {
     pub nodes: Option<Vec<MediaStudio>>,
+    /// The same studios again, but carrying the id a studio page needs and
+    /// the `isMain` flag that tells the animation studio from the rest of
+    /// the production committee. `nodes` stays alongside it: the detail
+    /// page's single `studio` string reads that, and every `media_detail`
+    /// row already on disk was cached with only that shape.
+    pub edges: Option<Vec<MediaStudioEdge>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaStudioEdge {
+    #[serde(rename = "isMain")]
+    pub is_main: Option<bool>,
+    pub node: Option<MediaStudio>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaStudio {
+    pub id: Option<i64>,
     pub name: Option<String>,
+}
+
+/// One studio's own record, behind `STUDIO_DETAIL_QUERY`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StudioNode {
+    pub id: i64,
+    pub name: Option<String>,
+    #[serde(rename = "isAnimationStudio")]
+    pub is_animation_studio: Option<bool>,
+    pub favourites: Option<i64>,
+    pub media: Option<MediaNodeConnection>,
+}
+
+/// A media connection asked for as `nodes` rather than `edges`. `Studio.media`
+/// and `Media.recommendations` both come back this way; `MediaConnection`
+/// cannot read them because it only declares `edges`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaNodeConnection {
+    pub nodes: Option<Vec<MediaItem>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +122,8 @@ pub struct MediaItem {
     pub favourites: Option<i32>,
     #[serde(rename = "isFavourite")]
     pub is_favourite: Option<bool>,
+    #[serde(rename = "isAdult")]
+    pub is_adult: Option<bool>,
     pub trending: Option<i32>,
     pub studios: Option<MediaStudioConnection>,
     #[serde(rename = "startDate")]

@@ -386,6 +386,57 @@ pub struct FfiStaffDetail {
     pub media_credits: Vec<FfiStaffMediaCredit>,
 }
 
+/// A studio credited on a title, as the detail page links to it.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiStudioRef {
+    pub id: i64,
+    pub name: String,
+    /// True for the animation studio, false for the rest of the production
+    /// committee. The detail page's single `studio` line has always shown the
+    /// first name AniList happened to return; this is what lets a caller show
+    /// the one that actually made the show.
+    pub is_main: bool,
+}
+
+/// One studio's own page.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiStudioDetail {
+    pub id: i64,
+    pub name: String,
+    pub is_animation_studio: bool,
+    pub favourites: i32,
+    /// Titles this studio led, newest first.
+    pub media: Vec<MediaSummary>,
+}
+
+/// One episode airing at a known time, for the season calendar.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiAiringSlot {
+    pub catalog_id: i64,
+    pub title: String,
+    pub cover_image: String,
+    pub episode: i32,
+    /// Unix seconds. The client turns it into a local time; the engine has no
+    /// business deciding which zone the calendar is drawn in.
+    pub airing_at: i64,
+    pub format: Option<String>,
+    pub episode_count: Option<i32>,
+    pub on_user_list: bool,
+    /// `CURRENT`, `PLANNING`, `COMPLETED`, `PAUSED`, `DROPPED`, `REPEATING`.
+    pub user_status: Option<String>,
+}
+
+/// One "Because you watched" row: a title, plus the title that suggested it.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiRecommendationRow {
+    pub media: MediaSummary,
+    pub because_title: String,
+    pub because_catalog_id: i64,
+    /// AniList's own recommendation score — how many users agreed with the
+    /// pairing, not a rating of the title.
+    pub rating: i32,
+}
+
 /// One comment, already flattened out of AniList's nested reply blob.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiThreadComment {
@@ -449,7 +500,17 @@ pub struct MediaDetail {
     pub format: Option<String>,
     pub status: Option<String>,
     pub year: Option<i32>,
+    /// The first studio's name, which is what the header line has always
+    /// drawn. Kept beside `studios` rather than replaced by it: every caller
+    /// of this field wants one string, not a list to pick from.
     pub studio: Option<String>,
+    /// Every credited studio with the id a studio page needs.
+    pub studios: Vec<FfiStudioRef>,
+    /// `YOUTUBE` or `DAILYMOTION`, with `trailer_id` the site's own video id
+    /// — AniList stores no playable URL, so the client builds one.
+    pub trailer_site: Option<String>,
+    pub trailer_id: Option<String>,
+    pub trailer_thumbnail: Option<String>,
     pub synopsis: Option<String>,
     pub genres: Vec<String>,
     pub average_score: Option<i32>,
@@ -1329,6 +1390,10 @@ impl AnicatEngine {
                 .and_then(|s| s.nodes.as_ref())
                 .and_then(|n| n.first())
                 .and_then(|s| s.name.clone()),
+            studios: studio_refs(&m),
+            trailer_site: m.trailer.as_ref().and_then(|t| t.site.clone()),
+            trailer_id: m.trailer.as_ref().and_then(|t| t.id.clone()),
+            trailer_thumbnail: m.trailer.as_ref().and_then(|t| t.thumbnail.clone()),
             synopsis: m.description.as_ref().map(|d| strip_html(d)),
             genres: m.genres.clone().unwrap_or_default(),
             average_score: m.average_score,
@@ -1729,6 +1794,92 @@ impl AnicatEngine {
                 })
                 .collect(),
         })
+    }
+
+    /// One studio, with the shows it led. `MediaDetail::studios` is where the
+    /// ids come from.
+    pub async fn studio_detail(&self, studio_id: i64) -> FfiResult<FfiStudioDetail> {
+        let studio = self
+            .catalogs
+            .studio_detail(studio_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(FfiStudioDetail {
+            id: studio.id,
+            name: studio.name.clone().unwrap_or_default(),
+            is_animation_studio: studio.is_animation_studio.unwrap_or(false),
+            favourites: studio.favourites.unwrap_or(0) as i32,
+            media: studio
+                .media
+                .as_ref()
+                .and_then(|m| m.nodes.as_ref())
+                .map(|nodes| {
+                    nodes
+                        .iter()
+                        .filter(|m| !m.is_adult.unwrap_or(false))
+                        .map(summarize)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Every episode airing between two unix timestamps, for a calendar.
+    ///
+    /// The window is the caller's: the engine has no opinion about where a
+    /// week starts, and a client that draws Monday-first must not have to
+    /// undo an assumption made here.
+    pub async fn airing_schedule(&self, from_unix: i64, to_unix: i64) -> FfiResult<Vec<FfiAiringSlot>> {
+        let slots = self
+            .catalogs
+            .airing_schedule(from_unix, to_unix)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(slots
+            .into_iter()
+            .map(|slot| {
+                let entry = slot.media.media_list_entry.as_ref();
+                FfiAiringSlot {
+                    catalog_id: slot.media.id,
+                    title: slot
+                        .media
+                        .title
+                        .as_ref()
+                        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                        .unwrap_or_default(),
+                    cover_image: slot
+                        .media
+                        .cover_image
+                        .as_ref()
+                        .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                        .unwrap_or_default(),
+                    episode: slot.episode,
+                    airing_at: slot.airing_at,
+                    format: slot.media.format.clone(),
+                    episode_count: slot.media.episodes,
+                    on_user_list: entry.is_some(),
+                    user_status: entry.and_then(|e| e.status.clone()),
+                }
+            })
+            .collect())
+    }
+
+    /// The "Because you watched" shelf. Empty, not an error, when signed out.
+    pub async fn recommendations_for_viewer(&self, limit: i32) -> FfiResult<Vec<FfiRecommendationRow>> {
+        let rows = self
+            .catalogs
+            .viewer_recommendations(limit.max(1) as usize)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|row| FfiRecommendationRow {
+                media: summarize(&row.media),
+                because_title: row.because_title,
+                because_catalog_id: row.because_catalog_id,
+                rating: row.rating,
+            })
+            .collect())
     }
 
     /// A forum thread with its first page of comments, replies flattened in.
@@ -2291,6 +2442,30 @@ fn relations(m: &anilist::types::MediaItem) -> (Option<RelatedTitle>, Option<Rel
     (best_prequel.map(|(c, _, _, _)| c), best_sequel.map(|(c, _, _, _)| c))
 }
 
+/// The credited studios, main ones first.
+///
+/// Comes back empty for a `media_detail` row cached before the query started
+/// asking for `edges`, which is why `MediaDetail::studio` still exists: the
+/// header line has to keep drawing something for the rest of that row's TTL.
+fn studio_refs(m: &anilist::types::MediaItem) -> Vec<FfiStudioRef> {
+    let Some(edges) = m.studios.as_ref().and_then(|s| s.edges.as_ref()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<FfiStudioRef> = edges
+        .iter()
+        .filter_map(|edge| {
+            let node = edge.node.as_ref()?;
+            Some(FfiStudioRef {
+                id: node.id?,
+                name: node.name.clone()?,
+                is_main: edge.is_main.unwrap_or(false),
+            })
+        })
+        .collect();
+    out.sort_by_key(|s| !s.is_main);
+    out
+}
+
 /// One place that flattens `MediaItem` for the FFI, so a field added for one
 /// view cannot go missing on another. Every list, shelf and grid in the app
 /// draws from the record this returns.
@@ -2327,6 +2502,50 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn studio_refs_lead_with_the_animation_studio() {
+        let m: anilist::types::MediaItem = serde_json::from_str(
+            r#"{
+                "id": 1,
+                "studios": {
+                    "nodes": [{ "name": "Aniplex" }, { "name": "ufotable" }],
+                    "edges": [
+                        { "isMain": false, "node": { "id": 61, "name": "Aniplex" } },
+                        { "isMain": true, "node": { "id": 43, "name": "ufotable" } },
+                        { "isMain": false, "node": { "id": 1, "name": "Shueisha" } }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        let refs = studio_refs(&m);
+        assert_eq!(
+            refs.iter().map(|s| s.id).collect::<Vec<_>>(),
+            [43, 61, 1],
+            "the main studio leads; the rest keep AniList's own order"
+        );
+        assert!(refs[0].is_main);
+    }
+
+    #[test]
+    fn a_detail_row_cached_before_edges_existed_still_yields_a_studio_line() {
+        // The exact shape of a `media_detail` cache row written by the build
+        // before the query asked for `edges`: it has to keep deserializing,
+        // and the header's single studio name has to survive.
+        let m: anilist::types::MediaItem =
+            serde_json::from_str(r#"{ "id": 1, "studios": { "nodes": [{ "name": "Bones" }] } }"#)
+                .unwrap();
+        assert!(studio_refs(&m).is_empty());
+        assert_eq!(
+            m.studios
+                .as_ref()
+                .and_then(|s| s.nodes.as_ref())
+                .and_then(|n| n.first())
+                .and_then(|s| s.name.as_deref()),
+            Some("Bones")
+        );
+    }
 
     #[test]
     fn anilist_progress_marks_episodes_watched_with_no_local_history() {

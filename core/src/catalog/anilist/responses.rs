@@ -41,6 +41,56 @@ pub struct MediaResponse {
     pub media: Option<super::types::MediaItem>,
 }
 
+/// `Page.airingSchedules`, which `Page<T>` cannot read: that one declares
+/// `media` as its only collection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiringScheduleResponse {
+    #[serde(rename = "Page")]
+    pub page: AiringSchedulePage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiringSchedulePage {
+    #[serde(rename = "airingSchedules")]
+    pub airing_schedules: Option<Vec<AiringScheduleNode>>,
+    #[serde(rename = "pageInfo")]
+    pub page_info: Option<PageInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiringScheduleNode {
+    pub id: Option<i64>,
+    #[serde(rename = "airingAt")]
+    pub airing_at: Option<i64>,
+    pub episode: Option<i32>,
+    pub media: Option<super::types::MediaItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StudioDetailResponse {
+    #[serde(rename = "Studio")]
+    pub studio: Option<super::types::StudioNode>,
+}
+
+/// `MEDIA_BATCH_RECOMMENDATIONS_QUERY`: one page of seed media, each carrying
+/// only its id and its own recommendation edges.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRecommendationsResponse {
+    #[serde(rename = "Page")]
+    pub page: BatchRecommendationsPage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRecommendationsPage {
+    pub media: Option<Vec<SeedRecommendations>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeedRecommendations {
+    pub id: i64,
+    pub recommendations: Option<super::types::RecommendationConnection>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterResponse {
     #[serde(rename = "Media")]
@@ -290,6 +340,130 @@ pub struct FavouriteMediaConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_airing_page_deserializes_with_its_adult_flag_and_list_entry() {
+        let json = r#"{
+            "Page": {
+                "airingSchedules": [
+                    {
+                        "id": 900,
+                        "airingAt": 1789000000,
+                        "episode": 7,
+                        "media": {
+                            "id": 21,
+                            "type": "ANIME",
+                            "title": { "romaji": "One Piece", "english": "One Piece" },
+                            "coverImage": { "large": "https://cover.large", "medium": null },
+                            "format": "TV",
+                            "episodes": null,
+                            "isAdult": false,
+                            "mediaListEntry": { "id": 5, "status": "CURRENT", "progress": 6 }
+                        }
+                    },
+                    {
+                        "id": 901,
+                        "airingAt": 1789003600,
+                        "episode": 1,
+                        "media": {
+                            "id": 99,
+                            "type": "ANIME",
+                            "title": { "romaji": "Something", "english": null },
+                            "coverImage": { "large": null, "medium": "https://cover.med" },
+                            "format": "ONA",
+                            "episodes": 12,
+                            "isAdult": true,
+                            "mediaListEntry": null
+                        }
+                    }
+                ],
+                "pageInfo": { "total": 2, "currentPage": 1, "hasNextPage": false }
+            }
+        }"#;
+        let res: AiringScheduleResponse = serde_json::from_str(json).expect("airing page");
+        let slots = res.page.airing_schedules.expect("schedules missing");
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].episode, Some(7));
+        let first = slots[0].media.as_ref().expect("media missing");
+        assert_eq!(first.is_adult, Some(false));
+        assert_eq!(
+            first.media_list_entry.as_ref().and_then(|e| e.status.as_deref()),
+            Some("CURRENT")
+        );
+        assert_eq!(slots[1].media.as_ref().unwrap().is_adult, Some(true));
+        assert_eq!(res.page.page_info.and_then(|p| p.has_next_page), Some(false));
+    }
+
+    #[test]
+    fn a_studio_deserializes_with_its_media_nodes() {
+        let json = r#"{
+            "Studio": {
+                "id": 4,
+                "name": "Bones",
+                "isAnimationStudio": true,
+                "favourites": 12000,
+                "media": {
+                    "nodes": [
+                        {
+                            "id": 5114,
+                            "type": "ANIME",
+                            "title": { "romaji": "Hagane no Renkinjutsushi", "english": "Fullmetal Alchemist" },
+                            "coverImage": { "large": "https://cover.large", "medium": null },
+                            "format": "TV",
+                            "episodes": 64,
+                            "averageScore": 90,
+                            "isAdult": false,
+                            "mediaListEntry": null
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let res: StudioDetailResponse = serde_json::from_str(json).expect("studio");
+        let studio = res.studio.expect("studio missing");
+        assert_eq!(studio.name.as_deref(), Some("Bones"));
+        assert_eq!(studio.is_animation_studio, Some(true));
+        let nodes = studio.media.and_then(|m| m.nodes).expect("nodes missing");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, 5114);
+        assert_eq!(nodes[0].episodes, Some(64));
+    }
+
+    #[test]
+    fn batched_recommendations_keep_their_seed_id() {
+        // The seed carries an id and nothing else — the shelf's caption has
+        // to come from the caller's own list entry, not from this response.
+        let json = r#"{
+            "Page": {
+                "media": [
+                    {
+                        "id": 1,
+                        "recommendations": {
+                            "nodes": [
+                                {
+                                    "rating": 120,
+                                    "mediaRecommendation": {
+                                        "id": 2,
+                                        "type": "ANIME",
+                                        "title": { "romaji": "Trigun", "english": "Trigun" },
+                                        "coverImage": { "large": "https://c.large", "medium": null },
+                                        "format": "TV",
+                                        "isAdult": false
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }"#;
+        let res: BatchRecommendationsResponse = serde_json::from_str(json).expect("batch recs");
+        let seeds = res.page.media.expect("media missing");
+        assert_eq!(seeds[0].id, 1);
+        let nodes = seeds[0].recommendations.as_ref().and_then(|r| r.nodes.as_ref()).unwrap();
+        assert_eq!(nodes[0].rating, Some(120));
+        assert_eq!(nodes[0].media_recommendation.as_ref().unwrap().id, 2);
+    }
 
     #[test]
     fn viewer_deserializes_favourites_nodes() {

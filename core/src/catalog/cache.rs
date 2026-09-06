@@ -182,7 +182,13 @@ impl AniListCache {
             | "get_smart_playlist"
             | "get_discover" => Duration::from_secs(6 * 3600),
             "get_user_list" => Duration::from_secs(15 * 60),
-            "get_airing_schedule" => Duration::from_secs(15 * 60),
+            // A week's calendar is up to ten requests, and what it says only
+            // changes when a broadcaster moves a slot.
+            "get_airing_schedule" => Duration::from_secs(30 * 60),
+            // Held far longer than the list it is derived from: the row set
+            // is keyed by the seed ids, so a list change that does not move
+            // the viewer's top six leaves this entry correct anyway.
+            "viewer_recommendations" => Duration::from_secs(6 * 3600),
             "get_user_profile" => Duration::from_secs(3600),
             "get_notifications" => Duration::from_secs(5 * 60),
             // Media metadata (title, synonyms, episode count, MAL id) is
@@ -212,6 +218,7 @@ impl AniListCache {
             // tapping through a cast list is a walk between them.
             "character_detail" => Duration::from_secs(6 * 3600),
             "staff_detail" => Duration::from_secs(6 * 3600),
+            "studio_detail" => Duration::from_secs(6 * 3600),
             // Forum content is the one live thing here. A thread on an airing
             // show gains replies while its page is open, and someone who
             // posts a comment and reopens the thread must not be handed the

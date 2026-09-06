@@ -8,6 +8,7 @@ pub mod anilist;
 pub mod anizip;
 pub mod cache;
 pub mod jikan;
+pub mod recommend;
 pub mod tmdb;
 
 pub use anilist::AniListClient;
@@ -21,6 +22,38 @@ use cache::AniListCache;
 /// AniList's documented ceiling on `Page(perPage:)`. Paging by a larger
 /// number than the server will actually return steps over comments.
 const THREAD_COMMENTS_PER_PAGE: i64 = 50;
+
+/// Rows per page of the airing calendar, and the ceiling on how many pages
+/// one window is allowed to cost. A week of a busy season is around 250
+/// slots, so 10 pages of 50 covers it with room to spare; the cap is there so
+/// a caller that asks for a year cannot spend fifty requests against
+/// AniList's 90/min budget and starve the rest of the app.
+const AIRING_PER_PAGE: i64 = 50;
+const AIRING_MAX_PAGES: i64 = 10;
+
+/// How many of the viewer's titles seed the "Because you watched" shelf, and
+/// how many recommendations each is asked for.
+const RECOMMENDATION_SEEDS: usize = 6;
+const RECOMMENDATIONS_PER_SEED: i64 = 12;
+
+/// One episode airing at a known time. A projection rather than the raw
+/// schedule node: the calendar draws the media record, and the airing pair is
+/// all it needs from around it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AiringSlot {
+    pub media: anilist::types::MediaItem,
+    pub episode: i32,
+    pub airing_at: i64,
+}
+
+/// One row of the "Because you watched" shelf, before the FFI flattens it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecommendationRow {
+    pub media: anilist::types::MediaItem,
+    pub because_title: String,
+    pub because_catalog_id: i64,
+    pub rating: i32,
+}
 
 /// The catalog clients plus the response cache they share.
 ///
@@ -112,10 +145,31 @@ impl Catalogs {
         status: &str,
         media_type: &str,
     ) -> Result<Vec<anilist::types::MediaItem>, String> {
+        self.user_list_inner(Some(status), media_type).await
+    }
+
+    /// Every status bucket at once, in one request.
+    ///
+    /// The recommender needs both the viewer's highest-rated titles and the
+    /// full set of ids to exclude; asking `user_list` per status would be six
+    /// requests for what `MediaListCollection` returns in one when the
+    /// `$status` argument is simply left out.
+    pub async fn user_list_all(
+        &self,
+        media_type: &str,
+    ) -> Result<Vec<anilist::types::MediaItem>, String> {
+        self.user_list_inner(None, media_type).await
+    }
+
+    async fn user_list_inner(
+        &self,
+        status: Option<&str>,
+        media_type: &str,
+    ) -> Result<Vec<anilist::types::MediaItem>, String> {
         let user_name = self.viewer_name().await?;
         let key = AniListCache::key(
             "get_user_list",
-            &[("user", &user_name), ("type", media_type), ("status", status)],
+            &[("user", &user_name), ("type", media_type), ("status", status.unwrap_or("ALL"))],
         );
         if let Some(hit) = self.cache.get(&key) {
             if let Ok(parsed) = serde_json::from_value(hit) {
@@ -125,7 +179,13 @@ impl Catalogs {
         let mut vars = HashMap::new();
         vars.insert("userName".to_string(), serde_json::json!(user_name));
         vars.insert("type".to_string(), serde_json::json!(media_type));
-        vars.insert("status".to_string(), serde_json::json!(status));
+        // The key is left out entirely rather than sent as null: an undefined
+        // variable makes GraphQL omit the argument, which is what "every
+        // list" means here, while an explicit null is a value the server is
+        // free to filter on.
+        if let Some(status) = status {
+            vars.insert("status".to_string(), serde_json::json!(status));
+        }
         vars.insert("sort".to_string(), serde_json::json!(["UPDATED_TIME_DESC"]));
         let res: anilist::responses::MediaListCollectionResponse = self
             .anilist
@@ -418,6 +478,207 @@ impl Catalogs {
         Ok(staff)
     }
 
+    /// One studio and the shows it led, for a studio page.
+    pub async fn studio_detail(&self, studio_id: i64) -> Result<anilist::types::StudioNode, String> {
+        let key = AniListCache::key("studio_detail", &[("id", &studio_id.to_string())]);
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), serde_json::json!(studio_id));
+        vars.insert("perPage".to_string(), serde_json::json!(50));
+        let res: anilist::responses::StudioDetailResponse = self
+            .anilist
+            .execute(anilist::queries::STUDIO_DETAIL_QUERY, vars)
+            .await?;
+        let studio = res.studio.ok_or_else(|| format!("AniList has no studio {studio_id}"))?;
+        if let Ok(v) = serde_json::to_value(&studio) {
+            self.cache.set(key, v, "studio_detail");
+        }
+        Ok(studio)
+    }
+
+    /// Every episode airing between two unix timestamps, in time order.
+    ///
+    /// Cached under the viewer's name as well as the window, not the window
+    /// alone: each slot carries whether the title is on the caller's own
+    /// list, so a schedule fetched before sign-in would otherwise keep
+    /// answering "on nobody's list" for the whole TTL after signing in.
+    pub async fn airing_schedule(&self, from_unix: i64, to_unix: i64) -> Result<Vec<AiringSlot>, String> {
+        let viewer = self.viewer_name().await.unwrap_or_else(|_| "anonymous".to_string());
+        // Day-granular, so the calendar's own second-by-second "now" does not
+        // make every repaint a fresh key and a fresh request.
+        let key = AniListCache::key(
+            "get_airing_schedule",
+            &[
+                ("user", &viewer),
+                ("from", &from_unix.div_euclid(86_400).to_string()),
+                ("to", &to_unix.div_euclid(86_400).to_string()),
+            ],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value(hit) {
+                return Ok(parsed);
+            }
+        }
+
+        let mut slots = Vec::new();
+        for page in 1..=AIRING_MAX_PAGES {
+            let mut vars = HashMap::new();
+            vars.insert("page".to_string(), serde_json::json!(page));
+            vars.insert("perPage".to_string(), serde_json::json!(AIRING_PER_PAGE));
+            vars.insert("airingAt_greater".to_string(), serde_json::json!(from_unix));
+            vars.insert("airingAt_lesser".to_string(), serde_json::json!(to_unix));
+            let res: anilist::responses::AiringScheduleResponse = self
+                .anilist
+                .execute(anilist::queries::AIRING_SCHEDULE_QUERY, vars)
+                .await?;
+            for node in res.page.airing_schedules.unwrap_or_default() {
+                let Some(media) = node.media else { continue };
+                if media.is_adult.unwrap_or(false) {
+                    continue;
+                }
+                let (Some(airing_at), Some(episode)) = (node.airing_at, node.episode) else {
+                    continue;
+                };
+                slots.push(AiringSlot { media, episode, airing_at });
+            }
+            let has_next = res
+                .page
+                .page_info
+                .and_then(|p| p.has_next_page)
+                .unwrap_or(false);
+            if !has_next {
+                break;
+            }
+        }
+
+        if let Ok(v) = serde_json::to_value(&slots) {
+            self.cache.set(key, v, "get_airing_schedule");
+        }
+        Ok(slots)
+    }
+
+    /// "Because you watched": AniList's own recommendation edges off the
+    /// titles the viewer rated highest, minus everything already on a list.
+    ///
+    /// Signed out this is an empty shelf, not an error — the home page draws
+    /// it alongside rows that need no token, and a thrown error there would
+    /// take the whole page down for a signed-out user.
+    pub async fn viewer_recommendations(&self, limit: usize) -> Result<Vec<RecommendationRow>, String> {
+        if !self.anilist.has_token() {
+            return Ok(Vec::new());
+        }
+        let entries = self.user_list_all("ANIME").await?;
+        // The exclusion set is every list, but only a finished or in-progress
+        // title says anything about taste: seeding from PLANNING would
+        // recommend on the strength of things the viewer has not seen.
+        let on_list: std::collections::HashSet<i64> = entries.iter().map(|m| m.id).collect();
+        let seeds = recommend::pick_seeds(
+            entries
+                .iter()
+                .filter(|m| {
+                    m.media_list_entry
+                        .as_ref()
+                        .and_then(|e| e.status.as_deref())
+                        .is_some_and(|s| s == "COMPLETED" || s == "CURRENT")
+                })
+                .map(|m| recommend::Seed {
+                    catalog_id: m.id,
+                    title: m
+                        .title
+                        .as_ref()
+                        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                        .unwrap_or_default(),
+                    user_score: m.media_list_entry.as_ref().and_then(|e| e.score),
+                    updated_at: m.media_list_entry.as_ref().and_then(|e| e.updated_at),
+                })
+                .collect(),
+            RECOMMENDATION_SEEDS,
+        );
+        if seeds.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut seed_ids: Vec<i64> = seeds.iter().map(|s| s.catalog_id).collect();
+        seed_ids.sort_unstable();
+        let key = AniListCache::key(
+            "viewer_recommendations",
+            &[(
+                "seeds",
+                &seed_ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","),
+            )],
+        );
+        if let Some(hit) = self.cache.get(&key) {
+            if let Ok(parsed) = serde_json::from_value::<Vec<RecommendationRow>>(hit) {
+                // Re-filtered on the way out, not just on the way in. Adding
+                // a recommended title to the list is the likeliest thing a
+                // viewer does with this shelf, and the seed ids the key is
+                // built from do not move when they do — so a cached row set
+                // would go on recommending what they just added for the rest
+                // of the six-hour TTL.
+                return Ok(parsed
+                    .into_iter()
+                    .filter(|row| !on_list.contains(&row.media.id))
+                    .take(limit)
+                    .collect());
+            }
+        }
+
+        let mut vars = HashMap::new();
+        vars.insert("ids".to_string(), serde_json::json!(seed_ids));
+        vars.insert("perPage".to_string(), serde_json::json!(RECOMMENDATIONS_PER_SEED));
+        vars.insert("type".to_string(), serde_json::json!("ANIME"));
+        let res: anilist::responses::BatchRecommendationsResponse = self
+            .anilist
+            .execute(anilist::queries::MEDIA_BATCH_RECOMMENDATIONS_QUERY, vars)
+            .await?;
+
+        // The batch query asks each seed for its id and its edges and nothing
+        // else, so the caption has to come from the list entry we already
+        // hold rather than from the response.
+        let seed_titles: HashMap<i64, String> =
+            seeds.iter().map(|s| (s.catalog_id, s.title.clone())).collect();
+        let mut candidates = Vec::new();
+        for seed in res.page.media.unwrap_or_default() {
+            let Some(title) = seed_titles.get(&seed.id) else { continue };
+            let nodes = seed.recommendations.and_then(|r| r.nodes).unwrap_or_default();
+            for node in nodes {
+                let Some(media) = node.media_recommendation else { continue };
+                if media.is_adult.unwrap_or(false) {
+                    continue;
+                }
+                candidates.push(recommend::Recommendation {
+                    media_id: media.id,
+                    media: *media,
+                    because_catalog_id: seed.id,
+                    because_title: title.clone(),
+                    rating: node.rating.unwrap_or(0),
+                });
+            }
+        }
+
+        // Cached unbounded and sliced per call: `limit` is the caller's shelf
+        // width, and a narrower one must not make the cached row set useless
+        // to a wider one.
+        let ranked = recommend::rank(candidates, &on_list, usize::MAX);
+        let rows: Vec<RecommendationRow> = ranked
+            .into_iter()
+            .map(|r| RecommendationRow {
+                media: r.media,
+                because_title: r.because_title,
+                because_catalog_id: r.because_catalog_id,
+                rating: r.rating,
+            })
+            .collect();
+        if let Ok(v) = serde_json::to_value(&rows) {
+            self.cache.set(key, v, "viewer_recommendations");
+        }
+        Ok(rows.into_iter().take(limit).collect())
+    }
+
     /// A forum thread with its first page of comments.
     ///
     /// Cached for far less time than the rest of this module: a thread on an
@@ -668,6 +929,62 @@ mod tests {
         println!(
             "page 2: {} comments",
             page_two.thread_comments.as_ref().map(|c| c.len()).unwrap_or(0)
+        );
+    }
+
+    /// Live. Same purpose as the block above: only the real schema can say
+    /// that `airingSchedules` accepts these arguments and answers in the
+    /// shape `AiringScheduleResponse` declares.
+    #[tokio::test]
+    #[ignore]
+    async fn live_airing_schedule_covers_a_day() {
+        let now = chrono::Utc::now().timestamp();
+        let slots = catalogs()
+            .airing_schedule(now, now + 24 * 3600)
+            .await
+            .expect("airing schedule");
+        println!("{} slots in the next 24h", slots.len());
+        assert!(!slots.is_empty(), "no episode airs in the next 24 hours");
+        assert!(
+            slots.windows(2).all(|w| w[0].airing_at <= w[1].airing_at),
+            "sort: TIME did not come back in time order"
+        );
+        assert!(slots.iter().all(|s| !s.media.is_adult.unwrap_or(false)));
+    }
+
+    /// Live.
+    #[tokio::test]
+    #[ignore]
+    async fn live_studio_detail() {
+        let studio = catalogs().studio_detail(4).await.expect("studio 4");
+        println!("studio: {:?}", studio.name);
+        assert_eq!(studio.is_animation_studio, Some(true));
+        let nodes = studio.media.as_ref().and_then(|m| m.nodes.as_ref()).expect("no media");
+        assert!(!nodes.is_empty(), "an animation studio with no titles");
+    }
+
+    /// Live, and the only one here that needs a token — the shelf is built
+    /// out of the viewer's own lists. `ANILIST_TOKEN=... cargo test --lib
+    /// catalog::tests::live_viewer_recommendations -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_viewer_recommendations() {
+        let token = std::env::var("ANILIST_TOKEN").ok();
+        assert!(token.is_some(), "set ANILIST_TOKEN to run this");
+        let catalogs = Catalogs::new(reqwest::Client::new(), token, None);
+        let rows = catalogs.viewer_recommendations(20).await.expect("recommendations");
+        for row in &rows {
+            println!(
+                "{} ({}) because {}",
+                row.media.title.as_ref().and_then(|t| t.romaji.as_deref()).unwrap_or(""),
+                row.rating,
+                row.because_title
+            );
+        }
+        assert!(!rows.is_empty(), "no recommendations for a signed-in viewer");
+        assert!(
+            rows.windows(2).all(|w| w[0].rating >= w[1].rating),
+            "rows are not rating-ordered"
         );
     }
 }

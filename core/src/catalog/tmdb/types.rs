@@ -302,6 +302,7 @@ fn blank_item(id: i64) -> MediaItem {
         popularity: None,
         favourites: None,
         is_favourite: None,
+        is_adult: None,
         trending: None,
         studios: None,
         start_date: None,

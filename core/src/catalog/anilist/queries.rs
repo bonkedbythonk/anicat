@@ -26,7 +26,7 @@ query ($id: Int, $type: MediaType) {
     favourites
     isFavourite
     trending
-    studios { nodes { name } }
+    studios { nodes { name } edges { isMain node { id name } } }
     startDate { year month day }
     endDate { year month day }
     nextAiringEpisode { airingAt episode timeUntilAiring }
@@ -424,7 +424,7 @@ query ($ids: [Int], $perPage: Int, $type: MediaType) {
             id type
             title { romaji english native }
             coverImage { large medium }
-            bannerImage format status season seasonYear episodes duration genres tags { name rank } averageScore meanScore
+            bannerImage format status season seasonYear episodes duration genres tags { name rank } averageScore meanScore isAdult
             mediaListEntry { id status score progress }
             siteUrl
           }
@@ -435,13 +435,16 @@ query ($ids: [Int], $perPage: Int, $type: MediaType) {
 }
 "#;
 
+/// The calendar's source: every episode airing inside a window, in time
+/// order. `isAdult` is selected because the calendar is not a search — there
+/// is no query text standing between the viewer and whatever aired, so the
+/// filtering has to happen on the way out.
 pub const AIRING_SCHEDULE_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $airingAt_greater: Int, $airingAt_lesser: Int, $mediaId_in: [Int]) {
+query ($page: Int, $perPage: Int, $airingAt_greater: Int, $airingAt_lesser: Int) {
   Page(page: $page, perPage: $perPage) {
     airingSchedules(
       airingAt_greater: $airingAt_greater,
       airingAt_lesser: $airingAt_lesser,
-      mediaId_in: $mediaId_in,
       sort: TIME
     ) {
       id airingAt episode
@@ -449,11 +452,37 @@ query ($page: Int, $perPage: Int, $airingAt_greater: Int, $airingAt_lesser: Int,
         id type
         title { romaji english }
         coverImage { large medium }
-        bannerImage format status genres averageScore
+        format episodes isAdult
         mediaListEntry { id status progress }
       }
     }
     pageInfo { total currentPage hasNextPage }
+  }
+}
+"#;
+
+/// One studio, plus the shows it is the main studio on, newest first.
+///
+/// `isMain: true` is the difference between a filmography and a list of
+/// everything the company ever put a name on: without it a production
+/// committee member's page fills with titles it only co-funded.
+pub const STUDIO_DETAIL_QUERY: &str = r#"
+query ($id: Int, $perPage: Int) {
+  Studio(id: $id) {
+    id
+    name
+    isAnimationStudio
+    favourites
+    media(sort: START_DATE_DESC, perPage: $perPage, isMain: true) {
+      nodes {
+        id type
+        title { romaji english native }
+        coverImage { large medium }
+        format status season seasonYear episodes duration genres averageScore isAdult
+        mediaListEntry { id status score progress }
+        siteUrl
+      }
+    }
   }
 }
 "#;

@@ -44,6 +44,24 @@ public struct SidebarView: View {
             .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads
         ]
 
+        public static let browseItems: [NavSection] = [
+            .upNext, .schedule, .library, .manga, .novels, .search, .history
+        ]
+
+        public static let systemItems: [NavSection] = [.downloads, .settings]
+
+        /// The order the rail actually draws, which is not `numberedSections`
+        /// — that list ends Settings, Downloads, while the rail renders
+        /// Browse then System and so ends Downloads, Settings. The section
+        /// entrance slides in the direction of travel down this list, so
+        /// reading the numbered order there sent the last two sections the
+        /// wrong way.
+        public static let displayOrder: [NavSection] = browseItems + systemItems
+
+        public var displayIndex: Int {
+            Self.displayOrder.firstIndex(of: self) ?? 0
+        }
+
         public static func fromNumberKey(_ num: Int) -> NavSection? {
             guard num >= 1 && num <= numberedSections.count else { return nil }
             return numberedSections[num - 1]
@@ -65,14 +83,6 @@ public struct SidebarView: View {
     public let onOpenSearchPalette: () -> Void
     @Namespace private var sidebarNavNamespace
 
-    private let browseItems: [NavSection] = [
-        .upNext, .schedule, .library, .manga, .novels, .search, .history
-    ]
-
-    private let systemItems: [NavSection] = [
-        .downloads, .settings
-    ]
-
     public init(currentView: Binding<NavSection>, onOpenSearchPalette: @escaping () -> Void) {
         self._currentView = currentView
         self.onOpenSearchPalette = onOpenSearchPalette
@@ -88,10 +98,10 @@ public struct SidebarView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     // Group: Browse
-                    navGroup(title: "Browse", items: browseItems)
+                    navGroup(title: "Browse", items: NavSection.browseItems)
 
                     // Group: System
-                    navGroup(title: "System", items: systemItems)
+                    navGroup(title: "System", items: NavSection.systemItems)
                 }
                 .padding(.bottom, 8)
             }
@@ -171,7 +181,12 @@ public struct SidebarView: View {
         NavItemButton(item: item, isActive: currentView == item, namespace: sidebarNavNamespace) {
             if currentView != item {
                 SumiHaptics.selection()
-                withAnimation(.snappy) {
+                // Same curve as the row's own `.animation(value: isActive)`
+                // below. `matchedGeometryEffect` only glides while the leaving
+                // and arriving rows animate in one transaction, so two
+                // different curves here made the highlight jump on whichever
+                // side finished first.
+                withAnimation(.snappy(duration: 0.3)) {
                     currentView = item
                 }
             }
@@ -235,7 +250,7 @@ public struct SidebarView: View {
                     }
                 }
                 .animation(.snappy, value: isHovered)
-                .animation(.snappy, value: isActive)
+                .animation(.snappy(duration: 0.3), value: isActive)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)

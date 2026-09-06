@@ -546,8 +546,18 @@ public struct RootView: View {
     }
 
     // MARK: - Section Content Switcher
-    @ViewBuilder
     private var sectionContent: some View {
+        // The slide has to wrap the switch rather than sit beside the `.id`
+        // above: an `AnyTransition` declared here would lose to the one the
+        // identified view already carries, and a wrapper placed outside the
+        // `.id` is not what this property returns.
+        SectionSlide(index: model.currentNavSection.displayIndex) {
+            sectionBody
+        }
+    }
+
+    @ViewBuilder
+    private var sectionBody: some View {
         switch model.currentNavSection {
         case .upNext:
             // Its own View struct, not a computed property here: `homeView`

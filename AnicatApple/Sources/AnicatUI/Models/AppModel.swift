@@ -142,6 +142,9 @@ public final class AppModel: @unchecked Sendable {
     /// The system Now Playing tile and the media keys behind it. Fed from
     /// the same title/episode/cover data Discord presence already gets.
     let nowPlaying = NowPlayingBridge()
+    /// Keeps the display (and so the system) from idling out while an
+    /// episode plays. See `SleepBlocker` for what a laptop does without it.
+    let sleepBlocker = SleepBlocker.system()
     /// Cover of the playing title when it came from the detail fetch in
     /// `ensurePlaybackEpisodes` rather than an open page or a loaded shelf:
     /// a play from the Up Next shelf opens no page, and the shelf's
@@ -568,8 +571,17 @@ public final class AppModel: @unchecked Sendable {
     /// transition and a close cannot each forget one of them.
     private func syncPlaybackSession() {
         guard activeStreamURL != nil else {
+            sleepBlocker.release()
             nowPlaying.clear()
             return
+        }
+        if playerController.isPlaying, let episode = currentPlaybackEpisode {
+            let title = currentPlaybackTitle ?? playerController.title
+            sleepBlocker.hold(reason: "Anicat is playing \(title), episode \(episode)")
+        } else {
+            // Paused is idle as far as the viewer is concerned: a laptop
+            // left on a paused frame should sleep like any other.
+            sleepBlocker.release()
         }
         nowPlaying.updateProgress(
             elapsed: playerController.currentTime,

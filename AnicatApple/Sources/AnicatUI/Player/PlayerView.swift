@@ -61,6 +61,11 @@ public struct PlayerView: View {
     /// as the session does, so its `@State` resets when the player closes —
     /// one intro per session, which is what it is for.
     @State private var hasShownFirstFrame = false
+    #if os(macOS)
+    /// The player's own key handling. See `PlayerKeyMonitor` for why it is a
+    /// second monitor rather than more cases in `RootView.handleKeyDown`.
+    @State private var keyMonitor = PlayerKeyMonitor()
+    #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let miniSize = CGSize(width: 320, height: 180)
@@ -384,44 +389,14 @@ public struct PlayerView: View {
                 .animation(.smooth, value: controller.areControlsVisible)
                 .transition(Self.chromeTransition)
 
-                // AniSkip Floating Action Pill (Bottom Right). Kept floating
+                // Skip pill / auto-skip flash (bottom right). Kept floating
                 // over the video itself, unlike the rest of the chrome — it's a
                 // contextual action tied to what's playing right now, meant to
                 // be seen right where the eye already is, the way
                 // Netflix/Crunchyroll place it.
-                if controller.isIntroActive {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Button(action: {
-                                withAnimation(.snappy) {
-                                    controller.skipIntro()
-                                }
-                            }) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "forward.fill")
-                                        .font(.system(size: 12))
-                                    Text("Skip Opening")
-                                        .sumiTabularMono(size: 12, weight: .bold)
-                                }
-                                .foregroundColor(SumiTheme.background)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(SumiTheme.indigo)
-                                .clipShape(Capsule())
-                                .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
-                            }
-                            .buttonStyle(.sumiPressable)
-                            .padding(.trailing, 24)
-                            .padding(.bottom, controller.areControlsVisible ? 100 : 24)
-                        }
-                    }
+                skipOverlay
                     .frame(width: videoRect.width, height: videoRect.height)
                     .position(x: videoRect.midX, y: videoRect.midY)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .animation(.smooth, value: controller.isIntroActive)
-                }
             } else {
                 // Mini-player chrome: a transparent tap-to-restore catcher
                 // over the whole small video (it sits above `MpvSurface`
@@ -469,7 +444,23 @@ public struct PlayerView: View {
         // cancelled-nowhere timer running after the view goes away.
         .onDisappear {
             controller.cancelAutohide()
+            #if os(macOS)
+            keyMonitor.stop()
+            #endif
         }
+        #if os(macOS)
+        .onAppear {
+            keyMonitor.onKey = { isSkipKey in
+                guard isSkipKey, !controller.autoSkipEnabled,
+                      controller.pendingSkipWindow != nil else { return false }
+                withAnimation(.snappy) {
+                    controller.skipPendingWindow()
+                }
+                return true
+            }
+            keyMonitor.start()
+        }
+        #endif
         // Latched, not mirrored: see `hasShownFirstFrame`. The curve is the
         // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
         // the still handing over to the picture reads as one move with the
@@ -504,6 +495,73 @@ public struct PlayerView: View {
             return "Buffering \(percent)%"
         }
         return "Buffering…"
+    }
+
+    /// The window the Skip pill is offering, if any. Nothing while auto-skip
+    /// is on: the jump has already happened by the time a pill could be seen,
+    /// and `skipFlashLabel` is what reports it instead.
+    private var skipPillWindow: SkipWindow? {
+        guard !controller.autoSkipEnabled else { return nil }
+        return controller.pendingSkipWindow
+    }
+
+    /// Bottom-right of the picture: the manual Skip pill, and above it the
+    /// brief note auto-skip leaves behind. Auto-skip is otherwise completely
+    /// silent, and ninety seconds vanishing with no explanation reads as a
+    /// seek bug rather than as the feature working.
+    private var skipOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let flash = controller.skipFlashLabel {
+                        HStack(spacing: 6) {
+                            Image(systemName: "forward.fill")
+                                .font(.system(size: 10))
+                            Text("Skipped \(flash)")
+                                .sumiTabularMono(size: 11, weight: .medium)
+                        }
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Capsule())
+                        .transition(.opacity)
+                    }
+                    if let window = skipPillWindow {
+                        Button {
+                            withAnimation(.snappy) {
+                                controller.skipPendingWindow()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "forward.fill")
+                                    .font(.system(size: 12))
+                                Text(window.label)
+                                    .sumiTabularMono(size: 12, weight: .bold)
+                                Text("↵")
+                                    .sumiTabularMono(size: 11, weight: .medium)
+                                    .opacity(0.6)
+                            }
+                            .foregroundColor(SumiTheme.background)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(SumiTheme.indigo)
+                            .clipShape(Capsule())
+                            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+                        }
+                        .buttonStyle(.sumiPressable)
+                        .help("\(window.label) (Return or S)")
+                        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .padding(.trailing, 24)
+                .padding(.bottom, controller.areControlsVisible ? 100 : 24)
+            }
+        }
+        .animation(.smooth, value: skipPillWindow)
+        .animation(.smooth, value: controller.skipFlashLabel)
     }
 
     // MARK: - Top Bar
@@ -1045,6 +1103,19 @@ private struct PlayerBottomBar: View {
                 Capsule()
                     .fill(SumiTheme.indigo)
                     .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 4)
+                // Chapter marks. 1pt, over the track rather than notched out
+                // of it: a gap in the filled bar would read as buffering
+                // rather than as a boundary. Drawn only where mpv reported
+                // chapters, so nothing changes for a release without them.
+                if controller.duration > 0 {
+                    ForEach(controller.chapters) { chapter in
+                        Rectangle()
+                            .fill(Color.white.opacity(0.55))
+                            .frame(width: 1, height: 8)
+                            .offset(x: geo.size.width * CGFloat(min(max(chapter.time / controller.duration, 0), 1)))
+                    }
+                    .allowsHitTesting(false)
+                }
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())

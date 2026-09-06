@@ -36,7 +36,18 @@ public final class PlayerController: @unchecked Sendable {
     }
     public var onPlayingStateChange: (@Sendable (_ isPlaying: Bool) -> Void)?
     public var currentTime: Double = 0.0 // seconds
-    public var duration: Double = 0.0 // seconds
+    /// The last chapter of a file has no next chapter to end at, so its
+    /// window is bounded by the duration — which mpv reports through its own
+    /// property observer, sometimes after `MPV_EVENT_FILE_LOADED` has already
+    /// handed over the chapter list. Recomputing here is what gives a
+    /// trailing "Preview" chapter a window at all.
+    public var duration: Double = 0.0 { // seconds
+        didSet {
+            guard duration != oldValue, !chapters.isEmpty else { return }
+            chapterWindows = PlayerChapters.skipWindows(chapters: chapters, duration: duration)
+            applySkipSources()
+        }
+    }
     public var title: String = ""
     public var episodeNumber: Int = 1
     /// The episode's own title (AniZip's, same source `EpisodeItem.title`
@@ -120,20 +131,69 @@ public final class PlayerController: @unchecked Sendable {
     public var sidewaysState: Int = 0
     public var onCycleSideways: (@Sendable () -> Void)?
 
-    // AniSkip (Skip Intro / Outro)
+    // Skip windows (chapters first, AniSkip filling what chapters left).
     public var introStartTime: Double? = nil
     public var introEndTime: Double? = nil
     public var isIntroActive: Bool = false
     public var outroStartTime: Double? = nil
     public var outroEndTime: Double? = nil
     public var isOutroActive: Bool = false
-    /// Guards each interval firing its auto-skip once per episode rather than
-    /// every single time-pos tick while `currentTime` sits inside the
-    /// window — without it, seeking backward into an already-skipped intro
-    /// (scrubbing, rewatching) would immediately auto-skip forward again with
-    /// no way to actually watch that stretch.
-    private var hasAutoSkippedIntro = false
-    private var hasAutoSkippedOutro = false
+    /// mpv's `chapter-list` for the loaded file, in file order. Kept whole
+    /// rather than only the skippable entries: the seek bar draws a tick per
+    /// chapter and the hover tooltip names whichever one the pointer is over,
+    /// and neither cares whether it is skippable.
+    public var chapters: [PlayerChapter] = []
+    /// What the chapters named. Empty for a release with no chapters, which
+    /// is when AniSkip is the only source.
+    public var chapterWindows: [SkipWindow] = []
+    /// The window `currentTime` is inside, if any, and the one the Skip pill
+    /// is showing for (which starts two seconds earlier — see
+    /// `SkipWindow.isPending`).
+    public var activeSkipWindow: SkipWindow?
+    public var pendingSkipWindow: SkipWindow?
+    /// Set for a moment after auto-skip jumps a window, so the player can say
+    /// what it just skipped. Auto-skip is otherwise completely silent, and a
+    /// video that jumps ninety seconds with no explanation reads as a seek
+    /// bug rather than a feature.
+    public var skipFlashLabel: String?
+    private var skipFlashTask: Task<Void, Never>?
+    /// The last AniSkip answer for this episode, kept so a chapter list that
+    /// arrives after it (or a `setChapters` on a later file) can be merged
+    /// against it rather than having overwritten it. Chapters win per kind:
+    /// a release that chapters its opening but not its ending still gets the
+    /// ending from AniSkip.
+    private var aniSkipTimes: AniSkipClient.SkipTimes?
+    /// Which windows auto-skip has already jumped, keyed by start time at
+    /// 0.1 s resolution. Without a guard per window, seeking backward into an
+    /// already-skipped opening (scrubbing, rewatching the sequence) would
+    /// immediately auto-skip forward again with no way to actually watch it.
+    private var skippedWindowKeys: Set<Int> = []
+
+    /// Every window in play, chapters plus whatever AniSkip filled in.
+    public var skipWindows: [SkipWindow] {
+        var windows = chapterWindows
+        if !chapterWindows.contains(where: { $0.kind == .opening }),
+           let start = aniSkipTimes?.introStart, let end = aniSkipTimes?.introEnd, end > start {
+            windows.append(SkipWindow(start: start, end: end, kind: .opening))
+        }
+        if !chapterWindows.contains(where: { $0.kind == .ending }),
+           let start = aniSkipTimes?.outroStart, let end = aniSkipTimes?.outroEnd, end > start {
+            windows.append(SkipWindow(start: start, end: end, kind: .ending))
+        }
+        return windows.sorted { $0.start < $1.start }
+    }
+
+    /// Whether the player is currently shrunk into the corner. Mirrored in
+    /// from `PlayerView` because the next-episode card must not arm behind a
+    /// mini-player: the card is where Cancel lives, and a countdown running
+    /// somewhere the viewer cannot see or stop is worse than no card at all.
+    /// A minimized player falls back to `AppModel`'s own end-of-episode
+    /// auto-next, exactly as before this card existed.
+    public var isMiniPlayerActive: Bool = false
+    public var nextEpisodeCountdown = NextEpisodeCountdown()
+    /// How long before the end the card comes up for a file with no outro
+    /// window from either source.
+    public static let countdownTailSeconds: Double = 30
 
     // Progress & Playback callbacks for real SQLite recording and libmpv sync
     public var onPositionChange: (@Sendable (_ currentTime: Double, _ duration: Double) -> Void)?
@@ -347,31 +407,82 @@ public final class PlayerController: @unchecked Sendable {
     }
 
     public func skipIntro() {
-        if let end = introEndTime {
-            hasAutoSkippedIntro = true
-            seek(to: end)
-            isIntroActive = false
-        }
+        guard let window = skipWindows.first(where: { $0.kind == .opening }) else { return }
+        performSkip(window, flash: false)
     }
 
     public func skipOutro() {
-        if let end = outroEndTime {
-            hasAutoSkippedOutro = true
-            seek(to: end)
-            isOutroActive = false
+        guard let window = skipWindows.first(where: { $0.kind == .ending }) else { return }
+        performSkip(window, flash: false)
+    }
+
+    /// What the Skip pill and its key press do: jump the window the pill is
+    /// showing for, which during the two-second lead-in has not started yet.
+    /// Landing on its end from before its start skips that lead-in too —
+    /// that is what pressing Skip early asks for.
+    public func skipPendingWindow() {
+        guard let window = pendingSkipWindow ?? activeSkipWindow else { return }
+        performSkip(window, flash: false)
+    }
+
+    private static func windowKey(_ window: SkipWindow) -> Int {
+        Int((window.start * 10).rounded())
+    }
+
+    private func performSkip(_ window: SkipWindow, flash: Bool) {
+        // Before the seek, never after: `seek` re-enters `checkIntroStatus`,
+        // which would find `currentTime` still inside the window on a seek
+        // mpv has not applied yet and skip it a second time.
+        skippedWindowKeys.insert(Self.windowKey(window))
+        if flash {
+            flashSkip(window.flashLabel)
         }
+        seek(to: window.end)
+    }
+
+    private func flashSkip(_ label: String) {
+        skipFlashLabel = label
+        skipFlashTask?.cancel()
+        skipFlashTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard !Task.isCancelled else { return }
+            self?.skipFlashLabel = nil
+        }
+    }
+
+    /// mpv's chapter list for the file that just loaded. Called on every file
+    /// load, with an empty list for a release that has no chapters, so the
+    /// previous episode's windows cannot survive into this one.
+    public func setChapters(_ chapters: [PlayerChapter], duration: Double?) {
+        self.chapters = chapters.sorted { $0.time < $1.time }
+        chapterWindows = PlayerChapters.skipWindows(chapters: self.chapters, duration: duration)
+        skippedWindowKeys.removeAll()
+        applySkipSources()
     }
 
     /// Called by `AniSkipClient`'s result for this episode. Resets the
     /// per-episode auto-skip guards so a freshly loaded episode's intro/outro
     /// can auto-skip again even though a previous episode already did.
+    ///
+    /// It no longer simply assigns the four fields: it is called with `nil`
+    /// on every AniSkip miss, and chapters — which are the better source and
+    /// usually arrive first — would have been wiped by that miss.
     public func setAniSkipTimes(_ times: AniSkipClient.SkipTimes?) {
-        introStartTime = times?.introStart
-        introEndTime = times?.introEnd
-        outroStartTime = times?.outroStart
-        outroEndTime = times?.outroEnd
-        hasAutoSkippedIntro = false
-        hasAutoSkippedOutro = false
+        aniSkipTimes = times
+        skippedWindowKeys.removeAll()
+        applySkipSources()
+    }
+
+    /// Recomputes the intro/outro pair from both sources. Chapters win per
+    /// kind rather than wholesale: a release that chapters only its opening
+    /// still takes its ending from AniSkip.
+    private func applySkipSources() {
+        let chapterIntro = chapterWindows.first { $0.kind == .opening }
+        let chapterOutro = chapterWindows.first { $0.kind == .ending }
+        introStartTime = chapterIntro?.start ?? aniSkipTimes?.introStart
+        introEndTime = chapterIntro?.end ?? aniSkipTimes?.introEnd
+        outroStartTime = chapterOutro?.start ?? aniSkipTimes?.outroStart
+        outroEndTime = chapterOutro?.end ?? aniSkipTimes?.outroEnd
         checkIntroStatus()
     }
 
@@ -390,26 +501,73 @@ public final class PlayerController: @unchecked Sendable {
         autoSkipEnabled.toggle()
     }
 
-    /// Despite the name (kept to avoid touching every call site), this
-    /// checks both the intro and outro windows against `currentTime`.
+    /// Despite the name (kept to avoid touching every call site), this walks
+    /// every skip window — chapter-derived and AniSkip alike — against
+    /// `currentTime`, and then gives the next-episode card its tick.
     public func checkIntroStatus() {
-        if let start = introStartTime, let end = introEndTime {
-            isIntroActive = (currentTime >= start && currentTime < end)
-            if isIntroActive, !hasAutoSkippedIntro, autoSkipEnabled {
-                skipIntro()
-            }
-        } else {
-            isIntroActive = false
+        let windows = skipWindows
+        if autoSkipEnabled,
+           let active = windows.first(where: { $0.contains(currentTime) }),
+           !skippedWindowKeys.contains(Self.windowKey(active)) {
+            // `performSkip` seeks, and `seek` re-enters this method with the
+            // post-jump position; the rest of this pass would be working
+            // from a `currentTime` that no longer exists.
+            performSkip(active, flash: true)
+            return
         }
 
-        if let start = outroStartTime, let end = outroEndTime {
-            isOutroActive = (currentTime >= start && currentTime < end)
-            if isOutroActive, !hasAutoSkippedOutro, autoSkipEnabled {
-                skipOutro()
-            }
-        } else {
-            isOutroActive = false
+        let active = windows.first { $0.contains(currentTime) }
+        activeSkipWindow = active
+        pendingSkipWindow = windows.first { $0.isPending(at: currentTime) }
+        isIntroActive = active?.kind == .opening
+        isOutroActive = active?.kind == .ending
+
+        checkNextEpisodeCountdown()
+    }
+
+    /// Arms and ticks the next-episode card. The card only fronts the
+    /// decision `AppModel` already makes — same setting, same "is there a
+    /// next episode" — and adds a window in which the viewer can say no.
+    private func checkNextEpisodeCountdown() {
+        if nextEpisodeCountdown.advance(to: currentTime) {
+            onNextEpisode?()
+            return
         }
+        guard nextEpisodeCountdown.phase == .idle,
+              Self.isNextEpisodeCardEnabled,
+              autoPlayNextEnabled,
+              hasNextEpisode,
+              !isMiniPlayerActive,
+              !awaitingNewFile,
+              duration > 0 else { return }
+        // The outro window from either source, or the last thirty seconds
+        // when neither exists. Auto-skip, when it is on, has already jumped
+        // to the window's end by the time this runs, so the card arms there
+        // and counts its eight seconds over the next episode's own start
+        // rather than over an ending nobody is watching.
+        let trigger = outroStartTime ?? (duration - Self.countdownTailSeconds)
+        guard currentTime >= trigger else { return }
+        nextEpisodeCountdown.arm(at: currentTime)
+    }
+
+    /// Dismisses the card for this episode. Any key, a click outside it, or
+    /// its own Cancel button.
+    public func cancelNextEpisodeCountdown() {
+        guard nextEpisodeCountdown.isVisible else { return }
+        nextEpisodeCountdown.cancel()
+    }
+
+    public func playNextEpisodeNow() {
+        guard nextEpisodeCountdown.playNow() else { return }
+        onNextEpisode?()
+    }
+
+    /// No `@AppStorage` mirror on this object the way auto-skip and
+    /// auto-play have: nothing here binds to it, it is read at the one
+    /// moment the card would arm, and defaulting an absent key to on is the
+    /// whole of its behaviour.
+    static var isNextEpisodeCardEnabled: Bool {
+        UserDefaults.standard.object(forKey: "anicat_next_up_card") as? Bool ?? true
     }
 
     public func showControlsBriefly() {

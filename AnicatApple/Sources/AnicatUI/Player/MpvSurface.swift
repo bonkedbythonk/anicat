@@ -1310,6 +1310,30 @@ public struct MpvSurface {
             return value.isEmpty ? nil : value
         }
 
+        /// mpv's `chapter-list` for the loaded file, read through the string
+        /// property form rather than `MPV_FORMAT_NODE`: the node form hands
+        /// back a map that has to be walked and freed with
+        /// `mpv_free_node_contents`, for a list this file already has a
+        /// two-line idiom for reading (see `trackList`).
+        func readChapters() -> [PlayerChapter] {
+            guard let countString = stringProperty("chapter-list/count"),
+                  let count = Int(countString), count > 0 else { return [] }
+            var chapters: [PlayerChapter] = []
+            // Two blocking property reads each. A sane release has a handful
+            // of chapters; the cap is only so a malformed file cannot hold
+            // the event loop for the length of its list.
+            chapters.reserveCapacity(min(count, 500))
+            for index in 0..<min(count, 500) {
+                guard let timeString = stringProperty("chapter-list/\(index)/time"),
+                      let time = Double(timeString) else { continue }
+                chapters.append(PlayerChapter(
+                    title: stringProperty("chapter-list/\(index)/title") ?? "",
+                    time: time
+                ))
+            }
+            return chapters
+        }
+
         private func startEventLoop() {
             guard let mpv = mpv else { return }
             let eventLoopStopped = eventLoopStopped
@@ -1333,7 +1357,20 @@ public struct MpvSurface {
                     }
 
                     if ev.event_id == MPV_EVENT_FILE_LOADED {
-                        await MainActor.run { self.controller.awaitingNewFile = false }
+                        // Read here, on the event loop's own thread: these
+                        // are blocking property reads that wait on mpv's core
+                        // lock, and this is the one thread already allowed to
+                        // do that (`trackList` is dispatched off main for the
+                        // same reason, because main is what calls it).
+                        let chapters = self.readChapters()
+                        let duration = self.stringProperty("duration").flatMap(Double.init)
+                        await MainActor.run {
+                            self.controller.awaitingNewFile = false
+                            // Unconditional, empty list included: a release
+                            // without chapters must not inherit the previous
+                            // episode's windows.
+                            self.controller.setChapters(chapters, duration: duration)
+                        }
                         continue
                     }
 

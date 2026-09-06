@@ -13,6 +13,158 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
     init(_ value: T) { self.value = value }
 }
 
+/// Which of the two ways of getting mpv's frames on screen is in use.
+///
+/// `.openGL` is the shipped path: libmpv's render API draws into our
+/// `NSOpenGLView` from `MpvRenderTarget`'s thread. `.vulkan` is the path
+/// the iOS port needs and macOS should move to: mpv's own `gpu-next` output
+/// through Vulkan-over-Metal (`macvk` context), drawing into a
+/// `CAMetalLayer` it creates inside the view we hand it as `wid`. No render
+/// context, no render thread, no CGL lock on our side, and OpenGL, which
+/// Apple deprecated in 2018 and Homebrew's mpv 0.41 no longer even offers
+/// as a GPU API, is out of the picture. Anime4K keeps working: `glsl-shaders`
+/// run inside gpu-next regardless of the backend underneath.
+///
+/// Selected by `anicat_render_backend` ("vulkan" or "opengl") read once per
+/// mpv instance, OpenGL until the Vulkan path has been verified against the
+/// cocoa-cb history in CLAUDE.md (a `wid` once meant mpv spawning its own
+/// window).
+private func log_backend(_ message: String) {
+    print("[libmpv] \(message)")
+}
+
+public enum MpvRenderBackend: String, Sendable {
+    case openGL = "opengl"
+    case vulkan = "vulkan"
+
+    static var configured: MpvRenderBackend {
+        // The environment wins over defaults so a second process can be
+        // started on the other backend for comparison without touching
+        // the running app's setting.
+        let raw = ProcessInfo.processInfo.environment["ANICAT_RENDER_BACKEND"]
+            ?? UserDefaults.standard.string(forKey: "anicat_render_backend")
+            ?? ""
+        return MpvRenderBackend(rawValue: raw) ?? .openGL
+    }
+}
+
+/// The view SwiftUI hosts. It owns pointer handling and reports its size to
+/// the controller; what fills it depends on the backend: an `MpvRenderView`
+/// child for OpenGL, or mpv's own layer-backed subview for Vulkan.
+///
+/// Pointer events live on a transparent topmost subview rather than on this
+/// view or the render child: with the Vulkan backend mpv inserts its own
+/// `NSView` subclass that handles mouse events itself (for its input
+/// system, which we have disabled), and would otherwise swallow the click
+/// before it reached us. A catcher above everything makes the two backends
+/// behave the same.
+@MainActor
+public final class MpvHostView: NSView {
+    public weak var coordinator: MpvSurface.Coordinator?
+    /// Immutable after init, so safe to read from the coordinator's setup
+    /// path without a hop.
+    public nonisolated let backend: MpvRenderBackend
+    /// Present for `.openGL` only.
+    public private(set) var glView: MpvRenderView?
+    private let eventCatcher = MpvEventCatcherView(frame: .zero)
+
+    public init(frame frameRect: NSRect, backend: MpvRenderBackend) {
+        self.backend = backend
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+        if backend == .openGL {
+            let gl = MpvRenderView(frame: bounds)
+            gl.autoresizingMask = [.width, .height]
+            addSubview(gl)
+            glView = gl
+        }
+        eventCatcher.frame = bounds
+        eventCatcher.autoresizingMask = [.width, .height]
+        addSubview(eventCatcher)
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    public override var isFlipped: Bool { false }
+
+    /// mpv adds its subview at the end; keep the catcher above it.
+    public override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if subview !== eventCatcher, eventCatcher.superview === self {
+            eventCatcher.removeFromSuperview()
+            addSubview(eventCatcher)
+        }
+    }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        window?.acceptsMouseMovedEvents = true
+        eventCatcher.coordinator = coordinator
+        glView?.coordinator = coordinator
+        coordinator?.attachMpv(to: self)
+        reportContainerSize()
+    }
+
+    public override func layout() {
+        super.layout()
+        reportContainerSize()
+    }
+
+    func reportContainerSize() {
+        coordinator?.controller.videoContainerSize = bounds.size
+    }
+}
+
+/// Transparent, topmost, and the only thing that hears the pointer. See
+/// `MpvHostView`.
+@MainActor
+final class MpvEventCatcherView: NSView {
+    weak var coordinator: MpvSurface.Coordinator?
+    private var trackingArea: NSTrackingArea?
+
+    override var isOpaque: Bool { false }
+
+    /// Every click toggles play/pause immediately, no waiting to see if a
+    /// second click is coming — `clickCount` on this same event already
+    /// tells us that. A double click also carries a fullscreen toggle, at
+    /// the cost of two play/pause flips netting out to no state change
+    /// (the same trade-off YouTube's own player makes) rather than making
+    /// every single click wait ~300ms to find out whether it's a double.
+    override func mouseDown(with event: NSEvent) {
+        coordinator?.controller.togglePlayPause()
+        if event.clickCount >= 2 {
+            if let window = AppWindow.main ?? NSApp.keyWindow {
+                AppWindow.setToolbarVisible(false)
+                window.toggleFullScreen(nil)
+            }
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        self.trackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        coordinator?.controller.showControlsBriefly()
+    }
+}
+
 /// Renders mpv via libmpv's render API (`mpv_render_context`) into our own
 /// `NSOpenGLView`, instead of handing mpv a `wid` and letting its cocoa-cb
 /// backend own a real Cocoa window.
@@ -73,53 +225,6 @@ public final class MpvRenderView: NSOpenGLView {
 
     public required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used — MpvRenderView is always constructed programmatically")
-    }
-
-    private var trackingArea: NSTrackingArea?
-
-    /// Every click toggles play/pause immediately, no waiting to see if a
-    /// second click is coming — `clickCount` on this same event already
-    /// tells us that. A double click also carries a fullscreen toggle, at
-    /// the cost of two play/pause flips netting out to no state change
-    /// (the same trade-off YouTube's own player makes) rather than making
-    /// every single click wait ~300ms to find out whether it's a double.
-    public override func mouseDown(with event: NSEvent) {
-        coordinator?.controller.togglePlayPause()
-        if event.clickCount >= 2 {
-            if let window = AppWindow.main ?? NSApp.keyWindow {
-                AppWindow.setToolbarVisible(false)
-                window.toggleFullScreen(nil)
-            }
-        }
-    }
-
-    public override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        self.trackingArea = area
-    }
-
-    public override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        coordinator?.controller.showControlsBriefly()
-    }
-
-    public override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        window?.acceptsMouseMovedEvents = true
-        coordinator?.attachMpv(to: self)
-        reportContainerSize()
-        publishDrawableSize()
     }
 
     public override func reshape() {
@@ -359,10 +464,11 @@ public struct MpvSurface: NSViewRepresentable {
         self.streamURL = streamURL
     }
 
-    public func makeNSView(context: Context) -> MpvRenderView {
-        let view = MpvRenderView(frame: .zero)
+    public func makeNSView(context: Context) -> MpvHostView {
+        let view = MpvHostView(frame: .zero, backend: MpvRenderBackend.configured)
         view.coordinator = context.coordinator
-        context.coordinator.renderView = view
+        context.coordinator.hostView = view
+        context.coordinator.renderView = view.glView
         context.coordinator.controller = controller
 
         if let streamURL {
@@ -372,10 +478,11 @@ public struct MpvSurface: NSViewRepresentable {
         return view
     }
 
-    public func updateNSView(_ nsView: MpvRenderView, context: Context) {
+    public func updateNSView(_ nsView: MpvHostView, context: Context) {
         let coordinator = context.coordinator
         nsView.coordinator = coordinator
-        coordinator.renderView = nsView
+        coordinator.hostView = nsView
+        coordinator.renderView = nsView.glView
         coordinator.controller = controller
 
         if nsView.window != nil && coordinator.mpvHandle == nil {
@@ -392,7 +499,7 @@ public struct MpvSurface: NSViewRepresentable {
         coordinator.applyAnime4K(enabled: controller.isAnime4KEnabled)
     }
 
-    public static func dismantleNSView(_ nsView: MpvRenderView, coordinator: Coordinator) {
+    public static func dismantleNSView(_ nsView: MpvHostView, coordinator: Coordinator) {
         coordinator.stop()
     }
 
@@ -408,6 +515,7 @@ public struct MpvSurface: NSViewRepresentable {
         private var isRunning = false
         fileprivate var controller: PlayerController
         fileprivate weak var renderView: MpvRenderView?
+        fileprivate weak var hostView: MpvHostView?
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
@@ -436,12 +544,12 @@ public struct MpvSurface: NSViewRepresentable {
             pendingStreamURL = url
         }
 
-        func attachMpv(to view: MpvRenderView) {
+        func attachMpv(to view: MpvHostView) {
             guard mpv == nil else { return }
             setupMpv(for: view, controller: controller)
         }
 
-        func setupMpv(for view: MpvRenderView, controller: PlayerController) {
+        func setupMpv(for view: MpvHostView, controller: PlayerController) {
             guard mpv == nil else { return }
 
             guard let handle = mpv_create() else {
@@ -449,9 +557,28 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            // "libmpv" is the special vo name that opts into the render API
-            // instead of a normal window-owning vo — no "wid" is set at all.
-            mpv_set_option_string(handle, "vo", "libmpv")
+            switch view.backend {
+            case .openGL:
+                // "libmpv" is the special vo name that opts into the render
+                // API instead of a normal window-owning vo — no "wid" is set.
+                mpv_set_option_string(handle, "vo", "libmpv")
+            case .vulkan:
+                // mpv owns the output: gpu-next over Vulkan, which MoltenVK
+                // maps onto Metal, drawing into a CAMetalLayer it creates in
+                // a subview of the view passed as `wid`. All three options
+                // and `wid` have to be set before mpv_initialize; after it
+                // the vo is already built.
+                mpv_set_option_string(handle, "vo", "gpu-next")
+                mpv_set_option_string(handle, "gpu-api", "vulkan")
+                mpv_set_option_string(handle, "gpu-context", "macvk")
+                // Nothing of mpv's own input handling: the event catcher
+                // above its subview is what hears the pointer, and mpv's
+                // key bindings would fight the app's.
+                mpv_set_option_string(handle, "input-cursor", "no")
+                mpv_set_option_string(handle, "input-vo-keyboard", "no")
+                var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(view).toOpaque()))
+                mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
+            }
             mpv_set_option_string(handle, "keep-open", "yes")
 
             // High-performance Apple Silicon settings.
@@ -488,30 +615,36 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            // `NSOpenGLContext` is explicitly non-Sendable, so the target
-            // that owns it is built inside the main-actor block rather than
-            // handing the context out of it.
-            let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
-                view.openGLContext.map { MpvRenderTarget(glContext: $0) }
-            }
-            guard let target else {
-                print("[libmpv] No OpenGL context on render view")
-                mpv_destroy(handle)
-                return
-            }
+            if view.backend == .openGL {
+                // `NSOpenGLContext` is explicitly non-Sendable, so the
+                // target that owns it is built inside the main-actor block
+                // rather than handing the context out of it.
+                let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
+                    view.glView?.openGLContext.map { MpvRenderTarget(glContext: $0) }
+                }
+                guard let target else {
+                    print("[libmpv] No OpenGL context on render view")
+                    mpv_destroy(handle)
+                    return
+                }
 
-            // Created on the render thread, which is the only thread that
-            // will ever touch it again.
-            let createStatus = target.create(mpv: handle)
-            if createStatus < 0 {
-                print("[libmpv] Failed to create render context: \(createStatus)")
-                mpv_destroy(handle)
-                return
-            }
-            self.renderTarget = target
-            MainActor.assumeIsolated {
-                let px = view.convertToBacking(view.bounds).size
-                target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
+                // Created on the render thread, which is the only thread
+                // that will ever touch it again.
+                let createStatus = target.create(mpv: handle)
+                if createStatus < 0 {
+                    print("[libmpv] Failed to create render context: \(createStatus)")
+                    mpv_destroy(handle)
+                    return
+                }
+                self.renderTarget = target
+                MainActor.assumeIsolated {
+                    if let gl = view.glView {
+                        let px = gl.convertToBacking(gl.bounds).size
+                        target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
+                    }
+                }
+            } else {
+                log_backend("vulkan: mpv output attached to host view \(Unmanaged.passUnretained(view).toOpaque())")
             }
 
             self.mpv = handle

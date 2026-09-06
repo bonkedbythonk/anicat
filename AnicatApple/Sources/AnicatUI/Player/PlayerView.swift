@@ -1342,6 +1342,58 @@ private struct PlayerBottomBar: View {
     /// two-row layout this used to be needed more vertical height than the
     /// video's own letterbox gap reliably has, and got clipped at the
     /// bottom in windowed sizes with a smaller gap.
+    /// Where the pointer is along the bar, 0...1, or nil when it is not over
+    /// it. The tooltip is the whole of what this drives; scrubbing has its
+    /// own drag state and does not read this.
+    @State private var hoverFraction: Double?
+
+    private static let tooltipWidth: CGFloat = 150
+
+    /// Time, and the chapter that time is inside. There is no frame preview
+    /// here and deliberately so: the only way to render one without seeking
+    /// the instance that is playing is a second libmpv on the same stream
+    /// URL, which is a second HTTP client pulling pieces from the range
+    /// server. Core pins exactly one playing file and keeps two selected
+    /// files at a time (`SELECTED_FILES_KEPT`), already spent on the playing
+    /// episode and the N+1 preload; a preview client requesting pieces
+    /// nobody is watching is the mid-playback eviction that pin exists to
+    /// prevent, and core cannot tell those reads are speculative.
+    @ViewBuilder
+    private func seekTooltip(width: CGFloat) -> some View {
+        if let hoverFraction, controller.duration > 0 {
+            let time = hoverFraction * controller.duration
+            let chapter = PlayerChapters.chapter(at: time, in: controller.chapters)
+            VStack(spacing: 2) {
+                Text(PlayerController.formatTimestamp(time))
+                    .sumiTabularMono(size: 11, weight: .semibold)
+                    .foregroundColor(SumiTheme.foreground)
+                if let chapter, !chapter.title.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text(chapter.title)
+                        .font(.system(size: 10))
+                        .foregroundColor(SumiTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(width: Self.tooltipWidth)
+            .background(Color.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(SumiTheme.border.opacity(0.6), lineWidth: 1)
+            )
+            .allowsHitTesting(false)
+            // Clamped to the bar rather than centred on the pointer at the
+            // ends, where centring would hang it off the window.
+            .offset(
+                x: min(max(hoverFraction * width - Self.tooltipWidth / 2, 0), max(width - Self.tooltipWidth, 0)),
+                y: -46
+            )
+        }
+    }
+
     private var scrubber: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
@@ -1381,6 +1433,19 @@ private struct PlayerBottomBar: View {
                         controller.seek(to: target)
                     }
             )
+            #if os(macOS)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    hoverFraction = min(max(point.x / geo.size.width, 0), 1)
+                case .ended:
+                    hoverFraction = nil
+                }
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                seekTooltip(width: geo.size.width)
+            }
         }
     }
 

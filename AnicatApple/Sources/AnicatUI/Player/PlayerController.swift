@@ -661,7 +661,14 @@ public final class PlayerController: @unchecked Sendable {
     }
 
     private func formatTime(_ seconds: Double) -> String {
-        let total = Int(seconds)
+        Self.formatTimestamp(seconds)
+    }
+
+    /// Shared with the seek bar's hover tooltip, which has to spell a
+    /// position the viewer is only pointing at rather than one this object
+    /// holds.
+    public static func formatTimestamp(_ seconds: Double) -> String {
+        let total = Int(max(seconds, 0))
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)

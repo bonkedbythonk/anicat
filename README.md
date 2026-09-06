@@ -103,7 +103,7 @@ Cinema mode is catalogued by TMDB and needs a TMDB read access token in Settings
 
 - macOS 14 or later on Apple silicon, with Xcode's command line tools (Swift 6)
 - [Rust](https://rustup.rs/) stable, with the Apple targets: `rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim`
-- [mpv](https://mpv.io) from Homebrew: `brew install mpv` (the package links `/opt/homebrew/opt/mpv/lib`)
+- No mpv install needed: libmpv and FFmpeg come from [MPVKit](https://github.com/mpvkit/MPVKit) as SwiftPM binary dependencies (about 1.7 GB of xcframeworks on first resolve)
 
 ```bash
 git clone https://github.com/bonkedbythonk/anicat.git
@@ -136,7 +136,7 @@ cd core && cargo test --lib && cargo clippy --lib --tests -- -D warnings
 |---|---|
 | [AniList](https://anilist.co) | Library, tracking, search, profile data for anime, manga and novels |
 | [TMDB](https://themoviedb.org) | Catalog for film and TV |
-| [mpv](https://mpv.io) | Media playback, linked as libmpv |
+| [mpv](https://mpv.io) via [MPVKit](https://github.com/mpvkit/MPVKit) | Media playback, libmpv linked statically, drawn through Metal |
 | [librqbit](https://github.com/ikatson/rqbit) | Embedded torrent engine |
 | [MangaDex](https://mangadex.org), [MangaKatana](https://mangakatana.com) | Manga chapters |
 | [Syosetu](https://syosetu.com) | Web novels |

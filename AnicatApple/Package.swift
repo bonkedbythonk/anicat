@@ -21,6 +21,18 @@ let package = Package(
             targets: ["AnicatUI"]
         )
     ],
+    dependencies: [
+        // libmpv, FFmpeg and their dependency closure as prebuilt
+        // xcframeworks for macOS, iOS, tvOS and visionOS, built with
+        // gpu-next, libplacebo and MoltenVK, plus MPVKit's `moltenvk`
+        // context patch: mpv draws into a CAMetalLayer we hand it as `wid`.
+        // Replaces the Homebrew libmpv this package linked from
+        // /opt/homebrew/opt/mpv/lib, which could never work for iOS and
+        // tied the macOS build to whatever `brew upgrade` last installed.
+        // GPL variant: Anicat is GPL-3 already; the variant adds only
+        // Samba, which we do not use, but it is the honest match.
+        .package(url: "https://github.com/mpvkit/MPVKit.git", exact: "1.0.0")
+    ],
     targets: [
         .binaryTarget(
             name: "AnicatCore",
@@ -35,16 +47,11 @@ let package = Package(
             ]
         ),
         .target(
-            name: "Cmpv",
-            path: "Sources/Cmpv",
-            publicHeadersPath: "include",
-            linkerSettings: [
-                .unsafeFlags(["-L/opt/homebrew/opt/mpv/lib", "-lmpv"])
-            ]
-        ),
-        .target(
             name: "AnicatUI",
-            dependencies: ["AnicatCoreKit", "Cmpv"],
+            dependencies: [
+                "AnicatCoreKit",
+                .product(name: "MPVKit-GPL", package: "MPVKit")
+            ],
             path: "Sources/AnicatUI",
             resources: [
                 .copy("Resources/Shaders"),
@@ -54,7 +61,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Anicat",
-            dependencies: ["AnicatUI", "AnicatCoreKit", "Cmpv"],
+            dependencies: ["AnicatUI", "AnicatCoreKit"],
             path: "Sources/AnicatApp"
         ),
         // Covers the FFI boundary itself, independently of any view: the

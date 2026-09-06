@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import OpenGL.GL
-import Cmpv
+import Libmpv
 
 #if os(macOS)
 /// Carries a non-`Sendable` value across an explicit `@Sendable` closure
@@ -13,26 +13,111 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
     init(_ value: T) { self.value = value }
 }
 
-/// Only one way of getting mpv's frames on screen exists on macOS, and it
-/// is the render API below. Tried and rejected 2026-09-06: handing this
-/// view to mpv as `wid` with vo=gpu-next, gpu-api=vulkan, gpu-context=macvk.
-/// mpv's macOS backend does not embed; it created its own 1920x1080 window
-/// ("[vo/gpu-next] Window size: 1920x1080") and went fullscreen in it, the
-/// same behaviour the cocoa-cb notes describe. The render API is the only
-/// embedding path libmpv offers on macOS, and it offers it for OpenGL only,
-/// so OpenGL stays until mpv grows a Metal render API or we ship a patched
-/// libmpv (MPVKit's iOS build patches exactly this for CAMetalLayer wids).
+/// How mpv's frames reach the screen.
+///
+/// `.metal` is where both platforms are going: mpv's own `gpu-next` output
+/// through Vulkan, which MoltenVK maps onto Metal, drawing into a
+/// `CAMetalLayer` we own and hand over as `wid`. That needs MPVKit's
+/// libmpv, whose `moltenvk` context (their patch 0001) takes the layer
+/// pointer and creates a Vulkan surface on it: no window, no view of mpv's
+/// own, no render context or render thread of ours. Stock mpv has no such
+/// context; its macOS backend only knows how to open its own window
+/// (tried 2026-09-06 with `macvk`: "[vo/gpu-next] Window size: 1920x1080"
+/// and a fullscreen window nobody asked for).
+///
+/// `.openGL` is the previous path, libmpv's render API into an
+/// `NSOpenGLView` from `MpvRenderTarget`'s thread. MPVKit's macOS build
+/// keeps `gl` enabled, so it still works; it is the escape hatch
+/// (`anicat_render_backend = "opengl"`) if Metal misbehaves on some
+/// machine, and it goes once a release has shipped without needing it.
+/// Anime4K's `glsl-shaders` run inside gpu-next either way.
+///
+/// Verified on an M4 Pro, macOS 26: video, subtitles, Anime4K, two
+/// open/close cycles, no window of mpv's own, zero libmpv frames on the
+/// main thread under `sample`.
 public enum MpvRenderBackend: String, Sendable {
     case openGL = "opengl"
+    case metal = "metal"
 
-    static var configured: MpvRenderBackend { .openGL }
+    static var configured: MpvRenderBackend {
+        // The environment wins over defaults so a second process can be
+        // started on the other backend without touching the running
+        // app's setting.
+        let raw = ProcessInfo.processInfo.environment["ANICAT_RENDER_BACKEND"]
+            ?? UserDefaults.standard.string(forKey: "anicat_render_backend")
+            ?? ""
+        return MpvRenderBackend(rawValue: raw) ?? .metal
+    }
+}
+
+/// The layer mpv draws into on the `.metal` path.
+///
+/// The `drawableSize` override is MPVKit's workaround, carried over: during
+/// a resize MoltenVK briefly forces the drawable to 1x1 to flush a
+/// presentation, and if that value sticks the picture flickers or stays
+/// 1x1. Refusing sizes that small keeps the last real one.
+final class MpvMetalLayer: CAMetalLayer {
+    override var drawableSize: CGSize {
+        get { super.drawableSize }
+        set {
+            if Int(newValue.width) > 1 && Int(newValue.height) > 1 {
+                super.drawableSize = newValue
+            }
+        }
+    }
+}
+
+/// The `.metal` child: a layer-hosting view whose layer is the
+/// `MpvMetalLayer` mpv renders into. mpv's `moltenvk` context reads the
+/// layer's `drawableSize` when it (re)configures and lets the swapchain
+/// follow it afterwards, so this view's only job is to keep that size in
+/// step with its bounds at the backing scale; there is nothing to draw.
+@MainActor
+public final class MpvMetalView: NSView {
+    let metalLayer = MpvMetalLayer()
+
+    public override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        metalLayer.framebufferOnly = true
+        metalLayer.backgroundColor = NSColor.black.cgColor
+        metalLayer.contentsScale = 2
+        // Layer-hosting (assign before wantsLayer), not layer-backed:
+        // AppKit must not replace or manage this layer.
+        layer = metalLayer
+        wantsLayer = true
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    public override func layout() {
+        super.layout()
+        syncDrawableSize()
+    }
+
+    public override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        syncDrawableSize()
+    }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncDrawableSize()
+    }
+
+    private func syncDrawableSize() {
+        let scale = window?.backingScaleFactor ?? 2
+        metalLayer.contentsScale = scale
+        metalLayer.frame = bounds
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    }
 }
 
 /// The view SwiftUI hosts. It owns pointer handling and reports its size to
-/// the controller; the `MpvRenderView` child does the drawing. Kept as a
-/// separate host so the iOS twin can put a different child (MPVKit's
-/// CAMetalLayer target) under the same pointer handling and the same
-/// coordinator.
+/// the controller; a backend-specific child does the drawing
+/// (`MpvMetalView` or `MpvRenderView`). The iOS twin puts a UIKit
+/// `CAMetalLayer` view in the same slot under the same coordinator.
 ///
 /// Pointer events live on a transparent topmost subview rather than on the
 /// render child, so a child that handles events itself (mpv's own view
@@ -45,6 +130,8 @@ public final class MpvHostView: NSView {
     public nonisolated let backend: MpvRenderBackend
     /// Present for `.openGL` only.
     public private(set) var glView: MpvRenderView?
+    /// Present for `.metal` only.
+    public private(set) var metalView: MpvMetalView?
     private let eventCatcher = MpvEventCatcherView(frame: .zero)
 
     public init(frame frameRect: NSRect, backend: MpvRenderBackend) {
@@ -52,11 +139,17 @@ public final class MpvHostView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        if backend == .openGL {
+        switch backend {
+        case .openGL:
             let gl = MpvRenderView(frame: bounds)
             gl.autoresizingMask = [.width, .height]
             addSubview(gl)
             glView = gl
+        case .metal:
+            let metal = MpvMetalView(frame: bounds)
+            metal.autoresizingMask = [.width, .height]
+            addSubview(metal)
+            metalView = metal
         }
         eventCatcher.frame = bounds
         eventCatcher.autoresizingMask = [.width, .height]
@@ -536,9 +629,41 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            // "libmpv" is the special vo name that opts into the render API
-            // instead of a normal window-owning vo — no "wid" is set at all.
-            mpv_set_option_string(handle, "vo", "libmpv")
+            switch view.backend {
+            case .openGL:
+                // "libmpv" is the special vo name that opts into the render
+                // API instead of a normal window-owning vo — no "wid" is set.
+                mpv_set_option_string(handle, "vo", "libmpv")
+            case .metal:
+                // See MpvRenderBackend. `wid` is the CAMetalLayer pointer;
+                // MPVKit's moltenvk context bridges it back and creates the
+                // Vulkan surface on it. All of this must precede
+                // mpv_initialize, after which the vo already exists.
+                // The layer is not Sendable, so only its address leaves
+                // the main-actor block; that address is all mpv wants.
+                let layerAddress: Int64? = MainActor.assumeIsolated {
+                    view.metalView.map { Int64(Int(bitPattern: Unmanaged.passUnretained($0.metalLayer).toOpaque())) }
+                }
+                guard var wid = layerAddress else {
+                    print("[libmpv] metal backend without a metal layer")
+                    mpv_destroy(handle)
+                    return
+                }
+                mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
+                mpv_set_option_string(handle, "vo", "gpu-next")
+                mpv_set_option_string(handle, "gpu-api", "vulkan")
+                mpv_set_option_string(handle, "gpu-context", "moltenvk")
+                // None of mpv's own input: the event catcher hears the
+                // pointer and the app owns the keyboard.
+                mpv_set_option_string(handle, "input-cursor", "no")
+                mpv_set_option_string(handle, "input-vo-keyboard", "no")
+                mpv_set_option_string(handle, "input-media-keys", "no")
+                // mpv's own warnings to stderr: a vo that fails to come up
+                // says why there and nowhere else, and libmpv is silent by
+                // default.
+                mpv_set_option_string(handle, "terminal", "yes")
+                mpv_set_option_string(handle, "msg-level", "all=warn")
+            }
             mpv_set_option_string(handle, "keep-open", "yes")
 
             // High-performance Apple Silicon settings.
@@ -575,31 +700,33 @@ public struct MpvSurface: NSViewRepresentable {
                 return
             }
 
-            // `NSOpenGLContext` is explicitly non-Sendable, so the target
-            // that owns it is built inside the main-actor block rather than
-            // handing the context out of it.
-            let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
-                view.glView?.openGLContext.map { MpvRenderTarget(glContext: $0) }
-            }
-            guard let target else {
-                print("[libmpv] No OpenGL context on render view")
-                mpv_destroy(handle)
-                return
-            }
+            if view.backend == .openGL {
+                // `NSOpenGLContext` is explicitly non-Sendable, so the
+                // target that owns it is built inside the main-actor block
+                // rather than handing the context out of it.
+                let target = MainActor.assumeIsolated { () -> MpvRenderTarget? in
+                    view.glView?.openGLContext.map { MpvRenderTarget(glContext: $0) }
+                }
+                guard let target else {
+                    print("[libmpv] No OpenGL context on render view")
+                    mpv_destroy(handle)
+                    return
+                }
 
-            // Created on the render thread, which is the only thread that
-            // will ever touch it again.
-            let createStatus = target.create(mpv: handle)
-            if createStatus < 0 {
-                print("[libmpv] Failed to create render context: \(createStatus)")
-                mpv_destroy(handle)
-                return
-            }
-            self.renderTarget = target
-            MainActor.assumeIsolated {
-                if let gl = view.glView {
-                    let px = gl.convertToBacking(gl.bounds).size
-                    target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
+                // Created on the render thread, which is the only thread
+                // that will ever touch it again.
+                let createStatus = target.create(mpv: handle)
+                if createStatus < 0 {
+                    print("[libmpv] Failed to create render context: \(createStatus)")
+                    mpv_destroy(handle)
+                    return
+                }
+                self.renderTarget = target
+                MainActor.assumeIsolated {
+                    if let gl = view.glView {
+                        let px = gl.convertToBacking(gl.bounds).size
+                        target.setPixelSize(width: Int32(px.width), height: Int32(px.height))
+                    }
                 }
             }
 

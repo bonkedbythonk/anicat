@@ -45,10 +45,6 @@ jobs:
         with:
           workspaces: core -> target
 
-      # Cmpv links libmpv from Homebrew at the path Package.swift hardcodes.
-      - name: Install mpv
-        run: brew install mpv
-
       # Produces Frameworks/AnicatCore.xcframework and the generated Swift
       # bindings, none of which are committed.
       - name: Build xcframework

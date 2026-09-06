@@ -24,14 +24,14 @@ work rather than a second target.
  │  Anicat          the executable; window, menu bar, Handoff   │
  │  AnicatUI        SwiftUI views, AppModel, player chrome,     │
  │                  caches, design system, continuity           │
- │  Cmpv            libmpv shim  (links /opt/homebrew/opt/mpv)  │
+ │  MPVKit-GPL      libmpv + FFmpeg, static xcframeworks         │
  │  AnicatCoreKit   generated Swift bindings + Sendable shims   │
  └───────────────┬────────────────────────────┬─────────────────┘
-                 │ UniFFI (sync + async calls) │ libmpv render API
+                 │ UniFFI (sync + async calls) │ wid = CAMetalLayer
  ┌───────────────▼────────────────────┐   ┌───▼──────────────────┐
- │  core  (Rust, staticlib)           │   │  libmpv (OpenGL,     │
- │                                    │   │  hwdec, Anime4K      │
- │  ffi.rs      AnicatEngine surface  │   │  glsl-shaders)       │
+ │  core  (Rust, staticlib)           │   │  libmpv gpu-next,    │
+ │                                    │   │  Vulkan via MoltenVK │
+ │  ffi.rs      AnicatEngine surface  │   │  hwdec, Anime4K      │
  │  catalog/    AniList, TMDB, cache  │   └───▲──────────────────┘
  │  reader/     MangaDex, MangaKatana │       │ HTTP range reads
  │              Syosetu               │       │ (loopback, OS port)
@@ -56,8 +56,10 @@ work rather than a second target.
   snapshots under `~/Library/Caches`. The home screen paints from the last
   snapshot before the engine has finished constructing, then refreshes
   without the loading scrim.
-- **Player** (`Player/`) renders through libmpv's render API into an
-  `NSOpenGLView` (libmpv's public API exposes OpenGL, not Metal, on macOS).
+- **Player** (`Player/`): mpv draws into a `CAMetalLayer` we hand it as
+  `wid`, through `gpu-next` over Vulkan on MoltenVK (MPVKit's `moltenvk`
+  context). No render context or render thread of ours; the OpenGL render
+  API path remains as an escape hatch behind `anicat_render_backend`.
   `PlayerController` is the observable state; `PlayerView` is the chrome,
   fitted to the video's letterboxed rect as reported by the render view
   itself. Intro/outro skip (AniSkip by MyAnimeList id), auto-next and the 85%

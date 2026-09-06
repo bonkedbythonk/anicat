@@ -26,6 +26,31 @@ for t in "${TARGETS[@]}"; do
   cargo build --release --lib --target "$t"
 done
 
+# Collapse each staticlib into one relocatable object that exports only the
+# UniFFI entry points, and archive that. The app also links MPVKit's
+# Libdovi, another Rust staticlib; two Rust runtimes in one link define
+# `_rust_eh_personality` (and the rest of std) twice and ld refuses. With
+# every symbol but `_uniffi_anicat_core_*` / `_ffi_anicat_core_*` made
+# local here, our copy of std is invisible to the outer link and the two
+# coexist. `ld -r` needs the platform spelled out for a relocatable output
+# on current toolchains.
+EXPORTS="$CORE/target/anicat_core.exports"
+printf '_uniffi_anicat_core_*\n_ffi_anicat_core_*\n' > "$EXPORTS"
+prelink() {
+  local target="$1" platform="$2" minver="$3"
+  local dir="$CORE/target/$target/release"
+  local lib="$dir/libanicat_core.a"
+  local obj="$dir/anicat_core_prelinked.o"
+  echo "==> prelink $target"
+  ld -r -arch arm64 -platform_version "$platform" "$minver" "$minver" \
+     -all_load "$lib" -exported_symbols_list "$EXPORTS" -o "$obj"
+  rm -f "$dir/libanicat_core_sealed.a"
+  ar crs "$dir/libanicat_core_sealed.a" "$obj"
+}
+prelink aarch64-apple-darwin  macos          14.0
+prelink aarch64-apple-ios     ios            17.0
+prelink aarch64-apple-ios-sim ios-simulator  17.0
+
 # The generator reads a cdylib, which only the host target can produce here.
 HOST_DYLIB="$CORE/target/aarch64-apple-darwin/release/libanicat_core.dylib"
 GEN="$CORE/target/uniffi-out"
@@ -45,9 +70,9 @@ rm -f "$GEN"/*.modulemap
 rm -rf "$FRAMEWORKS/AnicatCore.xcframework"
 mkdir -p "$FRAMEWORKS"
 xcodebuild -create-xcframework \
-  -library "$CORE/target/aarch64-apple-darwin/release/libanicat_core.a"  -headers "$HEADERS" \
-  -library "$CORE/target/aarch64-apple-ios/release/libanicat_core.a"     -headers "$HEADERS" \
-  -library "$CORE/target/aarch64-apple-ios-sim/release/libanicat_core.a" -headers "$HEADERS" \
+  -library "$CORE/target/aarch64-apple-darwin/release/libanicat_core_sealed.a"  -headers "$HEADERS" \
+  -library "$CORE/target/aarch64-apple-ios/release/libanicat_core_sealed.a"     -headers "$HEADERS" \
+  -library "$CORE/target/aarch64-apple-ios-sim/release/libanicat_core_sealed.a" -headers "$HEADERS" \
   -output "$FRAMEWORKS/AnicatCore.xcframework"
 
 mkdir -p "$OUT/Sources/AnicatCoreKit" "$SHIM/include"

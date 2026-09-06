@@ -7,6 +7,7 @@
 pub mod anilist;
 pub mod anizip;
 pub mod cache;
+pub mod jikan;
 pub mod tmdb;
 
 pub use anilist::AniListClient;

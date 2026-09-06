@@ -192,6 +192,19 @@ impl AniListCache {
             // Same lifetime as media_detail: it's fetched alongside it and
             // changes on the same cadence (a new episode airing).
             "anizip_meta" => Duration::from_secs(60 * 60),
+            // An AniList id's MAL id never changes once it is known, so a
+            // hit is held far longer than the detail record it rides along
+            // with — the point is that a title is looked up once, not once
+            // an hour.
+            "jikan_mal_id" => Duration::from_secs(7 * 24 * 3600),
+            // A miss needs its own cmd, not just its own value: `ttl` is a
+            // pure function of the cmd, and `persistent` recomputes every
+            // reloaded row's expiry from it. Sharing "jikan_mal_id" would
+            // pin a miss for a week — which is wrong for the exact case
+            // this fallback exists for, a show whose MAL entry is being
+            // created right now. Short enough to catch up the same day,
+            // long enough that reopening a detail page costs nothing.
+            "jikan_mal_id_miss" => Duration::from_secs(6 * 3600),
             "get_media_characters" => Duration::from_secs(6 * 3600),
             "get_media_discussions" => Duration::from_secs(30 * 60),
             // A voice actor's filmography changes about as often as a

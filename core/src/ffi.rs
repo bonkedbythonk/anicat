@@ -1074,6 +1074,19 @@ impl AnicatEngine {
 
         let resume = resume_episode(&history, list_progress);
 
+        // AniList leaves `idMal` null on a newly added entry for weeks, and
+        // AniSkip is keyed by MAL id — so the intro/outro skip went missing
+        // for precisely the shows being watched as they air. The guard is
+        // what keeps this free: a title that already has the mapping never
+        // touches Jikan, and neither does any manga. It cannot join the
+        // AniZip `join!` above because it needs the titles and year AniList
+        // has just answered with.
+        let mal_id = match m.id_mal {
+            Some(id) => Some(id),
+            None if is_manga => None,
+            None => self.jikan_mal_id(catalog_id, &m).await,
+        };
+
         let (prequel, sequel) = relations(&m);
 
         let mut relations_list = Vec::new();
@@ -1132,7 +1145,7 @@ impl AnicatEngine {
 
         Ok(MediaDetail {
             catalog_id,
-            mal_id: m.id_mal,
+            mal_id,
             title: m
                 .title
                 .as_ref()
@@ -1450,6 +1463,60 @@ impl AnicatEngine {
             self.catalogs.cache.set(key, v, "anizip_meta");
         }
         map
+    }
+
+    /// The MAL id Jikan can find by title, cached on the AniList id.
+    ///
+    /// Hit and miss are stored under two cmds because `AniListCache::ttl`
+    /// keys on the cmd alone, and the two want very different lifetimes —
+    /// see the arms in `cache.rs`. Both are consulted before any request, so
+    /// a title costs at most one lookup per launch even when the answer was
+    /// "no".
+    async fn jikan_mal_id(&self, anilist_id: i64, m: &crate::catalog::anilist::types::MediaItem) -> Option<i64> {
+        use crate::catalog::cache::AniListCache;
+        use crate::catalog::jikan::MalLookup;
+        let id = anilist_id.to_string();
+        let hit_key = AniListCache::key("jikan_mal_id", &[("id", &id)]);
+        let miss_key = AniListCache::key("jikan_mal_id_miss", &[("id", &id)]);
+        // `and_then` rather than `map`: a row that survived but no longer
+        // reads as a number falls through to a fresh lookup instead of
+        // answering None for the rest of the week-long hit TTL.
+        if let Some(id) = self.catalogs.cache.get(&hit_key).and_then(|v| v.as_i64()) {
+            return Some(id);
+        }
+        if self.catalogs.cache.get(&miss_key).is_some() {
+            return None;
+        }
+
+        // Romaji leads because MAL's own `title` is romanised, so it is the
+        // likeliest exact hit and the one worth spending the first of the
+        // two queries on. Everything after the second entry is only ever
+        // matched against, never sent.
+        let mut titles = Vec::new();
+        if let Some(t) = m.title.as_ref() {
+            titles.extend([t.romaji.clone(), t.english.clone(), t.native.clone()].into_iter().flatten());
+        }
+        titles.extend(m.synonyms.clone().unwrap_or_default());
+        if titles.is_empty() {
+            return None;
+        }
+
+        let year = m.season_year.or_else(|| m.start_date.as_ref().and_then(|d| d.year));
+        let found = crate::catalog::jikan::search_mal_id(&self.http, &titles, year, m.format.as_deref()).await;
+        match found {
+            MalLookup::Found(id) => {
+                self.catalogs.cache.set(hit_key, serde_json::json!(id), "jikan_mal_id");
+                Some(id)
+            }
+            MalLookup::NoMatch => {
+                self.catalogs.cache.set(miss_key, serde_json::json!(true), "jikan_mal_id_miss");
+                None
+            }
+            // Deliberately not cached. An outage that wrote a miss row
+            // would outlive itself by the whole negative TTL, and re-asking
+            // is cheap: a 504 comes back in well under a second.
+            MalLookup::Unavailable => None,
+        }
     }
 }
 

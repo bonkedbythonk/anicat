@@ -22,6 +22,11 @@ public struct MangaReaderView: View {
         case ltr = "LTR (Webtoon/Comic)"
 
         public var id: String { rawValue }
+
+        /// Positive x is to the right on screen. A right-to-left book advances
+        /// leftwards, so the page arriving during a forward turn comes in from
+        /// the left and the one leaving exits to the right.
+        var forwardSlideSign: CGFloat { self == .rtl ? -1 : 1 }
     }
 
     /// How a reading mode takes pointer and keyboard input. Pointer and
@@ -47,15 +52,33 @@ public struct MangaReaderView: View {
     public let onPrevChapter: () -> Void
     public let onClose: () -> Void
 
+    /// In `.double` this is the *first* page of the open spread, not an
+    /// arbitrary page inside it, so `onPageChanged` keeps meaning the same
+    /// thing to the Handoff advertisement in every mode.
     @State private var currentPageIndex: Int = 0
-    @State private var readingMode: ReadingMode = .webtoon
-    @State private var readingDirection: ReadingDirection = .rtl
+    @State private var readingMode: ReadingMode
+    @State private var readingDirection: ReadingDirection
+    @State private var offsetCover: Bool
     @State private var showControls: Bool = true
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
     @State private var wasFullScreenBeforeOpen: Bool = false
     @State private var prefetcher = PagePrefetcher()
+    /// Which pages turned out to be wide enough to be a double-page spread of
+    /// their own. Learned from the decoded pixels rather than declared: a page
+    /// list is URLs, and nothing in it says how a page is shaped.
+    @State private var wideIndices: Set<Int> = []
+    @State private var lastTurnWasForward = true
+    @State private var didPreloadNextChapter = false
+    @State private var didFinishChapter = false
+    @State private var syncToast = false
+    @State private var swipeMonitor = TrackpadSwipeMonitor()
+    /// The catalog id the per-title preferences are keyed on, read once at
+    /// construction. `nil` for a title with no AniList entry behind it, which
+    /// `ReaderPreferences` folds onto the global keys.
+    private let catalogId: Int64?
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isFocused: Bool
 
     // The statics below are `nonisolated` because `View` is `@MainActor` and
@@ -71,6 +94,15 @@ public struct MangaReaderView: View {
     /// The webtoon column's cap, shared with the fit so a page is not decoded
     /// for a width the column never reaches.
     nonisolated static let webtoonMaxWidth: CGFloat = 800
+    /// Above this width-over-height ratio a page is a printed double spread
+    /// already and must stand alone; pairing it with a neighbour would draw
+    /// two half-width pages where one full-width one belongs. 1.2 rather than
+    /// 1.0 because a portrait page scanned with its facing gutter runs a
+    /// little past square without being a spread.
+    nonisolated static let spreadAspectThreshold: CGFloat = 1.2
+    /// How far a page slides while it crossfades. Small on purpose: the turn
+    /// reads as a cut with a direction, not as a carousel.
+    nonisolated static let pageSlide: CGFloat = 6
 
     public init(
         title: String,
@@ -90,18 +122,180 @@ public struct MangaReaderView: View {
         self.onNextChapter = onNextChapter
         self.onPrevChapter = onPrevChapter
         self.onClose = onClose
+        // `AppModel.openReader` points the bridge at the session on this same
+        // actor immediately before assigning `activeReadingSession`, which is
+        // what causes this view to be built, so the id is already there and
+        // the preferences below are the title's own from the first frame.
+        let catalogId = ReaderBridge.shared.catalogId
+        self.catalogId = catalogId
+        self._readingMode = State(initialValue: ReaderPreferences.mode(catalogId: catalogId))
+        self._readingDirection = State(
+            initialValue: ReaderPreferences.isRightToLeft(catalogId: catalogId) ? .rtl : .ltr
+        )
+        self._offsetCover = State(initialValue: ReaderPreferences.offsetsCover(catalogId: catalogId))
     }
 
-    private var pageStep: Int {
-        readingMode == .double ? 2 : 1
+    // MARK: - Spread pairing
+
+    /// Pairs pages into what is drawn at once.
+    ///
+    /// Every mode but `.double` is one page at a time, so this only has to
+    /// answer for spreads: a wide page is a printed spread already and stands
+    /// alone, and `offsetCover` puts the first page alone so every pair after
+    /// it lands on the pairing the book was printed with — a cover is a single
+    /// leaf, and without the offset every spread in the volume is off by one.
+    ///
+    /// `wideIndices` is what the reader has decoded so far, so a page can turn
+    /// out wide after its spread was already laid out and the spreads after it
+    /// shift by one. That reflow is the cost of not knowing a page's shape
+    /// before fetching it: a page list is URLs. The prefetch window answers
+    /// for the pages ahead, so a turn lands on a spread already known to be
+    /// one — but the *opening* spread of a chapter is drawn before anything in
+    /// it has been decoded, so a wide cover re-pairs itself a frame later.
+    /// "Offset cover" is the setting that avoids that on a title where it
+    /// happens every chapter.
+    nonisolated static func spreads(pageCount: Int, wideIndices: Set<Int>, offsetCover: Bool) -> [[Int]] {
+        guard pageCount > 0 else { return [] }
+        var result: [[Int]] = []
+        var index = 0
+        if offsetCover {
+            result.append([0])
+            index = 1
+        }
+        while index < pageCount {
+            if wideIndices.contains(index) {
+                result.append([index])
+                index += 1
+            } else if index + 1 < pageCount, !wideIndices.contains(index + 1) {
+                result.append([index, index + 1])
+                index += 2
+            } else {
+                // Either the last page of an odd chapter, or the page before a
+                // wide one: both stand alone rather than being paired with
+                // something that cannot share the frame.
+                result.append([index])
+                index += 1
+            }
+        }
+        return result
+    }
+
+    /// Which spread `page` falls in. A page can briefly be outside every
+    /// spread while a chapter is being replaced, so the clamp is the answer
+    /// rather than a crash.
+    nonisolated static func spreadIndex(containing page: Int, spreads: [[Int]]) -> Int {
+        guard !spreads.isEmpty else { return 0 }
+        return spreads.firstIndex(where: { $0.contains(page) }) ?? min(max(page, 0), spreads.count - 1)
+    }
+
+    private var currentSpreads: [[Int]] {
+        Self.spreads(pageCount: pageURLs.count, wideIndices: wideIndices, offsetCover: offsetCover)
+    }
+
+    /// The pages drawn right now, in page order. Reading direction is applied
+    /// where they are laid out, not here, so the prefetch and the progress
+    /// readout never have to think about it.
+    private var visiblePages: [Int] {
+        switch readingMode {
+        case .single, .webtoon:
+            return pageURLs.indices.contains(currentPageIndex) ? [currentPageIndex] : []
+        case .double:
+            let spreads = currentSpreads
+            guard !spreads.isEmpty else { return [] }
+            return spreads[Self.spreadIndex(containing: currentPageIndex, spreads: spreads)]
+        }
     }
 
     private func turnPage(forward: Bool) {
-        let delta = forward ? pageStep : -pageStep
-        let next = min(max(currentPageIndex + delta, 0), max(pageURLs.count - 1, 0))
-        guard next != currentPageIndex else { return }
-        currentPageIndex = next
+        let next: Int
+        switch readingMode {
+        case .single, .webtoon:
+            next = min(max(currentPageIndex + (forward ? 1 : -1), 0), max(pageURLs.count - 1, 0))
+        case .double:
+            let spreads = currentSpreads
+            guard !spreads.isEmpty else { return }
+            let current = Self.spreadIndex(containing: currentPageIndex, spreads: spreads)
+            let target = min(max(current + (forward ? 1 : -1), 0), spreads.count - 1)
+            next = spreads[target][0]
+        }
+        guard next != currentPageIndex else {
+            // Already on the last spread, so this turn is what finishes the
+            // chapter; a reader who never turns again would otherwise never
+            // reach the sync below.
+            if forward { noteReadingPosition(currentPageIndex) }
+            return
+        }
+        lastTurnWasForward = forward
+        withAnimation(pageAnimation) { currentPageIndex = next }
         onPageChanged(next)
+        noteReadingPosition(next)
+    }
+
+    // MARK: - Chapter preload and AniList sync
+
+    /// How far through the chapter the reader has got, as the fraction of
+    /// pages behind them once what is on screen has been read.
+    ///
+    /// Derived from `page` rather than from `visiblePages`, which reads
+    /// `currentPageIndex`: this is called from `turnPage` immediately after
+    /// that state is written, and a fraction computed against the page the
+    /// reader has just left is one spread short of the truth.
+    private func readFraction(at page: Int) -> Double {
+        guard pageURLs.count > 0 else { return 0 }
+        let lastShown: Int
+        switch readingMode {
+        case .single, .webtoon:
+            lastShown = page
+        case .double:
+            let spreads = currentSpreads
+            let index = Self.spreadIndex(containing: page, spreads: spreads)
+            lastShown = spreads.indices.contains(index) ? (spreads[index].last ?? page) : page
+        }
+        return Double(max(page, lastShown) + 1) / Double(pageURLs.count)
+    }
+
+    private func noteReadingPosition(_ page: Int) {
+        let fraction = readFraction(at: page)
+        if !didPreloadNextChapter, fraction >= ReaderBridge.preloadThreshold {
+            didPreloadNextChapter = true
+            ReaderBridge.shared.preloadNextChapter()
+        }
+        guard !didFinishChapter, fraction >= 1.0 else { return }
+        didFinishChapter = true
+        Task {
+            guard await ReaderBridge.shared.finishChapter() else { return }
+            withAnimation(.snappy) { syncToast = true }
+            try? await Task.sleep(for: .seconds(2.2))
+            withAnimation(.snappy) { syncToast = false }
+        }
+    }
+
+    // MARK: - Motion
+
+    private var pageAnimation: Animation? {
+        reduceMotion ? nil : .snappy
+    }
+
+    /// Crossfade with a short slide in the direction of travel. Under Reduce
+    /// Motion the slide is dropped and the crossfade stays: a page turn with
+    /// no visual acknowledgement at all reads as a dropped key press.
+    private var pageTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let sign = readingDirection.forwardSlideSign * (lastTurnWasForward ? 1 : -1)
+        return .asymmetric(
+            insertion: .offset(x: Self.pageSlide * sign).combined(with: .opacity),
+            removal: .offset(x: -Self.pageSlide * sign).combined(with: .opacity)
+        )
+    }
+
+    private func notePageSize(index: Int, size: CGSize) {
+        guard size.height > 0 else { return }
+        let isWide = size.width / size.height > Self.spreadAspectThreshold
+        if isWide, !wideIndices.contains(index) {
+            withAnimation(pageAnimation) { _ = wideIndices.insert(index) }
+        } else if !isWide, wideIndices.contains(index) {
+            withAnimation(pageAnimation) { _ = wideIndices.remove(index) }
+        }
     }
 
     // MARK: - Prefetch window and page fit
@@ -128,7 +322,13 @@ public struct MangaReaderView: View {
         mode == .webtoon ? .scroll : .pageTurn
     }
 
-    nonisolated static func prefetchIndices(current: Int, pageCount: Int, mode: ReadingMode) -> [Int] {
+    nonisolated static func prefetchIndices(
+        current: Int,
+        pageCount: Int,
+        mode: ReadingMode,
+        wideIndices: Set<Int> = [],
+        offsetCover: Bool = false
+    ) -> [Int] {
         let shown: Set<Int>
         let candidates: [Int]
         switch mode {
@@ -136,8 +336,17 @@ public struct MangaReaderView: View {
             shown = [current]
             candidates = [current + 1, current + 2, current - 1]
         case .double:
-            shown = [current, current + 1]
-            candidates = [current + 2, current + 3, current - 2, current - 1]
+            // Read off the spread list rather than assumed to be pairs at even
+            // offsets: with a wide page or an offset cover in the chapter, a
+            // fixed `current + 2` warms a page from the middle of a spread and
+            // leaves the one actually about to be shown cold.
+            let spreads = spreads(pageCount: pageCount, wideIndices: wideIndices, offsetCover: offsetCover)
+            guard !spreads.isEmpty else { return [] }
+            let index = spreadIndex(containing: current, spreads: spreads)
+            shown = Set(spreads[index])
+            let ahead = spreads.indices.contains(index + 1) ? spreads[index + 1] : []
+            let behind = spreads.indices.contains(index - 1) ? spreads[index - 1] : []
+            candidates = ahead + behind
         }
         return candidates.filter { $0 >= 0 && $0 < pageCount && !shown.contains($0) }
     }
@@ -177,7 +386,13 @@ public struct MangaReaderView: View {
     }
 
     private func prefetchPlan(fit: ImageFit) -> PrefetchPlan {
-        let indices = Self.prefetchIndices(current: currentPageIndex, pageCount: pageURLs.count, mode: readingMode)
+        let indices = Self.prefetchIndices(
+            current: currentPageIndex,
+            pageCount: pageURLs.count,
+            mode: readingMode,
+            wideIndices: wideIndices,
+            offsetCover: offsetCover
+        )
         return PrefetchPlan(urls: indices.map { pageURLs[$0] }, fit: fit)
     }
 
@@ -248,7 +463,13 @@ public struct MangaReaderView: View {
                 // opens on; a plan keyed on the fit re-warms after a resize or
                 // mode switch, since the cache is keyed on the fit too.
                 .onChange(of: prefetchPlan(fit: fit), initial: true) { _, plan in
-                    prefetcher.replace(urls: plan.urls, fit: plan.fit)
+                    // The next chapter has to be warmed at the same fit or it
+                    // is warmed into a cache slot this reader never reads.
+                    ReaderBridge.shared.pageFit = plan.fit
+                    prefetcher.replace(urls: plan.urls, fit: plan.fit) { url, size in
+                        guard let index = pageURLs.firstIndex(of: url) else { return }
+                        notePageSize(index: index, size: size)
+                    }
                 }
             }
 
@@ -260,6 +481,16 @@ public struct MangaReaderView: View {
                     bottomBar
                 }
                 .transition(.opacity)
+            }
+
+            if syncToast {
+                VStack {
+                    Spacer()
+                    syncedBadge
+                        .padding(.bottom, showControls ? 72 : 24)
+                }
+                .transition(.opacity)
+                .allowsHitTesting(false)
             }
         }
         .focusable()
@@ -282,8 +513,38 @@ public struct MangaReaderView: View {
             turnPage(forward: readingDirection == .ltr)
             return .handled
         }
+        // A chapter turn replaces the page list without replacing the view:
+        // RootView keeps one `if let session` branch with no `.id`, so this
+        // view's identity survives and `State(initialValue: initialPage)` is
+        // honoured only on the first chapter. Left alone, the next chapter
+        // opened at the page the last one ended on — blank when it was
+        // shorter — and counted as finished the instant it appeared.
+        .onChange(of: pageURLs) { _, _ in
+            currentPageIndex = 0
+            wideIndices = []
+            lastTurnWasForward = true
+            didPreloadNextChapter = false
+            didFinishChapter = false
+            syncToast = false
+            noteReadingPosition(0)
+        }
+        .onChange(of: readingMode) { _, mode in
+            ReaderPreferences.setMode(mode, catalogId: catalogId)
+            updateSwipeMonitor()
+        }
+        .onChange(of: readingDirection) { _, direction in
+            ReaderPreferences.setRightToLeft(direction == .rtl, catalogId: catalogId)
+        }
+        .onChange(of: offsetCover) { _, offset in
+            ReaderPreferences.setOffsetsCover(offset, catalogId: catalogId)
+        }
         .onAppear {
             isFocused = true
+            updateSwipeMonitor()
+            // A one-page chapter is finished the moment it opens and is never
+            // turned, so the threshold checks have to run once without a turn
+            // or such a chapter would never sync.
+            noteReadingPosition(currentPageIndex)
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 wasFullScreenBeforeOpen = window.styleMask.contains(.fullScreen)
@@ -295,6 +556,7 @@ public struct MangaReaderView: View {
         }
         .onDisappear {
             prefetcher.cancel()
+            swipeMonitor.stop()
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
@@ -303,6 +565,35 @@ public struct MangaReaderView: View {
             }
             #endif
         }
+    }
+
+    /// The trackpad swipe belongs to the paged modes only: webtoon *is* a
+    /// scroll view, and consuming its horizontal scroll would be the same
+    /// mistake as the overlay that used to swallow the vertical one.
+    private func updateSwipeMonitor() {
+        guard Self.inputMode(for: readingMode) == .pageTurn else {
+            swipeMonitor.stop()
+            return
+        }
+        swipeMonitor.start { rightward in
+            turnPage(forward: (readingDirection == .rtl) == rightward)
+        }
+    }
+
+    private var syncedBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(SumiTheme.success)
+            Text("Synced to AniList")
+                .sumiTabularMono(size: 11, weight: .medium)
+                .foregroundColor(SumiTheme.foreground)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(SumiTheme.card.opacity(0.95))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
     }
 
     private func exitReader() {
@@ -321,7 +612,7 @@ public struct MangaReaderView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 0) {
                 ForEach(Array(pageURLs.enumerated()), id: \.offset) { index, url in
-                    ReaderPageImage(url: url, fit: fit) {
+                    ReaderPageImage(url: url, fit: fit, onDecoded: { notePageSize(index: index, size: $0) }) {
                         Rectangle()
                             .fill(SumiTheme.card)
                             .frame(height: 600)
@@ -349,6 +640,7 @@ public struct MangaReaderView: View {
                     .onAppear {
                         currentPageIndex = index
                         onPageChanged(index)
+                        noteReadingPosition(index)
                     }
                 }
             }
@@ -358,20 +650,14 @@ public struct MangaReaderView: View {
 
     // MARK: - Single Page View
     private func singlePageView(fit: ImageFit) -> some View {
+        // The ZStack is what lets the outgoing and incoming page occupy the
+        // frame together for the length of the crossfade; in a plain `if` the
+        // old page is gone before the new one is laid out and the transition
+        // has nothing to cross into.
         ZStack {
             if pageURLs.indices.contains(currentPageIndex) {
-                ReaderPageImage(url: pageURLs[currentPageIndex], fit: fit) {
-                    ProgressView()
-                } failure: {
-                    ProgressView()
-                }
-                // Keyed on the URL so a turn builds a fresh view. With one
-                // identity across turns, `State(initialValue:)` in the page's
-                // init is honored only once, so the prefetched page's
-                // synchronous cache hit never reached the first frame, and a
-                // turn to a page not yet fetched left the *previous* page on
-                // screen with nothing acknowledging the key press.
-                .id(pageURLs[currentPageIndex])
+                page(at: currentPageIndex, fit: fit)
+                    .transition(pageTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -379,30 +665,45 @@ public struct MangaReaderView: View {
 
     // MARK: - Double Page View
     private func doublePageView(fit: ImageFit) -> some View {
-        HStack(spacing: Self.spreadSpacing) {
-            let leftIndex = readingDirection == .rtl ? currentPageIndex + 1 : currentPageIndex
-            let rightIndex = readingDirection == .rtl ? currentPageIndex : currentPageIndex + 1
-
-            // Keyed on the URL for the same reason as the single page view.
-            if pageURLs.indices.contains(leftIndex) {
-                ReaderPageImage(url: pageURLs[leftIndex], fit: fit) {
-                    EmptyView()
-                } failure: {
-                    EmptyView()
+        ZStack {
+            let pages = visiblePages
+            if !pages.isEmpty {
+                HStack(spacing: Self.spreadSpacing) {
+                    // Reading order is applied here and nowhere else: the
+                    // spread is a list of pages in page order, and a
+                    // right-to-left book simply draws that list mirrored.
+                    ForEach(readingDirection == .rtl ? pages.reversed() : pages, id: \.self) { index in
+                        page(at: index, fit: fit)
+                    }
                 }
-                .id(pageURLs[leftIndex])
-            }
-
-            if pageURLs.indices.contains(rightIndex) {
-                ReaderPageImage(url: pageURLs[rightIndex], fit: fit) {
-                    EmptyView()
-                } failure: {
-                    EmptyView()
-                }
-                .id(pageURLs[rightIndex])
+                // Keyed on the spread, so a turn transitions the pair as one
+                // unit. Keying the two pages individually crossfaded them out
+                // of step and, in an HStack, moved the surviving one sideways
+                // while the other faded.
+                .id(pages)
+                .transition(pageTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Keyed on the URL so a turn builds a fresh view. With one identity
+    /// across turns, `State(initialValue:)` in the page's init is honored only
+    /// once, so the prefetched page's synchronous cache hit never reached the
+    /// first frame, and a turn to a page not yet fetched left the *previous*
+    /// page on screen with nothing acknowledging the key press.
+    private func page(at index: Int, fit: ImageFit) -> some View {
+        ReaderPageImage(
+            url: pageURLs[index],
+            fit: fit,
+            onDecoded: { notePageSize(index: index, size: $0) }
+        ) {
+            ProgressView()
+        } failure: {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundColor(SumiTheme.warning)
+        }
+        .id(pageURLs[index])
     }
 
     // MARK: - Top Bar
@@ -445,6 +746,28 @@ public struct MangaReaderView: View {
             }
             .buttonStyle(.sumiPressable)
             .padding(.trailing, 4)
+
+            // Only meaningful while pages are being paired, and a toggle that
+            // changes nothing visible is worse than an absent one.
+            if readingMode == .double {
+                Button(action: { offsetCover.toggle() }) {
+                    Label("Offset cover", systemImage: offsetCover ? "book.closed.fill" : "book.closed")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 12))
+                        .foregroundColor(offsetCover ? SumiTheme.background : SumiTheme.muted)
+                        .frame(width: 32, height: 32)
+                        .background(offsetCover ? SumiTheme.indigo : SumiTheme.card.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Show the first page alone so the spreads after it match the printed pairing.")
+                .animation(.snappy, value: offsetCover)
+                .padding(.trailing, 4)
+            }
 
             // Reading Direction Toggle
             Button(action: {
@@ -498,6 +821,19 @@ public struct MangaReaderView: View {
         )
     }
 
+    /// Names both pages of a spread rather than only its first: "Page 11 / 40"
+    /// while pages 11 and 12 are on screen is a readout that disagrees with
+    /// what the reader can see.
+    private var pageReadout: String {
+        let total = max(pageURLs.count, 1)
+        let pages = visiblePages
+        guard let first = pages.first else { return "Page 1 / \(total)" }
+        if let last = pages.last, last != first {
+            return "Pages \(first + 1)-\(last + 1) / \(total)"
+        }
+        return "Page \(first + 1) / \(total)"
+    }
+
     // MARK: - Bottom Bar
     private var bottomBar: some View {
         HStack(spacing: 16) {
@@ -510,7 +846,7 @@ public struct MangaReaderView: View {
 
             Spacer()
 
-            Text("Page \(currentPageIndex + 1) / \(max(pageURLs.count, 1))")
+            Text(pageReadout)
                 .sumiTabularMono(size: 12, weight: .medium)
                 .foregroundColor(SumiTheme.foreground)
 
@@ -556,6 +892,10 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
 
     let url: URL
     let fit: ImageFit
+    /// The decoded pixel size, which is where the reader learns a page's
+    /// aspect. A decode is aspect-fitted into the box, so the ratio is the
+    /// source's even though the size is not.
+    let onDecoded: (CGSize) -> Void
     @ViewBuilder let placeholder: () -> Placeholder
     @ViewBuilder let failure: () -> Failure
 
@@ -564,11 +904,13 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
     init(
         url: URL,
         fit: ImageFit,
+        onDecoded: @escaping (CGSize) -> Void = { _ in },
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = url
         self.fit = fit
+        self.onDecoded = onDecoded
         self.placeholder = placeholder
         self.failure = failure
         // Synchronous cache check at construction, as `CachedAsyncImage`
@@ -589,6 +931,20 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
         let fit: ImageFit
     }
 
+    /// `Phase` holds a `CGImage`, which is not `Equatable`, so the size is
+    /// pulled out into something `onChange` can compare.
+    private struct LoadedSize: Equatable {
+        let size: CGSize?
+
+        init(phase: Phase) {
+            if case .loaded(let image) = phase {
+                size = CGSize(width: image.width, height: image.height)
+            } else {
+                size = nil
+            }
+        }
+    }
+
     var body: some View {
         Group {
             switch phase {
@@ -601,6 +957,12 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
             case .failed:
                 failure()
             }
+        }
+        // Reported from here rather than from the init's cache hit: a `View`
+        // init runs during a body evaluation, and writing the reader's state
+        // from one is the "Modifying state during view update" trap.
+        .onChange(of: LoadedSize(phase: phase), initial: true) { _, loaded in
+            if let size = loaded.size { onDecoded(size) }
         }
         .task(id: LoadKey(url: url, fit: fit)) {
             if let cached = ImageDecodeCache.shared.cachedImage(for: url, fit: fit) {
@@ -631,17 +993,89 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
 /// the old task so pages the reader has moved past are never started; the
 /// fetches already in flight are shared through the decode cache and finish
 /// on their own. `cancel()` on close drops the last window with the reader.
+///
+/// Sequential, one page at a time, for the reason `ImageDecodeCache.prefetch`
+/// gives: three concurrent page fetches share the connection with the page the
+/// reader is waiting on. This drives the loop itself rather than calling that
+/// helper only so each page's decoded size can be reported as it lands — which
+/// is how a wide page is discovered before its spread is reached instead of
+/// when it is drawn. The loop awaits and does no work of its own; the fetch and
+/// the decode still run detached, at `.utility`, behind anything visible.
 @MainActor
 final class PagePrefetcher {
     private var task: Task<Void, Never>?
 
-    func replace(urls: [URL], fit: ImageFit) {
+    func replace(urls: [URL], fit: ImageFit, onDecoded: @escaping (URL, CGSize) -> Void) {
         task?.cancel()
-        task = urls.isEmpty ? nil : ImageDecodeCache.shared.prefetch(urls, fit: fit)
+        guard !urls.isEmpty else {
+            task = nil
+            return
+        }
+        task = Task {
+            for url in urls {
+                guard !Task.isCancelled else { return }
+                guard let image = await ImageDecodeCache.shared.image(for: url, fit: fit, priority: .utility)
+                else { continue }
+                guard !Task.isCancelled else { return }
+                onDecoded(url, CGSize(width: image.width, height: image.height))
+            }
+        }
     }
 
     func cancel() {
         task?.cancel()
         task = nil
+    }
+}
+
+// MARK: - Trackpad swipe
+
+/// Horizontal two-finger trackpad swipe as a page turn.
+///
+/// A swipe over a view that does not scroll arrives as `.scrollWheel` events,
+/// never as a `DragGesture` — SwiftUI's drag wants a pressed pointer — so a
+/// flick over the paged modes did nothing at all. The deltas are accumulated
+/// against a threshold and the momentum tail is dropped: one flick delivers
+/// dozens of events and then coasts, and acting on each of them turned five
+/// spreads on a single swipe.
+@MainActor
+final class TrackpadSwipeMonitor {
+    /// Points of horizontal travel a turn costs. Low enough for a flick, high
+    /// enough that the sideways drift in a two-finger vertical scroll does not
+    /// reach it.
+    static let threshold: CGFloat = 40
+
+    private var monitor: Any?
+    private var accumulated: CGFloat = 0
+
+    func start(_ onSwipe: @escaping (Bool) -> Void) {
+        stop()
+        #if os(macOS)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            // The coast after the fingers lift. Reading it turns pages the
+            // reader has already stopped asking for.
+            guard event.momentumPhase.isEmpty else { return event }
+            if event.phase.contains(.began) { self.accumulated = 0 }
+            // A vertical scroll is not this gesture's business, and the reader
+            // pinches and scrolls with the same two fingers.
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return event }
+            self.accumulated += event.scrollingDeltaX
+            if abs(self.accumulated) >= Self.threshold {
+                onSwipe(self.accumulated > 0)
+                self.accumulated = 0
+            }
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) { self.accumulated = 0 }
+            return nil
+        }
+        #endif
+    }
+
+    func stop() {
+        #if os(macOS)
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        #endif
+        monitor = nil
+        accumulated = 0
     }
 }

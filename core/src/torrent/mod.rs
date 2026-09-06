@@ -12,7 +12,7 @@ pub mod series;
 pub mod search;
 pub mod stream;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -396,7 +396,7 @@ impl TorrentManager {
             tokio::runtime::Builder::new_current_thread()
                 .build()
                 .expect("tokio runtime for startup cache cleanup")
-                .block_on(cleanup_cache(&dir, None));
+                .block_on(cleanup_cache(&dir, None, &HashSet::new()));
         });
         Self {
             session: tokio::sync::OnceCell::new(),
@@ -536,6 +536,18 @@ impl TorrentManager {
             .unwrap_or_else(|e| e.into_inner())
             .filter(|(t, _)| *t == torrent_id)
             .map(|(_, f)| f)
+    }
+
+    /// The session ids a cache sweep must not evict: the torrent a player is
+    /// reading, and the one a resolve just produced (the preload, whose file
+    /// has not been opened yet and so has no pin of its own).
+    fn cleanup_protected(&self, just_resolved: Option<usize>) -> HashSet<usize> {
+        let mut ids = HashSet::new();
+        if let Some((t, _)) = *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) {
+            ids.insert(t);
+        }
+        ids.extend(just_resolved);
+        ids
     }
 
     /// Record the file behind `(media, episode)` as the one a player is now
@@ -759,7 +771,8 @@ impl TorrentManager {
                     self.commit_resolution(media, episode, r, &cand).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                    let protected = self.cleanup_protected(Some(r.torrent_id));
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
                     log::info!(
                         "[resolve] torrent remembered release '{}' still good for media={} ep={} (torrent {}, file {}, session={}ms, total={}ms)",
                         cand.name, media, episode, r.torrent_id, r.file_id, session_ms, stage.elapsed().as_millis()
@@ -973,7 +986,8 @@ impl TorrentManager {
                 self.commit_resolution(media, episode, r, cand).await;
                 let dir = self.cache_dir.clone();
                 let session_for_cleanup = session.clone();
-                tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                let protected = self.cleanup_protected(Some(r.torrent_id));
+                tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
                 log::info!(
                     "torrent: streaming '{}' (torrent {}, file {})",
                     cand.name, r.torrent_id, r.file_id
@@ -1000,7 +1014,8 @@ impl TorrentManager {
                     self.commit_resolution(media, episode, r, cand).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                    let protected = self.cleanup_protected(Some(r.torrent_id));
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
                     log::info!(
                         "torrent: streaming '{}' (torrent {}, file {})",
                         cand.name, r.torrent_id, r.file_id
@@ -1041,7 +1056,8 @@ impl TorrentManager {
                     self.commit_resolution(media, episode, r, cand).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup)).await });
+                    let protected = self.cleanup_protected(Some(r.torrent_id));
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
                     log::info!(
                         "torrent: streaming '{}' (torrent {}, file {}) from the extended fallback pool",
                         cand.name, r.torrent_id, r.file_id
@@ -1150,7 +1166,7 @@ impl TorrentManager {
         for h in handles {
             let _ = session.pause(&h).await;
         }
-        cleanup_cache(&self.cache_dir, Some(&session)).await;
+        cleanup_cache(&self.cache_dir, Some(&session), &self.cleanup_protected(None)).await;
     }
 
     /// True while any torrent in the session is still downloading (live and
@@ -2230,7 +2246,15 @@ fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
 /// lifetime stayed fully live in memory even after its file was deleted —
 /// across a long session watching many episodes, that's how memory grew
 /// large enough to trigger the OS's own out-of-memory prompt.
-async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>) {
+/// `protected` holds session ids the sweep must step over whatever their
+/// age. The grace window is keyed on the newest file mtime under each
+/// directory, and a finished download stops changing: on a fast swarm an
+/// episode is complete a few minutes in, so by the 75% preload (18 min into
+/// a 24 min episode) the file being played was more than 10 minutes "old",
+/// the cache sat at 8.7 GB against a 3 GB cap, and this sweep deleted the
+/// torrent mpv was reading. Playback then stopped at around 20 minutes,
+/// every episode, with nothing to buffer because the file was gone.
+async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>, protected: &HashSet<usize>) {
     // The scan walks every torrent directory in the cache and stats every file
     // in it, which on a multi-GB cache is real, uninterruptible disk work.
     // This function became async so it could tell the Session about what it
@@ -2288,6 +2312,9 @@ async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>) {
             .file_name()
             .and_then(|n| n.to_str())
             .and_then(|name| id_by_name.get(name));
+        if matched_id.is_some_and(|id| protected.contains(id)) {
+            continue;
+        }
         if let (Some(session), Some(&id)) = (session, matched_id) {
             if session.delete(id.into(), true).await.is_ok() {
                 log::info!("torrent: evicted {} (session id {}, {} MB)", path.display(), id, size / (1024 * 1024));

@@ -221,8 +221,14 @@ extension AppModel {
         becauseYouWatched = recommended.map(Self.recommendationCard)
 
         let planningIds = Set(planningItems.map(\.id))
-        let fill = trendingItems.filter { !planningIds.contains($0.id) }
-        smartPicks = Array((planningItems.shuffled() + fill).prefix(20))
+        // Dealt again only when the planning list itself changes. Every
+        // refresh (each watched episode triggers one) used to reshuffle, and
+        // twenty posters jumping under the cursor read as a bug, not variety.
+        if planningIds != smartPicksSeed || smartPicks.isEmpty {
+            let fill = trendingItems.filter { !planningIds.contains($0.id) }
+            smartPicks = Array((planningItems.shuffled() + fill).prefix(20))
+            smartPicksSeed = planningIds
+        }
     }
 
     /// Wipes resume positions, provider overrides, and the offline list
@@ -241,7 +247,7 @@ extension AppModel {
     /// Maps the engine's flat summary onto a card. One place, so a card in
     /// the Library draws its progress tick from the same fields as one in a
     /// home shelf.
-    static func card(_ s: MediaSummary) -> MediaCard.Item {
+    nonisolated static func card(_ s: MediaSummary) -> MediaCard.Item {
         let total = s.episodes ?? s.chapters
         let progress = s.progress.map { Int($0) }
         // s.nextEpisode is nil once a show stops airing, whether finished or
@@ -373,7 +379,7 @@ extension AppModel {
     /// `format` is the only thing telling the two apart: AniList has no
     /// separate novel type, so both tabs are fed from a single request rather
     /// than paying for two round trips that would return overlapping rows.
-    static func splitByFormat(_ rows: [MediaSummary]) -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
+    nonisolated static func splitByFormat(_ rows: [MediaSummary]) -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
         (
             manga: rows.filter { $0.format != "NOVEL" }.map(card),
             novel: rows.filter { $0.format == "NOVEL" }.map(card)

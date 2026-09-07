@@ -220,7 +220,7 @@ public struct RootView: View {
                                 onDownloadEpisode: { ep in
                                     Task { await model.startDownload(episode: ep.number) }
                                 },
-                                downloadStates: model.downloadStates,
+                                downloadStates: { model.downloadStates },
                                 namespace: model.openingDetailSourceKey != nil ? cardNamespace : nil,
                                 playerNamespace: playerNamespace,
                                 playerSourceKey: model.openingPlayerSourceKey,
@@ -877,6 +877,7 @@ public struct RootView: View {
 /// `morphThumbnailURL` is the shelf row's still, when the caller has one on
 /// screen — the menu bar's Resume does not, and leaves it nil for a plain
 /// fade.
+@MainActor
 public func playFromShelf(
     model: AppModel,
     catalogId: Int64,
@@ -929,6 +930,7 @@ public func playFromShelf(
 /// including the nil case, rather than only where a row exists: a play from
 /// somewhere with no row at all (Downloads, the retry closure) would
 /// otherwise inherit whatever the last play left set and fly a stale still.
+@MainActor
 private func playEpisode(
     model: AppModel,
     catalogId: Int64,
@@ -1147,11 +1149,8 @@ private struct HomeSectionView: View {
                 // Watching is fixed, not configurable — same split as
                 // HomeView.tsx (queue + Watching are the front page; the rest
                 // are rows the user can reorder or hide).
-                if !model.watchingItems.isEmpty {
-                    mediaRow(title: "Watching", count: model.watchingItems.count, items: model.watchingItems, shelfKey: "watching")
-                } else if model.isSignedIn && model.isLoading {
-                    MediaRowSkeleton(title: "Watching")
-                }
+                HomeShelf(model: model, title: "Watching", shelfKey: "watching", items: \.watchingItems,
+                          skeleton: .whenSignedInAndLoading, namespace: namespace, onOpenDetail: onOpenDetail)
 
                 // Configurable rows, in the user's saved order; hidden ones
                 // are skipped entirely rather than shown collapsed.
@@ -1196,52 +1195,72 @@ private struct HomeSectionView: View {
     private func homeDiscoverRow(id: String, title: String) -> some View {
         switch id {
         case "becauseYouWatched":
-            // No skeleton branch: signed out the engine answers with an
-            // empty list rather than an error, so a placeholder here would
-            // sit on the page forever for anyone without a token.
-            if !model.becauseYouWatched.isEmpty {
-                mediaRow(title: title, count: model.becauseYouWatched.count, items: model.becauseYouWatched, shelfKey: "because")
-            }
+            // No skeleton: signed out the engine answers with an empty list
+            // rather than an error, so a placeholder here would sit on the
+            // page forever for anyone without a token.
+            HomeShelf(model: model, title: title, shelfKey: "because", items: \.becauseYouWatched,
+                      skeleton: .never, namespace: namespace, onOpenDetail: onOpenDetail)
         case "planning":
-            if model.isSignedIn {
-                if !model.planningItems.isEmpty {
-                    mediaRow(title: title, count: model.planningItems.count, items: model.planningItems, shelfKey: id)
-                } else if model.isLoading {
-                    MediaRowSkeleton(title: title)
-                }
-            }
+            HomeShelf(model: model, title: title, shelfKey: id, items: \.planningItems,
+                      requiresSignIn: true, namespace: namespace, onOpenDetail: onOpenDetail)
         case "smartPlaylist":
-            if model.isSignedIn {
-                if !model.smartPicks.isEmpty {
-                    mediaRow(title: title, count: model.smartPicks.count, items: model.smartPicks, shelfKey: id)
-                } else if model.isLoading {
-                    MediaRowSkeleton(title: title)
-                }
-            }
+            HomeShelf(model: model, title: title, shelfKey: id, items: \.smartPicks,
+                      requiresSignIn: true, namespace: namespace, onOpenDetail: onOpenDetail)
         case "trending":
-            if !model.trendingItems.isEmpty {
-                mediaRow(title: title, count: model.trendingItems.count, items: model.trendingItems, shelfKey: id)
-            } else if model.isLoading {
-                MediaRowSkeleton(title: title)
-            }
+            HomeShelf(model: model, title: title, shelfKey: id, items: \.trendingItems,
+                      namespace: namespace, onOpenDetail: onOpenDetail)
         case "newlyReleasing":
-            if !model.newlyReleasingItems.isEmpty {
-                mediaRow(title: title, count: model.newlyReleasingItems.count, items: model.newlyReleasingItems, shelfKey: id)
-            } else if model.isLoading {
-                MediaRowSkeleton(title: title)
-            }
+            HomeShelf(model: model, title: title, shelfKey: id, items: \.newlyReleasingItems,
+                      namespace: namespace, onOpenDetail: onOpenDetail)
         case "seasonal":
-            if !model.seasonalItems.isEmpty {
-                mediaRow(title: title, count: model.seasonalItems.count, items: model.seasonalItems, shelfKey: id)
-            } else if model.isLoading {
-                MediaRowSkeleton(title: title)
-            }
+            HomeShelf(model: model, title: title, shelfKey: id, items: \.seasonalItems,
+                      namespace: namespace, onOpenDetail: onOpenDetail)
         default:
             EmptyView()
         }
     }
+}
 
-    private func mediaRow(title: String, count: Int, items: [MediaCard.Item], shelfKey: String) -> some View {
+/// One shelf, reading its own array off the model so a shelf landing
+/// invalidates this row alone. Inlined in `HomeSectionView.body`, every
+/// shelf array (and `openingDetailSourceKey`) was a dependency of that one
+/// body, so each of `loadHome`'s staggered fetches re-ran it and every
+/// `ForEach` rebuilt every `MediaCard` (about 120 `CachedAsyncImage.init`s,
+/// each a lock and an NSCache lookup) before `.equatable()` could skip one.
+private struct HomeShelf: View {
+    enum Skeleton { case never, whenLoading, whenSignedInAndLoading }
+
+    let model: AppModel
+    let title: String
+    let shelfKey: String
+    let items: KeyPath<AppModel, [MediaCard.Item]>
+    var skeleton: Skeleton = .whenLoading
+    var requiresSignIn = false
+    let namespace: Namespace.ID
+    let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
+
+    private var showsSkeleton: Bool {
+        switch skeleton {
+        case .never: false
+        case .whenLoading: model.isLoading
+        case .whenSignedInAndLoading: model.isSignedIn && model.isLoading
+        }
+    }
+
+    var body: some View {
+        if requiresSignIn && !model.isSignedIn {
+            EmptyView()
+        } else {
+            let items = model[keyPath: items]
+            if !items.isEmpty {
+                shelf(items: items)
+            } else if showsSkeleton {
+                MediaRowSkeleton(title: title)
+            }
+        }
+    }
+
+    private func shelf(items: [MediaCard.Item]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 Text(title)
@@ -1251,7 +1270,7 @@ private struct HomeSectionView: View {
 
                 Spacer()
 
-                Text("\(count) shows")
+                Text("\(items.count) shows")
                     .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)
             }

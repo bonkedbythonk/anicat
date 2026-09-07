@@ -838,6 +838,22 @@ public struct MpvSurface {
 
     public final class Coordinator: NSObject, @unchecked Sendable {
         private var mpv: OpaquePointer?
+        /// Held by every caller that reads `mpv` off the main thread, and by
+        /// `stop()` while it takes the handle away. `stop()` only waits for
+        /// the event loop before `mpv_destroy`; a track walk on a global
+        /// queue that had already passed its `guard let mpv` kept using the
+        /// freed core.
+        private let handleLock = NSLock()
+
+        /// Runs `body` with the handle pinned, or returns nil once `stop()`
+        /// has taken it. Not for the main thread or the event loop, which
+        /// are ordered against `stop()` already; nesting it deadlocks.
+        private func withHandle<T>(_ body: (OpaquePointer) -> T) -> T? {
+            handleLock.lock()
+            defer { handleLock.unlock() }
+            guard let mpv else { return nil }
+            return body(mpv)
+        }
         #if os(macOS)
         /// Everything render-context related lives here, on its own thread.
         /// Set once in `setupMpv`, released by the teardown worker in `stop()`.
@@ -878,18 +894,27 @@ public struct MpvSurface {
         }
 
         deinit {
-            stop()
+            // `dismantleNSView` stops the coordinator on the main thread
+            // before releasing it; this only catches one dropped without it.
+            guard isRunning else { return }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { stop() }
+            } else {
+                assertionFailure("MpvSurface.Coordinator released off the main thread while running")
+            }
         }
 
         func setPendingStreamURL(_ url: String) {
             pendingStreamURL = url
         }
 
+        @MainActor
         func attachMpv(to view: MpvHostView) {
             guard mpv == nil else { return }
             setupMpv(for: view, controller: controller)
         }
 
+        @MainActor
         func setupMpv(for view: MpvHostView, controller: PlayerController) {
             guard mpv == nil else { return }
 
@@ -1053,16 +1078,16 @@ public struct MpvSurface {
             controller.onSelectAudioLanguage = { [weak self] preferDub, completion in
                 // Off the main thread: `selectAudioLanguage` walks
                 // `track-list/N/...` with blocking property reads.
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let switched = self?.selectAudioLanguage(preferDub: preferDub) ?? false
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let switched = self.flatMap { s in s.withHandle { _ in s.selectAudioLanguage(preferDub: preferDub) } } ?? false
                     Task { @MainActor in completion(switched) }
                 }
             }
             controller.onFetchTracks = { [weak self] completion in
                 // Same reason as above, more so: this reads five
                 // sub-properties per track over the whole list.
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let tracks = self?.trackList() ?? (audio: [], subtitle: [])
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let tracks = self.flatMap { s in s.withHandle { _ in s.trackList() } } ?? (audio: [], subtitle: [])
                     Task { @MainActor in completion(tracks.audio, tracks.subtitle) }
                 }
             }
@@ -1162,6 +1187,11 @@ public struct MpvSurface {
         private func scheduleNudgeRestore(after delay: Double) {
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
+                // handleLock outside nudgeLock, the only place both are
+                // held; nothing takes them the other way round.
+                self.handleLock.lock()
+                defer { self.handleLock.unlock() }
+                guard self.mpv != nil else { return }
                 self.nudgeLock.lock()
                 guard let original = self.restoreAspectOverride else {
                     self.nudgeLock.unlock()
@@ -1280,6 +1310,7 @@ public struct MpvSurface {
             }
         }
 
+        @MainActor
         func loadFile(url: String) {
             // Not the place to touch `awaitingNewFile`: `updateNSView` calls
             // this on every SwiftUI update, so during a resolve it arrives
@@ -1361,6 +1392,7 @@ public struct MpvSurface {
         /// nothing and lavfi fails to configure at all ("Impossible to
         /// convert between the formats"), verified against mpv/macOS in the
         /// Tauri build — and restored once back to the off state.
+        @MainActor
         func cycleSideways() {
             guard let mpv = mpv else { return }
             let next = (controller.sidewaysState + 1) % 3
@@ -1829,16 +1861,16 @@ public struct MpvSurface {
                         let prop = ev.data.assumingMemoryBound(to: mpv_event_property.self).pointee
                         guard let name = prop.name.map({ String(cString: $0) }) else { continue }
 
-                        // Still the previous file's numbers: see
-                        // `PlayerController.awaitingNewFile`.
-                        let stale = await MainActor.run { self.controller.awaitingNewFile }
-                        if stale, ["time-pos", "duration", "pause"].contains(name) {
-                            continue
-                        }
-
+                        // `awaitingNewFile` is read in the same main-actor
+                        // hop as the write it gates. Read in a hop of its
+                        // own, `resolveAndPlay` could set it between the
+                        // two and the outgoing file's last tick was applied
+                        // to the new episode anyway: the bug the gate exists
+                        // for. See `PlayerController.awaitingNewFile`.
                         if name == "time-pos", let data = prop.data {
                             let pos = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
+                                guard !self.controller.awaitingNewFile else { return }
                                 if !self.controller.isScrubbing {
                                     self.controller.currentTime = pos
                                     self.controller.checkIntroStatus()
@@ -1859,6 +1891,7 @@ public struct MpvSurface {
                         } else if name == "duration", let data = prop.data {
                             let dur = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
+                                guard !self.controller.awaitingNewFile else { return }
                                 self.controller.duration = dur
                                 self.controller.onPositionChange?(self.controller.currentTime, dur)
                             }
@@ -1871,6 +1904,7 @@ public struct MpvSurface {
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {
+                                guard !self.controller.awaitingNewFile else { return }
                                 self.controller.isPlaying = !paused
                                 if paused {
                                     self.controller.onPositionChange?(self.controller.currentTime, self.controller.duration)
@@ -1885,6 +1919,7 @@ public struct MpvSurface {
             }
         }
 
+        @MainActor
         func stop() {
             guard isRunning else { return }
             isRunning = false
@@ -1932,8 +1967,10 @@ public struct MpvSurface {
             // without a box because its capture list is inferred, not a
             // plain `DispatchQueue.global().async` closure's stricter one.
             // `MpvRenderTarget` needs no box; it is `@unchecked Sendable`.
+            handleLock.lock()
             let handle = UnsafeSendableBox(self.mpv)
             self.mpv = nil
+            handleLock.unlock()
             #if os(macOS)
             let renderTarget = self.renderTarget
             self.renderTarget = nil

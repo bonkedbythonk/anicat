@@ -16,6 +16,7 @@ struct AnicatUITests {
     }
 
     @Test("Anime4K Single Toggle and 6-Shader Chain Exact Matching")
+    @MainActor
     func testAnime4KSingleToggle() {
         // Verify official 6-shader chain from Tauri Anicat
         let expectedShaders = [
@@ -124,6 +125,7 @@ struct AnicatUITests {
     }
 
     @Test("AppModel.resolveAndPlay error propagation and player configuration")
+    @MainActor
     func testResolveAndPlayErrorAndConfiguration() async {
         let model = AppModel()
         // Engine is nil, resolveAndPlay MUST throw error, not silently succeed or swallow
@@ -143,6 +145,7 @@ struct AnicatUITests {
     /// shipped Discord presence off for everyone who never opened Settings,
     /// since `@AppStorage`'s `= true` only supplies a default to the view.
     @Test("Discord presence setting defaults to on when unwritten")
+    @MainActor
     func testDiscordPresenceDefault() {
         let defaults = UserDefaults.standard
         let key = AppModel.discordPresenceKey
@@ -279,6 +282,7 @@ struct AnicatUITests {
     }
 
     @Test("PlayerController seeking and play/pause callbacks trigger correctly")
+    @MainActor
     func testPlayerControllerSeekingAndPausing() {
         let controller = PlayerController(title: "Frieren", episodeNumber: 1)
         controller.duration = 1440.0 // 24 minutes
@@ -328,6 +332,7 @@ struct AnicatUITests {
     }
 
     @Test("PlayerController autohide state, isMenuOpen, and cancelAutohide")
+    @MainActor
     func testPlayerControllerAutohideAndMenuState() {
         let controller = PlayerController(title: "Frieren", episodeNumber: 1)
         #expect(controller.areControlsVisible == true)

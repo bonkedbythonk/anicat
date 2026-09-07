@@ -37,17 +37,8 @@ extension AppModel {
         playerController.nextEpisodeCountdown.reset()
     }
 
-    /// One hop onto the main actor for the playback feedback sounds.
-    ///
-    /// `AppSounds.play` is main-actor isolated and `AppModel` is not, and
-    /// the callers here are a mix: `stopPlayback` and the position tick are
-    /// synchronous and nonisolated, the rest are `async`. Rather than each
-    /// site spelling out its own hop — or `assumeIsolated`, which would trap
-    /// the first time one of them is called from anywhere but the main
-    /// thread — they all go through here. A sound is late by one runloop
-    /// turn, which is not something an ear can hold against a blip.
     func playFeedback(_ sound: AppSounds) {
-        Task { @MainActor in sound.play() }
+        sound.play()
     }
 
     func setupPlayerCallbacks() {
@@ -429,7 +420,9 @@ extension AppModel {
         let title = details.title
         let coverURL = details.coverURL
         while true {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // A cancelled task returns from `sleep` at once; with the error
+            // swallowed this became a hot FFI poll until the download ended.
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
             let status = await engine.episodeDownloadStatus(
                 catalog: .anilist,
                 catalogId: catalogId,
@@ -441,7 +434,11 @@ extension AppModel {
                 if mirrorToDetailPage { downloadStates[episode] = .notStarted }
                 setLibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: .notStarted)
             case .downloading(let percent):
-                if mirrorToDetailPage { downloadStates[episode] = .downloading(percent: percent) }
+                // Whole percents, and only written on change: Observation
+                // invalidates on every set, and a tick that wrote the same
+                // value still re-ran the episode list once a second.
+                let next = MediaDetailView.EpisodeDownloadState.downloading(percent: percent.rounded())
+                if mirrorToDetailPage, downloadStates[episode] != next { downloadStates[episode] = next }
                 setLibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: .downloading(percent: percent))
                 continue
             case .done(let path):
@@ -714,8 +711,8 @@ extension AppModel {
                 )
                 engine.discordClearPresence()
             }
-        } else {
-            engine?.discordClearPresence()
+        } else if let engine {
+            engineIOQueue.async { engine.discordClearPresence() }
         }
         // Release the playing-file pin and pause the session's torrents.
         // Without it a closed player kept downloading the rest of the
@@ -753,12 +750,18 @@ extension AppModel {
         // stopPlayback from a nonisolated context ran this on a cooperative
         // thread, and reading selectedMediaDetails there while the main
         // thread replaced it was a SIGBUS on a freed HeroBanner.Details.
-        Task { @MainActor in
+        //
+        // Tracked as the page's own task: untracked, `openDetail` could not
+        // cancel it, and stopping then immediately opening another title
+        // had the old title's fetch land on the new page.
+        activeDetailTask?.cancel()
+        let refresh = Task { @MainActor in
             await loadHistory()
             if let currentDetails = selectedMediaDetails {
                 await loadDetail(id: currentDetails.id, isManga: Self.isMangaFormat(currentDetails.format))
             }
         }
+        activeDetailTask = refresh
     }
 
     /// Races `resolveStream` against a plain timer so a stalled search or a
@@ -1011,15 +1014,25 @@ extension AppModel {
         )
 
         if Self.isDiscordPresenceEnabled {
-            engine.discordSetPresence(
-                title: effectiveTitle,
-                episode: episode,
-                episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? "",
-                totalEpisodes: Int64(selectedMediaDetails?.episodeCount ?? 0),
-                pos: Int64(playerController.currentTime),
-                duration: Int64(playerController.duration),
-                paused: false
-            )
+            // On `engineIOQueue` like the clear in `stopPlayback`: issued
+            // inline, this set could run while a queued clear was still
+            // waiting behind a stalled write, and the clear then landed
+            // after it and wiped the new episode's presence.
+            let episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
+            let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
+            let pos = Int64(playerController.currentTime)
+            let duration = Int64(playerController.duration)
+            engineIOQueue.async {
+                engine.discordSetPresence(
+                    title: effectiveTitle,
+                    episode: episode,
+                    episodeTitle: episodeTitle,
+                    totalEpisodes: totalEpisodes,
+                    pos: pos,
+                    duration: duration,
+                    paused: false
+                )
+            }
         }
 
         return streamURL

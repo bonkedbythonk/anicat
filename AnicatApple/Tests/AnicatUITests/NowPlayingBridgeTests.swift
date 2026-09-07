@@ -57,6 +57,7 @@ struct NowPlayingBridgeTests {
     }
 
     @Test("attach enables the transport commands and mirrors the controller's neighbours")
+    @MainActor
     func attachMirrorsNavigation() {
         let controller = PlayerController(title: "Frieren", episodeNumber: 3)
         controller.hasNextEpisode = true

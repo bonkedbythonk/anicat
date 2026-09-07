@@ -35,7 +35,8 @@ public enum PersonPage: Equatable, Hashable, Identifiable, Sendable {
 }
 
 @Observable
-public final class AppModel: @unchecked Sendable {
+@MainActor
+public final class AppModel {
     // Progress/Discord IPC calls (recordProgress, discordSetPresence,
     // discordClearPresence) are synchronous FFI writes that can stall for as
     // long as SQLite or Discord's own read side does — see the notes on
@@ -384,6 +385,8 @@ public final class AppModel: @unchecked Sendable {
     // same split as HomeView.tsx.
     public var planningItems: [MediaCard.Item] = []
     public var smartPicks: [MediaCard.Item] = []
+    /// The planning ids `smartPicks` was last shuffled from; see `loadHome`.
+    @ObservationIgnored var smartPicksSeed: Set<Int64> = []
     public var newlyReleasingItems: [MediaCard.Item] = []
     public var seasonalItems: [MediaCard.Item] = []
 
@@ -478,7 +481,7 @@ public final class AppModel: @unchecked Sendable {
 
     /// Settings' "Discord Rich Presence" switch. Written by `@AppStorage`
     /// in `SettingsView`, read here.
-    public static let discordPresenceKey = "anicat_discord_presence"
+    public nonisolated static let discordPresenceKey = "anicat_discord_presence"
 
     /// Defaults to on. `UserDefaults.bool(forKey:)` answers `false` for a
     /// key nothing has written yet, and `@AppStorage`'s default lives in the
@@ -493,7 +496,9 @@ public final class AppModel: @unchecked Sendable {
     /// Last value acted on, so the observer below can tell a change to this
     /// key from the many other keys `didChangeNotification` fires for.
     private var lastDiscordPresenceEnabled = AppModel.isDiscordPresenceEnabled
-    private var defaultsObserver: NSObjectProtocol?
+    // `nonisolated(unsafe)`: `deinit` is nonisolated and has to reach it.
+    // Written once from `init` on the main actor, read once in deinit.
+    @ObservationIgnored private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
 
     public init() {
         setupPlayerCallbacks()
@@ -673,6 +678,7 @@ public final class AppModel: @unchecked Sendable {
         novelReading = []
         planningItems = []
         smartPicks = []
+        smartPicksSeed = []
     }
 
     /// One entry per detail page navigated away from (relation click, related

@@ -272,7 +272,11 @@ public struct MediaDetailView: View {
     public let onDownloadEpisode: (EpisodeItem) -> Void
     /// Keyed by episode number. An episode with no entry has never had a
     /// download started — `EpisodeRow` treats that the same as `.notStarted`.
-    public let downloadStates: [Int: EpisodeDownloadState]
+    /// A closure, not the dictionary: read inside `EpisodeListSection.body`
+    /// so the 1s download poll invalidates that section alone. Passed as a
+    /// value from `RootView`, the read happened in RootView's body and every
+    /// tick re-ran the root, the whole detail page and the sidebar.
+    public let downloadStates: () -> [Int: EpisodeDownloadState]
     /// Shared with the `MediaCard` this detail page was opened from, so the
     /// poster grows from that card's actual on-screen frame instead of the
     /// generic offset/opacity swap. `nil` when opened from a context that
@@ -365,7 +369,7 @@ public struct MediaDetailView: View {
         onLoadReleaseCandidates: @escaping (Int) async -> [ReleaseCandidateItem] = { _ in [] },
         onPlayWithRelease: @escaping (EpisodeItem, String) -> Void = { _, _ in },
         onDownloadEpisode: @escaping (EpisodeItem) -> Void = { _ in },
-        downloadStates: [Int: EpisodeDownloadState] = [:],
+        downloadStates: @escaping () -> [Int: EpisodeDownloadState] = { [:] },
         namespace: Namespace.ID? = nil,
         playerNamespace: Namespace.ID? = nil,
         playerSourceKey: String? = nil,
@@ -2051,7 +2055,7 @@ private struct EpisodeListSection: View {
     let resumeEpisode: Int?
     let resumeSeconds: Int?
     let selectedViewMode: MediaDetailView.EpisodeViewMode
-    let downloadStates: [Int: MediaDetailView.EpisodeDownloadState]
+    let downloadStates: () -> [Int: MediaDetailView.EpisodeDownloadState]
     var isLoading: Bool = false
     let onPlayEpisode: (MediaDetailView.EpisodeItem) -> Void
     let onSetEpisodeWatched: (Int, Bool) -> Void
@@ -2068,10 +2072,15 @@ private struct EpisodeListSection: View {
     @State private var isLoadingServers = false
     @State private var serverCandidates: [MediaDetailView.ReleaseCandidateItem] = []
 
-    // Cached resume target — computing `episodes.first(where:)` on every body
-    // call (once per EpisodeRow in the lazy list) adds O(n) work per render.
-    // Stored in @State and rebuilt only when the inputs actually change.
-    @State private var resumeTarget: MediaDetailView.EpisodeItem? = nil
+    // Evaluated once per section body, not once per row, so a plain
+    // computed property is enough. It was a `@State` cache that nothing
+    // ever assigned, so no row was ever the resume target.
+    private var resumeTarget: MediaDetailView.EpisodeItem? {
+        if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
+            return match
+        }
+        return episodes.first(where: { !$0.isWatched }) ?? episodes.first
+    }
 
     private func morphSource(for episode: MediaDetailView.EpisodeItem) -> EpisodeMorphSource? {
         guard let playerNamespace,
@@ -2081,14 +2090,8 @@ private struct EpisodeListSection: View {
         return EpisodeMorphSource(key: playerSourceKey, namespace: playerNamespace)
     }
 
-    private func computeResumeTarget() -> MediaDetailView.EpisodeItem? {
-        if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
-            return match
-        }
-        return episodes.first(where: { !$0.isWatched }) ?? episodes.first
-    }
-
     var body: some View {
+        let downloadStates = downloadStates()
         Group {
             if episodes.isEmpty {
                 if isLoading {
@@ -2131,8 +2134,11 @@ private struct EpisodeListSection: View {
                             },
                             onDownload: { onDownloadEpisode(episode) },
                             isServerPickerOpen: serverPickerEpisode?.id == episode.id,
-                            isLoadingServers: isLoadingServers,
-                            serverCandidates: serverCandidates,
+                            // Only the open row sees the picker state:
+                            // `EpisodeRow.==` compares both, so one picker
+                            // loading re-rendered every row in the list.
+                            isLoadingServers: serverPickerEpisode?.id == episode.id && isLoadingServers,
+                            serverCandidates: serverPickerEpisode?.id == episode.id ? serverCandidates : [],
                             onCloseServerPicker: { serverPickerEpisode = nil },
                             onSelectServer: { name in
                                 serverPickerEpisode = nil

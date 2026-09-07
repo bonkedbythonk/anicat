@@ -132,7 +132,7 @@ extension AppModel {
         activeDetailTask = task
     }
 
-    public static func isMangaFormat(_ format: String?) -> Bool {
+    public nonisolated static func isMangaFormat(_ format: String?) -> Bool {
         format == "MANGA" || format == "NOVEL" || format == "ONE_SHOT"
     }
 
@@ -279,6 +279,10 @@ extension AppModel {
                 )
             }
 
+            // The page can have moved on during the fetch. Cancellation
+            // covers `openDetail`'s own task; this covers a refresh that
+            // was started for the page and finished after it closed.
+            guard selectedMediaDetails?.id == id || loadingCatalogId == id else { return }
             self.selectedEpisodes = episodes
             if currentPlaybackCatalogId == id {
                 playbackEpisodes = episodes

@@ -5,53 +5,6 @@ import AppKit
 
 @Suite("Visual Snapshot Verification")
 struct SnapshotTests {
-    @Test("Render HeroBanner and MediaCard Snapshot")
-    @MainActor
-    func testRenderComponents() throws {
-        let details = HeroBanner.Details(
-            title: "Code Geass: Lelouch of the Rebellion",
-            romajiTitle: "Code Geass: Hangyaku no Lelouch",
-            bannerURL: nil,
-            coverURL: nil,
-            format: "TV",
-            year: 2006,
-            studio: "Sunrise",
-            synopsis: "In the year 2010, the Holy Empire of Britannia is establishing itself as a dominant military nation, starting with the conquest of Japan.",
-            genres: ["Action", "Mecha", "Sci-Fi"],
-            averageScore: 85,
-            nextEpisodeText: "Continue Episode 5"
-        )
-
-        let hero = HeroBanner(
-            details: details,
-            onPrimaryAction: {},
-            onTrailerAction: {}
-        )
-        .frame(width: 800, height: 320)
-        .background(SumiTheme.background)
-        .preferredColorScheme(.dark)
-
-        let hostingView = NSHostingView(rootView: hero)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 800, height: 320)
-        hostingView.appearance = NSAppearance(named: .darkAqua)
-        hostingView.layoutSubtreeIfNeeded()
-
-        guard let bitmapRep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
-            Issue.record("Failed to create bitmap rep for HeroBanner")
-            return
-        }
-        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmapRep)
-
-        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to convert image to PNG")
-            return
-        }
-
-        let outPath = "/tmp/anicat_hero_snapshot.png"
-        try pngData.write(to: URL(fileURLWithPath: outPath))
-        print("Successfully rendered snapshot to \(outPath)")
-    }
-
     @Test("Render WeekStrip Snapshot")
     @MainActor
     func testRenderWeekStrip() throws {

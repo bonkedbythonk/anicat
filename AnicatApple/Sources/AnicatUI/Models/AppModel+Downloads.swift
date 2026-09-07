@@ -117,15 +117,22 @@ extension AppModel {
         )
 
         if Self.isDiscordPresenceEnabled {
-            engine.discordSetPresence(
-                title: title,
-                episode: episode,
-                episodeTitle: playerController.episodeTitle,
-                totalEpisodes: Int64(playbackEpisodes.count),
-                pos: Int64(playerController.currentTime),
-                duration: Int64(playerController.duration),
-                paused: false
-            )
+            // Queued, not inline: see the same call in `resolveAndPlay`.
+            let episodeTitle = playerController.episodeTitle
+            let totalEpisodes = Int64(playbackEpisodes.count)
+            let pos = Int64(playerController.currentTime)
+            let duration = Int64(playerController.duration)
+            engineIOQueue.async {
+                engine.discordSetPresence(
+                    title: title,
+                    episode: episode,
+                    episodeTitle: episodeTitle,
+                    totalEpisodes: totalEpisodes,
+                    pos: pos,
+                    duration: duration,
+                    paused: false
+                )
+            }
         }
     }
 }

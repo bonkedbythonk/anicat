@@ -34,6 +34,7 @@ struct RealDataWiringTests {
     }
 
     @Test("AppModel.openDetail fetches real AniList data and populates detail/episodes")
+    @MainActor
     func testOpenDetailFetchesRealData() async throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
@@ -63,6 +64,7 @@ struct RealDataWiringTests {
     }
 
     @Test("Player playback position change records real progress to SQLite")
+    @MainActor
     func testPlayerProgressRecordsToSqlite() throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
@@ -95,6 +97,7 @@ struct RealDataWiringTests {
     }
 
     @Test("Manga reader open and close session flow")
+    @MainActor
     func testMangaReaderSession() async throws {
         let model = AppModel()
         let chapter = MediaDetailView.MangaChapterItem(id: "test-ch-1", number: "1", title: "The Beginning")
@@ -127,6 +130,7 @@ struct RealDataWiringTests {
     }
 
     @Test("Playback stop time is clamped to duration in SQLite progress")
+    @MainActor
     func testPlaybackStopClampsDuration() throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
@@ -286,6 +290,7 @@ struct RealDataWiringTests {
     }
 
     @Test("AppModel fetches real manga detail and populates chapters")
+    @MainActor
     func testMangaDetailFetchesRealData() async throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
@@ -374,6 +379,7 @@ struct RealDataWiringTests {
     }
 
     @Test("MediaDetail fetches real characters, relations, recommendations, and discussions")
+    @MainActor
     func testMediaDetailRealDataVerification() async throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
@@ -406,6 +412,7 @@ struct RealDataWiringTests {
     }
 
     @Test("AppModel.openDetail deduplicates concurrent loads for the same title and protects history")
+    @MainActor
     func testOpenDetailDeduplication() async throws {
         let (engine, tempDir) = try makeEngine()
         defer { try? FileManager.default.removeItem(atPath: tempDir) }

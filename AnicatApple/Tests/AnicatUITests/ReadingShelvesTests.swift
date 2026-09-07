@@ -25,6 +25,7 @@ struct ReadingShelvesTests {
     }
 
     @Test("A NOVEL row goes to the novel shelf and every other format to the manga shelf")
+    @MainActor
     func splitsOnFormat() {
         let rows = [
             summary(1, "Manga A", format: "MANGA"),
@@ -51,6 +52,7 @@ struct ReadingShelvesTests {
     }
 
     @Test("An empty list yields two empty shelves, so neither renders")
+    @MainActor
     func emptyList() {
         let split = AppModel.splitByFormat([])
         #expect(split.manga.isEmpty)

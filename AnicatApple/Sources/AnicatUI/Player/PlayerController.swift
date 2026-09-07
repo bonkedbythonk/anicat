@@ -31,7 +31,8 @@ public enum AppWindow {
 #endif
 
 @Observable
-public final class PlayerController: @unchecked Sendable {
+@MainActor
+public final class PlayerController {
     /// Written from four places (the transport methods below, mpv's own
     /// `pause` observer in `MpvSurface`, and `AppModel.resolveAndPlay`), so
     /// anything that has to follow every pause edge listens here rather
@@ -43,7 +44,7 @@ public final class PlayerController: @unchecked Sendable {
             if oldValue != isPlaying { onPlayingStateChange?(isPlaying) }
         }
     }
-    public var onPlayingStateChange: (@Sendable (_ isPlaying: Bool) -> Void)?
+    public var onPlayingStateChange: (@MainActor (_ isPlaying: Bool) -> Void)?
     public var currentTime: Double = 0.0 // seconds
     /// The last chapter of a file has no next chapter to end at, so its
     /// window is bounded by the duration — which mpv reports through its own
@@ -139,7 +140,7 @@ public final class PlayerController: @unchecked Sendable {
     // only, tracks how the screen is physically turned right now rather than
     // a per-show preference, same reasoning as the Lua version.
     public var sidewaysState: Int = 0
-    public var onCycleSideways: (@Sendable () -> Void)?
+    public var onCycleSideways: (@MainActor () -> Void)?
 
     // Skip windows (chapters first, AniSkip filling what chapters left).
     public var introStartTime: Double? = nil
@@ -307,7 +308,7 @@ public final class PlayerController: @unchecked Sendable {
     public static let countdownTailSeconds: Double = 30
 
     // Progress & Playback callbacks for real SQLite recording and libmpv sync
-    public var onPositionChange: (@Sendable (_ currentTime: Double, _ duration: Double) -> Void)?
+    public var onPositionChange: (@MainActor (_ currentTime: Double, _ duration: Double) -> Void)?
     /// True from the moment `AppModel.resolveAndPlay` commits to a new
     /// episode until mpv reports `MPV_EVENT_FILE_LOADED` for it. mpv keeps
     /// emitting the *outgoing* file's time-pos for the whole resolve (0 to
@@ -318,7 +319,7 @@ public final class PlayerController: @unchecked Sendable {
     /// within a second of N+1 starting. Position, duration and pause
     /// updates are dropped while this is set.
     public var awaitingNewFile: Bool = false
-    public var onPlaybackStopped: (@Sendable () -> Void)?
+    public var onPlaybackStopped: (@MainActor () -> Void)?
     public var onSeek: (@Sendable (_ seconds: Double) -> Void)?
     public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?
     public var isScrubbing: Bool = false
@@ -413,7 +414,7 @@ public final class PlayerController: @unchecked Sendable {
     /// itself failed — an empty list and a failed search are different
     /// things to say, and the popover has to say them differently.
     public var onListReleases: (@Sendable (_ completion: @escaping @Sendable @MainActor (_ releases: [MediaDetailView.ReleaseCandidateItem], _ failure: String?) -> Void) -> Void)?
-    public var onSelectRelease: (@Sendable (_ name: String) -> Void)?
+    public var onSelectRelease: (@MainActor (_ name: String) -> Void)?
     /// The release the playing file was resolved from, when the viewer
     /// asked for one by name. `nil` after an ordinary play: the auto-pick
     /// races candidates inside the engine and nothing reports back which
@@ -480,7 +481,9 @@ public final class PlayerController: @unchecked Sendable {
         }
     }
 
-    private var defaultsObserver: NSObjectProtocol?
+    // `nonisolated(unsafe)`: `deinit` is nonisolated and has to reach it.
+    // Written once from `init` on the main actor, read once in deinit.
+    @ObservationIgnored private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
 
     deinit {
         if let defaultsObserver {

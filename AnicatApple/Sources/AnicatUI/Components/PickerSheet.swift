@@ -83,25 +83,14 @@ public struct PickerSheet: View {
                 HStack(alignment: .top, spacing: 18) {
                     Button(action: { commit(pick.item) }) {
                         ZStack {
-                            AsyncImage(url: pick.item.coverImageURL) { phase in
-                                switch phase {
-                                case .empty:
-                                    Rectangle().fill(SumiTheme.card)
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                case .failure:
-                                    Rectangle()
-                                        .fill(SumiTheme.card)
-                                        .overlay(
-                                            Image(systemName: "photo")
-                                                .font(.system(size: 24))
-                                                .foregroundColor(SumiTheme.muted)
-                                        )
-                                @unknown default:
-                                    Rectangle().fill(SumiTheme.card)
-                                }
+                            // `CachedAsyncImage`, not `AsyncImage`: the
+                            // latter decodes the full cover for a 140pt slot.
+                            CachedAsyncImage(url: pick.item.coverImageURL, maxPixelSize: 420) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Rectangle().fill(SumiTheme.card)
                             }
                         }
                         .frame(width: 140, height: 210)

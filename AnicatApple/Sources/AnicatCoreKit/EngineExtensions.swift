@@ -138,4 +138,6 @@ extension MangaSummary: @unchecked Sendable {}
 extension MediaDetail: @unchecked Sendable {}
 extension MediaSummary: @unchecked Sendable {}
 extension WatchProgress: @unchecked Sendable {}
+// Payload-free enum; crosses from the main-actor `AppModel` into engine calls.
+extension FfiCatalog: @unchecked Sendable {}
 extension ActivityRow: @unchecked Sendable {}

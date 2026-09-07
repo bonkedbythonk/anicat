@@ -205,6 +205,7 @@ public final class NowPlayingBridge: @unchecked Sendable {
     /// on every play: an existing registration is replaced, not stacked,
     /// because two targets on one command both fire and a single pause press
     /// toggled twice back to playing.
+    @MainActor
     public func attach(to controller: PlayerController) {
         if self.controller === controller, !registeredTargets.isEmpty { return }
         detachCommands()
@@ -256,12 +257,18 @@ public final class NowPlayingBridge: @unchecked Sendable {
 
     private func register(
         _ command: MPRemoteCommand,
-        _ handler: @escaping (PlayerController, MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus
+        _ handler: @escaping @MainActor (PlayerController, MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus
     ) {
         command.isEnabled = true
         let target = command.addTarget { [weak self] event in
-            guard let controller = self?.controller else { return .noActionableNowPlayingItem }
-            return handler(controller, event)
+            // MPRemoteCommandCenter delivers on the main thread; the
+            // controller is main-actor state. `event` is not `Sendable`
+            // but never leaves this thread, so the box is honest.
+            let boxed = UncheckedSendable(event)
+            return MainActor.assumeIsolated {
+                guard let controller = self?.controller else { return .noActionableNowPlayingItem }
+                return handler(controller, boxed.value)
+            }
         }
         registeredTargets.append((command, target))
     }
@@ -272,4 +279,9 @@ public final class NowPlayingBridge: @unchecked Sendable {
         }
         registeredTargets.removeAll()
     }
+}
+
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }

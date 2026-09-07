@@ -16,8 +16,8 @@ Local-only data does not carry over. The engine uses a new database
 (`registry.sqlite`) and does not read the 5.x `registry.db`, so the local
 watch log, saved downloads, per-title audio and subtitle preferences, and
 manual search-title overrides start empty. The old `registry.db`,
-`registry.json`, `config.toml` and `covers/` in that folder are unused by
-6.0.0 and can be deleted once you have signed in.
+`registry.json` and `covers/` in that folder are unused by 6.0.0 and can be
+deleted. Leave `config.toml` alone — 6.0.0 still keeps your token there.
 
 ### What is new
 
@@ -29,8 +29,8 @@ manual search-title overrides start empty. The old `registry.db`,
 - **Faster starts.** Candidates from SubsPlease, AnimeTosho, Nyaa and SeaDex
   are gathered in one wave rather than in phases, the best two are raced, and
   the release that won an episode is remembered and tried first next time.
-  Measured start-to-picture: 2750ms cold, 955ms for a remembered release,
-  798ms from a complete cached file.
+  Measured resolve time: 2750ms cold, 955ms for a remembered release, 798ms
+  from a complete cached file.
 - **Manga reader** — single page, two-page spread, vertical scroll, RTL and
   LTR, with MangaDex first and MangaKatana filling in titles MangaDex has
   matched but cannot serve.

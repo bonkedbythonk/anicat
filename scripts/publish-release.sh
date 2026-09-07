@@ -28,6 +28,12 @@ bash "$ROOT/scripts/package-anicat-macos-app.sh" release zip
 
 NOTES="$(mktemp)"
 if [ -f "$ROOT/RELEASE_NOTES.md" ]; then
+    # Committed notes satisfy this -f check forever, so without the heading
+    # match the next version ships the previous version's notes verbatim.
+    if ! head -1 "$ROOT/RELEASE_NOTES.md" | grep -q "$VERSION"; then
+        echo "publish-release: RELEASE_NOTES.md heading is not $VERSION; rewrite it or delete it to fall back to the commit log" >&2
+        exit 1
+    fi
     cat "$ROOT/RELEASE_NOTES.md" > "$NOTES"
 else
     # --match 'v*': the newest tag by topology is `legacy/tauri`, so a bare

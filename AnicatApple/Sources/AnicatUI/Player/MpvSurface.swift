@@ -920,12 +920,14 @@ public struct MpvSurface {
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
+                    #if os(macOS)
                     self.fullScreenObserver = NotificationCenter.default.addObserver(
                         forName: FullScreenGuard.transitionEndedNotification, object: nil, queue: .main
                     ) { [weak self, weak view] _ in
                         guard let self, let view else { return }
                         MainActor.assumeIsolated { self.fullScreenTransitionEnded(view: view) }
                     }
+                    #endif
                     if let layer = view.metalView?.metalLayer,
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
@@ -1132,6 +1134,7 @@ public struct MpvSurface {
         /// stream has had a second to configure. Belt and braces for the
         /// case the report kept showing: the windowed-size picture in the
         /// top-left of a fullscreen window.
+        #if os(macOS)
         @MainActor
         func fullScreenTransitionEnded(view: MpvHostView) {
             view.metalView?.syncDrawableSize()
@@ -1150,6 +1153,7 @@ public struct MpvSurface {
                 }
             }
         }
+        #endif
 
         /// Runs on the event-loop thread after a file loads and on its idle
         /// tick: if mpv still reports the old size, nudge again. The first

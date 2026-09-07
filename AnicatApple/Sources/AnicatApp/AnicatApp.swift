@@ -384,7 +384,10 @@ struct AnicatApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ThemedRoot { RootView(model: model) }
+            // `RootTabView`, not `RootView`: the desktop root opens with a
+            // 200pt sidebar rail and a 1080pt minimum width, which on a
+            // 402pt phone leaves the content column narrower than one poster.
+            ThemedRoot { RootTabView(model: model) }
                 // The detail page's studio buttons and "More from" shelf
                 // reach the model through here rather than through
                 // `MediaDetailView.init`, whose one call site inside

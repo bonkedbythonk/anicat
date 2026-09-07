@@ -74,6 +74,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <true/>
     <key>ATSApplicationFontsPath</key>
     <string>Fonts</string>
+    <!-- Without this list AppKit never delivers a Spotlight hit or a Handoff
+         activity to the app: the installed 6.0.0 opened to the home screen
+         on every Spotlight result while dev-run.sh, which had the key, worked. -->
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>com.apple.corespotlightitem</string>
+        <string>com.anicat.playback</string>
+        <string>com.anicat.reading</string>
+    </array>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

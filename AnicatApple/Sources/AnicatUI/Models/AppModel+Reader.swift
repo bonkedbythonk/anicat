@@ -204,6 +204,7 @@ extension AppModel {
                 progress: Int64(progress)
             )
             await recordAniListSuccess()
+            refreshListsAfterEdit()
             return .sent
         } catch {
             await recordAniListFailure(error)

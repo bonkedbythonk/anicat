@@ -142,6 +142,23 @@ extension AppModel {
         persistHomeCache()
     }
 
+    /// Re-reads the viewer's lists after a list mutation (status, score,
+    /// progress, removal), in the background and without the loading flag.
+    /// The engine invalidates its `get_user_list` cache on every save, but
+    /// `upNextItems`, `watchingItems` and `libraryItems` are only ever
+    /// built by `loadInitialCatalog` and `fetchLibrary`, which nothing ran
+    /// again until the next launch: a title moved from Watching to
+    /// Completed stayed in Up Next until then.
+    func refreshListsAfterEdit() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.loadInitialCatalog()
+            await self.fetchLibrary()
+            await self.loadReadingShelves()
+            self.persistHomeCache()
+        }
+    }
+
     /// AniList's own season/year pair for "now" — the convention the
     /// seasonal query expects. December belongs to *next* year's Winter, not
     /// this year's: AniList's "Winter 2025" is Dec 2024 through Feb 2025.

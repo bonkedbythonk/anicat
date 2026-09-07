@@ -471,6 +471,13 @@ extension AppModel {
         do {
             try await engine.updateListEntry(catalogId: details.id, status: status, score: score, progress: progress)
             await recordAniListSuccess()
+            // Off the Up Next shelf at once when the title leaves the
+            // watching list; the background re-read below confirms it.
+            if let status, status != "CURRENT", status != "REPEATING" {
+                upNextItems.removeAll { $0.id == details.id }
+                watchingItems.removeAll { $0.id == details.id }
+            }
+            refreshListsAfterEdit()
             // Not `openDetail(id:)`: its "already viewing this title" guard
             // (`selectedMediaDetails?.id == id && !isDetailLoading`) always
             // matches here, since this mutation runs on the page currently
@@ -508,6 +515,9 @@ extension AppModel {
         do {
             try await engine.removeFromList(listEntryId: entryId)
             await recordAniListSuccess()
+            upNextItems.removeAll { $0.id == details.id }
+            watchingItems.removeAll { $0.id == details.id }
+            refreshListsAfterEdit()
             // Not `openDetail(id:)` — see the identical fix on
             // `updateListEntry`: its "already viewing this title" guard
             // always matches here since this runs on the page currently
@@ -557,6 +567,7 @@ extension AppModel {
                 progress: Int64(progress)
             )
             await recordAniListSuccess()
+            refreshListsAfterEdit()
         } catch {
             await recordAniListFailure(error)
         }

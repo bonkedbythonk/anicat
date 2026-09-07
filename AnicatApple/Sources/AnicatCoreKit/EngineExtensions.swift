@@ -107,3 +107,35 @@ extension FfiCharacterDetail: @unchecked Sendable {}
 extension FfiStaffDetail: @unchecked Sendable {}
 extension FfiThreadDetail: @unchecked Sendable {}
 extension FfiThreadCommentPage: @unchecked Sendable {}
+
+// Every record the engine returns from an async method is awaited on the
+// main actor somewhere in the UI, and CI's stricter toolchain rejects each
+// one it meets ("non-sendable result type 'FfiStudioDetail' cannot be sent
+// from nonisolated context"), one type per push. All of them are plain
+// values of strings, numbers and arrays of the same, so the whole set is
+// declared at once rather than chased one CI run at a time.
+extension FfiAiringSlot: @unchecked Sendable {}
+extension FfiCharacter: @unchecked Sendable {}
+extension FfiCharacterAppearance: @unchecked Sendable {}
+extension FfiCreditCharacter: @unchecked Sendable {}
+extension FfiDayCount: @unchecked Sendable {}
+extension FfiDiscussion: @unchecked Sendable {}
+extension FfiRecommendation: @unchecked Sendable {}
+extension FfiRecommendationRow: @unchecked Sendable {}
+extension FfiRelation: @unchecked Sendable {}
+extension FfiStaffCharacterCredit: @unchecked Sendable {}
+extension FfiStaffMediaCredit: @unchecked Sendable {}
+extension FfiStudioDetail: @unchecked Sendable {}
+extension FfiStudioRef: @unchecked Sendable {}
+extension FfiThreadComment: @unchecked Sendable {}
+extension FfiTitleCount: @unchecked Sendable {}
+extension FfiTorrentChoice: @unchecked Sendable {}
+extension FfiTrackPreference: @unchecked Sendable {}
+extension FfiVoiceActor: @unchecked Sendable {}
+extension FfiWatchStats: @unchecked Sendable {}
+extension MangaChapter: @unchecked Sendable {}
+extension MangaSummary: @unchecked Sendable {}
+extension MediaDetail: @unchecked Sendable {}
+extension MediaSummary: @unchecked Sendable {}
+extension WatchProgress: @unchecked Sendable {}
+extension ActivityRow: @unchecked Sendable {}

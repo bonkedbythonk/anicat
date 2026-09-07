@@ -21,11 +21,6 @@ struct PhoneDetailView: View {
 
     var body: some View {
         ScrollView {
-            // `maxWidth: .infinity` is load-bearing, not cosmetic: without it
-            // the hero's banner sets the column's width from its own intrinsic
-            // size (a 1900pt-wide image), and every row below it centred on
-            // that instead of the screen — the page rendered with its left
-            // half off the display.
             VStack(alignment: .leading, spacing: 16) {
                 if let details = model.selectedMediaDetails {
                     Hero(details: details)
@@ -86,13 +81,37 @@ struct PhoneDetailView: View {
             LazyVStack(spacing: 0) {
                 ForEach(model.selectedEpisodes) { episode in
                     Button {
-                        Task { await model.playSelectedEpisode(episode.number) }
+                        // `resolveAndPlay`, not `playSelectedEpisode`: that
+                        // one guards on `currentPlaybackCatalogId` and
+                        // `playbackEpisodes`, both of which only exist once
+                        // something is already playing, so from a freshly
+                        // pushed page it returned silently and the tap did
+                        // nothing at all. `resolveAndPlay` is what sets them,
+                        // via `ensurePlaybackEpisodes`.
+                        play(episode.number)
                     } label: {
                         EpisodeRow(episode: episode)
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(SumiTheme.border)
                 }
+            }
+        }
+    }
+
+    private func play(_ number: Int) {
+        guard let details = model.selectedMediaDetails else { return }
+        model.activeResolveTask = Task {
+            do {
+                _ = try await model.resolveAndPlay(
+                    catalogId: details.id,
+                    episode: Int64(number),
+                    title: details.title
+                )
+            } catch is CancellationError {
+                // The viewer cancelled the "Finding a stream" overlay.
+            } catch {
+                model.errorMessage = "Failed to play episode \(number): \(error.localizedDescription)"
             }
         }
     }

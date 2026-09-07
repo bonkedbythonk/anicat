@@ -23,10 +23,15 @@ public struct RootTabView: View {
     }
 
     @State private var tab: Tab = .upNext
-    /// One flag, not one per tab: a deep link can open a title while any tab
-    /// is showing, and three independent flags meant the push landed on
-    /// whichever tab happened to own the one that was set.
-    @State private var showDetail = false
+    /// Which tab the open detail page belongs to, if any.
+    ///
+    /// Not "is a detail showing" scoped to the visible tab, which is what
+    /// this was first: switching tabs then read as a dismissal on the tab
+    /// being left (popping the page and clearing the model) and as a
+    /// presentation on the tab being entered, so Library opened an empty
+    /// spinner over a model that had just been emptied. The page belongs to
+    /// the tab it was opened from and stays there.
+    @State private var detailOwner: Tab?
 
     public var body: some View {
         ZStack {
@@ -72,15 +77,29 @@ public struct RootTabView: View {
             }
         }
         .tint(SumiTheme.indigo)
+        // A deep link (`anicat://title/<id>`) and a notification tap both go
+        // straight to `openDetail` on the model, with no row tapped to have
+        // claimed an owner. Handled here rather than in `DetailPush`, which
+        // is installed three times and would have all three tabs claim the
+        // same page. `detailOwner == nil` so it does not steal a page a tap
+        // has already opened elsewhere.
+        .onChange(of: model.selectedMediaDetails?.id) { _, id in
+            if id != nil, detailOwner == nil { detailOwner = tab }
+        }
     }
 
-    /// The shared flag, readable only by the tab currently on screen. Without
-    /// the `tab ==` guard all three stacks push the same page, and coming
-    /// back to a tab you had left showed a detail page you never opened there.
     private func scoped(to owner: Tab) -> Binding<Bool> {
         Binding(
-            get: { tab == owner && showDetail },
-            set: { showDetail = $0 }
+            get: { detailOwner == owner },
+            // Only the owning tab may release the page. An unguarded setter
+            // let whichever tab was being left clear a page another tab owned.
+            set: { presented in
+                if presented {
+                    detailOwner = owner
+                } else if detailOwner == owner {
+                    detailOwner = nil
+                }
+            }
         )
     }
 }
@@ -107,13 +126,7 @@ private struct DetailPush: ViewModifier {
             .onChange(of: isPresented) { _, presented in
                 if !presented { model.closeDetail() }
             }
-            // A deep link (`anicat://title/<id>`) and a notification tap both
-            // go straight to `openDetail` on the model, with no tap on any
-            // row to have set the flag. Without this the page loaded into a
-            // model nothing was showing.
-            .onChange(of: model.selectedMediaDetails?.id) { _, id in
-                if id != nil { isPresented = true }
-            }
+
     }
 }
 

@@ -371,53 +371,6 @@ struct AnicatApp: App {
 /// pin the appearance (`.preferredColorScheme(.dark)` covers a UIKit scene,
 /// which resolves colours through SwiftUI's environment rather than an
 /// `NSAppearance`), and no menu bar to extend.
-#if os(macOS)
-/// Double-click on the title strip zooms the window, the way a real title
-/// bar does. With `.fullSizeContentView` and a transparent title bar the
-/// SwiftUI content sits under the traffic lights and takes the click, so
-/// AppKit's own double-click-to-zoom never fired ("i cant click the drag
-/// bar at the top to make it fullscreen"). A local monitor watches for a
-/// second click inside the top 28 pt and asks the window to zoom, unless
-/// the player covers that strip, where a double-click is its own
-/// fullscreen toggle. Honours the System Settings choice: "Minimize" in
-/// "Double-click a window's title bar to" miniaturizes instead.
-enum TitleStripDoubleClick {
-    static let stripHeight: CGFloat = 28
-    /// Written once from `install`, on the main thread; the token is only
-    /// held so a second `configure` pass does not add a second monitor.
-    nonisolated(unsafe) private static var monitor: Any?
-
-    @MainActor
-    static func install() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
-            handle(event)
-        }
-    }
-
-    @MainActor
-    private static func handle(_ event: NSEvent) -> NSEvent? {
-            guard event.clickCount == 2,
-                  let window = event.window, window == AppWindow.main,
-                  !window.styleMask.contains(.fullScreen),
-                  let contentView = window.contentView else { return event }
-            let point = contentView.convert(event.locationInWindow, from: nil)
-            let top = contentView.isFlipped ? point.y : contentView.bounds.height - point.y
-            guard top >= 0, top <= stripHeight else { return event }
-            if let hit = contentView.hitTest(point), hit.isDescendant(of: contentView),
-               sequence(first: hit, next: { $0.superview }).contains(where: { $0 is MpvHostView }) {
-                return event
-            }
-            let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
-            switch action {
-            case "Minimize": window.performMiniaturize(nil)
-            case "None": return event
-            default: window.performZoom(nil)
-            }
-            return nil
-    }
-}
-#endif
 
 @main
 struct AnicatApp: App {
@@ -440,6 +393,9 @@ struct AnicatApp: App {
                 .task {
                     await model.initialize()
                     model.drainPendingDeepLink()
+                    if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {
+                        model.debugPlayLocalFile(path)
+                    }
                 }
                 // The URL scheme and notifications are not macOS features:
                 // both have iOS counterparts, and a scene that only wired

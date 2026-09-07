@@ -1,0 +1,91 @@
+# The iOS app target. SwiftPM cannot emit an iOS `.app` — it builds
+# frameworks and command-line executables only — so the phone build needs an
+# Xcode project even though every line of source it compiles already lives in
+# this package. Generated with `xcodegen generate` rather than committed:
+# a hand-edited .xcodeproj is 3000 lines of unreviewable XML that conflicts
+# on every branch, and there is nothing in it a human should be authoring.
+#
+# The macOS app does NOT come through here. It is still
+# `swift build --product Anicat` plus scripts/package-anicat-macos-app.sh;
+# adding it would mean two descriptions of one target that drift apart.
+name: Anicat
+options:
+  bundleIdPrefix: com.anicat
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  # Without this, xcodegen emits a project whose scheme builds for
+  # "My Mac" first and fails on the AppKit-only half of AnicatApp.swift.
+  defaultConfig: Debug
+
+packages:
+  # The package this project sits inside. Xcode resolves a local package by
+  # path, so there is no version to pin and no checkout: the project always
+  # builds the working tree, which is the point.
+  AnicatApple:
+    path: .
+
+targets:
+  AnicatiOS:
+    type: application
+    platform: iOS
+    sources:
+      # The same entry file the macOS executable target uses. Its macOS half
+      # is behind `#if os(macOS)`, so on iOS this compiles down to the scene
+      # in the `#else` branch and nothing else.
+      - path: Sources/AnicatApp
+    dependencies:
+      - package: AnicatApple
+        product: AnicatUI
+      - package: AnicatApple
+        product: AnicatCoreKit
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Anicat
+        CFBundleShortVersionString: 6.0.0
+        CFBundleVersion: "1"
+        # Playback must survive the screen locking or the app leaving the
+        # foreground; without this the audio session is torn down the moment
+        # the user pockets the phone mid-episode.
+        UIBackgroundModes:
+          - audio
+        # librqbit talks to peers on the local subnet and BonjourDiscovery
+        # advertises/browses `_anicat-stream._tcp`. iOS 14 and later refuse
+        # both silently — no error, just no peers — unless the app declares
+        # why it wants the local network.
+        NSLocalNetworkUsageDescription: >-
+          Anicat finds other Anicat instances on your network and connects to
+          nearby peers while streaming.
+        NSBonjourServices:
+          - _anicat-stream._tcp
+        # The player is landscape; everything else is portrait. Upside-down
+        # is left out because a phone rotated 180 degrees mid-episode is an
+        # accident, not an intention.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # An empty launch-screen dictionary is what opts the app into the
+        # full screen. With no UILaunchScreen key at all iOS assumes a
+        # pre-iPhone-X app and letterboxes it inside black bars.
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios
+        # iPhone only. iPad would inherit the 200pt-rail desktop layout,
+        # which is the one thing this port is replacing.
+        TARGETED_DEVICE_FAMILY: "1"
+        # Read from the environment, not written here. A Team ID is not a
+        # credential -- it cannot sign anything without the private key --
+        # but it is the one stable handle that ties this pseudonymous repo
+        # to a named Apple developer account, and DISCLAIMER.md says that
+        # name stays private. It also cannot be rotated if it ever leaks.
+        # Set ANICAT_DEVELOPMENT_TEAM in your shell before `xcodegen
+        # generate`; unset it and generation still succeeds, which is what
+        # CI does, since it builds with CODE_SIGNING_ALLOWED=NO.
+        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO

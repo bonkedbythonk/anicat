@@ -63,5 +63,22 @@ extension AppModel {
     public func loadWatchStats() {
         guard let engine else { return }
         watchStatsSnapshot = try? engine.watchStats(days: 365)
+        watchStatsRecentSnapshot = try? engine.watchStats(days: 30)
+    }
+
+    /// Fetches the title and cover of a registry row no shelf has loaded, so
+    /// the Stats page can name it instead of printing "AniList #177552".
+    /// One lookup per id per session; the detail call is cached by core.
+    @MainActor
+    public func ensureKnownTitle(_ id: Int64) {
+        guard let engine, knownTitles[id] == nil, !pendingTitleLookups.contains(id) else { return }
+        pendingTitleLookups.insert(id)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let detail = try? await engine.mediaDetail(catalogId: id, isManga: false) else { return }
+            self.resolvedTitles[id] = detail.title
+            if let cover = URL(string: detail.coverImage) { self.resolvedCovers[id] = cover }
+            self.syncKnownTitles()
+        }
     }
 }

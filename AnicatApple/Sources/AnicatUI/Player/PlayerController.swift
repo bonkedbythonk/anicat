@@ -19,6 +19,14 @@ public enum AppWindow {
     public static func setToolbarVisible(_ visible: Bool) {
         main?.toolbar = nil
     }
+
+    /// Hides or shows the close, minimize and zoom buttons. Hidden while a
+    /// stream is up: see the player mount in `RootView`.
+    public static func setTrafficLightsHidden(_ hidden: Bool) {
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            main?.standardWindowButton(kind)?.isHidden = hidden
+        }
+    }
 }
 #endif
 

@@ -295,6 +295,8 @@ extension AppModel {
             // cache flashing empty the instant this fresh fetch lands.
             self.selectedCharacters = cached?.characters ?? []
             self.selectedDiscussions = cached?.discussions ?? []
+            let fixture = ScreenshotFixtures.isEnabled
+                ? ScreenshotFixtures.listEntry(episodeCount: (d.episodeCount ?? d.chapterCount).map(Int.init)) : nil
             let freshDetails = HeroBanner.Details(
                 id: d.catalogId,
                 title: d.title,
@@ -310,14 +312,14 @@ extension AppModel {
                 nextEpisodeText: nil,
                 status: d.status,
                 episodeCount: (d.episodeCount ?? d.chapterCount).map(Int.init),
-                resumeEpisode: d.resumeEpisode.map(Int.init),
-                resumeSeconds: d.resumeSeconds.map(Int.init),
+                resumeEpisode: fixture?.resumeEpisode ?? d.resumeEpisode.map(Int.init),
+                resumeSeconds: fixture.map { $0.resumeSeconds } ?? d.resumeSeconds.map(Int.init),
                 prequel: d.prequel.map(Self.relation),
                 sequel: d.sequel.map(Self.relation),
-                listStatus: d.listStatus,
-                userScore: d.userScore,
+                listStatus: fixture?.status ?? d.listStatus,
+                userScore: fixture == nil ? d.userScore : nil,
                 listEntryId: d.listEntryId,
-                listProgress: d.listProgress.map(Int.init),
+                listProgress: fixture?.progress ?? d.listProgress.map(Int.init),
                 isFavourite: d.isFavourite,
                 malId: d.malId,
                 trailerSite: d.trailerSite,
@@ -500,6 +502,10 @@ extension AppModel {
         do {
             try await engine.toggleFavourite(catalogId: details.id, isManga: currentDetailIsManga())
             await recordAniListSuccess()
+            let before = details.isFavourite
+            defer {
+                PlayerLog.write("[favourite] \(details.id): was \(before), now \(selectedMediaDetails?.isFavourite ?? before)")
+            }
             // See `removeFromList`/`updateListEntry` — same `openDetail(id:)`
             // dedup-guard no-op.
             await loadDetail(id: details.id, isManga: currentDetailIsManga(), forceRefresh: true)

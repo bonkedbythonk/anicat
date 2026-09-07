@@ -14,6 +14,14 @@ import CoreSpotlight
 /// light toggle wired up, so there is nothing for a light resolution to be
 /// right about.
 final class AppearanceLock: NSObject, NSApplicationDelegate {
+    /// A Dock click with no visible window (the main window hidden behind a
+    /// fullscreen space that was left, or closed) brings the window back
+    /// rather than doing nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { AppWindow.main?.makeKeyAndOrderFront(nil) }
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The theme store owns the appearance now: Paper is light, Ink and
         // OLED are dark, and a pinned darkAqua left menus and scrollers dark
@@ -43,6 +51,50 @@ final class AnicatWindowDelegate: NSObject, NSWindowDelegate {
         if let window = notification.object as? NSWindow {
             window.toolbar = nil
         }
+    }
+
+}
+
+/// The window's own size and position across launches. `isRestorable` is
+/// off (see `WindowConfigurator`), and with it off SwiftUI's frame autosave
+/// stopped restoring too: the key it writes was present in the defaults
+/// while every launch still opened at `defaultSize`, and
+/// `setFrameAutosaveName` never wrote its key at all. So the frame is kept
+/// by hand: saved on resize and move outside fullscreen, applied once when
+/// the window first appears, and only if it still fits a screen.
+@MainActor
+enum WindowFrameMemory {
+    static let key = "anicat_window_frame"
+    private static var restored = false
+    private static var observers: [NSObjectProtocol] = []
+
+    /// Notifications rather than delegate methods: SwiftUI owns the
+    /// window's delegate slot and the resize/move callbacks on the app's
+    /// own delegate never arrived (no frame was written in a full session).
+    static func watch(_ window: NSWindow) {
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+        for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification, NSWindow.didEndLiveResizeNotification] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { save(AppWindow.main) }
+            })
+        }
+    }
+
+    static func save(_ window: NSWindow?) {
+        guard let window, !window.styleMask.contains(.fullScreen), window.isVisible,
+              window.frame.width > 200, window.frame.height > 200 else { return }
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: key)
+    }
+
+    static func restoreOnce(_ window: NSWindow) {
+        guard !restored else { return }
+        restored = true
+        guard let stored = UserDefaults.standard.string(forKey: key) else { return }
+        let frame = NSRectFromString(stored)
+        guard frame.width > 200, frame.height > 200,
+              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return }
+        window.setFrame(frame, display: true)
     }
 }
 
@@ -76,11 +128,13 @@ struct WindowConfigurator: NSViewRepresentable {
         // by playback, so the window opts out of state restoration; the
         // frame itself still comes back through SwiftUI's own autosave.
         window.isRestorable = false
-        // Restoration off means the frame no longer comes back either, and
-        // the window opened at the 1080x820 minimum: small and nearly
-        // square. Frame autosave is separate from state restoration and
-        // keeps the last size and position without bringing fullscreen back.
-        window.setFrameAutosaveName("AnicatMainWindow")
+        // Restoration off means the frame no longer comes back either;
+        // `WindowFrameMemory` keeps the last size and position without
+        // bringing fullscreen back.
+        if !window.styleMask.contains(.fullScreen) {
+            WindowFrameMemory.restoreOnce(window)
+        }
+        WindowFrameMemory.watch(window)
         if window.styleMask.contains(.fullScreen), !AppWindow.isPlaybackActive {
             FullScreenGuard.set(false, on: window)
         }
@@ -93,6 +147,7 @@ struct WindowConfigurator: NSViewRepresentable {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.styleMask.insert(.fullSizeContentView)
+        TitleStripDoubleClick.install()
         // Not .clear: a fully non-opaque window drops out of AppKit's opaque
         // fast path entirely, so every redraw anywhere in the window pays a
         // full recomposite-against-desktop cost, not just the sidebar's own
@@ -105,6 +160,54 @@ struct WindowConfigurator: NSViewRepresentable {
         ScrollPocketWorkaround.disableScrollPockets(in: window.contentView)
     }
 }
+
+#if os(macOS)
+/// Double-click on the title strip zooms the window, the way a real title
+/// bar does. With `.fullSizeContentView` and a transparent title bar the
+/// SwiftUI content sits under the traffic lights and takes the click, so
+/// AppKit's own double-click-to-zoom never fired ("i cant click the drag
+/// bar at the top to make it fullscreen"). A local monitor watches for a
+/// second click inside the top 28 pt and asks the window to zoom, unless
+/// the player covers that strip, where a double-click is its own
+/// fullscreen toggle. Honours the System Settings choice: "Minimize" in
+/// "Double-click a window's title bar to" miniaturizes instead.
+enum TitleStripDoubleClick {
+    static let stripHeight: CGFloat = 28
+    /// Written once from `install`, on the main thread; the token is only
+    /// held so a second `configure` pass does not add a second monitor.
+    nonisolated(unsafe) private static var monitor: Any?
+
+    @MainActor
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            handle(event)
+        }
+    }
+
+    @MainActor
+    private static func handle(_ event: NSEvent) -> NSEvent? {
+            guard event.clickCount == 2,
+                  let window = event.window, window == AppWindow.main,
+                  !window.styleMask.contains(.fullScreen),
+                  let contentView = window.contentView else { return event }
+            let point = contentView.convert(event.locationInWindow, from: nil)
+            let top = contentView.isFlipped ? point.y : contentView.bounds.height - point.y
+            guard top >= 0, top <= stripHeight else { return event }
+            if let hit = contentView.hitTest(point), hit.isDescendant(of: contentView),
+               sequence(first: hit, next: { $0.superview }).contains(where: { $0 is MpvHostView }) {
+                return event
+            }
+            let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+            switch action {
+            case "Minimize": window.performMiniaturize(nil)
+            case "None": return event
+            default: window.performZoom(nil)
+            }
+            return nil
+    }
+}
+#endif
 
 @main
 struct AnicatApp: App {
@@ -272,6 +375,54 @@ struct AnicatApp: App {
 /// pin the appearance (`.preferredColorScheme(.dark)` covers a UIKit scene,
 /// which resolves colours through SwiftUI's environment rather than an
 /// `NSAppearance`), and no menu bar to extend.
+#if os(macOS)
+/// Double-click on the title strip zooms the window, the way a real title
+/// bar does. With `.fullSizeContentView` and a transparent title bar the
+/// SwiftUI content sits under the traffic lights and takes the click, so
+/// AppKit's own double-click-to-zoom never fired ("i cant click the drag
+/// bar at the top to make it fullscreen"). A local monitor watches for a
+/// second click inside the top 28 pt and asks the window to zoom, unless
+/// the player covers that strip, where a double-click is its own
+/// fullscreen toggle. Honours the System Settings choice: "Minimize" in
+/// "Double-click a window's title bar to" miniaturizes instead.
+enum TitleStripDoubleClick {
+    static let stripHeight: CGFloat = 28
+    /// Written once from `install`, on the main thread; the token is only
+    /// held so a second `configure` pass does not add a second monitor.
+    nonisolated(unsafe) private static var monitor: Any?
+
+    @MainActor
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            handle(event)
+        }
+    }
+
+    @MainActor
+    private static func handle(_ event: NSEvent) -> NSEvent? {
+            guard event.clickCount == 2,
+                  let window = event.window, window == AppWindow.main,
+                  !window.styleMask.contains(.fullScreen),
+                  let contentView = window.contentView else { return event }
+            let point = contentView.convert(event.locationInWindow, from: nil)
+            let top = contentView.isFlipped ? point.y : contentView.bounds.height - point.y
+            guard top >= 0, top <= stripHeight else { return event }
+            if let hit = contentView.hitTest(point), hit.isDescendant(of: contentView),
+               sequence(first: hit, next: { $0.superview }).contains(where: { $0 is MpvHostView }) {
+                return event
+            }
+            let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+            switch action {
+            case "Minimize": window.performMiniaturize(nil)
+            case "None": return event
+            default: window.performZoom(nil)
+            }
+            return nil
+    }
+}
+#endif
+
 @main
 struct AnicatApp: App {
     @State private var model: AppModel

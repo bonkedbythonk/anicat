@@ -140,21 +140,29 @@ public struct StatsView: View {
     /// so the name has to come from whatever the catalog views have loaded.
     let knownTitles: [Int64: String]
     let knownCovers: [Int64: URL]
+    /// The 30-day window behind the "most watched" card; the year-long
+    /// `stats` feeds everything else.
+    let recentStats: FfiWatchStats?
     let onLoad: () -> Void
     let onSelectTitle: (Int64, String?) -> Void
+    let onResolveTitle: (Int64) -> Void
 
     public init(
         stats: FfiWatchStats?,
+        recentStats: FfiWatchStats? = nil,
         knownTitles: [Int64: String] = [:],
         knownCovers: [Int64: URL] = [:],
         onLoad: @escaping () -> Void = {},
-        onSelectTitle: @escaping (Int64, String?) -> Void = { _, _ in }
+        onSelectTitle: @escaping (Int64, String?) -> Void = { _, _ in },
+        onResolveTitle: @escaping (Int64) -> Void = { _ in }
     ) {
         self.stats = stats
+        self.recentStats = recentStats
         self.knownTitles = knownTitles
         self.knownCovers = knownCovers
         self.onLoad = onLoad
         self.onSelectTitle = onSelectTitle
+        self.onResolveTitle = onResolveTitle
     }
 
     private var tallies: [DayTally] {
@@ -346,9 +354,18 @@ public struct StatsView: View {
     }
 
     private func topTitlesCard(_ stats: FfiWatchStats) -> some View {
-        card(title: "Most watched") {
-            ForEach(Array(stats.topTitles.prefix(10).enumerated()), id: \.offset) { index, row in
+        let rows = Array((recentStats ?? stats).topTitles.prefix(10))
+        return card(title: recentStats == nil ? "Most watched" : "Most watched, last 30 days") {
+            if rows.isEmpty {
+                Text("Nothing watched in the last 30 days.")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.muted)
+            }
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 topTitleRow(index: index, row: row)
+                    .onAppear {
+                        if knownTitles[row.catalogId] == nil { onResolveTitle(row.catalogId) }
+                    }
             }
         }
     }

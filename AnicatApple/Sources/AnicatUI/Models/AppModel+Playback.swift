@@ -861,6 +861,13 @@ extension AppModel {
            let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
+            // An episode already watched through (past the 85% mark that
+            // records it as watched) replays from the start: resuming at
+            // 23:40 of 24:00 put the viewer into the credits of a rewatch
+            // and then straight into auto-next.
+            if initialDuration > 0, initialTime / initialDuration >= 0.85 {
+                initialTime = 0
+            }
             if initialTime > 0, initialDuration > 0 {
                 resumeFraction = initialTime / initialDuration
             }

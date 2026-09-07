@@ -552,6 +552,11 @@ public struct RootView: View {
             AppWindow.isPlaybackActive = isPlaying
             if isPlaying {
                 AppWindow.setToolbarVisible(false)
+                // The zoom button's hover menu ("Exit Full Screen / Tile
+                // Window") came up over the picture whenever the pointer was
+                // left near the top-left as fullscreen began; no traffic
+                // lights while a stream is up, so there is nothing to hover.
+                AppWindow.setTrafficLightsHidden(true)
                 // Env switch for a driven test copy: fullscreen would take
                 // the screen from whoever is at the keyboard.
                 if !wasPlaying, !window.styleMask.contains(.fullScreen),
@@ -567,10 +572,22 @@ public struct RootView: View {
                 }
             } else {
                 AppWindow.setToolbarVisible(false)
+                AppWindow.setTrafficLightsHidden(false)
                 NSCursor.setHiddenUntilMouseMoves(false)
                 if wasPlaying, enteredFullscreenForPlayback, window.styleMask.contains(.fullScreen) {
                     FullScreenGuard.set(false, on: window)
                     enteredFullscreenForPlayback = false
+                    // Opening and closing streams in quick succession once
+                    // left the window in a fullscreen the player had asked
+                    // for with no player in it; the exit had been queued
+                    // behind an enter that AppKit never reported finished.
+                    // One late check re-issues it.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                        guard model.activeStreamURL == nil, let window = AppWindow.main,
+                              window.styleMask.contains(.fullScreen) else { return }
+                        PlayerLog.write("[fullscreen] still fullscreen 4s after the player closed; exiting again")
+                        FullScreenGuard.set(false, on: window)
+                    }
                 }
             }
         }
@@ -778,6 +795,7 @@ public struct RootView: View {
         case .stats:
             StatsView(
                 stats: model.watchStatsSnapshot,
+                recentStats: model.watchStatsRecentSnapshot,
                 knownTitles: model.knownTitles,
                 knownCovers: model.knownCovers,
                 // Reloaded on every entry into the section and nowhere else.
@@ -787,7 +805,8 @@ public struct RootView: View {
                 onLoad: { model.loadWatchStats() },
                 onSelectTitle: { id, title in
                     openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
-                }
+                },
+                onResolveTitle: { id in model.ensureKnownTitle(id) }
             )
         case .downloads:
             DownloadsView(
@@ -966,6 +985,11 @@ private struct HomeSectionView: View {
     let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
 
     @State private var showHomeCustomize = false
+    /// Up Next shows four rows until asked for the rest: eight or more
+    /// in-progress titles pushed the week strip and every shelf below the
+    /// fold, and the first row is the one that gets played anyway.
+    @State private var upNextExpanded = false
+    private static let upNextCollapsedCount = 4
     @State private var showPicker = false
 
     /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only
@@ -1050,7 +1074,7 @@ private struct HomeSectionView: View {
                     // Up Next Queue Container
                     if !model.upNextItems.isEmpty {
                         UpNextQueueView(
-                            items: model.upNextItems,
+                            items: upNextExpanded ? model.upNextItems : Array(model.upNextItems.prefix(Self.upNextCollapsedCount)),
                             namespace: namespace,
                             openingSourceKey: model.openingDetailSourceKey,
                             shelfKey: "upnext",
@@ -1074,6 +1098,25 @@ private struct HomeSectionView: View {
                                 }
                             }
                         )
+                        if model.upNextItems.count > Self.upNextCollapsedCount {
+                            Button {
+                                withAnimation(.smooth(duration: 0.35)) { upNextExpanded.toggle() }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(upNextExpanded ? "Show fewer" : "Show all \(model.upNextItems.count)")
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                    Image(systemName: upNextExpanded ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundColor(SumiTheme.muted)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.sumiPressable)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityLabel(upNextExpanded ? "Show fewer Up Next titles" : "Show all Up Next titles")
+                        }
                     } else {
                         // Mirrors HomeView.tsx: an empty queue states the absence
                         // plainly rather than leaving the "Up Next" heading over
@@ -1112,15 +1155,15 @@ private struct HomeSectionView: View {
                     homeDiscoverRow(id: row.id, title: row.title)
                 }
             }
-            // `px-6 lg:px-10 pt-10 pb-8` on the web's scroll container, and
-            // `max-w-[1100px]` on the page inside it. Without the cap the
-            // shelves stretch the full window and the layout stops matching
-            // at any width past ~1280.
+            // Capped so the shelves do not stretch across a whole 1512 pt
+            // fullscreen, and centred: left-aligned under a 1100 cap the
+            // right third of a fullscreen window was empty ("blank space on
+            // the right side").
             .padding(.horizontal, 40)
             .padding(.top, 40)
             .padding(.bottom, 32)
-            .frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: 1280, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(SumiTheme.background)
         .sheet(isPresented: $showHomeCustomize) {

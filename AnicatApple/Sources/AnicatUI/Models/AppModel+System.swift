@@ -257,8 +257,10 @@ extension AppModel {
     @MainActor
     public func updateDockBadge() {
         #if os(macOS)
-        let count = currentNavSection == .upNext ? 0 : newEpisodeBadgeCount
-        NSApp?.dockTile.badgeLabel = count > 0 ? String(count) : nil
+        // No badge since 2026-09-07 at the owner's request ("unneeded"):
+        // the count still lives in Up Next's subtitle. Clearing rather than
+        // returning, so a badge left by an earlier build goes away.
+        NSApp?.dockTile.badgeLabel = nil
         #endif
     }
 }

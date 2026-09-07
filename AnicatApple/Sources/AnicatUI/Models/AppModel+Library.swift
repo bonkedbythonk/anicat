@@ -48,8 +48,18 @@ extension AppModel {
     }
 
     func syncKnownTitles() {
-        var titles: [Int64: String] = [:]
-        var covers: [Int64: URL] = [:]
+        // Always on the main thread. Every shelf setter's `didSet` calls
+        // this, and a setter reached after an `await` in a nonisolated
+        // async method runs on the cooperative pool; the dictionaries were
+        // then replaced on one thread while the Stats view read them on
+        // another, and the test copy crashed in `knownTitles.setter`
+        // releasing the old storage (crash report 2026-09-07 19:27).
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.syncKnownTitles() }
+            return
+        }
+        var titles = resolvedTitles
+        var covers = resolvedCovers
         for item in watchingItems + trendingItems + libraryItems + mangaReading + novelReading + mangaPlanning + novelPlanning + searchResults {
             titles[item.id] = item.title
             if let cover = item.coverImageURL { covers[item.id] = cover }
@@ -96,6 +106,9 @@ extension AppModel {
     }
 
     func persistHomeCache() {
+        // Fixture shelves must not become the snapshot the real app paints
+        // from at its next launch; the caches directory is shared.
+        guard !ScreenshotFixtures.isEnabled else { return }
         HomeCache.save(HomeCache.Snapshot(
             trending: trendingItems,
             watching: watchingItems,
@@ -298,7 +311,11 @@ extension AppModel {
     func fetchLibrary() async {
         guard let engine, !Task.isCancelled else { return }
         do {
-            let rows = try await engine.userList(status: libraryStatus, mediaType: libraryType)
+            var rows = try await engine.userList(status: libraryStatus, mediaType: libraryType)
+            if ScreenshotFixtures.isEnabled {
+                let pool = try await engine.trending(mediaType: libraryType, format: nil, limit: 24)
+                rows = ScreenshotFixtures.list(status: libraryStatus, from: pool)
+            }
             guard !Task.isCancelled else { return }
             await recordAniListSuccess()
             libraryItems = rows.map(Self.card)
@@ -321,7 +338,10 @@ extension AppModel {
 
         let trendingManga = (try? await trendingMangaTask) ?? []
         let novels = (try? await novelsTask) ?? []
-        let readingRows = (try? await readingRowsTask) ?? []
+        var readingRows = (try? await readingRowsTask) ?? []
+        if ScreenshotFixtures.isEnabled {
+            readingRows = ScreenshotFixtures.watching(from: Array(trendingManga.prefix(5)) + Array(novels.prefix(3)))
+        }
 
         mangaTrending = trendingManga.map(Self.card)
         novelTrending = novels.map(Self.card)
@@ -338,7 +358,10 @@ extension AppModel {
     /// out: `PLANNING` is a per-user list and the request would only 401.
     public func loadPlanningShelves() async -> (manga: [MediaCard.Item], novel: [MediaCard.Item]) {
         guard let engine, isSignedIn else { return ([], []) }
-        let rows = (try? await engine.userList(status: "PLANNING", mediaType: "MANGA")) ?? []
+        var rows = (try? await engine.userList(status: "PLANNING", mediaType: "MANGA")) ?? []
+        if ScreenshotFixtures.isEnabled {
+            rows = ScreenshotFixtures.list(status: "PLANNING", from: mangaTrending.isEmpty ? [] : ((try? await engine.trending(mediaType: "MANGA", format: nil, limit: 24)) ?? []))
+        }
         return Self.splitByFormat(rows)
     }
 
@@ -361,6 +384,14 @@ extension AppModel {
     /// watch log either way — the registry recorded that without a token.
     public func loadHistory() async {
         guard let engine else { return }
+        if ScreenshotFixtures.isEnabled {
+            await fetchWatchActivity()
+            if viewer == nil {
+                viewer = ScreenshotFixtures.profile(favourites: trendingItemsAsSummaries, favouriteManga: [])
+            }
+            isSignedIn = true
+            return
+        }
         activity = (try? engine.watchActivity(limit: 500)) ?? []
         viewer = try? await engine.viewerProfile()
         isSignedIn = viewer != nil
@@ -373,8 +404,18 @@ extension AppModel {
     /// write the same two properties.
     func fetchWatchActivity() async {
         guard let engine else { return }
+        if ScreenshotFixtures.isEnabled {
+            let trending = (try? await engine.trending(mediaType: "ANIME", format: nil, limit: 24)) ?? []
+            activity = ScreenshotFixtures.activity(for: ScreenshotFixtures.watching(from: trending))
+            return
+        }
         activity = (try? engine.watchActivity(limit: 500)) ?? []
     }
+
+    /// `loadHistory` under screenshot mode may run before the home load has
+    /// a trending list to build a profile from; an empty favourites row is
+    /// fine there.
+    private var trendingItemsAsSummaries: [MediaSummary] { [] }
 
     /// Loads the trending anime shelf that backs Search's Discover section.
     /// The same list `loadInitialCatalog` fetches; kept as its own method so
@@ -452,8 +493,12 @@ extension AppModel {
         async let profileTask = engine.viewerProfile()
 
         let trending = (try? await trendingTask) ?? []
-        let watching = (try? await watchingTask) ?? []
-        let profile = try? await profileTask
+        var watching = (try? await watchingTask) ?? []
+        var profile = try? await profileTask
+        if ScreenshotFixtures.isEnabled {
+            watching = ScreenshotFixtures.watching(from: trending)
+            profile = ScreenshotFixtures.profile(favourites: trending, favouriteManga: [])
+        }
         trendingItems = trending.map(Self.card)
         if profile != nil || !trending.isEmpty || !watching.isEmpty {
             await recordAniListSuccess()

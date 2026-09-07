@@ -416,6 +416,10 @@ public final class AppModel: @unchecked Sendable {
     /// and nowhere else: `watchStats` reads the local registry synchronously,
     /// so there is nothing to gain from holding it warm.
     public var watchStatsSnapshot: FfiWatchStats?
+    /// The last 30 days, for the "most watched" card only. Over a year the
+    /// card was a ranking of episode counts, which long-running shows win
+    /// by existing; a month says what is actually being watched now.
+    public var watchStatsRecentSnapshot: FfiWatchStats?
 
     /// One configurable home row: which one, its display title, and whether
     /// the user has it shown. Reorder is the array order itself.
@@ -458,6 +462,12 @@ public final class AppModel: @unchecked Sendable {
     /// `syncKnownTitles()` on write rather than rebuilt from all six source
     /// arrays on every read.
     public internal(set) var knownTitles: [Int64: String] = [:]
+    /// Titles looked up on demand for a registry row no shelf has loaded
+    /// (`ensureKnownTitle`), folded into `knownTitles` by `syncKnownTitles`
+    /// so a shelf refresh does not drop them again.
+    var resolvedTitles: [Int64: String] = [:]
+    var resolvedCovers: [Int64: URL] = [:]
+    var pendingTitleLookups: Set<Int64> = []
     /// Same sourcing as `knownTitles`, for the Now Playing artwork of a
     /// title played without its page open.
     public internal(set) var knownCovers: [Int64: URL] = [:]

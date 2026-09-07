@@ -166,7 +166,11 @@ extension AppModel {
     /// the engine's hour-long detail cache on any title opened recently).
     /// The fetch runs alongside the resolve rather than ahead of it, and
     /// the navigation state is recomputed when it lands.
-    func ensurePlaybackEpisodes(for catalogId: Int64, engine: AnicatEngine) {
+    func ensurePlaybackEpisodes(
+        for catalogId: Int64,
+        engine: AnicatEngine,
+        catalog: FfiCatalog = .anilist
+    ) {
         if selectedMediaDetails?.id == catalogId, !selectedEpisodes.isEmpty {
             playbackEpisodes = selectedEpisodes
             playbackEpisodesCatalogId = catalogId
@@ -183,7 +187,13 @@ extension AppModel {
         // exists to fix.
         playbackMalId = nil
         Task { [weak self] in
-            guard let detail = try? await engine.mediaDetail(catalogId: catalogId, isManga: false) else { return }
+            // A film or an episode of a series has no AniList entry to ask
+            // for, and `mediaDetail` would answer for whatever anime happens
+            // to carry the same number.
+            let fetched: MediaDetail? = catalog == .anilist
+                ? try? await engine.mediaDetail(catalogId: catalogId, isManga: false)
+                : try? await engine.cinemaDetail(catalog: catalog, catalogId: catalogId)
+            guard let detail = fetched else { return }
             guard let self, self.currentPlaybackCatalogId == catalogId else { return }
             self.playbackEpisodes = Self.episodeItems(from: detail)
             self.playbackCoverURL = URL(string: detail.coverImage)
@@ -842,7 +852,7 @@ extension AppModel {
         // in its list; an ordinary play is whatever the engine's own race
         // landed on, which it does not report back.
         self.playerController.currentReleaseName = chosenName
-        ensurePlaybackEpisodes(for: catalogId, engine: engine)
+        ensurePlaybackEpisodes(for: catalogId, engine: engine, catalog: catalog)
         self.currentPlaybackTitle = effectiveTitle
         // A fresh play always opens full-screen, not stuck minimized from
         // whatever the last session left it as.

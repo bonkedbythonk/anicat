@@ -557,6 +557,10 @@ private struct AccountTabSection: View {
 
     @State private var anilistTokenInput: String = ""
     @State private var disconnectConfirming: Bool = false
+    /// A viewer's own TMDB key, which wins over the one the app carries.
+    /// `TmdbCredential` is the reader; `@AppStorage` needs a literal here, so
+    /// the two spellings have to agree.
+    @AppStorage("anicat_tmdb_key") private var tmdbKeyInput: String = ""
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -755,6 +759,39 @@ private struct AccountTabSection: View {
                     )
                     .frame(maxWidth: 340)
                 }
+            }
+
+            // Cinema mode reads TMDB with a key the app carries, so this is
+            // an override and not a requirement -- the field says so, because
+            // an empty credential box otherwise reads as a thing to go and
+            // fill in before films will work. Takes effect on the next
+            // launch: the engine is handed its key when it is constructed.
+            SettingsCard(title: "Cinema (TMDB)") {
+                SettingField(
+                    label: "Your own TMDB key",
+                    description: "Optional. Anicat ships with a key, so films and series work without one. Paste a v3 key or a v4 read token to use your own quota instead. Restart to apply."
+                ) {
+                    SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(SumiTheme.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .frame(maxWidth: 340)
+                }
+
+                // Required by TMDB's API terms wherever their data is used,
+                // not a courtesy line: the wording is theirs.
+                Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.top, 4)
             }
 
             // Status Diagnostics Box

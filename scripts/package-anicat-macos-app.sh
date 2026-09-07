@@ -68,6 +68,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>${COMMIT}</string>
     <key>AnicatBuiltAt</key>
     <string>${BUILT_AT}</string>
+    <!-- Cinema mode's TMDB key, taken from the environment at package time.
+         A packaged .app has no environment of its own to read at launch, and
+         nobody is asked to register with TMDB themselves (see
+         TmdbCredential.swift). Empty when ANICAT_TMDB_KEY is unset, which
+         reads as "no key" and hides cinema mode rather than shipping a
+         credential-shaped blank. -->
+    <key>ANICATTMDBKey</key>
+    <string>${ANICAT_TMDB_KEY:-}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

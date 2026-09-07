@@ -62,6 +62,17 @@ public struct RootView: View {
                             model.currentNavSection = section
                         }
                     ),
+                    modeCaption: model.appMode == .cinema ? "Films and series" : "Anime and manga",
+                    // nil hides the switch entirely: with no TMDB key there is
+                    // no second world to move to.
+                    switchModeCaption: model.cinemaAvailable
+                        ? (model.appMode == .cinema ? "anime" : "cinema")
+                        : nil,
+                    onSwitchMode: {
+                        withAnimation(.smooth(duration: 0.3)) {
+                            model.setAppMode(model.appMode == .cinema ? .anime : .cinema)
+                        }
+                    },
                     onOpenSearchPalette: { model.paletteOpen = true }
                 )
                 .frame(width: 200)
@@ -139,13 +150,15 @@ public struct RootView: View {
                                 onPlayEpisode: { ep in
                                     playEpisode(
                                         model: model, catalogId: details.id, episode: ep.number, title: details.title,
+                                        catalog: model.playbackCatalogForOpenDetail,
                                         morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
                                         morphThumbnailURL: ep.thumbnailURL
                                     )
                                 },
                                 onPlayEpisodeFromStart: { ep in
                                     playEpisode(
-                                        model: model, catalogId: details.id, episode: ep.number, title: details.title, fromStart: true,
+                                        model: model, catalogId: details.id, episode: ep.number, title: details.title,
+                                        catalog: model.playbackCatalogForOpenDetail, fromStart: true,
                                         morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
                                         morphThumbnailURL: ep.thumbnailURL
                                     )
@@ -628,17 +641,25 @@ public struct RootView: View {
     private var sectionBody: some View {
         switch model.currentNavSection {
         case .upNext:
-            // Its own View struct, not a computed property here: `homeView`
-            // used to inline into this 1198-line body, so any one shelf's
-            // array changing (a Watching progress tick from playback, a
-            // background refreshAll updating Trending) re-evaluated every
-            // other shelf's layout along with it.
-            HomeSectionView(
-                model: model,
-                namespace: cardNamespace,
-                playerNamespace: playerNamespace,
-                onOpenDetail: openDetailFor
-            )
+            // Cinema mode replaces the home page rather than adding rows to
+            // it: an AniList id and a TMDB id are different numbers for
+            // different titles, and a shelf holding both could not say which
+            // detail page a card opens.
+            if model.appMode == .cinema {
+                CinemaHomeView(model: model, focusSearchOnAppear: false)
+            } else {
+                // Its own View struct, not a computed property here: `homeView`
+                // used to inline into this 1198-line body, so any one shelf's
+                // array changing (a Watching progress tick from playback, a
+                // background refreshAll updating Trending) re-evaluated every
+                // other shelf's layout along with it.
+                HomeSectionView(
+                    model: model,
+                    namespace: cardNamespace,
+                    playerNamespace: playerNamespace,
+                    onOpenDetail: openDetailFor
+                )
+            }
         case .schedule:
             ScheduleView(
                 items: model.scheduleItems,
@@ -655,6 +676,13 @@ public struct RootView: View {
                 openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
             }
         case .search:
+            if model.appMode == .cinema {
+                // The same page as Home, with the field focused: TMDB's
+                // search takes a query and nothing else, so the formats,
+                // genres, sorts and discover grid `SearchView` is built
+                // around have nothing to drive here.
+                CinemaHomeView(model: model, focusSearchOnAppear: true)
+            } else {
             SearchView(
                 searchText: $model.searchQuery,
                 results: model.searchResults,
@@ -699,6 +727,7 @@ public struct RootView: View {
                     }
                 }
             )
+            }
         case .settings:
             SettingsView(
                 isSignedIn: model.isSignedIn,
@@ -936,6 +965,7 @@ private func playEpisode(
     catalogId: Int64,
     episode: Int,
     title: String,
+    catalog: FfiCatalog = .anilist,
     chosenName: String? = nil,
     fromStart: Bool = false,
     morphKey: String? = nil,
@@ -946,6 +976,7 @@ private func playEpisode(
     model.activeResolveTask = Task {
         do {
             _ = try await model.resolveAndPlay(
+                catalog: catalog,
                 catalogId: catalogId,
                 episode: Int64(episode),
                 title: title,
@@ -966,6 +997,7 @@ private func playEpisode(
                     catalogId: catalogId,
                     episode: episode,
                     title: title,
+                    catalog: catalog,
                     chosenName: chosenName,
                     fromStart: fromStart
                 )

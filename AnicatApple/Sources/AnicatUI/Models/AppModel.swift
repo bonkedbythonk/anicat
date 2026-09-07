@@ -445,6 +445,49 @@ public final class AppModel {
 
     public var homeRowConfig: [HomeRowConfig] = AppModel.loadHomeRowConfig()
 
+    // MARK: - Cinema
+    //
+    // Films and series from TMDB, reached by pressing the mark at the foot of
+    // the sidebar. The behaviour lives in `AppModel+Cinema.swift`; only the
+    // storage is here.
+
+    /// Which of the two worlds the app is showing. Anime and manga come from
+    /// AniList, cinema from TMDB, and nothing is mixed between them: the two
+    /// catalogs number their titles independently and a blended shelf could
+    /// not say which id it was holding.
+    public enum AppMode: String, Sendable, CaseIterable {
+        case anime
+        case cinema
+    }
+
+    static let appModeDefaultsKey = "anicat_app_mode"
+
+    public var appMode: AppMode = AppModel.loadAppMode() {
+        didSet {
+            guard appMode != oldValue else { return }
+            UserDefaults.standard.set(appMode.rawValue, forKey: Self.appModeDefaultsKey)
+        }
+    }
+
+    /// Whether the engine has a TMDB credential to read with. Cinema mode is
+    /// hidden entirely without one: every TMDB call fails the same way, and a
+    /// page of empty shelves says nothing about why.
+    public var cinemaAvailable: Bool = false
+
+    public var cinemaShelves: [CinemaShelf] = []
+    public var isCinemaLoading: Bool = false
+    /// Why the rows are empty, when they are. A rejected key and a dead
+    /// network both leave eight empty shelves behind, and "try again in a
+    /// moment" is the wrong thing to tell someone whose key TMDB refused --
+    /// the engine names that case `tmdb_unauthorized` precisely so this can
+    /// tell them apart.
+    public var cinemaError: String?
+    public var cinemaSearchResults: [MediaCard.Item] = []
+
+    /// The catalog the open detail page belongs to. Every refresh path on
+    /// that page reads AniList, so it has to know when not to run.
+    public var currentDetailCatalog: MediaCard.CardCatalog = .anilist
+
     // Library / Manga / Novels / History
     public var libraryItems: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
     public var libraryStatus: String = "CURRENT"
@@ -578,9 +621,18 @@ public final class AppModel {
             let coreEngine = try AnicatEngine(
                 dataDir: dataDir.path,
                 anilistToken: token,
-                tmdbKey: tmdbKey
+                // Nobody is asked to register with TMDB to watch a film: the
+                // app carries a key and Settings can override it. See
+                // `TmdbCredential` for the order and why none of it is in the
+                // repo.
+                tmdbKey: tmdbKey ?? TmdbCredential.key
             )
             self.engine = coreEngine
+            self.cinemaAvailable = coreEngine.hasTmdbKey()
+            // A mode the viewer left the app in is only restorable while it
+            // still exists: a build with no key must not open onto eight
+            // shelves that cannot load.
+            if !self.cinemaAvailable { self.appMode = .anime }
             if let token, !token.isEmpty {
                 self.isSignedIn = true
                 // A token already in the Keychain means the first run

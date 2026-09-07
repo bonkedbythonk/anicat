@@ -153,6 +153,10 @@ extension AppModel {
 
     func loadDetail(id: Int64, title: String? = nil, coverURL: URL? = nil, isManga: Bool, forceRefresh: Bool = false) async {
         guard let engine, !Task.isCancelled else { return }
+        // This page is AniList's. Left as it was, a film opened just before
+        // would still be the catalog every play, refresh and progress write
+        // from here named -- and TMDB's ids are not AniList's.
+        currentDetailCatalog = .anilist
         loadingCatalogId = id
         // Episode numbers repeat across titles, so a stale entry here would
         // show as "downloaded"/"downloading" on the wrong show's episode 1

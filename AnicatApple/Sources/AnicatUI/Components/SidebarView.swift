@@ -93,10 +93,26 @@ public struct SidebarView: View {
 
     @Binding public var currentView: NavSection
     public let onOpenSearchPalette: () -> Void
+    /// What the mark at the foot of the rail is showing right now, and what
+    /// pressing it switches to. Passed in rather than read from `AppModel`
+    /// here so the rail stays a view of its inputs.
+    public let modeCaption: String
+    public let switchModeCaption: String?
+    public let onSwitchMode: () -> Void
     @Namespace private var sidebarNavNamespace
+    @State private var isModeHovered = false
 
-    public init(currentView: Binding<NavSection>, onOpenSearchPalette: @escaping () -> Void) {
+    public init(
+        currentView: Binding<NavSection>,
+        modeCaption: String = "Anime and manga",
+        switchModeCaption: String? = nil,
+        onSwitchMode: @escaping () -> Void = {},
+        onOpenSearchPalette: @escaping () -> Void
+    ) {
         self._currentView = currentView
+        self.modeCaption = modeCaption
+        self.switchModeCaption = switchModeCaption
+        self.onSwitchMode = onSwitchMode
         self.onOpenSearchPalette = onOpenSearchPalette
     }
 
@@ -126,16 +142,20 @@ public struct SidebarView: View {
                 // (80pt), grayscaled, at `opacity-10`. An SF Symbol cat is a
                 // different drawing at a different weight and reads as a
                 // placeholder next to the real logo.
-                VStack(spacing: 6) {
-                    SumiLogoMark()
-                        .frame(height: 80)
-                    // The mode caption under the mark. It names which of the
-                    // two worlds the app is in; the switch itself only appears
-                    // once cinema mode is enabled, so this is a label rather
-                    // than a control here.
-                    Text("Anime and manga")
-                        .sumiTabularMono(size: 9)
-                        .foregroundColor(SumiTheme.muted)
+                Group {
+                    if switchModeCaption != nil {
+                        Button(action: onSwitchMode) { modeMark }
+                            .buttonStyle(.sumiPressable)
+                            #if os(macOS)
+                            .onHover { isModeHovered = $0 }
+                            #endif
+                            .help("Switch to \(switchModeCaption ?? "")")
+                    } else {
+                        // No TMDB credential, no second world to switch to:
+                        // the mark stays the watermark it has always been
+                        // rather than a control that answers nothing.
+                        modeMark
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 8)
@@ -274,6 +294,25 @@ public struct SidebarView: View {
     }
 }
 
+
+extension SidebarView {
+    /// The mark and the caption under it. The caption names which of the two
+    /// worlds the app is in; on hover it names the one a press would move to,
+    /// because a logo that is also a switch says nothing about being one.
+    @ViewBuilder
+    var modeMark: some View {
+        VStack(spacing: 6) {
+            SumiLogoMark()
+                .frame(height: 80)
+                .opacity(isModeHovered ? 1.6 : 1)
+            Text(isModeHovered ? (switchModeCaption.map { "Switch to \($0)" } ?? modeCaption) : modeCaption)
+                .sumiTabularMono(size: 9)
+                .foregroundColor(isModeHovered ? SumiTheme.foreground : SumiTheme.muted)
+        }
+        .animation(.snappy(duration: 0.2), value: isModeHovered)
+        .contentShape(Rectangle())
+    }
+}
 
 /// The sidebar watermark, loaded out of the module bundle by URL.
 ///

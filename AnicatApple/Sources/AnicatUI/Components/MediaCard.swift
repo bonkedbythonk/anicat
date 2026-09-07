@@ -1,6 +1,22 @@
 import SwiftUI
 
 public struct MediaCard: View, Equatable {
+    /// Which catalog a card's id belongs to.
+    ///
+    /// A card used to be an AniList id and nothing else, which was true while
+    /// there was one catalog. TMDB numbers films and series in two separate
+    /// spaces of its own, so id 550 alone names three different titles across
+    /// the three catalogs -- and the detail page a card opens is chosen by
+    /// this, not by which shelf it was tapped on.
+    ///
+    /// `nil` means AniList: every card written before cinema mode existed
+    /// decodes out of the home cache without this key.
+    public enum CardCatalog: String, Sendable, Codable {
+        case anilist
+        case tmdbMovie
+        case tmdbTv
+    }
+
     public struct Item: Identifiable, Sendable, Equatable, Codable {
         public let id: Int64
         public let title: String
@@ -11,7 +27,8 @@ public struct MediaCard: View, Equatable {
         public let totalEpisodesOrChapters: Int?
         public let hasNewEpisode: Bool
         public let playlistReason: String?
-        
+        public let catalog: CardCatalog?
+
         public init(
             id: Int64,
             title: String,
@@ -21,7 +38,8 @@ public struct MediaCard: View, Equatable {
             progress: Int? = nil,
             totalEpisodesOrChapters: Int? = nil,
             hasNewEpisode: Bool = false,
-            playlistReason: String? = nil
+            playlistReason: String? = nil,
+            catalog: CardCatalog? = nil
         ) {
             self.id = id
             self.title = title
@@ -32,6 +50,7 @@ public struct MediaCard: View, Equatable {
             self.totalEpisodesOrChapters = totalEpisodesOrChapters
             self.hasNewEpisode = hasNewEpisode
             self.playlistReason = playlistReason
+            self.catalog = catalog
         }
     }
 

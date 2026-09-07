@@ -10,8 +10,9 @@ import Foundation
 enum PlayerLog {
     private static let queue = DispatchQueue(label: "app.anicat.playerlog", qos: .utility)
     private static let url: URL = {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Anicat", isDirectory: true)
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = library.appendingPathComponent("Logs/Anicat", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("player.log")
     }()

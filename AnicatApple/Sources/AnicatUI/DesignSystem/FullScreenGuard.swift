@@ -31,8 +31,9 @@ public enum FullScreenGuard {
         wanted = nil
         let center = NotificationCenter.default
         let begin: (Notification) -> Void = { _ in armTransitionTimeout() }
-        let end: (Notification) -> Void = { _ in
+        let end: (Notification) -> Void = { note in
             inTransition = false
+            PlayerLog.write("[fullscreen] \(note.name.rawValue) wanted \(wanted.map { $0 ? "enter" : "exit" } ?? "none")")
             FullScreenState.shared.isFullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
             NotificationCenter.default.post(name: FullScreenGuard.transitionEndedNotification, object: nil)
             guard let window = self.window, let target = wanted else { return }
@@ -61,26 +62,38 @@ public enum FullScreenGuard {
         transitionToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             guard transitionToken == token, inTransition else { return }
+            // A transition that never reported back. Drop the queued
+            // request rather than replaying it: replaying is how a
+            // refused toggle turned into a chain of refused toggles.
             inTransition = false
-            if let window, let target = wanted {
-                wanted = nil
-                set(target, on: window)
-            }
+            wanted = nil
+            PlayerLog.write("[fullscreen] transition timed out; state \(window?.styleMask.contains(.fullScreen) == true ? "fullscreen" : "windowed")")
         }
     }
     private static var transitionToken = UUID()
+    /// When the last toggle was actually sent. AppKit ignores a second
+    /// toggleFullScreen inside roughly the first 300 ms of a transition
+    /// without posting anything, and a key held on F sent several: the
+    /// guard then waited on notifications that never came and the window
+    /// could no longer enter or leave fullscreen at all. Requests inside
+    /// that window are queued like mid-transition ones.
+    private static var lastToggleAt: CFAbsoluteTime = 0
 
     /// Enter or leave fullscreen, now or as soon as the current transition ends.
     public static func set(_ fullScreen: Bool, on window: NSWindow) {
         attach(to: window)
-        if inTransition {
+        let now = CFAbsoluteTimeGetCurrent()
+        if inTransition || now - lastToggleAt < 0.35 {
             wanted = fullScreen
+            PlayerLog.write("[fullscreen] queued \(fullScreen ? "enter" : "exit") (transition in flight)")
             return
         }
         guard window.styleMask.contains(.fullScreen) != fullScreen else {
             wanted = nil
             return
         }
+        lastToggleAt = now
+        PlayerLog.write("[fullscreen] toggling to \(fullScreen ? "enter" : "exit")")
         armTransitionTimeout()
         window.toggleFullScreen(nil)
     }

@@ -30,7 +30,9 @@ NOTES="$(mktemp)"
 if [ -f "$ROOT/RELEASE_NOTES.md" ]; then
     cat "$ROOT/RELEASE_NOTES.md" > "$NOTES"
 else
-    PREV="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null || true)"
+    # --match 'v*': the newest tag by topology is `legacy/tauri`, so a bare
+    # describe made the generated notes span the entire Swift rewrite.
+    PREV="$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
     {
         echo "## Anicat $VERSION"
         echo

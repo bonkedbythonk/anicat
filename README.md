@@ -46,14 +46,13 @@ The app was rewritten from Tauri/React to Swift in 2026. An iPhone build is the 
 
 ## Install
 
-No packaged release of the native app yet: the DMGs on the
-[Releases page](https://github.com/bonkedbythonk/anicat/releases) up to
-v5.8.0 and the `install_macos.sh` one-liner install the retired Tauri
-version. Until a 6.x release exists, build from source and install the
-result into `/Applications`:
+Apple silicon, macOS 14 or later. Download
+`Anicat-<version>-macos-arm64.zip` from the
+[Releases page](https://github.com/bonkedbythonk/anicat/releases), unzip it
+and move `Anicat.app` to `/Applications`. Or let the installer do it:
 
 ```bash
-bash scripts/package-anicat-macos-app.sh release install
+curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
 The build is ad-hoc signed, not notarized. On first launch right-click the
@@ -62,6 +61,9 @@ app and choose Open, or clear the quarantine flag:
 ```bash
 xattr -dr com.apple.quarantine /Applications/Anicat.app
 ```
+
+Releases up to v5.8.0 are the retired Tauri app and are not upgrades to
+6.x — see [RELEASE_NOTES.md](RELEASE_NOTES.md) for what carries over.
 
 ---
 

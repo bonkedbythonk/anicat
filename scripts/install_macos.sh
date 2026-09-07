@@ -1,88 +1,75 @@
 #!/bin/bash
 set -e
 
-# Anicat Easy macOS Installer
-# This script downloads the latest release from GitHub, installs it, and bypasses Gatekeeper.
+# Anicat macOS installer. Downloads the latest release, installs it into
+# /Applications and clears the quarantine flag the ad-hoc signature would
+# otherwise trip over.
 #
+#   curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 
 REPO="bonkedbythonk/anicat"
 APP_NAME="Anicat.app"
 INSTALL_PATH="/Applications/$APP_NAME"
 
-
-# Every published release is still the retired Tauri app. Until the native
-# Swift app has a release of its own, installing "latest" would install
-# software that is no longer maintained, so this refuses instead.
-echo "Anicat is being rebuilt as a native app and has no installer release yet."
-echo "Build it from source: https://github.com/bonkedbythonk/anicat#building-from-source"
-exit 1
+if [ "$(uname -m)" != "arm64" ]; then
+    echo "Anicat is built for Apple silicon only; this machine reports $(uname -m)."
+    echo "Build from source: https://github.com/bonkedbythonk/anicat#building-from-source"
+    exit 1
+fi
 
 echo "Step 1: Finding the latest version..."
 # Deliberately no python3 here. A stock macOS has no usable interpreter --
 # /usr/bin/python3 is a stub that prompts for a multi-GB Xcode Command Line
 # Tools install -- and this script has to work on a machine with nothing but
 # Terminal. /releases/latest already excludes drafts and prereleases, so the
-# .dmg asset URL can be pulled straight out with grep. Everything else this
-# script uses (curl, hdiutil, xattr, osascript, lsof, killall) ships with the
-# base system.
+# asset URL can be pulled straight out with grep. Everything else this script
+# uses (curl, ditto, xattr, osascript) ships with the base system.
 DOWNLOAD_URL=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" \
-    | grep -o "https://github.com/$REPO/releases/download/[^\"]*\.dmg" \
+    | grep -o "https://github.com/$REPO/releases/download/[^\"]*macos-arm64\.zip" \
     | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
     echo "Couldn't find a download link. The latest release might still be building."
     echo "Try again in a few minutes, or download manually from:"
-    echo "  https://github.com/bonkedbythonk/anicat/releases"
+    echo "  https://github.com/$REPO/releases"
     exit 1
 fi
 
-TMP_DMG="/tmp/anicat_latest.dmg"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+TMP_ZIP="$TMP_DIR/anicat.zip"
+
 echo "Step 2: Downloading... (this might take a minute)"
 if [ -t 2 ]; then
-    curl -L -o "$TMP_DMG" "$DOWNLOAD_URL" --progress-bar
+    curl -L -o "$TMP_ZIP" "$DOWNLOAD_URL" --progress-bar
 else
-    curl -L -sS -o "$TMP_DMG" "$DOWNLOAD_URL"
+    curl -L -sS -o "$TMP_ZIP" "$DOWNLOAD_URL"
 fi
 
-# Clean up any stuck mounts
-echo "Step 3: Preparing installation..."
-
-# Close existing running instances first to release file locks on the app bundle and the server port
-# Use osascript for graceful quit (more reliable than killall, which often fails silently)
+echo "Step 3: Installing..."
+# A running copy holds its own executable open; replacing the bundle under it
+# leaves a half-old app that crashes on the next window. Quit it first.
 osascript -e 'tell application "Anicat" to quit' 2>/dev/null || true
-osascript -e 'tell application "Anicat Dev" to quit' 2>/dev/null || true
 sleep 2
-# Force-kill any remaining processes (sidecar, port holder)
-killall "anicat-server" 2>/dev/null || true
-lsof -ti :13370 | xargs kill -9 2>/dev/null || true
-sleep 1
 
-for volume in /Volumes/Anicat*; do
-    if [ -d "$volume" ]; then
-        hdiutil detach -force "$volume" 2>/dev/null || true
-    fi
-done
+# ditto, not unzip: unzip drops the symlinks and extended attributes inside a
+# .app bundle, which breaks the signature and Gatekeeper rejects the result.
+ditto -x -k "$TMP_ZIP" "$TMP_DIR/extracted"
 
-echo "Mounting DMG and copying application..."
-MOUNT_POINT=$(hdiutil mount "$TMP_DMG" | tail -n 1 | awk -F '\t' '{print $3}')
-
-if [ -d "$INSTALL_PATH" ]; then
-    rm -rf "$INSTALL_PATH"
+if [ ! -d "$TMP_DIR/extracted/$APP_NAME" ]; then
+    echo "The downloaded archive did not contain $APP_NAME."
+    exit 1
 fi
-cp -R "$MOUNT_POINT/$APP_NAME" "/Applications/"
 
-# Cleanup
-hdiutil detach -force "$MOUNT_POINT" 2>/dev/null || hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
-rm -f "$TMP_DMG"
+rm -rf "$INSTALL_PATH"
+ditto "$TMP_DIR/extracted/$APP_NAME" "$INSTALL_PATH"
 
-# Remove quarantine flag recursively from the entire app bundle
+# The bundle is ad-hoc signed, not notarized, so without this macOS refuses to
+# open it and offers only "Move to Trash".
 xattr -r -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
 
-# Start Anicat
 echo "Step 4: Opening Anicat..."
-# We don't start the sidecar manually here, as the Tauri application's Rust core
-# handles spawning and lifecycle management of its bundled anicat-server sidecar automatically.
-open -a "$INSTALL_PATH"
+open "$INSTALL_PATH"
 
 echo ""
 echo "================================="
@@ -92,4 +79,4 @@ echo ""
 echo "The app should open now."
 echo "If not, open your Applications folder and click Anicat."
 echo ""
-echo "Enjoy watching!"
+echo "Connect your AniList account from Settings to sync your library."

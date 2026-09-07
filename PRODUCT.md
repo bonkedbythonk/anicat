@@ -8,7 +8,7 @@ native (macOS now; iOS is the stated goal of the Swift rewrite)
 
 ## Users
 
-Anime/manga viewers with an AniList account who want to watch, read, and track without a browser. Public GitHub repo; the releases published there are the retired Tauri build, and the Swift app has no packaged release yet. The audience today is the developer on a MacBook and, once it compiles for iOS, a sideloaded iPhone. First-run clarity still matters because the repo is public.
+Anime/manga viewers with an AniList account who want to watch, read, and track without a browser. Public GitHub repo; 6.0.0 is the first packaged release of the Swift app, and everything published up to v5.8.0 is the retired Tauri build. The audience today is the developer on a MacBook and, once it compiles for iOS, a sideloaded iPhone. First-run clarity still matters because the repo is public.
 
 ## Product Purpose
 

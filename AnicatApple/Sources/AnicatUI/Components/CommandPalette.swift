@@ -31,6 +31,13 @@ public struct CommandPalette: View {
 
     @State private var query = ""
     @State private var highlighted = 0
+    // Set by the arrow keys and read by the hover handler. Scrolling the
+    // ringed row to centre moves the list under a resting pointer, whose
+    // hover then re-highlights whatever slid beneath it; the list scrolled
+    // again to that row, and so on (visible flicker, and Down could not get
+    // past the fourth row). Hover is ignored for a moment after a key move,
+    // and only key moves scroll.
+    @State private var keyboardMoveAt: Date = .distantPast
     @State private var titleMatches: [Command] = []
     @FocusState private var fieldFocused: Bool
 
@@ -123,11 +130,13 @@ public struct CommandPalette: View {
                 // be driven from the keyboard it was opened with.
                 .onKeyPress(.downArrow) {
                     guard !matches.isEmpty else { return .ignored }
+                    keyboardMoveAt = Date()
                     highlighted = min(highlighted + 1, matches.count - 1)
                     return .handled
                 }
                 .onKeyPress(.upArrow) {
                     guard !matches.isEmpty else { return .ignored }
+                    keyboardMoveAt = Date()
                     highlighted = max(highlighted - 1, 0)
                     return .handled
                 }
@@ -181,7 +190,8 @@ public struct CommandPalette: View {
                         }
                         .buttonStyle(.sumiPressable)
                         .onHover { hovering in
-                            if hovering { highlighted = index }
+                            guard hovering, Date().timeIntervalSince(keyboardMoveAt) > 0.4 else { return }
+                            highlighted = index
                         }
                         .id(command.id)
                     }
@@ -191,8 +201,9 @@ public struct CommandPalette: View {
         }
         .frame(maxHeight: 380)
         .onChange(of: highlighted) { _, index in
-            guard matches.indices.contains(index) else { return }
-            proxy.scrollTo(matches[index].id, anchor: .center)
+            guard matches.indices.contains(index),
+                  Date().timeIntervalSince(keyboardMoveAt) < 0.4 else { return }
+            proxy.scrollTo(matches[index].id, anchor: nil)
         }
         }
     }

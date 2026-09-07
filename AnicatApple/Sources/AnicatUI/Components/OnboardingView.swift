@@ -124,7 +124,7 @@ public struct OnboardingView: View {
                                     .foregroundColor(SumiTheme.warning)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else {
-                                Text("The token stays in this Mac's Keychain. Anicat never sees your password.")
+                                Text("The token stays in this device's Keychain. Anicat never sees your password.")
                                     .font(.system(size: 12))
                                     .foregroundColor(SumiTheme.muted)
                             }

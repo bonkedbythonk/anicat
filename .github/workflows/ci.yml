@@ -60,6 +60,22 @@ jobs:
         working-directory: AnicatApple
         run: swift build --product AnicatUI --triple arm64-apple-ios17.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
 
+      # The compile check above builds a library and stops there: it never
+      # links an executable, never reads Info.plist and never produces a
+      # bundle, so a missing product dependency, a malformed plist key or a
+      # target that cannot bundle all pass it. Only building the app catches
+      # those, and the project is generated rather than committed, so CI has
+      # to run xcodegen before it can build anything.
+      - name: Build the iOS app
+        working-directory: AnicatApple
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project Anicat.xcodeproj -scheme AnicatiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build-xcode \
+            CODE_SIGNING_ALLOWED=NO build
+
       # Not `swift test`: several suites call the live AniList API and fail
       # outright during its outages, which would make CI red for reasons
       # unrelated to the change.

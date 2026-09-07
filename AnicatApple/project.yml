@@ -14,9 +14,6 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
-  # Without this, xcodegen emits a project whose scheme builds for
-  # "My Mac" first and fails on the AppKit-only half of AnicatApp.swift.
-  defaultConfig: Debug
 
 packages:
   # The package this project sits inside. Xcode resolves a local package by

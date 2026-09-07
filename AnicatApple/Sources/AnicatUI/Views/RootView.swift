@@ -540,7 +540,10 @@ public struct RootView: View {
             AppWindow.isPlaybackActive = isPlaying
             if isPlaying {
                 AppWindow.setToolbarVisible(false)
-                if !wasPlaying, !window.styleMask.contains(.fullScreen) {
+                // Env switch for a driven test copy: fullscreen would take
+                // the screen from whoever is at the keyboard.
+                if !wasPlaying, !window.styleMask.contains(.fullScreen),
+                   ProcessInfo.processInfo.environment["ANICAT_NO_AUTO_FULLSCREEN"] == nil {
                     enteredFullscreenForPlayback = true
                     FullScreenGuard.set(true, on: window)
                 }

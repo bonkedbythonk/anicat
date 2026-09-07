@@ -11,6 +11,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
+# Which commit the bundle was built from, shown under Settings > Maintenance.
+# Two installs in one afternoon carried the same 6.0.0 and nobody could tell
+# which fixes a running copy had.
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then COMMIT="${COMMIT}+"; fi
+BUILT_AT="$(date '+%Y-%m-%d %H:%M')"
 SRC="$ROOT/AnicatApple"
 CONFIG="${1:-release}"
 # `install` as the second argument copies the finished bundle into
@@ -58,6 +64,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>${VERSION}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>AnicatCommit</key>
+    <string>${COMMIT}</string>
+    <key>AnicatBuiltAt</key>
+    <string>${BUILT_AT}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

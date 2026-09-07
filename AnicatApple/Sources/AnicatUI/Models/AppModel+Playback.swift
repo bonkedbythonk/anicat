@@ -1005,3 +1005,18 @@ extension AppModel {
         return streamURL
     }
 }
+
+
+extension AppModel {
+    /// Test hook: plays a local file straight into the player, no resolve.
+    /// Only reachable through the ANICAT_DEBUG_PLAY_FILE environment
+    /// variable, read once at launch; it exists so a driven test copy can
+    /// exercise the player without a torrent and without taking focus.
+    public func debugPlayLocalFile(_ path: String) {
+        playerController.title = (path as NSString).lastPathComponent
+        playerController.episodeNumber = 1
+        playerController.awaitingNewFile = true
+        playerController.isPlaying = true
+        activeStreamURL = URL(fileURLWithPath: path)
+    }
+}

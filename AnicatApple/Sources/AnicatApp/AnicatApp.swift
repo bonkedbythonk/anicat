@@ -141,6 +141,9 @@ struct AnicatApp: App {
                     // app got here before there was an engine to route it
                     // with; this is where it finally runs.
                     model.drainPendingDeepLink()
+                    if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {
+                        model.debugPlayLocalFile(path)
+                    }
                 }
                 .onOpenURL { url in
                     model.handleOpenURL(url)

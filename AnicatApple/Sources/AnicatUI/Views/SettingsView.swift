@@ -810,6 +810,17 @@ private func diagnosticRow(label: String, value: String, isGood: Bool, highlight
 }
 
 private struct MaintenanceTabSection: View {
+    static var buildDescription: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "dev"
+        let commit = info["AnicatCommit"] as? String
+        let built = info["AnicatBuiltAt"] as? String
+        var parts = [version]
+        if let commit { parts.append(commit) }
+        if let built { parts.append("built \(built)") }
+        return parts.joined(separator: " · ")
+    }
+
     let isSignedIn: Bool
     let username: String?
     let onClearRegistry: () async -> Bool
@@ -829,9 +840,13 @@ private struct MaintenanceTabSection: View {
                     .font(.system(size: 13))
                     .foregroundColor(SumiTheme.muted)
 
-                Text("1.0.0 (Native Apple Silicon ARM64)")
+                // Read from the bundle, not typed here: the string said 1.0.0
+                // for months after the version moved on, and the commit is
+                // what tells two same-version installs apart.
+                Text(Self.buildDescription)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(SumiTheme.foreground)
+                    .textSelection(.enabled)
             }
 
             // No update mechanism exists in the native build yet — a

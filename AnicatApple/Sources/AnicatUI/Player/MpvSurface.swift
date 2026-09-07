@@ -887,6 +887,10 @@ public struct MpvSurface {
                     return
                 }
                 MainActor.assumeIsolated {
+                    // Seeded from the layer as it is now: the first size was
+                    // applied before this closure existed, and a check that
+                    // knows no size checks nothing.
+                    self.lastDrawableSize = view.metalView?.metalLayer.drawableSize ?? .zero
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
@@ -1092,9 +1096,13 @@ public struct MpvSurface {
                   let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
                   let h = stringProperty("osd-dimensions/h").flatMap(Double.init),
                   w > 0, h > 0 else { return }
+            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+                let dw = stringProperty("dwidth") ?? "-", dh = stringProperty("dheight") ?? "-"
+                NSLog("[libmpv] size check: osd %.0fx%.0f dwidth/dheight %@x%@ layer %.0fx%.0f", w, h, dw, dh, wanted.width, wanted.height)
+            }
             if abs(w - wanted.width) > 1 || abs(h - wanted.height) > 1 {
                 reconfigAttemptsForSize += 1
-                print(String(format: "[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize))
+                NSLog("[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize)
                 nudgeVideoReconfig()
             }
         }
@@ -1512,7 +1520,7 @@ public struct MpvSurface {
                 // "video" is refused by a build without the screenshot code,
                 // and by an audio-only file. Neither is worth retrying every
                 // second for the rest of the episode.
-                print("[ambient] screenshot-raw unavailable (\(status)); falling back to the episode still")
+                NSLog("[ambient] screenshot-raw unavailable (%d); falling back to the episode still", status)
                 ambientGate.giveUp()
                 return nil
             }
@@ -1523,17 +1531,17 @@ public struct MpvSurface {
             let elapsed = finished - now
             if ambientSamplesLogged < Self.ambientSamplesToLog {
                 ambientSamplesLogged += 1
-                print(String(format: "[ambient] screenshot-raw %.1fms + downscale %.1fms = %.1fms",
-                             (captured - now) * 1000, (finished - captured) * 1000, elapsed * 1000))
+                NSLog("[ambient] screenshot-raw %.1fms + downscale %.1fms = %.1fms",
+                      (captured - now) * 1000, (finished - captured) * 1000, elapsed * 1000)
             }
             if elapsed > AmbientSampleGate.budget {
-                print(String(format: "[ambient] sample took %.1fms (over budget %d/%d in a row)",
-                             elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit))
+                NSLog("[ambient] sample took %.1fms (over budget %d/%d in a row)",
+                      elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit)
             }
             let before = ambientGate.currentInterval
             ambientGate.record(elapsed: elapsed)
             if ambientGate.currentInterval != before {
-                print(String(format: "[ambient] sampling every %.0fms now", ambientGate.currentInterval * 1000))
+                NSLog("[ambient] sampling every %.0fms now", ambientGate.currentInterval * 1000)
             }
             return frame
         }
@@ -1604,6 +1612,17 @@ public struct MpvSurface {
 
                     if ev.event_id == MPV_EVENT_SHUTDOWN {
                         break
+                    }
+                    // Every iteration, not only the timeout branch below:
+                    // during playback the property observers deliver an
+                    // event many times a second, so the 50 ms timeout almost
+                    // never fires and a sampler that rode it alone managed
+                    // two samples in 25 s of playback while the bars sat on
+                    // the episode still. Both calls are gated by their own
+                    // intervals, so this costs a comparison per event.
+                    if ev.event_id != MPV_EVENT_NONE, let self, self.isRunning {
+                        await self.sampleAmbientIfDue()
+                        self.verifyVideoSizeIfDue()
                     }
                     if ev.event_id == MPV_EVENT_NONE {
                         guard let self = self, self.isRunning else {

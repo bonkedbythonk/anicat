@@ -336,7 +336,9 @@ public struct StatsView: View {
             }
 
             if let firstWatch = stats.firstWatchAt {
-                Text("Watching here since \(firstWatch).")
+                // The registry hands back an ISO-8601 stamp; shown raw it read
+                // "since 2026-09-05T20:40:22+02:00".
+                Text("Watching here since \(Self.longDate(fromISO: firstWatch)).")
                     .font(.system(size: 12))
                     .foregroundColor(SumiTheme.muted)
             }
@@ -429,5 +431,23 @@ public struct StatsView: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
+    }
+}
+
+
+extension StatsView {
+    static func longDate(fromISO iso: String) -> String {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime]
+        var date = parser.date(from: iso)
+        if date == nil {
+            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            date = parser.date(from: iso)
+        }
+        guard let date else { return iso }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
 }

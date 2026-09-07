@@ -30,8 +30,10 @@ public struct VibrancyBackdrop: View {
             #else
             VisualEffectView()
             #endif
-            // rgba(22, 19, 16, 0.62) — the ink at 62%, not the surface colour.
-            Color(hex: "#161310").opacity(0.62)
+            // The palette's ground at 62%, not a fixed ink: hard-coded
+            // #161310 under Paper left the sidebar dark with dark text on it,
+            // unreadable, while the rest of the window went light.
+            SumiTheme.background.opacity(0.62)
         }
     }
 }

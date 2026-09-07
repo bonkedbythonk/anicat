@@ -44,6 +44,9 @@ final class AmbientMetalSampler {
     /// Called from the layer's `nextDrawable` override with the drawable it
     /// is about to hand to MoltenVK; the presented handler fires later.
     nonisolated func track(_ drawable: CAMetalDrawable) {
+        // The presented handler does not exist in the iOS Simulator's
+        // Metal; there the glow keeps the screenshot path.
+        #if os(macOS) || !targetEnvironment(simulator)
         drawable.addPresentedHandler { [weak self] (presented: MTLDrawable) in
             guard let self, let metal = presented as? CAMetalDrawable else { return }
             // The texture is a GPU resource, safe to hand across threads;
@@ -51,6 +54,7 @@ final class AmbientMetalSampler {
             let texture = SendableTexture(metal.texture)
             Task { @MainActor in self.sample(texture.texture) }
         }
+        #endif
     }
 
     private func sample(_ source: MTLTexture) {

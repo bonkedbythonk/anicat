@@ -37,6 +37,19 @@ extension AppModel {
         playerController.nextEpisodeCountdown.reset()
     }
 
+    /// One hop onto the main actor for the playback feedback sounds.
+    ///
+    /// `AppSounds.play` is main-actor isolated and `AppModel` is not, and
+    /// the callers here are a mix: `stopPlayback` and the position tick are
+    /// synchronous and nonisolated, the rest are `async`. Rather than each
+    /// site spelling out its own hop — or `assumeIsolated`, which would trap
+    /// the first time one of them is called from anywhere but the main
+    /// thread — they all go through here. A sound is late by one runloop
+    /// turn, which is not something an ear can hold against a blip.
+    func playFeedback(_ sound: AppSounds) {
+        Task { @MainActor in sound.play() }
+    }
+
     func setupPlayerCallbacks() {
         playerController.onPositionChange = { [weak self] currentTime, duration in
             self?.handlePlaybackPositionChange(currentTime: currentTime, duration: duration)
@@ -153,6 +166,7 @@ extension AppModel {
             // Cancel on the resolve overlay, not a failure.
         } catch {
             errorMessage = "Failed to switch release: \(error.localizedDescription)"
+            playFeedback(.error)
         }
     }
 
@@ -249,6 +263,7 @@ extension AppModel {
             )
         } catch {
             errorMessage = "Failed to load episode \(number): \(error.localizedDescription)"
+            playFeedback(.error)
         }
     }
 
@@ -270,6 +285,7 @@ extension AppModel {
             )
         } catch {
             errorMessage = "Failed to load episode \(target.number): \(error.localizedDescription)"
+            playFeedback(.error)
         }
     }
 
@@ -480,6 +496,10 @@ extension AppModel {
             let percent = Double(stopTime) / Double(dur) * 100
             if percent >= Self.watchedThresholdPct {
                 hasAdvancedAniListForCurrentEpisode = true
+                // The one moment in an episode where something is recorded
+                // that the viewer cannot see happening. The flag above makes
+                // it once per episode, not once per tick past the line.
+                playFeedback(.watchedTick)
                 // Reuses the episode list's own mark-watched path (status
                 // transitions, COMPLETED-on-last-episode clamp) when the
                 // detail page is open, and sends the same mutation itself
@@ -654,6 +674,11 @@ extension AppModel {
 
     /// Stops playback, records final progress into SQLite, and clears the Apple Handoff broadcast.
     public func stopPlayback() {
+        // Read before the clear below, and gated on it: this method also
+        // runs on paths where no player was open (engine teardown, a
+        // stop for a play that never resolved), and an unconditional
+        // sound is a close blip from an idle app.
+        let wasPlaying = activeStreamURL != nil
         // Both calls are IPC writes into the Rust engine — `recordProgress`
         // hits SQLite, `discordClearPresence` hits Discord's socket, and the
         // comment on `handlePlaybackPositionChange` already documents that a
@@ -686,6 +711,9 @@ extension AppModel {
             Task.detached(priority: .utility) { await engine.playbackStopped() }
         }
         self.activeStreamURL = nil
+        if wasPlaying {
+            playFeedback(.playerClose)
+        }
         self.isPlayerMinimized = false
         // Leaving the key set would keep the row it names tagged as a
         // `matchedGeometryEffect` source for the rest of the session, so the
@@ -931,6 +959,7 @@ extension AppModel {
         withAnimation(.easeInOut(duration: 0.32)) {
             self.activeStreamURL = streamURL
         }
+        playFeedback(.playerOpen)
         // Replaying the episode already loaded produces the same stream URL,
         // so `MpvSurface` sees no change and never reopens the file — the
         // `--start` argument that normally carries `fromStart` is only read

@@ -1475,6 +1475,12 @@ private struct PlayerBottomBar: View {
     /// own drag state and does not read this.
     @State private var hoverFraction: Double?
 
+    /// Where the last scrub tick put the playhead, so the next one can tell
+    /// which boundaries it swept over. Nil outside a drag: a stale value
+    /// from the previous scrub would fire against every boundary between
+    /// the two, which is most of them.
+    @State private var lastScrubTime: Double?
+
     private static let tooltipWidth: CGFloat = 150
 
     /// Time, and the chapter that time is inside. There is no frame preview
@@ -1522,6 +1528,20 @@ private struct PlayerBottomBar: View {
         }
     }
 
+    /// Whether a scrub from `from` to `to` swept over a chapter mark or the
+    /// edge of a skip window — the marks the bar already draws, so the tick
+    /// lands on something the viewer can see. Direction-agnostic: dragging
+    /// back over the opening is the same boundary as dragging forward over
+    /// it.
+    private func crossesBoundary(from: Double, to: Double) -> Bool {
+        guard controller.duration > 0, from != to else { return false }
+        let lower = min(from, to)
+        let upper = max(from, to)
+        let boundaries = controller.chapters.map(\.time)
+            + controller.skipWindows.flatMap { [$0.start, $0.end] }
+        return boundaries.contains { $0 > lower && $0 <= upper }
+    }
+
     private var scrubber: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
@@ -1552,12 +1572,18 @@ private struct PlayerBottomBar: View {
                     .onChanged { value in
                         controller.isScrubbing = true
                         let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                        controller.currentTime = Double(fraction) * controller.duration
+                        let target = Double(fraction) * controller.duration
+                        if let previous = lastScrubTime, crossesBoundary(from: previous, to: target) {
+                            AppHaptics.seekSnap()
+                        }
+                        lastScrubTime = target
+                        controller.currentTime = target
                     }
                     .onEnded { value in
                         let fraction = min(max(value.location.x / geo.size.width, 0), 1)
                         let target = Double(fraction) * controller.duration
                         controller.isScrubbing = false
+                        lastScrubTime = nil
                         controller.seek(to: target)
                     }
             )

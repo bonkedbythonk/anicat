@@ -193,6 +193,7 @@ public struct SidebarView: View {
         NavItemButton(item: item, isActive: currentView == item, namespace: sidebarNavNamespace) {
             if currentView != item {
                 SumiHaptics.selection()
+                AppSounds.tabChange.play()
                 // Same curve as the row's own `.animation(value: isActive)`
                 // below. `matchedGeometryEffect` only glides while the leaving
                 // and arriving rows animate in one transaction, so two

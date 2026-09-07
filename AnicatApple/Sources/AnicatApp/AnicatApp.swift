@@ -130,6 +130,11 @@ struct AnicatApp: App {
     var body: some Scene {
         WindowGroup {
             ThemedRoot { RootView(model: model) }
+                // The detail page's studio buttons and "More from" shelf
+                // reach the model through here rather than through
+                // `MediaDetailView.init`, whose one call site inside
+                // `RootView` has no other interest in studios.
+                .environment(\.studioPageActions, model.studioPageActions)
                 .task {
                     await model.initialize()
                     // A notification tap or Spotlight hit that launched the
@@ -277,6 +282,11 @@ struct AnicatApp: App {
     var body: some Scene {
         WindowGroup {
             ThemedRoot { RootView(model: model) }
+                // The detail page's studio buttons and "More from" shelf
+                // reach the model through here rather than through
+                // `MediaDetailView.init`, whose one call site inside
+                // `RootView` has no other interest in studios.
+                .environment(\.studioPageActions, model.studioPageActions)
                 .task {
                     await model.initialize()
                     model.drainPendingDeepLink()

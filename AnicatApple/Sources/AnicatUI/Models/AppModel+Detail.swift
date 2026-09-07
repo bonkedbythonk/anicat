@@ -322,7 +322,10 @@ extension AppModel {
                 malId: d.malId,
                 trailerSite: d.trailerSite,
                 trailerId: d.trailerId,
-                trailerThumbnail: d.trailerThumbnail
+                trailerThumbnail: d.trailerThumbnail,
+                studios: d.studios.map {
+                    HeroBanner.Details.StudioRef(id: $0.id, name: $0.name, isMain: $0.isMain)
+                }
             )
             if cached == nil {
                 withAnimation(.easeInOut(duration: 0.24)) {
@@ -597,6 +600,47 @@ extension AppModel {
             )
         }
         await updateListEntry(status: status, progress: Int64(progress))
+    }
+
+    /// Backs the "More from <studio>" shelf. Returns what is already known
+    /// straight away and fetches only on a miss, because the shelf asks
+    /// from `onAppear` — which fires again every time it scrolls back into
+    /// view, and on a studio the viewer has already opened a page for the
+    /// answer is sitting in `studioWorks` from that load.
+    ///
+    /// The current title is not filtered out here: the cache is keyed by
+    /// studio and shared by every title that studio made, so the exclusion
+    /// belongs to whoever is drawing the shelf.
+    public func studioWorks(studioId: Int64) async -> [MediaSummary] {
+        if let cached = studioWorks[studioId] { return cached }
+        guard let engine, !studioWorksInFlight.contains(studioId) else { return [] }
+        studioWorksInFlight.insert(studioId)
+        defer { studioWorksInFlight.remove(studioId) }
+        guard let detail = try? await engine.studioDetail(studioId: studioId) else { return [] }
+        studioWorks[studioId] = detail.media
+        return detail.media
+    }
+
+    /// The environment value the detail page's studio buttons and shelf
+    /// read, bound to this model. Built here rather than at the scene so
+    /// both platforms' scenes install the same one.
+    public var studioPageActions: StudioPageActions {
+        StudioPageActions(
+            open: { [weak self] id in self?.openStudio(id: id) },
+            works: { [weak self] id in await self?.studioWorkItems(studioId: id) ?? [] }
+        )
+    }
+
+    /// `studioWorks` in the shape the detail page's shelf draws.
+    public func studioWorkItems(studioId: Int64) async -> [MediaDetailView.StudioWorkItem] {
+        await studioWorks(studioId: studioId).map {
+            MediaDetailView.StudioWorkItem(
+                id: $0.catalogId,
+                title: $0.title,
+                coverImage: $0.coverImage,
+                format: $0.format
+            )
+        }
     }
 
     static func relation(_ r: RelatedTitle) -> HeroBanner.Details.Relation {

@@ -159,6 +159,23 @@ public struct MediaDetailView: View {
         }
     }
 
+    /// One title on the "More from <studio>" shelf. A view-level shape
+    /// rather than the engine's `MediaSummary` so this file keeps needing
+    /// nothing from `AnicatCoreKit`.
+    public struct StudioWorkItem: Identifiable, Sendable, Equatable {
+        public let id: Int64
+        public let title: String
+        public let coverImage: String
+        public let format: String?
+
+        public init(id: Int64, title: String, coverImage: String, format: String? = nil) {
+            self.id = id
+            self.title = title
+            self.coverImage = coverImage
+            self.format = format
+        }
+    }
+
     public struct RecommendationItem: Identifiable, Sendable, Codable {
         public let id: Int64
         public let title: String
@@ -304,6 +321,8 @@ public struct MediaDetailView: View {
     @State private var trailerFromHover = false
     @State private var isPosterHovered = false
     @State private var isTrailerHovered = false
+    @State private var studioWorks: [StudioWorkItem] = []
+    @Environment(\.studioPageActions) private var studioPageActions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var detailTabNamespace
     @Namespace private var viewModeNamespace
@@ -402,6 +421,11 @@ public struct MediaDetailView: View {
     /// viewport, so the two never name the title at once.
     private static let compactHeaderThreshold: CGFloat = 260
 
+    /// How many of a studio's works the shelf offers. AniList returns
+    /// hundreds for a prolific studio, and the studio's own page is one tap
+    /// away for the rest.
+    private static let studioShelfCount = 12
+
     public var body: some View {
         ZStack(alignment: .top) {
             scrollBody
@@ -484,6 +508,7 @@ public struct MediaDetailView: View {
                 banner
                 content
                 tabsSection
+                moreFromStudio
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -853,6 +878,78 @@ public struct MediaDetailView: View {
         }
     }
 
+    /// Other titles by the studio that made this one. Fetched when the page
+    /// mounts rather than as part of the detail load: it sits below the
+    /// tabs, so nothing about the page above it waits on the request, and a
+    /// studio already opened this session answers from `AppModel`'s cache
+    /// without a round trip at all.
+    ///
+    /// `.task(id:)` rather than a bare `onAppear`: it cancels with the page,
+    /// which a detached fetch left running past a fast back-and-forward
+    /// would not, and it re-runs when the id changes.
+    @ViewBuilder
+    private var moreFromStudio: some View {
+        if let studio = shelfStudio {
+            Group {
+                if !studioWorks.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button {
+                            studioPageActions.open(studio.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("MORE FROM \(studio.name.uppercased())")
+                                    .sumiTabularMono(size: 11)
+                                    .foregroundColor(SumiTheme.indigo)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(SumiTheme.indigo.opacity(0.7))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.sumiPressable)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 16) {
+                                ForEach(studioWorks) { work in
+                                    PersonMediaPoster(
+                                        title: work.title,
+                                        coverImage: work.coverImage,
+                                        year: nil,
+                                        caption: work.format
+                                    ) {
+                                        onSelectMediaId?(
+                                            work.id,
+                                            work.title,
+                                            URL(string: work.coverImage),
+                                            AppModel.isMangaFormat(work.format)
+                                        )
+                                    }
+                                    .frame(width: 140)
+                                }
+                            }
+                            .padding(.bottom, 4)
+                        }
+                    }
+                    .padding(.horizontal, 56)
+                    .padding(.bottom, 64)
+                    .frame(maxWidth: 1150, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .transition(.opacity)
+                }
+            }
+            .task(id: studio.id) {
+                let works = await studioPageActions.works(studio.id)
+                // The studio's own list includes the title being viewed;
+                // dropping it here rather than in the cache keeps that
+                // cache shareable with every other title the studio made.
+                let others = works.filter { $0.id != details.id }.prefix(Self.studioShelfCount)
+                withAnimation(.sumi(.page)) {
+                    studioWorks = Array(others)
+                }
+            }
+        }
+    }
+
     /// The one line of state above the title. Everything is muted mono except
     /// the three things worth colouring: the format, the airing status, and
     /// the counts.
@@ -896,10 +993,7 @@ public struct MediaDetailView: View {
                     .foregroundColor(SumiTheme.muted)
             }
 
-            if let studio = details.studio {
-                Text(studio)
-                    .foregroundColor(SumiTheme.muted)
-            }
+            studioLine
 
             if let score = details.averageScore, score > 0 {
                 Text("SCORE \(score)%")
@@ -915,6 +1009,40 @@ public struct MediaDetailView: View {
         }
         .sumiTabularMono(size: 10.5)
     }
+
+    /// The studios, each opening its own page. Falls back to the plain
+    /// `studio` string for a snapshot written before `studios` existed and
+    /// for any title AniList credits no studio ids for — the name was
+    /// always shown here, and losing it to gain a button is not a trade.
+    @ViewBuilder
+    private var studioLine: some View {
+        if !mainStudios.isEmpty {
+            HStack(spacing: 6) {
+                Text("Studio:")
+                    .foregroundColor(SumiTheme.muted.opacity(0.7))
+                ForEach(mainStudios) { studio in
+                    StudioButton(name: studio.name) {
+                        studioPageActions.open(studio.id)
+                    }
+                }
+            }
+        } else if let studio = details.studio {
+            Text(studio)
+                .foregroundColor(SumiTheme.muted)
+        }
+    }
+
+    /// The animation studios, or every credited one when AniList marks none
+    /// as main — a production committee of six names is still better than
+    /// an empty line where the studio used to be.
+    private var mainStudios: [HeroBanner.Details.StudioRef] {
+        guard let studios = details.studios, !studios.isEmpty else { return [] }
+        let main = studios.filter(\.isMain)
+        return main.isEmpty ? Array(studios.prefix(3)) : main
+    }
+
+    /// The shelf's subject: one studio, so the heading can name it.
+    private var shelfStudio: HeroBanner.Details.StudioRef? { mainStudios.first }
 
     private var trailerPill: some View {
         Button {
@@ -2680,5 +2808,62 @@ private struct ServerPickerView: View {
         }
         .frame(width: 460)
         .background(SumiTheme.card)
+    }
+}
+
+// MARK: - Studio navigation
+
+/// What the detail page can ask of the studio catalog: open a studio's own
+/// page, and list its works for the "More from" shelf.
+///
+/// Handed down the environment rather than added to `MediaDetailView.init`,
+/// which already takes two dozen parameters and is built at one call site
+/// with no other interest in studios. The default is inert, so a preview or
+/// a test that renders the page without an app around it draws the studio
+/// names as plain buttons and no shelf, rather than failing on a dependency
+/// it never asked for.
+public struct StudioPageActions: Sendable {
+    public var open: @MainActor @Sendable (Int64) -> Void
+    public var works: @MainActor @Sendable (Int64) async -> [MediaDetailView.StudioWorkItem]
+
+    public init(
+        open: @escaping @MainActor @Sendable (Int64) -> Void = { _ in },
+        works: @escaping @MainActor @Sendable (Int64) async -> [MediaDetailView.StudioWorkItem] = { _ in [] }
+    ) {
+        self.open = open
+        self.works = works
+    }
+}
+
+private struct StudioPageActionsKey: EnvironmentKey {
+    static let defaultValue = StudioPageActions()
+}
+
+public extension EnvironmentValues {
+    var studioPageActions: StudioPageActions {
+        get { self[StudioPageActionsKey.self] }
+        set { self[StudioPageActionsKey.self] = newValue }
+    }
+}
+
+/// One studio name in the meta line, sized to sit inside that mono line
+/// rather than break it: no capsule and no padding of its own, just the
+/// hover colour and underline that say the name is a destination.
+private struct StudioButton: View {
+    let name: String
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            Text(name)
+                .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.muted)
+                .underline(isHovered, color: SumiTheme.indigo.opacity(0.6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .stableHover { isHovered = $0 }
+        .animation(.sumi(.pop), value: isHovered)
     }
 }

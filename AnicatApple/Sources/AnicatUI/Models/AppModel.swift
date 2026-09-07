@@ -11,12 +11,14 @@ public enum PersonPage: Equatable, Hashable, Identifiable, Sendable {
     case character(id: Int64)
     case staff(id: Int64)
     case thread(id: Int64)
+    case studio(id: Int64)
 
     public var id: String {
         switch self {
         case .character(let id): return "character-\(id)"
         case .staff(let id): return "staff-\(id)"
         case .thread(let id): return "thread-\(id)"
+        case .studio(let id): return "studio-\(id)"
         }
     }
 
@@ -27,6 +29,7 @@ public enum PersonPage: Equatable, Hashable, Identifiable, Sendable {
         case .character(let id): return URL(string: "https://anilist.co/character/\(id)")
         case .staff(let id): return URL(string: "https://anilist.co/staff/\(id)")
         case .thread(let id): return URL(string: "https://anilist.co/forum/thread/\(id)")
+        case .studio(let id): return URL(string: "https://anilist.co/studio/\(id)")
         }
     }
 }
@@ -160,6 +163,19 @@ public final class AppModel: @unchecked Sendable {
     public var selectedRecommendations: [MediaDetailView.RecommendationItem] = []
     public var selectedDiscussions: [MediaDetailView.DiscussionItem] = []
 
+    // MARK: - Detail extras
+
+    /// Works by studio id, for the "More from" shelf at the foot of the
+    /// detail page. Keyed by studio rather than by title so two shows from
+    /// the same studio share one fetch, and never pruned: a session opens
+    /// few enough studios that the map stays smaller than a single detail
+    /// snapshot.
+    var studioWorks: [Int64: [MediaSummary]] = [:]
+    /// Studio ids with a `studioWorks` fetch already in flight. The shelf
+    /// asks on `onAppear`, which fires again on every scroll back into
+    /// view — without this each return trip started another request.
+    var studioWorksInFlight: Set<Int64> = []
+
     // MARK: - People and threads
 
     /// A stack, not a single page: a character page lists its voice actors,
@@ -175,6 +191,7 @@ public final class AppModel: @unchecked Sendable {
     public var loadedCharacter: FfiCharacterDetail?
     public var loadedStaff: FfiStaffDetail?
     public var loadedThread: FfiThreadDetail?
+    public var loadedStudio: FfiStudioDetail?
     /// Page 1 arrives inside `loadedThread`; `loadMoreThreadComments`
     /// appends later pages here rather than replacing, so the list grows.
     public var loadedThreadComments: [FfiThreadComment] = []

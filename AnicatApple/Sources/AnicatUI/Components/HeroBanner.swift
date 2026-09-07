@@ -50,6 +50,14 @@ public struct HeroBanner: View {
         public let trailerSite: String?
         public let trailerId: String?
         public let trailerThumbnail: String?
+        /// Every credited studio, each with the id its own page is opened
+        /// by. `studio` above stays as the single name the meta line has
+        /// always drawn: it is the first name AniList returned, which is
+        /// not reliably the animation studio.
+        ///
+        /// Optional for the reason `trailerSite` documents — a snapshot
+        /// written before this field existed has no key for it.
+        public let studios: [StudioRef]?
 
         /// A neighbouring season, as the detail page's chain cards draw it.
         public struct Relation: Sendable, Identifiable, Codable {
@@ -65,7 +73,23 @@ public struct HeroBanner: View {
                 self.coverURL = coverURL
             }
         }
-        
+
+        /// One credited studio. `isMain` marks the animation studio rather
+        /// than the rest of the production committee, which is the only
+        /// thing that makes "Studio: MAPPA" narrower than a list of six
+        /// licensing and music companies.
+        public struct StudioRef: Sendable, Identifiable, Codable, Hashable {
+            public let id: Int64
+            public let name: String
+            public let isMain: Bool
+
+            public init(id: Int64, name: String, isMain: Bool) {
+                self.id = id
+                self.name = name
+                self.isMain = isMain
+            }
+        }
+
         public init(
             id: Int64 = 0,
             title: String,
@@ -93,11 +117,13 @@ public struct HeroBanner: View {
             malId: Int64? = nil,
             trailerSite: String? = nil,
             trailerId: String? = nil,
-            trailerThumbnail: String? = nil
+            trailerThumbnail: String? = nil,
+            studios: [StudioRef]? = nil
         ) {
             self.trailerSite = trailerSite
             self.trailerId = trailerId
             self.trailerThumbnail = trailerThumbnail
+            self.studios = studios
             self.status = status
             self.episodeCount = episodeCount
             self.resumeEpisode = resumeEpisode

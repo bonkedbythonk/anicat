@@ -57,6 +57,19 @@ public struct PersonPageView: View {
                     } else {
                         PersonPageLoadingState()
                     }
+                case .studio:
+                    if let studio = model.loadedStudio {
+                        StudioDetailView(studio: studio) { catalogId, title, cover, format in
+                            model.openTitleFromPersonPage(
+                                id: catalogId,
+                                title: title,
+                                coverURL: URL(string: cover),
+                                isManga: AppModel.isMangaFormat(format)
+                            )
+                        }
+                    } else {
+                        PersonPageLoadingState()
+                    }
                 case .thread:
                     if let thread = model.loadedThread {
                         ThreadView(

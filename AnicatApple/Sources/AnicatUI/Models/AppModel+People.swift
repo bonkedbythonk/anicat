@@ -22,6 +22,10 @@ extension AppModel {
         pushPersonPage(.thread(id: id))
     }
 
+    public func openStudio(id: Int64) {
+        pushPersonPage(.studio(id: id))
+    }
+
     /// One step back, whatever "back" currently means. The swipe gesture,
     /// the mouse back button and Alt+Left all called `closeDetail()`
     /// directly, which with a character page open dropped the detail page
@@ -97,6 +101,14 @@ extension AppModel {
                     let detail = try await engine.staffDetail(staffId: id)
                     guard self.stillOnTop(page) else { return }
                     self.loadedStaff = detail
+                case .studio(let id):
+                    let detail = try await engine.studioDetail(studioId: id)
+                    guard self.stillOnTop(page) else { return }
+                    self.loadedStudio = detail
+                    // The page and the "More from" shelf want the same
+                    // list, so the fetch that drew the page fills the
+                    // shelf's cache too rather than each paying for its own.
+                    self.studioWorks[id] = detail.media
                 case .thread(let id):
                     let detail = try await engine.threadDetail(threadId: id)
                     guard self.stillOnTop(page) else { return }
@@ -175,6 +187,7 @@ extension AppModel {
         loadedCharacter = nil
         loadedStaff = nil
         loadedThread = nil
+        loadedStudio = nil
         loadedThreadComments = []
         threadHasMoreComments = false
         isLoadingMoreThreadComments = false

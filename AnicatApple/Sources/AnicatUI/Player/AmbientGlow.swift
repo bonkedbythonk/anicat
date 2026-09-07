@@ -13,10 +13,26 @@ import ImageIO
 public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
     public let id: Int
     public let image: CGImage
+    /// The outer fifth of the frame on each side. Each letterbox bar is lit
+    /// by the band of picture it touches, the way a zoned backlight is: a
+    /// single blurred copy of the whole frame mixed the centre into every
+    /// bar and the light did not line up with the picture's edges.
+    public let top: CGImage
+    public let bottom: CGImage
+    public let left: CGImage
+    public let right: CGImage
+
+    public static let bandFraction: CGFloat = 0.2
 
     public init(id: Int, image: CGImage) {
         self.id = id
         self.image = image
+        let w = CGFloat(image.width), h = CGFloat(image.height)
+        let bw = max(1, (w * Self.bandFraction).rounded()), bh = max(1, (h * Self.bandFraction).rounded())
+        top = image.cropping(to: CGRect(x: 0, y: 0, width: w, height: bh)) ?? image
+        bottom = image.cropping(to: CGRect(x: 0, y: h - bh, width: w, height: bh)) ?? image
+        left = image.cropping(to: CGRect(x: 0, y: 0, width: bw, height: h)) ?? image
+        right = image.cropping(to: CGRect(x: w - bw, y: 0, width: bw, height: h)) ?? image
     }
 
     public static func == (lhs: AmbientFrame, rhs: AmbientFrame) -> Bool {
@@ -28,12 +44,12 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
 /// interval, the budget and the strike policy can be exercised without a
 /// running player.
 public struct AmbientSampleGate: Sendable, Equatable {
-    /// How often a frame is sampled. 150 ms, about seven a second, under a
-    /// 0.35 s fade in the view: one a second lagged cuts by up to a second
+    /// How often a frame is sampled. 100 ms, ten a second, under a
+    /// 0.3 s fade in the view: one a second lagged cuts by up to a second
     /// and read as "too slow". The idle tick that drives it is 50 ms, and
-    /// the downscale measured 0.65 ms for 1080p, so seven a second is
-    /// under 5 ms of work a second before `screenshot-raw` itself.
-    public static let interval: CFAbsoluteTime = 0.15
+    /// the downscale measured 0.65 ms for 1080p, so ten a second is
+    /// under 7 ms of work a second before `screenshot-raw` itself.
+    public static let interval: CFAbsoluteTime = 0.1
     /// `screenshot-raw` runs on mpv's core lock, so a slow sample is a
     /// dropped frame. Covers the downscale too — both happen before the
     /// event loop gets back to `mpv_wait_event`.

@@ -365,7 +365,7 @@ public struct PlayerView: View {
                             .tint(SumiTheme.indigo)
                         Text(bufferingLabel)
                             .sumiTabularMono(size: 12)
-                            .foregroundColor(SumiTheme.muted)
+                            .foregroundColor(PlayerChrome.muted)
                     }
                     .transition(.opacity)
                 }
@@ -639,19 +639,17 @@ public struct PlayerView: View {
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
         if let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
             let video = geometry.videoRect
-            ZStack {
-                glowImage(frame, windowSize: windowSize)
+            ZStack(alignment: .topLeading) {
+                glowBands(frame, video: video, windowSize: windowSize)
                     .id(frame.id)
                     .transition(.opacity)
             }
-            .frame(width: windowSize.width, height: windowSize.height)
-            // Opacity on the group, not on each frame: samples arrive once a
-            // second and the fade runs for two, so two or three copies are
-            // alive at any moment and per-copy alphas would sum to a visible
-            // pulse at exactly the sample rate — the flicker this whole
-            // rewrite exists to remove.
+            .frame(width: windowSize.width, height: windowSize.height, alignment: .topLeading)
+            // Opacity on the group, not on each frame: several fades overlap
+            // at seven samples a second, and per-copy alphas would sum to a
+            // pulse at exactly the sample rate.
             .compositingGroup()
-            .opacity(0.55)
+            .opacity(0.6)
             .mask(alignment: .topLeading) {
                 Path { path in
                     path.addRect(CGRect(origin: .zero, size: windowSize))
@@ -661,39 +659,49 @@ public struct PlayerView: View {
                 .frame(width: windowSize.width, height: windowSize.height)
             }
             .allowsHitTesting(false)
-            // Fast enough to track a cut, slow enough not to strobe: at
-            // one sample a second with a two second fade the bars lagged the
-            // picture visibly ("too slow"); seven samples a second under a
-            // 0.35 s fade reads as the picture's own light.
-            .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: frame.id)
+            // Fast enough to track a cut, slow enough not to strobe: ten
+            // samples a second under this fade reads as the picture's own
+            // light; one a second under two seconds lagged cuts visibly.
+            .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: frame.id)
         }
     }
 
-    /// One sampled frame, blurred to fill the window.
-    private func glowImage(_ frame: AmbientFrame, windowSize: CGSize) -> some View {
-        Image(decorative: frame.image, scale: 1)
+    /// One blurred band of picture per letterbox bar, each stretched over
+    /// the bar it touches plus an overlap into the video the mask removes:
+    /// a blur pulls transparency in from its layer's edge, and without the
+    /// overlap every bar faded to nothing exactly where it meets the frame.
+    @ViewBuilder
+    private func glowBands(_ frame: AmbientFrame, video: CGRect, windowSize: CGSize) -> some View {
+        let overlap: CGFloat = 48
+        let blur: CGFloat = 36
+        if video.minY > 0.5 {
+            band(frame.top, rect: CGRect(x: video.minX - overlap, y: -overlap, width: video.width + overlap * 2, height: video.minY + overlap * 2), blur: blur)
+        }
+        if video.maxY < windowSize.height - 0.5 {
+            band(frame.bottom, rect: CGRect(x: video.minX - overlap, y: video.maxY - overlap, width: video.width + overlap * 2, height: windowSize.height - video.maxY + overlap * 2), blur: blur)
+        }
+        if video.minX > 0.5 {
+            band(frame.left, rect: CGRect(x: -overlap, y: video.minY - overlap, width: video.minX + overlap * 2, height: video.height + overlap * 2), blur: blur)
+        }
+        if video.maxX < windowSize.width - 0.5 {
+            band(frame.right, rect: CGRect(x: video.maxX - overlap, y: video.minY - overlap, width: windowSize.width - video.maxX + overlap * 2, height: video.height + overlap * 2), blur: blur)
+        }
+    }
+
+    private func band(_ image: CGImage, rect: CGRect, blur: CGFloat) -> some View {
+        Image(decorative: image, scale: 1)
             .resizable()
-            .aspectRatio(contentMode: .fill)
-            // Overfilled by layout, not by `scaleEffect`: a blur pulls
-            // transparency in from its own layer's edges, and the bars this
-            // is masked to are exactly those edges, so without the overfill
-            // the glow fades out along the window border and reads as a
-            // vignette rather than as spill. `scaleEffect` would leave the
-            // layout bounds at the window size, and the rasterizer below is
-            // free to size its buffer to those bounds and crop the overfill
-            // straight back off.
-            .frame(width: windowSize.width * 1.2, height: windowSize.height * 1.2)
-            .blur(radius: 60)
-            .saturation(1.1)
-            .brightness(-0.15)
-            // Rasterized per frame, not per composite: each of these layers
-            // is static for the two seconds it lives, but the video beside it
-            // recomposites 24 times a second, and an unflattened 60pt blur
-            // is the same full-window offscreen pass this file's mini-player
-            // comment records as the app-wide lag while minimized.
+            .interpolation(.high)
+            .frame(width: rect.width, height: rect.height)
+            .blur(radius: blur)
+            .saturation(1.15)
+            .brightness(-0.1)
+            // Rasterized once per sample, not per composite: the video beside
+            // it recomposites 24 times a second and an unflattened blur is a
+            // full-window offscreen pass each time.
             .drawingGroup()
-            .frame(width: windowSize.width, height: windowSize.height)
-            .clipped()
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
     }
 
     #if os(macOS)
@@ -792,7 +800,7 @@ public struct PlayerView: View {
                                 .foregroundColor(SumiTheme.indigo)
                             Text(next.title.isEmpty ? "Episode \(next.number)" : next.title)
                                 .font(.system(size: 12.5, weight: .semibold))
-                                .foregroundColor(SumiTheme.foreground)
+                                .foregroundColor(PlayerChrome.foreground)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 8) {
@@ -807,7 +815,7 @@ public struct PlayerView: View {
                                 }
                                 .buttonStyle(.sumiPressable)
                                 .font(.system(size: 11))
-                                .foregroundColor(SumiTheme.muted)
+                                .foregroundColor(PlayerChrome.muted)
                             }
                             .padding(.top, 2)
                         }
@@ -843,7 +851,7 @@ public struct PlayerView: View {
         if reduceMotion {
             Text("\(seconds)")
                 .sumiTabularMono(size: 20, weight: .bold)
-                .foregroundColor(SumiTheme.foreground)
+                .foregroundColor(PlayerChrome.foreground)
                 .frame(width: 40, height: 40)
         } else {
             ZStack {
@@ -856,7 +864,7 @@ public struct PlayerView: View {
                     .animation(.linear(duration: 0.25), value: controller.currentTime)
                 Text("\(seconds)")
                     .sumiTabularMono(size: 14, weight: .bold)
-                    .foregroundColor(SumiTheme.foreground)
+                    .foregroundColor(PlayerChrome.foreground)
             }
             .frame(width: 40, height: 40)
         }
@@ -879,7 +887,7 @@ public struct PlayerView: View {
                             Text("Skipped \(flash)")
                                 .sumiTabularMono(size: 11, weight: .medium)
                         }
-                        .foregroundColor(SumiTheme.foreground)
+                        .foregroundColor(PlayerChrome.foreground)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(Color.black.opacity(0.6))
@@ -936,7 +944,7 @@ public struct PlayerView: View {
             Button(action: onClose) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
+                    .foregroundColor(PlayerChrome.foreground)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.sumiPressable)
@@ -944,7 +952,7 @@ public struct PlayerView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
+                    .foregroundColor(PlayerChrome.foreground)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Text("Episode \(controller.episodeNumber)")
@@ -952,10 +960,10 @@ public struct PlayerView: View {
                         .foregroundColor(SumiTheme.indigo)
                     if !controller.episodeTitle.isEmpty {
                         Text("·")
-                            .foregroundColor(SumiTheme.muted.opacity(0.5))
+                            .foregroundColor(PlayerChrome.muted.opacity(0.5))
                         Text(controller.episodeTitle)
                             .font(.system(size: 10.5))
-                            .foregroundColor(SumiTheme.muted)
+                            .foregroundColor(PlayerChrome.muted)
                             .lineLimit(1)
                     }
                 }
@@ -971,7 +979,7 @@ public struct PlayerView: View {
                 Button(action: onMinimize) {
                     Image(systemName: "pip.enter")
                         .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.sumiPressable)
@@ -990,7 +998,7 @@ public struct PlayerView: View {
                 }) {
                     Image(systemName: "rectangle.inset.bottomright.filled")
                         .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.sumiPressable)
@@ -1002,7 +1010,7 @@ public struct PlayerView: View {
                 Button(action: { controller.toggleAutoPlayNext() }) {
                     Image(systemName: controller.autoPlayNextEnabled ? "play.square.stack.fill" : "play.square.stack")
                         .font(.system(size: 13))
-                        .foregroundColor(controller.autoPlayNextEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.85))
+                        .foregroundColor(controller.autoPlayNextEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.sumiPressable)
@@ -1016,7 +1024,7 @@ public struct PlayerView: View {
                 Button(action: { controller.toggleAutoSkip() }) {
                     Image(systemName: controller.autoSkipEnabled ? "forward.circle.fill" : "forward.circle")
                         .font(.system(size: 13))
-                        .foregroundColor(controller.autoSkipEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.85))
+                        .foregroundColor(controller.autoSkipEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.sumiPressable)
@@ -1028,7 +1036,7 @@ public struct PlayerView: View {
                     Button(action: { showEpisodeList = true }) {
                         Image(systemName: "list.bullet")
                             .font(.system(size: 13))
-                            .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                            .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.sumiPressable)
@@ -1047,7 +1055,7 @@ public struct PlayerView: View {
                 }) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.sumiPressable)
@@ -1523,11 +1531,11 @@ private struct PlayerBottomBar: View {
             VStack(spacing: 2) {
                 Text(PlayerController.formatTimestamp(time))
                     .sumiTabularMono(size: 11, weight: .semibold)
-                    .foregroundColor(SumiTheme.foreground)
+                    .foregroundColor(PlayerChrome.foreground)
                 if let chapter, !chapter.title.trimmingCharacters(in: .whitespaces).isEmpty {
                     Text(chapter.title)
                         .font(.system(size: 10))
-                        .foregroundColor(SumiTheme.muted)
+                        .foregroundColor(PlayerChrome.muted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -1632,7 +1640,7 @@ private struct PlayerBottomBar: View {
             Button(action: { controller.previousEpisode() }) {
                 Image(systemName: "backward.end.fill")
                 .font(.system(size: 14))
-                .foregroundColor(controller.hasPreviousEpisode ? SumiTheme.foreground.opacity(0.8) : SumiTheme.muted.opacity(0.4))
+                .foregroundColor(controller.hasPreviousEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasPreviousEpisode)
@@ -1661,7 +1669,7 @@ private struct PlayerBottomBar: View {
             Button(action: { controller.seekRelative(by: -10) }) {
                 Image(systemName: "gobackward.10")
                 .font(.system(size: 15))
-                .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                .foregroundColor(PlayerChrome.foreground.opacity(0.8))
             }
             .buttonStyle(.sumiPressable)
             .help("Back 10 seconds")
@@ -1671,7 +1679,7 @@ private struct PlayerBottomBar: View {
             Button(action: { controller.seekRelative(by: 10) }) {
                 Image(systemName: "goforward.10")
                 .font(.system(size: 15))
-                .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                .foregroundColor(PlayerChrome.foreground.opacity(0.8))
             }
             .buttonStyle(.sumiPressable)
             .help("Forward 10 seconds")
@@ -1681,7 +1689,7 @@ private struct PlayerBottomBar: View {
             Button(action: { controller.nextEpisode() }) {
                 Image(systemName: "forward.end.fill")
                 .font(.system(size: 14))
-                .foregroundColor(controller.hasNextEpisode ? SumiTheme.foreground.opacity(0.8) : SumiTheme.muted.opacity(0.4))
+                .foregroundColor(controller.hasNextEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasNextEpisode)
@@ -1691,11 +1699,11 @@ private struct PlayerBottomBar: View {
             // Time Display
             HStack(spacing: 4) {
                 Text(controller.formattedCurrentTime)
-                .foregroundColor(SumiTheme.foreground)
+                .foregroundColor(PlayerChrome.foreground)
                 Text("/")
-                .foregroundColor(SumiTheme.muted)
+                .foregroundColor(PlayerChrome.muted)
                 Text(controller.formattedDuration)
-                .foregroundColor(SumiTheme.muted)
+                .foregroundColor(PlayerChrome.muted)
             }
             .sumiTabularMono(size: 11.5)
             .fixedSize()
@@ -1712,7 +1720,7 @@ private struct PlayerBottomBar: View {
                     Button(action: { controller.toggleMute() }) {
                         Image(systemName: volumeIcon)
                         .font(.system(size: 14))
-                        .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                        .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                         .frame(width: 16)
                     }
                     .buttonStyle(.sumiPressable)
@@ -1731,7 +1739,7 @@ private struct PlayerBottomBar: View {
                 Button(action: { controller.toggleAnime4K() }) {
                     Image(systemName: "sparkles")
                     .font(.system(size: 14))
-                    .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+                    .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                 }
                 .buttonStyle(.sumiPressable)
                 .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
@@ -1742,7 +1750,7 @@ private struct PlayerBottomBar: View {
                 Button(action: { ambientGlowEnabled.toggle() }) {
                     Image(systemName: ambientGlowEnabled ? "light.max" : "light.min")
                     .font(.system(size: 14))
-                    .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+                    .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                 }
                 .buttonStyle(.sumiPressable)
                 .help(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
@@ -1752,7 +1760,7 @@ private struct PlayerBottomBar: View {
                 Button(action: { controller.cycleSideways() }) {
                     Image(systemName: "rotate.right")
                     .font(.system(size: 14))
-                    .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+                    .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                 }
                 .buttonStyle(.sumiPressable)
                 .help(rotateHelpText)
@@ -1771,7 +1779,7 @@ private struct PlayerBottomBar: View {
                 }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 14))
-                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
+                    .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Toggle Fullscreen (F)")
@@ -1793,4 +1801,15 @@ private struct PlayerBottomBar: View {
             }
         }
     }
+}
+
+
+/// The chrome's own colours, fixed to the dark palette. The player is
+/// always drawn on black and its bars on black scrims, and under the Paper
+/// theme `SumiTheme.foreground` resolved to ink: dark text on a dark scrim,
+/// so the controls vanished. The popovers keep the theme's colours, since
+/// their own material follows the appearance.
+enum PlayerChrome {
+    static var foreground: Color { SumiPalette.ink.foreground }
+    static var muted: Color { SumiPalette.ink.muted }
 }

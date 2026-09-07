@@ -646,15 +646,10 @@ public struct PlayerView: View {
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
         if let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
             let video = geometry.videoRect
-            ZStack(alignment: .topLeading) {
-                glowBands(frame, video: video, windowSize: windowSize)
-                    .id(frame.id)
-                    .transition(.opacity)
+            AmbientGlowCrossfade(frame: frame, reduceMotion: reduceMotion) { shown in
+                glowBands(shown, video: video, windowSize: windowSize)
             }
             .frame(width: windowSize.width, height: windowSize.height, alignment: .topLeading)
-            // Opacity on the group, not on each frame: several fades overlap
-            // at seven samples a second, and per-copy alphas would sum to a
-            // pulse at exactly the sample rate.
             .compositingGroup()
             .opacity(0.6)
             .mask(alignment: .topLeading) {
@@ -666,12 +661,6 @@ public struct PlayerView: View {
                 .frame(width: windowSize.width, height: windowSize.height)
             }
             .allowsHitTesting(false)
-            // Fast enough to track a cut, slow enough not to strobe: ten
-            // samples a second under this fade reads as the picture's own
-            // light; one a second under two seconds lagged cuts visibly.
-            // "Delayed" at 100 ms and a 0.3 s fade; 50 ms samples under a
-            // 0.15 s fade put the light within a couple of frames of the cut.
-            .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: frame.id)
         }
     }
 
@@ -1827,4 +1816,53 @@ private struct PlayerBottomBar: View {
 enum PlayerChrome {
     static var foreground: Color { SumiPalette.ink.foreground }
     static var muted: Color { SumiPalette.ink.muted }
+}
+
+
+/// Two layers, the previous frame under the current one, and only the top
+/// one fades in. A SwiftUI transition faded the old layer out while the
+/// new one faded in, and two half-transparent copies over black add up to
+/// three quarters of the light, so at twenty samples a second the bars
+/// pulsed at the sample rate: "goes on and off slightly, constantly". With
+/// the old frame held opaque underneath, the composite never dips.
+private struct AmbientGlowCrossfade<Content: View>: View {
+    let frame: AmbientFrame
+    let reduceMotion: Bool
+    @ViewBuilder let content: (AmbientFrame) -> Content
+
+    @State private var back: AmbientFrame?
+    @State private var front: AmbientFrame?
+    @State private var frontOpacity: Double = 1
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let back {
+                content(back)
+            }
+            if let front {
+                content(front)
+                    .opacity(frontOpacity)
+            }
+        }
+        .onAppear {
+            front = frame
+            frontOpacity = 1
+        }
+        .onChange(of: frame.id) { _, _ in
+            back = front
+            front = frame
+            if reduceMotion {
+                frontOpacity = 1
+                return
+            }
+            // A ramp shorter than the sample interval would never be seen
+            // through; longer than two intervals and the light lags. 80 ms
+            // against 33 ms samples from the drawable: at most two frames
+            // arrive mid-ramp, and the half-shown one becomes the base.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { frontOpacity = 0 }
+            withAnimation(.linear(duration: 0.08)) { frontOpacity = 1 }
+        }
+    }
 }

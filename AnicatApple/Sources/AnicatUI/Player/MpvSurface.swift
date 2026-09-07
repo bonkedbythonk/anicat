@@ -80,6 +80,29 @@ final class MpvMetalLayer: CAMetalLayer {
             }
         }
     }
+
+    /// MoltenVK sets `framebufferOnly` to true when the swapchain is only
+    /// ever a colour attachment, and a framebuffer-only texture cannot be
+    /// sampled by the ambient glow's scale kernel. Pinned false; the cost
+    /// is a texture the GPU cannot treat as write-only, which does not
+    /// register at 1080p.
+    override var framebufferOnly: Bool {
+        get { false }
+        set {}
+    }
+
+    /// The ambient sampler, when the `.metal` backend is active. Every
+    /// drawable handed to MoltenVK is registered so its presented handler
+    /// can copy the finished picture.
+    nonisolated(unsafe) var ambientSampler: AmbientMetalSampler?
+
+    override func nextDrawable() -> CAMetalDrawable? {
+        let drawable = super.nextDrawable()
+        if let drawable, let ambientSampler {
+            ambientSampler.track(drawable)
+        }
+        return drawable
+    }
 }
 
 #if os(macOS)
@@ -897,6 +920,18 @@ public struct MpvSurface {
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
+                    if let layer = view.metalView?.metalLayer,
+                       let device = layer.device ?? MTLCreateSystemDefaultDevice(),
+                       let sampler = AmbientMetalSampler(device: device) {
+                        sampler.onThumbnail = { [weak self] image in
+                            guard let self else { return }
+                            guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true,
+                                  !self.controller.awaitingNewFile else { return }
+                            self.controller.setAmbientFrame(image)
+                        }
+                        layer.ambientSampler = sampler
+                        self.usesMetalAmbientSampler = true
+                    }
                 }
                 mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
                 mpv_set_option_string(handle, "vo", "gpu-next")
@@ -1451,7 +1486,13 @@ public struct MpvSurface {
         /// resolve or a cache stall: `screenshot-raw` blocks on a core that
         /// is itself waiting on the swarm, which is the one situation where a
         /// slow screenshot would be the player's own fault.
+        /// True once the drawable-side sampler is installed; the
+        /// `screenshot-raw` path below then stays idle and only serves the
+        /// OpenGL escape hatch.
+        nonisolated(unsafe) var usesMetalAmbientSampler = false
+
         func sampleAmbientIfDue() async {
+            guard !usesMetalAmbientSampler else { return }
             // Checked before the main-actor hop below, not after: this runs
             // on every 50ms idle tick, and hopping twenty times a second to
             // read three booleans that matter once a second is the whole

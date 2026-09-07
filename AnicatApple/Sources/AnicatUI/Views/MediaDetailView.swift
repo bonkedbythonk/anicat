@@ -322,6 +322,18 @@ public struct MediaDetailView: View {
     @State private var isPosterHovered = false
     @State private var isTrailerHovered = false
     @State private var studioWorks: [StudioWorkItem] = []
+    /// The confirmation that a download was queued. Nothing else on the page
+    /// moved at the tap: the button became a 15pt ring on a row that may be
+    /// scrolled anywhere, so the eye had nothing to catch ("no visual
+    /// feedback"). `token` tells two taps apart so a second one restarts
+    /// the dismiss timer instead of being swallowed as "no change".
+    struct DownloadToast: Equatable {
+        let episode: Int
+        let token: Int
+    }
+    @State private var downloadToast: DownloadToast?
+    @State private var downloadToastCount = 0
+    @State private var downloadToastTask: Task<Void, Never>?
     @Environment(\.studioPageActions) private var studioPageActions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var detailTabNamespace
@@ -439,6 +451,16 @@ public struct MediaDetailView: View {
                 trailerOverlay(trailerId: trailerId)
                     .zIndex(50)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            if let toast = downloadToast {
+                VStack {
+                    Spacer()
+                    downloadToastView(toast)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+                .zIndex(55)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .onChange(of: activeTab) { _, _ in closeTrailer() }
@@ -558,6 +580,43 @@ public struct MediaDetailView: View {
     private func startingPlayback(_ action: () -> Void) {
         closeTrailer()
         action()
+    }
+
+    /// Queues the download and confirms it. Dismissed on a timer rather
+    /// than when the row reaches `.downloading`: that happens within a frame
+    /// of the tap and would take the toast down before it was read.
+    private func downloadEpisode(_ episode: EpisodeItem) {
+        onDownloadEpisode(episode)
+        downloadToastCount += 1
+        withAnimation(.snappy) {
+            downloadToast = DownloadToast(episode: episode.number, token: downloadToastCount)
+        }
+        downloadToastTask?.cancel()
+        downloadToastTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy) { downloadToast = nil }
+        }
+    }
+
+    /// A capsule at the foot of the page: the shape `PlayerController.flashHUD`
+    /// gives the same job over the picture.
+    private func downloadToastView(_ toast: DownloadToast) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(SumiTheme.indigo)
+            Text("Episode \(toast.episode) added to Downloads")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(SumiTheme.foreground)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(SumiTheme.card)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        .padding(.bottom, 24)
     }
 
     private var scrollBody: some View {
@@ -1697,7 +1756,7 @@ public struct MediaDetailView: View {
                 onSetEpisodeWatched: onSetEpisodeWatched,
                 onLoadReleaseCandidates: onLoadReleaseCandidates,
                 onPlayWithRelease: { episode, name in startingPlayback { onPlayWithRelease(episode, name) } },
-                onDownloadEpisode: onDownloadEpisode,
+                onDownloadEpisode: downloadEpisode,
                 catalogId: details.id,
                 playerNamespace: playerNamespace,
                 playerSourceKey: playerSourceKey
@@ -2686,6 +2745,13 @@ private struct EpisodeRow: View, Equatable {
             }
 
             downloadButton
+                // One footprint for every state, so the buttons beside it
+                // do not shift when the arrow becomes a 15pt ring; and a
+                // spring on the swap, because the tap used to change
+                // nothing visible until the first progress poll a second
+                // later.
+                .frame(width: 24, height: 24)
+                .animation(.snappy, value: downloadState)
                 .padding(.top, 3)
 
             Button(action: { onToggleWatched(!episode.isWatched) }) {
@@ -2718,6 +2784,12 @@ private struct EpisodeRow: View, Equatable {
         .animation(.snappy, value: isHovered)
     }
 
+    /// How one download state gives way to the next. On every branch below
+    /// rather than once on the `switch`: a transition on the conditional as
+    /// a whole runs when the button enters or leaves the row, not when the
+    /// branch changes.
+    private static let downloadStateSwap: AnyTransition = .scale(scale: 0.6).combined(with: .opacity)
+
     @ViewBuilder
     private var downloadButton: some View {
         switch downloadState {
@@ -2731,6 +2803,7 @@ private struct EpisodeRow: View, Equatable {
             }
             .buttonStyle(.sumiPressable)
             .help("Download Episode")
+            .transition(Self.downloadStateSwap)
         case .downloading(let percent):
             ZStack {
                 Circle()
@@ -2742,11 +2815,13 @@ private struct EpisodeRow: View, Equatable {
             }
             .frame(width: 15, height: 15)
             .help("Downloading… \(Int(percent))%")
+            .transition(Self.downloadStateSwap)
         case .done:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 15))
                 .foregroundColor(SumiTheme.successLight)
                 .help("Downloaded")
+                .transition(Self.downloadStateSwap)
         case .failed(let message):
             Button(action: onDownload) {
                 Image(systemName: "exclamationmark.circle")
@@ -2757,6 +2832,7 @@ private struct EpisodeRow: View, Equatable {
             }
             .buttonStyle(.sumiPressable)
             .help("Download failed: \(message) — click to retry")
+            .transition(Self.downloadStateSwap)
         }
     }
 

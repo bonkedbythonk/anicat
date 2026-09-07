@@ -1283,8 +1283,12 @@ impl TorrentManager {
         tokio::spawn(async move {
             {
                 let mut downloads = mgr.downloads.lock().await;
-                if downloads.contains_key(&(torrent_id, file_id)) {
-                    return;
+                // A `Failed` entry is not a running download: the episode
+                // row's button reads "click to retry" in that state, and
+                // deduping against it made the retry a silent no-op.
+                match downloads.get(&(torrent_id, file_id)) {
+                    None | Some(EpisodeDownloadStatus::Failed { .. }) => {}
+                    Some(_) => return,
                 }
                 downloads.insert((torrent_id, file_id), EpisodeDownloadStatus::Downloading { percent: 0.0 });
             }
@@ -1334,15 +1338,23 @@ impl TorrentManager {
             let mut finished = false;
             for _ in 0..MAX_SAMPLES {
                 mgr.ensure_selected(&session, torrent_id, file_id).await;
-                let on_disk = tokio::fs::metadata(&source_path).await.map(|m| m.len()).unwrap_or(0);
+                // Hashed pieces, never the length on disk: librqbit
+                // `set_len`s every file to its full size while the torrent
+                // initializes (`ensure_file_length` in `initializing.rs`),
+                // so a metadata read said 100% on the first tick and the
+                // copy below ran one second after the tap. What landed in
+                // Downloads had the right name, the pre-buffered head and
+                // zeros for the rest of the episode — reported as "it
+                // downloaded the wrong episode".
+                let done = handle.stats().file_progress.get(file_id).copied().unwrap_or(0);
                 if expected_len > 0 {
-                    let percent = (on_disk as f64 / expected_len as f64 * 100.0).min(100.0);
+                    let percent = (done as f64 / expected_len as f64 * 100.0).min(100.0);
                     mgr.downloads.lock().await.insert(
                         (torrent_id, file_id),
                         EpisodeDownloadStatus::Downloading { percent },
                     );
                 }
-                if on_disk >= expected_len && expected_len > 0 {
+                if done >= expected_len && expected_len > 0 {
                     finished = true;
                     break;
                 }

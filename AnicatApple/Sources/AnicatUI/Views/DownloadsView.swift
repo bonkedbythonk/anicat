@@ -11,10 +11,9 @@ import AppKit
 /// this just renders whatever `libraryDownloads` currently says.
 public struct DownloadsView: View {
     let downloads: [AppModel.LibraryDownload]
-    /// Opens the title at this episode. Optional because the core has no
-    /// play-from-local-file entry point: there is nothing this view can hand
-    /// a finished file to, so what the caller wires up is the detail page,
-    /// and an unwired caller shows no Play button rather than a dead one.
+    /// Opens the finished file (`AppModel.playDownloadedFile`). Optional
+    /// because the list is model state this view only reads: an unwired
+    /// caller shows no Play button rather than a dead one.
     let onPlay: ((AppModel.LibraryDownload) -> Void)?
     /// Drops the row from `libraryDownloads`. Optional for the same reason:
     /// the list is model state this view only reads.
@@ -73,6 +72,15 @@ public struct DownloadsView: View {
         }
     }
 
+    /// What the list's `.animation(value:)` watches. `LibraryDownload` is
+    /// not `Equatable` (see `AppModel.downloadSignature`), and a change that
+    /// keeps a row where it is (a percentage tick) must not re-run the row
+    /// transition, so this is ids plus done-ness: which rows exist and
+    /// which tab each belongs to.
+    private var membership: [String] {
+        downloads.map { "\($0.id):\(Self.donePath($0.state) != nil)" }
+    }
+
     public var body: some View {
         SumiPage {
             SumiPageHeader(title: "Downloads", subtitle: "\(queued.count) queued · \(offline.count) offline")
@@ -93,11 +101,20 @@ public struct DownloadsView: View {
                     VStack(spacing: 8) {
                         ForEach(shown) { item in
                             DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
+                                .transition(.asymmetric(
+                                    insertion: .opacity,
+                                    removal: .scale(scale: 0.96).combined(with: .opacity)
+                                ))
                         }
                     }
                 }
             }
             .animation(.smooth, value: tab)
+            // Without an animated value on the list a removed row vanished
+            // and the rows under it jumped up in the same frame. Keyed on
+            // membership rather than the array itself so a finished download
+            // leaving Queue for Offline animates out the same way.
+            .animation(.snappy, value: membership)
         }
     }
 }

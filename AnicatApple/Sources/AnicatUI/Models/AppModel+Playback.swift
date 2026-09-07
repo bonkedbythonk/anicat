@@ -277,6 +277,13 @@ extension AppModel {
         let targetIndex = index + offset
         guard sorted.indices.contains(targetIndex) else { return }
         let target = sorted[targetIndex]
+        // Next out of a downloaded episode into another downloaded one used
+        // to resolve the swarm for a file already on disk; the Downloads
+        // page's own Play opens it from there, so this does too.
+        if let download = finishedDownload(catalogId: catalogId, episode: target.number) {
+            await playDownloadedFile(download)
+            return
+        }
         do {
             _ = try await resolveAndPlay(
                 catalog: currentPlaybackCatalog,
@@ -390,7 +397,13 @@ extension AppModel {
     /// reactive state this model exposes.
     public func startDownload(episode: Int) async {
         guard let engine, let details = selectedMediaDetails else { return }
-        guard downloadStates[episode] == nil || downloadStates[episode] == .notStarted else { return }
+        // `.failed` passes: that row's button reads "click to retry", and a
+        // guard that admitted only nil and `.notStarted` made the retry a
+        // silent no-op. The engine dedupes the same way.
+        switch downloadStates[episode] {
+        case .downloading?, .done?: return
+        case nil, .notStarted?, .failed?: break
+        }
         downloadStates[episode] = .downloading(percent: 0)
         setLibraryDownload(catalogId: details.id, episode: episode, title: details.title, coverURL: details.coverURL, state: .downloading(percent: 0))
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"

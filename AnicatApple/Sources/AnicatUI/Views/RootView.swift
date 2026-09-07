@@ -812,7 +812,11 @@ public struct RootView: View {
             DownloadsView(
                 downloads: model.libraryDownloads,
                 onPlay: { download in
-                    playEpisode(model: model, catalogId: download.catalogId, episode: download.episode, title: download.title)
+                    // The file that finished, not a fresh resolve: routed
+                    // through `playEpisode` this searched the indexers again
+                    // and streamed whichever release won, so what played had
+                    // nothing to do with the row's own file.
+                    Task { await model.playDownloadedFile(download) }
                 },
                 onRemove: { download in
                     model.libraryDownloads.removeAll { $0.id == download.id }

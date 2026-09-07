@@ -917,6 +917,7 @@ public struct MpvSurface {
                     // applied before this closure existed, and a check that
                     // knows no size checks nothing.
                     self.lastDrawableSize = view.metalView?.metalLayer.drawableSize ?? .zero
+                    NSLog("[libmpv] surface attached, layer %@", NSStringFromSize(self.lastDrawableSize))
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
@@ -1168,6 +1169,12 @@ public struct MpvSurface {
             guard force || now - lastSizeCheckAt >= 0.5 else { return }
             lastSizeCheckAt = now
             let wanted = lastDrawableSize
+            if force {
+                // Before any guard: a forced check that logs nothing when a
+                // guard fails is what left the owner's report empty.
+                let osdW = stringProperty("osd-dimensions/w") ?? "-", osdH = stringProperty("osd-dimensions/h") ?? "-"
+                NSLog("[libmpv] forced size check: osd %@x%@ layer %.0fx%.0f attempts %d", osdW, osdH, wanted.width, wanted.height, reconfigAttemptsForSize)
+            }
             guard wanted.width > 1, reconfigAttemptsForSize < 3,
                   let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
                   let h = stringProperty("osd-dimensions/h").flatMap(Double.init),

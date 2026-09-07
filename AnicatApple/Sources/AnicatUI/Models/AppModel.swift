@@ -832,6 +832,14 @@ public final class AppModel: @unchecked Sendable {
         // so Escape has to pop it before the page it covers. Checked here,
         // inside the one ordered ladder, rather than at the key monitor —
         // a second copy of this order is what drifts.
+        // Called from the key monitor on the main thread; the state is
+        // main-actor and this method is not.
+        let trailerWasOpen = MainActor.assumeIsolated { () -> Bool in
+            guard TrailerState.shared.isOpen else { return false }
+            TrailerState.shared.isOpen = false
+            return true
+        }
+        if trailerWasOpen { return true }
         if !personPageStack.isEmpty {
             closePersonPage()
             return true

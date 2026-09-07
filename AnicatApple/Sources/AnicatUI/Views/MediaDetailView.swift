@@ -430,11 +430,72 @@ public struct MediaDetailView: View {
         ZStack(alignment: .top) {
             scrollBody
             compactHeaderLayer
+            // The trailer as its own overlay, centred and 16:9, instead of
+            // replaced into the banner: there the hero's poster, title and
+            // gradient stayed drawn over the embed, and the window's own
+            // chrome crossed the picture. It also arrives with a spring
+            // instead of a hard swap.
+            if isTrailerOpen, let trailerId = details.trailerId {
+                trailerOverlay(trailerId: trailerId)
+                    .zIndex(50)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
         }
-        .task(id: isTrailerRegionHovered) { await followTrailerHover() }
-        // A trailer left running behind another tab is audio with nothing on
-        // screen to explain it.
         .onChange(of: activeTab) { _, _ in closeTrailer() }
+        .onChange(of: TrailerState.shared.isOpen) { _, open in
+            if !open { closeTrailer() }
+        }
+        .onDisappear { TrailerState.shared.isOpen = false }
+    }
+
+    private func trailerOverlay(trailerId: String) -> some View {
+        GeometryReader { geo in
+            let width = min(geo.size.width - 64, 1040)
+            let height = width * 9 / 16
+            ZStack {
+                Color.black.opacity(0.78)
+                    .ignoresSafeArea()
+                    .onTapGesture { closeTrailer() }
+                VStack(spacing: 10) {
+                    TrailerPlayer(site: details.trailerSite, videoId: trailerId)
+                        .frame(width: width, height: height)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+                        .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.6), radius: 40, y: 16)
+                    HStack(spacing: 12) {
+                        Text(details.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(1)
+                        Text("Trailer")
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted)
+                        Spacer(minLength: 0)
+                        Button {
+                            closeTrailer()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Close")
+                                    .sumiTabularMono(size: 11)
+                            }
+                            .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(SumiTheme.card)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.sumiPressable)
+                        .keyboardShortcut(.escape, modifiers: [])
+                    }
+                    .frame(width: width)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
     }
 
     // MARK: - Trailer
@@ -479,6 +540,7 @@ public struct MediaDetailView: View {
             isTrailerOpen = true
             trailerFromHover = fromHover
         }
+        TrailerState.shared.isOpen = true
     }
 
     private func closeTrailer() {
@@ -487,6 +549,7 @@ public struct MediaDetailView: View {
             isTrailerOpen = false
             trailerFromHover = false
         }
+        TrailerState.shared.isOpen = false
     }
 
     /// Every path that starts a stream goes through here first. The detail
@@ -605,31 +668,11 @@ public struct MediaDetailView: View {
         .stableHover { isTrailerHovered = $0 }
     }
 
-    /// The banner still, or the trailer in its place.
+    /// The banner still. The trailer used to replace it here; it now opens
+    /// as an overlay from `body`, so the hero never draws over an embed.
     @ViewBuilder
     private var bannerContent: some View {
-        if isTrailerOpen, let trailerId = details.trailerId {
-            TrailerPlayer(site: details.trailerSite, videoId: trailerId)
-                .overlay(alignment: .topTrailing) {
-                    Button {
-                        closeTrailer()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(SumiTheme.foreground)
-                            .frame(width: 26, height: 26)
-                            .background(SumiTheme.background.opacity(0.7))
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(SumiTheme.border, lineWidth: 1))
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .padding(12)
-                }
-                .sumiTransition(.opacity)
-        } else {
-            bannerImage
-        }
+        bannerImage
     }
 
     /// The banner still, moving at half the scroll speed and dimming as it

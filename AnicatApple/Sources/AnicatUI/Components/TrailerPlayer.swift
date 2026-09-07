@@ -33,7 +33,7 @@ struct TrailerPlayer: View {
         case "youtube", nil:
             // `youtube-nocookie.com`, not `youtube.com`: the standard embed
             // sets its tracking cookies before anything is played.
-            return URL(string: "https://www.youtube-nocookie.com/embed/\(escaped)?autoplay=1&mute=1&controls=1&playsinline=1&rel=0")
+            return URL(string: "https://www.youtube-nocookie.com/embed/\(escaped)?autoplay=1&mute=1&controls=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3")
         case "dailymotion":
             return URL(string: "https://www.dailymotion.com/embed/video/\(escaped)?autoplay=1&mute=1")
         default:

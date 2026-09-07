@@ -205,7 +205,6 @@ private struct GeneralTabSection: View {
     // Settings ever looked up, so every one of them was a control that
     // changed nothing. They come back with the feature that reads them.
     @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
-    @AppStorage("anicat_show_fps_hud") private var showFPSHUD: Bool = false
     // `SystemNotifications` and `SpotlightIndexer` own the readers and the
     // defaults; `@AppStorage` needs a literal here, so the two spellings and
     // the two defaults must agree.
@@ -239,16 +238,6 @@ private struct GeneralTabSection: View {
                 )
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
-            SettingField(
-                label: "Performance HUD",
-                badge: "120Hz Debugger",
-                description: "Real-time FPS and frame hitch counter in the top-right corner. Shortcut: ⌘⇧D."
-            ) {
-                SumiSwitch(isOn: $showFPSHUD)
-            }
         }
 
         SettingsCard(title: "Notifications") {

@@ -40,4 +40,11 @@ if [ -f "$ICON" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$PLIST" 2>/dev/null \
         || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$PLIST"
 fi
+# Same activity types the packaged plist declares; without them Spotlight
+# hits and Handoff never reach the app.
+/usr/libexec/PlistBuddy -c "Delete :NSUserActivityTypes" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :NSUserActivityTypes array" "$PLIST"
+for t in com.apple.corespotlightitem com.anicat.playback com.anicat.reading; do
+    /usr/libexec/PlistBuddy -c "Add :NSUserActivityTypes: string $t" "$PLIST"
+done
 open dist/Anicat.app

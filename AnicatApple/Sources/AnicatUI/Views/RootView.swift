@@ -516,12 +516,7 @@ public struct RootView: View {
         .animation(.snappy, value: model.isLoading)
         .animation(.snappy, value: model.paletteOpen)
         .animation(.snappy, value: model.shortcutsOpen)
-        .overlay(alignment: .topTrailing) {
-            FPSHUDView()
-                .padding(.top, 14)
-                .padding(.trailing, 20)
-                .zIndex(100)
-        }
+
         .globalKeyboardShortcuts(model: model)
         // `ContinuityManager` broadcasts Handoff activities on every page/time
         // update, but nothing ever received them — Handoff on another device
@@ -1416,14 +1411,6 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             withAnimation(.snappy) {
                 model.paletteOpen.toggle()
             }
-            return nil
-        }
-
-        // Cmd+Shift+D: Toggle FPS / Performance Debugger HUD
-        if isCmd && isShift && !isCtrl && !isAlt && chars == "d" {
-            let key = "anicat_show_fps_hud"
-            let current = UserDefaults.standard.object(forKey: key) as? Bool ?? false
-            UserDefaults.standard.set(!current, forKey: key)
             return nil
         }
 

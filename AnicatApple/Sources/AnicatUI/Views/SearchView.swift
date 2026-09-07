@@ -56,6 +56,14 @@ public struct SearchView: View {
     @State private var statusFilter: String = ""
     @State private var sortFilter: String = ""
 
+    // Keyboard navigation over whichever grid is showing. `nil` means the
+    // caret is in the field; Down from there lands on the first card, Up
+    // from the first row goes back. Column count comes from the measured
+    // grid width, since an adaptive LazyVGrid never says how many it made.
+    @State private var keyboardIndex: Int?
+    @State private var pageWidth: CGFloat = 0
+    @FocusState private var searchFocused: Bool
+
     public init(
         searchText: Binding<String>,
         results: [MediaCard.Item],
@@ -205,6 +213,47 @@ public struct SearchView: View {
         hasActiveFilters || showsSeasonYearHint
     }
 
+    /// The grid the arrows walk: results when a search has run, Discover
+    /// otherwise, which is also what the eye is on.
+    private var keyboardItems: [MediaCard.Item] {
+        results.isEmpty ? discoverItems : results
+    }
+
+    /// Same arithmetic as the grid's `.adaptive(minimum: 165)` with 20pt
+    /// gaps: how many 165pt columns plus gaps fit the measured width.
+    private var keyboardColumns: Int {
+        // Content is capped at 1100pt and inset 40pt each side, the same
+        // frames the grids sit in.
+        let gridWidth = min(pageWidth, 1100) - 80
+        return max(1, Int((gridWidth + 20) / (165 + 20)))
+    }
+
+    private func moveKeyboard(by delta: Int) -> KeyPress.Result {
+        let items = keyboardItems
+        guard !items.isEmpty else { return .ignored }
+        let next: Int
+        if let current = keyboardIndex {
+            next = current + delta
+        } else if delta > 0 {
+            next = 0
+        } else {
+            return .ignored
+        }
+        if next < 0 {
+            // Up past the first row: back to the query text.
+            keyboardIndex = nil
+            return .handled
+        }
+        keyboardIndex = min(next, items.count - 1)
+        return .handled
+    }
+
+    private func openKeyboardItem(at index: Int) {
+        let item = keyboardItems[index]
+        let key = results.isEmpty ? "search-discover:\(item.id)" : "search-results:\(item.id)"
+        onSelectMedia(item, key)
+    }
+
     private func commitSearch() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A blank query with a filter set is a legitimate browse ("show me
@@ -223,6 +272,11 @@ public struct SearchView: View {
     }
 
     public var body: some View {
+        // The page's own width is the one number the arrow keys need (see
+        // `keyboardColumns`); a preference bubbled up from the grid arrived
+        // as 0 and every Down stepped one card instead of one row.
+        GeometryReader { page in
+        ScrollViewReader { proxy in
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 24) {
                 // Header & Search Input
@@ -252,9 +306,21 @@ public struct SearchView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 15))
                             .foregroundColor(SumiTheme.foreground)
+                            .focused($searchFocused)
                             .onSubmit {
-                                commitSearch()
+                                if let index = keyboardIndex, keyboardItems.indices.contains(index) {
+                                    openKeyboardItem(at: index)
+                                } else {
+                                    commitSearch()
+                                }
                             }
+                            .onKeyPress(.downArrow) { moveKeyboard(by: keyboardColumns) }
+                            .onKeyPress(.upArrow) { moveKeyboard(by: -keyboardColumns) }
+                            // Left and right only once a card is chosen, so
+                            // the caret still moves through the query text.
+                            .onKeyPress(.rightArrow) { keyboardIndex == nil ? .ignored : moveKeyboard(by: 1) }
+                            .onKeyPress(.leftArrow) { keyboardIndex == nil ? .ignored : moveKeyboard(by: -1) }
+                            .onChange(of: searchText) { _, _ in keyboardIndex = nil }
 
                         if !searchText.isEmpty {
                             Button(action: { searchText = "" }) {
@@ -397,6 +463,8 @@ public struct SearchView: View {
                                         onSelectMedia(item, "search-discover:\(item.id)")
                                     }
                                     .equatable()
+                                    .searchKeyboardRing(results.isEmpty && keyboardIndex == index)
+                                    .id(item.id)
                                     // Same "a few cards early" pattern as the
                                     // results grid below — Discover used to
                                     // just stop at a fixed 24 items with
@@ -467,6 +535,8 @@ public struct SearchView: View {
                                     onSelectMedia(item, "search-results:\(item.id)")
                                 }
                                 .equatable()
+                                .searchKeyboardRing(keyboardIndex == index)
+                                .id(item.id)
                                 .sumiStaggeredEntrance(index: index, entrance: Self.resultsEntrance)
                                 // Firing the next page a few cards before the
                                 // true end means the next row is already
@@ -518,6 +588,15 @@ public struct SearchView: View {
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .onChange(of: keyboardIndex) { _, index in
+            guard let index, keyboardItems.indices.contains(index) else { return }
+            withAnimation(.snappy) { proxy.scrollTo(keyboardItems[index].id, anchor: .center) }
+        }
+        .onChange(of: results.count) { _, _ in keyboardIndex = nil }
+        .onAppear { searchFocused = true }
+        .onChange(of: page.size.width, initial: true) { _, width in pageWidth = width }
+        }
+        }
         .background(SumiTheme.background)
         // `RootView` remounts this view (`.id(currentNavSection)`) on every
         // nav switch, so an unconditional `onAppear` refetched trending —
@@ -548,5 +627,20 @@ private struct BreathingIcon: View {
                     expanded = true
                 }
             }
+    }
+}
+
+private extension View {
+    /// The keyboard cursor over a card: a 2pt accent ring, drawn outside the
+    /// card so it never covers the poster.
+    func searchKeyboardRing(_ active: Bool) -> some View {
+        overlay(
+            RoundedRectangle(cornerRadius: SumiTheme.radiusLg + 3)
+                .stroke(SumiTheme.indigo, lineWidth: 2)
+                .padding(-4)
+                .opacity(active ? 1 : 0)
+                .animation(.snappy(duration: 0.2), value: active)
+                .allowsHitTesting(false)
+        )
     }
 }

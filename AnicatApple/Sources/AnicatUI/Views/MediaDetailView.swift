@@ -479,7 +479,11 @@ public struct MediaDetailView: View {
                     .ignoresSafeArea()
                     .onTapGesture { closeTrailer() }
                 VStack(spacing: 10) {
-                    TrailerPlayer(site: details.trailerSite, videoId: trailerId)
+                    TrailerPlayer(
+                        site: details.trailerSite,
+                        videoId: trailerId,
+                        thumbnail: details.trailerThumbnail.flatMap(URL.init(string:))
+                    )
                         .frame(width: width, height: height)
                         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
                         .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
@@ -493,6 +497,31 @@ public struct MediaDetailView: View {
                             .sumiTabularMono(size: 11)
                             .foregroundColor(SumiTheme.muted)
                         Spacer(minLength: 0)
+                        // Always offered, not only once the embed has
+                        // refused: the refusal is read off the player frame
+                        // by polling, and a frame that never settles gives
+                        // up quietly. This is the way out the viewer can
+                        // reach without waiting on that.
+                        if let watchURL = TrailerPlayer.watchURL(site: details.trailerSite, videoId: trailerId) {
+                            Button {
+                                Platform.openExternal(watchURL)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("Watch on \(TrailerPlayer.siteName(details.trailerSite))")
+                                        .sumiTabularMono(size: 11)
+                                }
+                                .foregroundColor(SumiTheme.foreground)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(SumiTheme.card)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                                .contentShape(Capsule())
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
                         Button {
                             closeTrailer()
                         } label: {

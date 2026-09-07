@@ -149,6 +149,9 @@ public final class MpvMetalView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
+        if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+            NSLog("[metal] bounds %@ scale %.0f drawable %@ superview %@", NSStringFromRect(bounds), scale, NSStringFromSize(metalLayer.drawableSize), superview.map { NSStringFromRect($0.frame) } ?? "-")
+        }
         pendingDrawableSync?.cancel()
         let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         let work = DispatchWorkItem { [weak self] in
@@ -1098,7 +1101,10 @@ public struct MpvSurface {
                   w > 0, h > 0 else { return }
             if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
                 let dw = stringProperty("dwidth") ?? "-", dh = stringProperty("dheight") ?? "-"
-                NSLog("[libmpv] size check: osd %.0fx%.0f dwidth/dheight %@x%@ layer %.0fx%.0f", w, h, dw, dh, wanted.width, wanted.height)
+                let mt = stringProperty("osd-dimensions/mt") ?? "-", mb = stringProperty("osd-dimensions/mb") ?? "-"
+                let ml = stringProperty("osd-dimensions/ml") ?? "-", mr = stringProperty("osd-dimensions/mr") ?? "-"
+                let aspect = stringProperty("video-aspect-override") ?? "-"
+                NSLog("[libmpv] size check: osd %.0fx%.0f margins t%@ b%@ l%@ r%@ dwidth/dheight %@x%@ aspect-override %@ layer %.0fx%.0f", w, h, mt, mb, ml, mr, dw, dh, aspect, wanted.width, wanted.height)
             }
             if abs(w - wanted.width) > 1 || abs(h - wanted.height) > 1 {
                 reconfigAttemptsForSize += 1

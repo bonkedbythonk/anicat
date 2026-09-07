@@ -69,6 +69,7 @@ public struct PlayerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
+    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = false
     /// The whole window is the picture-in-picture — see `PictureInPicture`
     /// for why there is no second window and no AVKit here.
     private var isPiP: Bool {
@@ -618,6 +619,12 @@ public struct PlayerView: View {
 
     private var glowFrame: AmbientFrame? {
         guard ambientGlowEnabled, !reduceTransparency else { return nil }
+        #if os(macOS)
+        // Fullscreen only unless asked: in a window the bars are thin, the
+        // chrome sits in them, and the owner found the light there a
+        // distraction rather than an extension of the picture.
+        if !ambientGlowWindowed, !FullScreenState.shared.isFullScreen { return nil }
+        #endif
         return controller.ambientFrame
     }
 

@@ -21,6 +21,7 @@ public enum FullScreenGuard {
 
     public static func attach(to window: NSWindow) {
         guard self.window !== window else { return }
+        FullScreenState.shared.isFullScreen = window.styleMask.contains(.fullScreen)
         observers.forEach(NotificationCenter.default.removeObserver)
         self.window = window
         inTransition = false
@@ -29,6 +30,7 @@ public enum FullScreenGuard {
         let begin: (Notification) -> Void = { _ in armTransitionTimeout() }
         let end: (Notification) -> Void = { _ in
             inTransition = false
+            FullScreenState.shared.isFullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
             guard let window = self.window, let target = wanted else { return }
             wanted = nil
             if window.styleMask.contains(.fullScreen) != target {
@@ -86,5 +88,16 @@ public enum FullScreenGuard {
         let current = wanted ?? window.styleMask.contains(.fullScreen)
         set(!current, on: window)
     }
+}
+
+/// Whether the main window is in fullscreen, for views that care (the
+/// player's glow is fullscreen-only by default). Written by the guard on
+/// every completed transition, so a view reading it is redrawn then.
+@Observable
+@MainActor
+public final class FullScreenState {
+    public static let shared = FullScreenState()
+    public var isFullScreen = false
+    private init() {}
 }
 #endif

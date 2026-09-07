@@ -288,6 +288,7 @@ private struct PlayerTabSection: View {
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
+    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = false
     // `PlayerController.isNextEpisodeCardEnabled` owns the reader and the
     // default; the literal here and the one there must agree.
     @AppStorage("anicat_next_up_card") private var nextUpCard: Bool = true
@@ -385,9 +386,21 @@ private struct PlayerTabSection: View {
 
             SettingField(
                 label: "Ambient Glow",
-                description: "Fills the black bars with a blurred, drifting copy of the picture, so a 4:3 or ultrawide video sits in its own light instead of hard black."
+                description: "Lights the black bars in fullscreen with the colours at the picture's edges, like a backlight behind a TV."
             ) {
                 SumiSwitch(isOn: $ambientGlow)
+            }
+
+            if ambientGlow {
+                Divider()
+                    .background(SumiTheme.border)
+
+                SettingField(
+                    label: "Glow in windowed mode",
+                    description: "Also light the bars when the player is a window. Off by default: the bars are thin there and the controls sit in them."
+                ) {
+                    SumiSwitch(isOn: $ambientGlowWindowed)
+                }
             }
 
             #if os(macOS)

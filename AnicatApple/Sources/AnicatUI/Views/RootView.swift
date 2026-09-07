@@ -349,6 +349,13 @@ public struct RootView: View {
                     },
                     morphThumbnailURL: model.openingPlayerThumbnailURL
                 )
+                // The player measures the window through its own
+                // GeometryReader; inside the safe area that measurement was
+                // 28pt short of the window under the transparent title bar,
+                // so the video sat centred in the shorter box, the top bar
+                // read 28pt taller than the bottom, and the glow bands were
+                // laid out against the wrong edges.
+                .ignoresSafeArea()
                 .transition(.opacity)
                 .zIndex(30)
             }

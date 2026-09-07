@@ -90,6 +90,7 @@ QUICKSTART.md
 AGENTS.md
 agents.md
 docs/DEV_VS_PUBLIC.md
+HANDOFF.md
 scripts/start-dev.sh
 scripts/dev_backend.sh
 scripts/dev_frontend.sh

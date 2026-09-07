@@ -11,7 +11,6 @@ struct PlayerChapterTests {
         ("OP1", SkipKind.opening),
         ("OP 2", SkipKind.opening),
         ("Intro", SkipKind.opening),
-        ("Avant", SkipKind.opening),
         ("Opening Theme", SkipKind.opening),
         ("NCOP", SkipKind.opening),
         ("ED", SkipKind.ending),
@@ -43,6 +42,44 @@ struct PlayerChapterTests {
     ])
     func rejects(title: String) {
         #expect(SkipKind.from(chapterTitle: title) == nil)
+    }
+
+    /// "Intro, OP, Part A" is a real chapter layout: the intro is the cold
+    /// open, and auto-skip jumped it along with the song.
+    @Test("An Intro beside an explicit OP is the cold open, not a window")
+    func introBesideExplicitOpening() {
+        let chapters = [
+            PlayerChapter(title: "Intro", time: 0),
+            PlayerChapter(title: "OP", time: 95),
+            PlayerChapter(title: "Part A", time: 185),
+            PlayerChapter(title: "ED", time: 1300),
+        ]
+        let windows = PlayerChapters.skipWindows(chapters: chapters, duration: 1420)
+        #expect(windows.map(\.start) == [95, 1300])
+        // Alone, the alias still names the opening.
+        let alone = PlayerChapters.skipWindows(chapters: [
+            PlayerChapter(title: "Intro", time: 0),
+            PlayerChapter(title: "Part A", time: 90),
+        ], duration: 1420)
+        #expect(alone.map(\.start) == [0])
+        #expect(SkipKind.from(chapterTitle: "Avant") == nil)
+    }
+
+    @Test("AniSkip overrules an Intro chapter it does not overlap")
+    @MainActor
+    func aniSkipOverrulesIntroAlias() {
+        let controller = PlayerController()
+        controller.setChapters([
+            PlayerChapter(title: "Intro", time: 0),
+            PlayerChapter(title: "Part A", time: 80),
+        ], duration: 1420)
+        #expect(controller.skipWindows.map(\.start) == [0])
+        controller.setAniSkipTimes(AniSkipClient.SkipTimes(introStart: 80, introEnd: 170, outroStart: nil, outroEnd: nil))
+        #expect(controller.skipWindows.map(\.start) == [80])
+        #expect(controller.skipWindows.first?.chapterTitle == "")
+        // An AniSkip opening that agrees with the chapter leaves it in place.
+        controller.setAniSkipTimes(AniSkipClient.SkipTimes(introStart: 2, introEnd: 85, outroStart: nil, outroEnd: nil))
+        #expect(controller.skipWindows.first?.chapterTitle == "Intro")
     }
 
     @Test("Windows run from each marker to the next chapter")

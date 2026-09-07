@@ -277,7 +277,7 @@ private struct PlayerTabSection: View {
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
-    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = false
+    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = true
     // `PlayerController.isNextEpisodeCardEnabled` owns the reader and the
     // default; the literal here and the one there must agree.
     @AppStorage("anicat_next_up_card") private var nextUpCard: Bool = true
@@ -386,7 +386,7 @@ private struct PlayerTabSection: View {
 
                 SettingField(
                     label: "Glow in windowed mode",
-                    description: "Also light the bars when the player is a window. Off by default: the bars are thin there and the controls sit in them."
+                    description: "Also light the bars when the player is a window, not only in fullscreen."
                 ) {
                     SumiSwitch(isOn: $ambientGlowWindowed)
                 }

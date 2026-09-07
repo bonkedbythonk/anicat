@@ -101,6 +101,7 @@ public final class PlayerController: @unchecked Sendable {
 
     public func toggleAutoPlayNext() {
         autoPlayNextEnabled.toggle()
+        flashHUD(autoPlayNextEnabled ? "Autoplay next on" : "Autoplay next off", symbol: "play.square.stack")
     }
 
     public var activeAnime4KPreset: Anime4KPreset {
@@ -167,6 +168,29 @@ public final class PlayerController: @unchecked Sendable {
     public private(set) var seekFlash: SeekFlash?
     private var seekFlashTask: Task<Void, Never>?
     private var seekFlashCount = 0
+    /// What a toggle in the bar just did, shown over the picture for a
+    /// moment. The icon's tint change alone went unnoticed ("i need some
+    /// visual confirmation"): the icons are 14 pt in a corner and the eye
+    /// is on the picture.
+    public struct HUDFlash: Equatable, Sendable {
+        public let symbol: String
+        public let text: String
+        public let token: Int
+    }
+    public private(set) var hudFlash: HUDFlash?
+    private var hudFlashTask: Task<Void, Never>?
+    private var hudFlashCount = 0
+
+    public func flashHUD(_ text: String, symbol: String) {
+        hudFlashCount += 1
+        hudFlash = HUDFlash(symbol: symbol, text: text, token: hudFlashCount)
+        hudFlashTask?.cancel()
+        hudFlashTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.hudFlash = nil
+        }
+    }
     private var skipFlashTask: Task<Void, Never>?
     /// The last AniSkip answer for this episode, kept so a chapter list that
     /// arrives after it (or a `setChapters` on a later file) can be merged
@@ -180,8 +204,24 @@ public final class PlayerController: @unchecked Sendable {
     /// immediately auto-skip forward again with no way to actually watch it.
     private var skippedWindowKeys: Set<Int> = []
 
+    /// The chapter windows auto-skip may act on. Drops an "Intro" chapter
+    /// that AniSkip contradicts: when the only opening the chapters name is
+    /// the alias and AniSkip's opening overlaps it by less than half, the
+    /// chapter is the cold open and AniSkip has the song. Measured against
+    /// nothing (no AniSkip answer) the chapter stands.
+    private var trustedChapterWindows: [SkipWindow] {
+        guard let intro = chapterWindows.first(where: { $0.kind == .opening }),
+              SkipKind.isIntroAlias(intro.chapterTitle),
+              let start = aniSkipTimes?.introStart, let end = aniSkipTimes?.introEnd, end > start
+        else { return chapterWindows }
+        let overlap = max(0, min(intro.end, end) - max(intro.start, start))
+        guard overlap < 0.5 * (intro.end - intro.start) else { return chapterWindows }
+        return chapterWindows.filter { $0 != intro }
+    }
+
     /// Every window in play, chapters plus whatever AniSkip filled in.
     public var skipWindows: [SkipWindow] {
+        let chapterWindows = trustedChapterWindows
         var windows = chapterWindows
         if !chapterWindows.contains(where: { $0.kind == .opening }),
            let start = aniSkipTimes?.introStart, let end = aniSkipTimes?.introEnd, end > start {
@@ -503,6 +543,7 @@ public final class PlayerController: @unchecked Sendable {
         isAnime4KEnabled.toggle()
         UserDefaults.standard.set(isAnime4KEnabled, forKey: "anicat_gpu_upscaling")
         showControlsBriefly()
+        flashHUD(isAnime4KEnabled ? "Upscaling on" : "Upscaling off", symbol: "sparkles")
     }
 
     public func cycleAnime4K() {
@@ -620,6 +661,7 @@ public final class PlayerController: @unchecked Sendable {
     /// kind rather than wholesale: a release that chapters only its opening
     /// still takes its ending from AniSkip.
     private func applySkipSources() {
+        let chapterWindows = trustedChapterWindows
         let chapterIntro = chapterWindows.first { $0.kind == .opening }
         let chapterOutro = chapterWindows.first { $0.kind == .ending }
         introStartTime = chapterIntro?.start ?? aniSkipTimes?.introStart
@@ -642,6 +684,7 @@ public final class PlayerController: @unchecked Sendable {
 
     public func toggleAutoSkip() {
         autoSkipEnabled.toggle()
+        flashHUD(autoSkipEnabled ? "Auto-skip on" : "Auto-skip off", symbol: "forward.frame")
     }
 
     /// Despite the name (kept to avoid touching every call site), this walks

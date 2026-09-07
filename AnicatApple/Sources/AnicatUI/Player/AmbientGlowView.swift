@@ -91,23 +91,45 @@ final class AmbientGlowHostView: AmbientGlowPlatformView {
     /// start points included.
     override var isFlipped: Bool { true }
     private var hostLayer: CALayer { layer! }
+    private var pixelScale: CGFloat { window?.backingScaleFactor ?? 2 }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     #else
     private var hostLayer: CALayer { layer }
+    private var pixelScale: CGFloat { window?.screen.scale ?? traitCollection.displayScale }
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
     #endif
 
     func apply(frame: AmbientFrame, video: CGRect, windowSize: CGSize, animated: Bool) {
         // Geometry never animates: a band that eased into a new window size
         // would spend 100 ms over the picture or short of the edge.
+        // Band edges land on the device pixels mpv puts the picture on.
+        // SwiftUI's rect is fractional (top 58.875 pt on a 732 pt window,
+        // 117.75 px) while mpv truncates the picture height to whole pixels
+        // and centres it with integer division: 1228 px tall, top margin
+        // (1464 - 1228) / 2 = 118. A band cut at the fractional rect left a
+        // row neither drew, a black hairline under the picture (8.6 against
+        // 38 either side in a capture); one overlapping by a point was a
+        // bright hairline instead; flooring both edges put the black row
+        // above the picture. So the same arithmetic as mpv, in pixels.
+        let scale = pixelScale
+        let layerWidth = (windowSize.width * scale).rounded(), layerHeight = (windowSize.height * scale).rounded()
+        let pictureWidth = min(layerWidth, (video.width * scale).rounded(.down))
+        let pictureHeight = min(layerHeight, (video.height * scale).rounded(.down))
+        let leftPixel = ((layerWidth - pictureWidth) / 2).rounded(.down)
+        let topPixel = ((layerHeight - pictureHeight) / 2).rounded(.down)
+        let topEdge = topPixel / scale, bottomEdge = (topPixel + pictureHeight) / scale
+        let leftEdge = leftPixel / scale, rightEdge = (leftPixel + pictureWidth) / scale
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        top.frame = CGRect(x: 0, y: 0, width: windowSize.width, height: max(0, video.minY))
-        bottom.frame = CGRect(x: 0, y: video.maxY, width: windowSize.width, height: max(0, windowSize.height - video.maxY))
-        left.frame = CGRect(x: 0, y: video.minY, width: max(0, video.minX), height: video.height)
-        right.frame = CGRect(x: video.maxX, y: video.minY, width: max(0, windowSize.width - video.maxX), height: video.height)
+        top.frame = CGRect(x: 0, y: 0, width: windowSize.width, height: max(0, topEdge))
+        bottom.frame = CGRect(x: 0, y: bottomEdge, width: windowSize.width, height: max(0, windowSize.height - bottomEdge))
+        left.frame = CGRect(x: 0, y: topEdge, width: max(0, leftEdge), height: bottomEdge - topEdge)
+        right.frame = CGRect(x: rightEdge, y: topEdge, width: max(0, windowSize.width - rightEdge), height: bottomEdge - topEdge)
+        top.isHidden = video.minY < 0.5
+        bottom.isHidden = windowSize.height - video.maxY < 0.5
+        left.isHidden = video.minX < 0.5
+        right.isHidden = windowSize.width - video.maxX < 0.5
         for band in [top, bottom, left, right] {
-            band.isHidden = band.frame.width < 0.5 || band.frame.height < 0.5
             band.layoutMask()
         }
         CATransaction.commit()

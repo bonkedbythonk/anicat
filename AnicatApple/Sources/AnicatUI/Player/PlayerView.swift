@@ -69,7 +69,7 @@ public struct PlayerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
-    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = false
+    @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = true
     /// The whole window is the picture-in-picture — see `PictureInPicture`
     /// for why there is no second window and no AVKit here.
     private var isPiP: Bool {
@@ -399,6 +399,19 @@ public struct PlayerView: View {
                         .allowsHitTesting(false)
                 }
 
+                // Toggle confirmation, top centre of the picture, under the
+                // top bar rather than over the transport it came from.
+                if let hud = controller.hudFlash {
+                    hudBadge(hud)
+                        .id(hud.token)
+                        .position(x: videoRect.midX, y: videoRect.minY + 72)
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                        .allowsHitTesting(false)
+                }
+
                 // Top/bottom chrome, `topGap`/`bottomGap` tall. Where that
                 // is natural letterbox the background is the same black the
                 // picture is already framed in; where it exceeds the gap
@@ -618,6 +631,7 @@ public struct PlayerView: View {
         .animation(.snappy, value: controller.isBuffering)
         .animation(.snappy(duration: 0.28), value: controller.isPlaying)
         .animation(.snappy(duration: 0.3), value: controller.seekFlash)
+        .animation(.snappy(duration: 0.3), value: controller.hudFlash)
         }
     }
 
@@ -658,6 +672,22 @@ public struct PlayerView: View {
         .clipShape(Capsule())
     }
 
+    private func hudBadge(_ hud: PlayerController.HUDFlash) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: hud.symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(SumiTheme.indigo)
+            Text(hud.text)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.62))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+    }
+
     /// What the chrome bars sit on. See the top bar's comment.
     private var chromeGround: Color {
         if glowFrame == nil { return .black }
@@ -667,9 +697,9 @@ public struct PlayerView: View {
     private var glowFrame: AmbientFrame? {
         guard ambientGlowEnabled, !reduceTransparency else { return nil }
         #if os(macOS)
-        // Fullscreen only unless asked: in a window the bars are thin, the
-        // chrome sits in them, and the owner found the light there a
-        // distraction rather than an extension of the picture.
+        // On in a window too since 2026-09-07: the objection to it there
+        // (a distraction in thin bars) was the blurred-image version's
+        // flicker; with the gradient layers the owner asked for it always on.
         if !ambientGlowWindowed, !FullScreenState.shared.isFullScreen { return nil }
         #endif
         return controller.ambientFrame
@@ -1646,12 +1676,17 @@ private struct PlayerBottomBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
+        // 28 pt hit targets on every icon (the glyphs themselves are 14 pt,
+        // and a 14 pt target at the far end of a 1512 pt bar was "hard to
+        // click"), so the row spacing comes down to keep the same rhythm.
+        HStack(spacing: 8) {
             // Previous Episode
             Button(action: { controller.previousEpisode() }) {
                 Image(systemName: "backward.end.fill")
                 .font(.system(size: 14))
                 .foregroundColor(controller.hasPreviousEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasPreviousEpisode)
@@ -1683,6 +1718,8 @@ private struct PlayerBottomBar: View {
                 Image(systemName: "gobackward.10")
                 .font(.system(size: 15))
                 .foregroundColor(PlayerChrome.foreground.opacity(0.8))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
             .help("Back 10 seconds")
@@ -1693,6 +1730,8 @@ private struct PlayerBottomBar: View {
                 Image(systemName: "goforward.10")
                 .font(.system(size: 15))
                 .foregroundColor(PlayerChrome.foreground.opacity(0.8))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
             .help("Forward 10 seconds")
@@ -1703,6 +1742,8 @@ private struct PlayerBottomBar: View {
                 Image(systemName: "forward.end.fill")
                 .font(.system(size: 14))
                 .foregroundColor(controller.hasNextEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasNextEpisode)
@@ -1734,7 +1775,8 @@ private struct PlayerBottomBar: View {
                         Image(systemName: volumeIcon)
                         .font(.system(size: 14))
                         .foregroundColor(PlayerChrome.foreground.opacity(0.8))
-                        .frame(width: 16)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
                     .help(controller.isMuted ? "Unmute (M)" : "Mute (M)")
@@ -1753,6 +1795,8 @@ private struct PlayerBottomBar: View {
                     Image(systemName: "sparkles")
                     .font(.system(size: 14))
                     .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
@@ -1760,10 +1804,15 @@ private struct PlayerBottomBar: View {
 
                 // Ambient glow. The same key Settings writes; the player is
                 // where the effect is judged, so the switch lives here too.
-                Button(action: { ambientGlowEnabled.toggle() }) {
+                Button(action: {
+                    ambientGlowEnabled.toggle()
+                    controller.flashHUD(ambientGlowEnabled ? "Ambient glow on" : "Ambient glow off", symbol: "light.max")
+                }) {
                     Image(systemName: ambientGlowEnabled ? "light.max" : "light.min")
                     .font(.system(size: 14))
                     .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .help(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
@@ -1774,6 +1823,8 @@ private struct PlayerBottomBar: View {
                     Image(systemName: "rotate.right")
                     .font(.system(size: 14))
                     .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .help(rotateHelpText)
@@ -1793,6 +1844,8 @@ private struct PlayerBottomBar: View {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 14))
                     .foregroundColor(PlayerChrome.foreground.opacity(0.8))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Toggle Fullscreen (F)")

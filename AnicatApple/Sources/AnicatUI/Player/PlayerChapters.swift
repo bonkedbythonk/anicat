@@ -67,9 +67,32 @@ public enum SkipKind: String, Sendable, Equatable {
             .filter { !$0.isEmpty }
     }
 
+    /// Whether the title names the opening in a word that can only mean the
+    /// song: "OP", "NCOP", "Opening". "Intro" is not in this set, see
+    /// `isIntroAlias`.
+    public static func namesOpeningExplicitly(_ chapterTitle: String) -> Bool {
+        tokens(of: chapterTitle).contains { explicitOpening.contains($0) }
+    }
+
+    /// "Intro" is two different chapters in the wild: some groups label the
+    /// opening song with it, others the cold open before the song, the
+    /// episode's first scene. Auto-skip treated both as the song and jumped
+    /// the first minutes of story on releases chaptered "Intro, OP, Part A".
+    /// A title that is only this alias is still an opening when nothing
+    /// else says otherwise, but `PlayerChapters.skipWindows` drops it when
+    /// the same file also has an explicit "OP", and the controller drops it
+    /// when AniSkip places the opening somewhere else.
+    public static func isIntroAlias(_ chapterTitle: String) -> Bool {
+        from(chapterTitle: chapterTitle) == .opening && !namesOpeningExplicitly(chapterTitle)
+    }
+
+    private static let explicitOpening: Set<String> = ["op", "ncop", "opening", "openings"]
+
+    /// "Avant" is not here on purpose: it is the Japanese TV term for the
+    /// scene before the opening, always story, never the song.
     private static let markers: [String: SkipKind] = [
         "op": .opening, "ncop": .opening, "opening": .opening, "openings": .opening,
-        "intro": .opening, "introduction": .opening, "avant": .opening,
+        "intro": .opening, "introduction": .opening,
         "ed": .ending, "nced": .ending, "ending": .ending, "endings": .ending,
         "outro": .ending,
         "preview": .preview,
@@ -139,9 +162,13 @@ public enum PlayerChapters {
     /// "Preview".
     public static func skipWindows(chapters: [PlayerChapter], duration: Double?) -> [SkipWindow] {
         let sorted = chapters.sorted { $0.time < $1.time }
+        // With an explicit "OP" in the same file, an "Intro" chapter is
+        // the cold open, not a second opening.
+        let hasExplicitOpening = sorted.contains { SkipKind.namesOpeningExplicitly($0.title) }
         var windows: [SkipWindow] = []
         for (index, chapter) in sorted.enumerated() {
             guard let kind = SkipKind.from(chapterTitle: chapter.title) else { continue }
+            if kind == .opening, hasExplicitOpening, SkipKind.isIntroAlias(chapter.title) { continue }
             let next = sorted.indices.contains(index + 1) ? sorted[index + 1].time : duration
             guard let end = next, end - chapter.time >= minimumWindowSeconds else { continue }
             windows.append(SkipWindow(start: chapter.time, end: end, kind: kind, chapterTitle: chapter.title))

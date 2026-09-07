@@ -661,7 +661,11 @@ public struct PlayerView: View {
                 .frame(width: windowSize.width, height: windowSize.height)
             }
             .allowsHitTesting(false)
-            .animation(reduceMotion ? nil : .smooth(duration: 2.0), value: frame.id)
+            // Fast enough to track a cut, slow enough not to strobe: at
+            // one sample a second with a two second fade the bars lagged the
+            // picture visibly ("too slow"); seven samples a second under a
+            // 0.35 s fade reads as the picture's own light.
+            .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: frame.id)
         }
     }
 
@@ -1462,6 +1466,7 @@ public struct PlayerView: View {
 
 private struct PlayerBottomBar: View {
     @Bindable var controller: PlayerController
+    @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     /// The hairline exists to separate a bar sitting in solid letterbox
     /// black from the picture above it. When the bar overlays the picture
     /// (a 16:9 window, gradient scrim) the same line reads as a white
@@ -1731,6 +1736,17 @@ private struct PlayerBottomBar: View {
                 .buttonStyle(.sumiPressable)
                 .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
                 .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
+
+                // Ambient glow. The same key Settings writes; the player is
+                // where the effect is judged, so the switch lives here too.
+                Button(action: { ambientGlowEnabled.toggle() }) {
+                    Image(systemName: ambientGlowEnabled ? "light.max" : "light.min")
+                    .font(.system(size: 14))
+                    .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+                }
+                .buttonStyle(.sumiPressable)
+                .help(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
+                .accessibilityLabel(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
 
                 // Rotate 90 degrees (off / CW / CCW)
                 Button(action: { controller.cycleSideways() }) {

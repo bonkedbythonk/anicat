@@ -28,9 +28,12 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
 /// interval, the budget and the strike policy can be exercised without a
 /// running player.
 public struct AmbientSampleGate: Sendable, Equatable {
-    /// How often a frame is sampled. One second: the drawing cross-fades
-    /// over two, so anything slower reads as a step rather than a drift.
-    public static let interval: CFAbsoluteTime = 1
+    /// How often a frame is sampled. 150 ms, about seven a second, under a
+    /// 0.35 s fade in the view: one a second lagged cuts by up to a second
+    /// and read as "too slow". The idle tick that drives it is 50 ms, and
+    /// the downscale measured 0.65 ms for 1080p, so seven a second is
+    /// under 5 ms of work a second before `screenshot-raw` itself.
+    public static let interval: CFAbsoluteTime = 0.15
     /// `screenshot-raw` runs on mpv's core lock, so a slow sample is a
     /// dropped frame. Covers the downscale too — both happen before the
     /// event loop gets back to `mpv_wait_event`.

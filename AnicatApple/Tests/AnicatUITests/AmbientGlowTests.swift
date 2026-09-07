@@ -107,13 +107,13 @@ struct AmbientGlowTests {
 
     /// The gate is what keeps `screenshot-raw` from costing playback: it runs
     /// on mpv's core lock, so a sample that goes long is a dropped frame.
-    @Test("The gate holds samples to one a second")
+    @Test("The gate holds samples to the interval")
     func gateInterval() {
         var gate = AmbientSampleGate()
         #expect(gate.isDue(at: 100))
         gate.begin(at: 100)
-        #expect(!gate.isDue(at: 100.5))
-        #expect(gate.isDue(at: 101))
+        #expect(!gate.isDue(at: 100 + AmbientSampleGate.interval / 2))
+        #expect(gate.isDue(at: 100 + AmbientSampleGate.interval))
     }
 
     /// Strikes are consecutive, not cumulative: at one sample a second a

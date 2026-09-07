@@ -855,15 +855,12 @@ impl AnicatEngine {
 
     /// Find a torrent for an episode and hand back what the player opens.
     pub async fn resolve_stream(&self, req: StreamRequest) -> FfiResult<StreamHandle> {
-        // cinema.rs and series.rs are in the crate but not reachable from
-        // here: `ResolveTarget::movie`/`series` would have to be populated
-        // from TMDB detail, which Phase 2 wires up. Refusing is the honest
-        // answer — falling through would silently run the anime search for a
-        // film and return some unrelated release.
+        // A film or an episode of a western series is searched on year or on
+        // SxxEyy, neither of which the anime path has any notion of. Falling
+        // through would silently run the anime search for a film and return
+        // some unrelated release.
         if req.catalog != FfiCatalog::Anilist {
-            return Err(AnicatError::NotFound {
-                msg: format!("{:?} playback is not wired up yet", req.catalog),
-            });
+            return self.resolve_cinema_stream(req).await;
         }
         let port = self.ensure_stream_server().await?;
         let media = MediaKey::new(req.catalog.into(), req.catalog_id);
@@ -946,6 +943,53 @@ impl AnicatEngine {
             torrent_id: torrent_id as u64,
             file_id: file_id as u64,
         })
+    }
+
+    /// Whether cinema mode has a TMDB credential to read with.
+    ///
+    /// The mode is hidden without one rather than shown broken: every call
+    /// below fails with `no_tmdb_token`, and eight empty shelves explain
+    /// nothing to whoever is looking at them.
+    pub fn has_tmdb_key(&self) -> bool {
+        self.catalogs.has_tmdb_key()
+    }
+
+    /// The cinema home rows, in the order the page draws them. Named by the
+    /// engine so it stays the only place that knows which TMDB endpoints
+    /// exist -- a row the Swift side invents has no endpoint behind it.
+    pub fn cinema_row_kinds(&self) -> Vec<String> {
+        crate::catalog::cinema::CINEMA_ROWS.iter().map(|k| k.to_string()).collect()
+    }
+
+    /// One cinema home row.
+    pub async fn cinema_row(&self, kind: String, page: i32) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .cinema_row(&kind, page.max(1) as i64)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// Films and series matching a query, most popular first.
+    pub async fn search_cinema(&self, query: String, limit: i32) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .cinema_search(&query, limit.max(1) as i64)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// One film or series, in the same `MediaDetail` the anime path answers
+    /// with -- so the detail page, its caches and the player read one shape
+    /// whichever catalog the title came from.
+    pub async fn cinema_detail(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<MediaDetail> {
+        self.cinema_media_detail(catalog, catalog_id).await
     }
 
     /// Every release the indexers found for one episode, best first — the
@@ -2180,6 +2224,317 @@ fn push_child_comments(
 }
 
 impl AnicatEngine {
+    /// The cinema counterpart of `resolve_stream`.
+    ///
+    /// A separate path rather than another branch inside it: everything
+    /// `gather_media_info` reads -- relations, synonyms, airing counts,
+    /// franchise shape -- is AniList's alone, and what the cinema search
+    /// needs instead (a film's year, an episode's SxxEyy) comes from the TMDB
+    /// detail. What stays shared is everything after the search: the same
+    /// `resolve`, the same remembered-release reuse, the same playing pin.
+    async fn resolve_cinema_stream(&self, req: StreamRequest) -> FfiResult<StreamHandle> {
+        let port = self.ensure_stream_server().await?;
+        let catalog: Catalog = req.catalog.into();
+        let media = MediaKey::new(catalog, req.catalog_id);
+        let is_series = req.catalog == FfiCatalog::TmdbTv;
+        let detail = self
+            .catalogs
+            .cinema_detail(req.catalog_id, is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+
+        // Releases are named with either title TMDB carries -- an anime film
+        // on a western indexer is as likely to be listed under its original
+        // title as its english one -- and the page's own title goes in behind
+        // both, because it may be showing a translation of either.
+        let mut titles: Vec<String> = vec![];
+        let mut year: Option<i32> = None;
+        let mut season_map: Vec<(u32, u32)> = vec![];
+        if let Some(m) = &detail.movie {
+            push_title(&mut titles, m.title.clone());
+            push_title(&mut titles, m.original_title.clone());
+            year = release_year(m.release_date.as_deref());
+        }
+        if let Some(series) = &detail.series {
+            push_title(&mut titles, series.name.clone());
+            push_title(&mut titles, series.original_name.clone());
+            season_map = series.season_map();
+        }
+        push_title(&mut titles, req.title.clone());
+        if titles.is_empty() {
+            return Err(AnicatError::NotFound {
+                msg: format!("no search titles for {media}"),
+            });
+        }
+
+        let series_criteria = if is_series {
+            let (season, episode) =
+                crate::catalog::cinema::locate_episode(&season_map, req.episode.max(0) as u32)
+                    .ok_or_else(|| AnicatError::NotFound {
+                        msg: format!(
+                            "episode {} is past the {} seasons TMDB lists for {media}",
+                            req.episode,
+                            season_map.len()
+                        ),
+                    })?;
+            Some(crate::torrent::series::EpisodeCriteria {
+                season,
+                episode,
+                browser_client: false,
+            })
+        } else {
+            None
+        };
+        let movie_criteria = if is_series {
+            None
+        } else {
+            Some(crate::torrent::cinema::MovieCriteria { year, browser_client: false })
+        };
+
+        let episode_count: i64 = if is_series {
+            season_map.iter().map(|(_, count)| *count as i64).sum()
+        } else {
+            1
+        };
+
+        let remembered = self
+            .registry
+            .remembered_release(media.catalog, media.id, req.episode)
+            .ok()
+            .flatten()
+            .filter(|r| r.prefer_dub == req.prefer_dub);
+
+        let url = self
+            .torrents
+            .resolve(
+                &self.http,
+                ResolveTarget {
+                    media,
+                    episode: req.episode,
+                    titles: &titles,
+                    // A film has no episode number in its release name; an
+                    // episode of a series always does.
+                    allow_episodeless: !is_series,
+                    episode_count: Some(episode_count),
+                    aired_episodes: Some(episode_count),
+                    prefer_dub: req.prefer_dub,
+                    browser_client: false,
+                    chosen_name: req.chosen_name.clone(),
+                    movie: movie_criteria,
+                    series: series_criteria,
+                    entry: layout::EntryHint {
+                        kind: if is_series {
+                            layout::EntryKind::Tv
+                        } else {
+                            layout::EntryKind::Movie
+                        },
+                        ..Default::default()
+                    },
+                    sibling_titles: &[],
+                    resume_fraction: req.resume_fraction,
+                    remembered,
+                },
+                port,
+            )
+            .await
+            .map_err(|msg| AnicatError::NotFound { msg })?;
+
+        let (torrent_id, file_id) = self
+            .torrents
+            .resolved_ids(media, req.episode)
+            .await
+            .ok_or_else(|| AnicatError::Internal {
+                msg: "resolve returned a url with nothing behind it".into(),
+            })?;
+        if let Some(winner) = self.torrents.winning_release(media, req.episode).await {
+            if let Err(e) = self
+                .registry
+                .remember_release(media.catalog, media.id, req.episode, &winner)
+            {
+                log::warn!("registry: could not remember release for {media} ep {}: {e}", req.episode);
+            }
+        }
+        if !req.preload {
+            self.torrents.set_playing(media, req.episode).await;
+        }
+        Ok(StreamHandle {
+            url,
+            torrent_id: torrent_id as u64,
+            file_id: file_id as u64,
+        })
+    }
+
+    /// One film or series as a `MediaDetail`.
+    ///
+    /// The title's own fields come from the same `into_media_item` the rows
+    /// and the search use, so a card and the page it opens can never disagree
+    /// about a title, a year or a poster. Only what a card has no room for --
+    /// the episode list, the trailer, the credits, the local progress -- is
+    /// assembled here.
+    async fn cinema_media_detail(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<MediaDetail> {
+        let is_series = catalog == FfiCatalog::TmdbTv;
+        let detail = self
+            .catalogs
+            .cinema_detail(catalog_id, is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        let item = match (detail.movie.clone(), detail.series.clone()) {
+            (Some(m), _) => m.into_media_item(),
+            (_, Some(s)) => s.into_media_item(),
+            _ => None,
+        }
+        .ok_or_else(|| AnicatError::NotFound {
+            msg: format!("TMDB has no {catalog:?} {catalog_id}"),
+        })?;
+
+        let history = self
+            .registry
+            .history_for(catalog.into(), catalog_id)
+            .unwrap_or_default();
+
+        let mut episodes: Vec<EpisodeRow> = Vec::new();
+        let watched_percent = |number: i32| -> f64 {
+            history
+                .iter()
+                .find(|e| e.episode_number == number as i64 && e.duration > 0)
+                .map(|e| (e.stop_time as f64 / e.duration as f64) * 100.0)
+                .unwrap_or(0.0)
+        };
+        if is_series {
+            for ep in &detail.episodes {
+                let number = ep.absolute as i32;
+                let percent = watched_percent(number);
+                episodes.push(EpisodeRow {
+                    number,
+                    // The season is stated in the row rather than left for
+                    // the client to work back out of the absolute number:
+                    // the season map lives in the engine, and "Episode 34" on
+                    // its own tells a viewer of a five-season show nothing.
+                    title: ep.title.clone().unwrap_or_else(|| {
+                        format!("S{:02}E{:02}", ep.season, ep.episode)
+                    }),
+                    thumbnail: ep.still_url.clone(),
+                    is_watched: episode_is_watched(number, percent, None),
+                    progress_percent: percent,
+                    runtime_minutes: ep.runtime_minutes,
+                    synopsis: ep.overview.clone(),
+                    air_date: ep.air_date.clone(),
+                });
+            }
+        } else {
+            // A film is one sitting, and the player, the registry and the
+            // resume position all key on an episode number, so it is
+            // episode 1 rather than a special case in each of them.
+            let percent = watched_percent(1);
+            episodes.push(EpisodeRow {
+                number: 1,
+                title: item
+                    .title
+                    .as_ref()
+                    .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                    .unwrap_or_else(|| "Film".to_string()),
+                thumbnail: item.banner_image.clone(),
+                is_watched: episode_is_watched(1, percent, None),
+                progress_percent: percent,
+                runtime_minutes: item.duration,
+                synopsis: item.description.clone(),
+                air_date: detail.movie.as_ref().and_then(|m| m.release_date.clone()),
+            });
+        }
+
+        let resume = resume_episode(&history, None);
+        let trailer_id = detail
+            .movie
+            .as_ref()
+            .and_then(|m| m.videos.as_ref())
+            .or_else(|| detail.series.as_ref().and_then(|s| s.videos.as_ref()))
+            .and_then(|v| v.best_trailer());
+        let studio = detail
+            .movie
+            .as_ref()
+            .and_then(|m| m.production_companies.as_ref())
+            .or_else(|| detail.series.as_ref().and_then(|s| s.networks.as_ref()))
+            .and_then(|c| c.first())
+            .and_then(|c| c.name.clone());
+        let recommendations = detail
+            .movie
+            .as_ref()
+            .and_then(|m| m.recommendations.as_ref())
+            .and_then(|p| p.results.as_ref())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| r.clone().into_media_item())
+                    .map(|i| cinema_recommendation(&i))
+                    .collect::<Vec<_>>()
+            })
+            .or_else(|| {
+                detail
+                    .series
+                    .as_ref()
+                    .and_then(|s| s.recommendations.as_ref())
+                    .and_then(|p| p.results.as_ref())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|r| r.clone().into_media_item())
+                            .map(|i| cinema_recommendation(&i))
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .unwrap_or_default();
+
+        Ok(MediaDetail {
+            catalog_id,
+            mal_id: None,
+            title: item
+                .title
+                .as_ref()
+                .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                .unwrap_or_default(),
+            romaji_title: item.title.as_ref().and_then(|t| t.romaji.clone()),
+            cover_image: item
+                .cover_image
+                .as_ref()
+                .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                .unwrap_or_default(),
+            banner_image: item.banner_image.clone(),
+            format: item.format.clone(),
+            status: item.status.clone(),
+            year: item.season_year,
+            studio,
+            // TMDB company ids are not AniList studio ids, and a studio page
+            // keyed on one would open somebody else's. The named line above
+            // is what the header draws; this list is what makes it clickable,
+            // so it stays empty until there is a page to click through to.
+            studios: vec![],
+            trailer_site: trailer_id.as_ref().map(|_| "YOUTUBE".to_string()),
+            trailer_id,
+            trailer_thumbnail: None,
+            synopsis: item.description.clone(),
+            genres: item.genres.clone().unwrap_or_default(),
+            average_score: item.average_score,
+            episode_count: Some(episodes.len() as i32),
+            chapter_count: None,
+            duration_minutes: item.duration,
+            resume_episode: resume.map(|e| e.episode_number as i32),
+            resume_seconds: resume.map(|e| e.stop_time as i32),
+            prequel: None,
+            sequel: None,
+            relations: vec![],
+            recommendations,
+            episodes,
+            // Cinema titles are tracked locally only: AniList has no entry to
+            // write to, and nothing else is wired up.
+            list_status: None,
+            user_score: None,
+            list_entry_id: None,
+            list_progress: None,
+            is_favourite: false,
+        })
+    }
     async fn ensure_stream_server(&self) -> FfiResult<u16> {
         self.stream_port
             .get_or_try_init(|| crate::torrent::stream::serve(self.torrents.clone()))
@@ -2634,6 +2989,53 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
         next_airing_at: m.next_airing_episode.as_ref().and_then(|n| n.airing_at),
         next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
     }
+}
+
+/// Adds a title to the search list when it has one and it is not already
+/// there. TMDB repeats the same string in `title` and `original_title` for
+/// any english-language film, and a duplicated title is a duplicated search.
+fn push_title(titles: &mut Vec<String>, candidate: Option<String>) {
+    if let Some(t) = candidate.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        if !titles.contains(&t) {
+            titles.push(t);
+        }
+    }
+}
+
+/// The year out of TMDB's `YYYY-MM-DD`. The whole cinema search hangs on it
+/// -- two films of the same name are told apart by nothing else -- so a
+/// malformed or missing date answers `None` rather than a guess.
+fn release_year(date: Option<&str>) -> Option<i32> {
+    date?.get(..4)?.parse().ok()
+}
+
+/// A recommendation card for a cinema title.
+fn cinema_recommendation(m: &anilist::types::MediaItem) -> FfiRecommendation {
+    let s = summarize_cinema(m);
+    FfiRecommendation {
+        catalog_id: s.catalog_id,
+        title: s.title,
+        format: s.format,
+        cover_image: s.cover_image,
+        average_score: s.average_score,
+        rating: None,
+    }
+}
+
+/// A cinema title's card.
+///
+/// The catalog comes from the format TMDB's own conversion sets -- a film
+/// converts with `MOVIE`, a series with `TV` -- because a row or a search
+/// answers in `MediaItem`, which carries the id but not which of TMDB's two
+/// id spaces it belongs to. Getting this wrong opens the wrong detail page,
+/// so it is decided here once rather than at each call site.
+fn summarize_cinema(m: &anilist::types::MediaItem) -> MediaSummary {
+    let catalog = if m.format.as_deref() == Some("MOVIE") {
+        FfiCatalog::TmdbMovie
+    } else {
+        FfiCatalog::TmdbTv
+    };
+    MediaSummary { catalog, ..summarize(m) }
 }
 
 #[cfg(test)]

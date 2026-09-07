@@ -29,10 +29,32 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
         self.image = image
         let w = CGFloat(image.width), h = CGFloat(image.height)
         let bw = max(1, (w * Self.bandFraction).rounded()), bh = max(1, (h * Self.bandFraction).rounded())
-        top = image.cropping(to: CGRect(x: 0, y: 0, width: w, height: bh)) ?? image
-        bottom = image.cropping(to: CGRect(x: 0, y: h - bh, width: w, height: bh)) ?? image
-        left = image.cropping(to: CGRect(x: 0, y: 0, width: bw, height: h)) ?? image
-        right = image.cropping(to: CGRect(x: w - bw, y: 0, width: bw, height: h)) ?? image
+        // Each band is collapsed to one pixel across its thin axis, so a
+        // top band is 64x1: one colour per column, like the LEDs behind a
+        // TV. A 64x7 band stretched over a 110 pt bar showed its seven
+        // source rows as horizontal stripes through the blur.
+        let topCrop = image.cropping(to: CGRect(x: 0, y: 0, width: w, height: bh)) ?? image
+        let bottomCrop = image.cropping(to: CGRect(x: 0, y: h - bh, width: w, height: bh)) ?? image
+        let leftCrop = image.cropping(to: CGRect(x: 0, y: 0, width: bw, height: h)) ?? image
+        let rightCrop = image.cropping(to: CGRect(x: w - bw, y: 0, width: bw, height: h)) ?? image
+        top = Self.collapse(topCrop, to: CGSize(width: w, height: 1)) ?? topCrop
+        bottom = Self.collapse(bottomCrop, to: CGSize(width: w, height: 1)) ?? bottomCrop
+        left = Self.collapse(leftCrop, to: CGSize(width: 1, height: h)) ?? leftCrop
+        right = Self.collapse(rightCrop, to: CGSize(width: 1, height: h)) ?? rightCrop
+    }
+
+    /// Draws `image` scaled into `size` with averaging interpolation, which
+    /// for a one-pixel-thin target is the mean across the collapsed axis.
+    static func collapse(_ image: CGImage, to size: CGSize) -> CGImage? {
+        let width = max(1, Int(size.width)), height = max(1, Int(size.height))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 
     public static func == (lhs: AmbientFrame, rhs: AmbientFrame) -> Bool {
@@ -44,15 +66,17 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
 /// interval, the budget and the strike policy can be exercised without a
 /// running player.
 public struct AmbientSampleGate: Sendable, Equatable {
-    /// How often a frame is sampled when the machine keeps up: 100 ms, ten
-    /// a second, under a 0.3 s fade in the view. One a second lagged cuts
-    /// by up to a second and read as "too slow".
-    public static let interval: CFAbsoluteTime = 0.1
-    /// The slowest the gate backs off to. Still a live picture, just a
-    /// lazier one; the previous rule stopped sampling altogether after
+    /// How often a frame is sampled when the machine keeps up: 50 ms,
+    /// twenty a second, under a 0.15 s fade in the view. Ten a second still
+    /// read as delayed; a steady-state sample measured 5 ms, so twenty a
+    /// second is a tenth of a core on mpv's lock, and the budget below
+    /// backs it off on a machine that cannot afford that.
+    public static let interval: CFAbsoluteTime = 0.05
+    /// The slowest the gate backs off to, 0.4 s: still a live picture, just
+    /// a lazier one; the previous rule stopped sampling altogether after
     /// three slow samples and left the bars frozen on the episode still,
     /// which read as "the glow is stuck".
-    public static let maxInterval: CFAbsoluteTime = 1.0
+    public static let maxInterval: CFAbsoluteTime = 0.4
     /// `screenshot-raw` runs on mpv's core lock, so a slow sample is a
     /// dropped frame. Covers the downscale too. 30 ms rather than 15: a
     /// 1080p frame conversion alone lands near 15 on a busy core, and one
@@ -60,8 +84,12 @@ public struct AmbientSampleGate: Sendable, Equatable {
     public static let budget: CFAbsoluteTime = 0.030
     /// Slow samples in a row before the interval doubles.
     public static let slowSampleLimit = 3
-    /// Fast samples in a row before the interval halves back.
-    public static let recoverySampleLimit = 20
+    /// Fast samples in a row before the interval halves back. Five, not
+    /// twenty: launch is the slow moment (the engine, the image cache and
+    /// the first decode all land together, samples of 60 ms), and twenty
+    /// samples at the backed-off rate meant most of a minute at the slower
+    /// cadence after a two-second startup.
+    public static let recoverySampleLimit = 5
 
     public private(set) var gaveUp = false
     public private(set) var currentInterval: CFAbsoluteTime = AmbientSampleGate.interval

@@ -127,7 +127,7 @@ struct AmbientGlowTests {
         #expect(!gate.gaveUp)
         for _ in 0..<30 { gate.record(elapsed: 0.050) }
         #expect(gate.currentInterval == AmbientSampleGate.maxInterval)
-        for _ in 0..<20 { gate.record(elapsed: 0.002) }
+        for _ in 0..<AmbientSampleGate.recoverySampleLimit { gate.record(elapsed: 0.002) }
         #expect(gate.currentInterval == AmbientSampleGate.maxInterval / 2)
         // Scattered slow samples never move it.
         var scattered = AmbientSampleGate()

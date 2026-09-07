@@ -388,7 +388,7 @@ public struct PlayerView: View {
                     VStack(spacing: 0) {
                         Group {
                             if controller.areControlsVisible {
-                                topBar(showsHairline: geometry.topOverlay == 0).padding(.horizontal, SumiTheme.spaceLg)
+                                topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
                             }
                         }
                         .frame(height: topGap)
@@ -417,7 +417,7 @@ public struct PlayerView: View {
 
                         Group {
                             if controller.areControlsVisible {
-                                PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0).padding(.horizontal, SumiTheme.spaceLg)
+                                PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
                             }
                         }
                         .frame(height: bottomGap)
@@ -662,7 +662,9 @@ public struct PlayerView: View {
             // Fast enough to track a cut, slow enough not to strobe: ten
             // samples a second under this fade reads as the picture's own
             // light; one a second under two seconds lagged cuts visibly.
-            .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: frame.id)
+            // "Delayed" at 100 ms and a 0.3 s fade; 50 ms samples under a
+            // 0.15 s fade put the light within a couple of frames of the cut.
+            .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: frame.id)
         }
     }
 
@@ -674,28 +676,34 @@ public struct PlayerView: View {
     private func glowBands(_ frame: AmbientFrame, video: CGRect, windowSize: CGSize) -> some View {
         let overlap: CGFloat = 48
         let blur: CGFloat = 36
+        // Each band fades away from the video, brightest where it touches
+        // the picture, the way light off a screen falls off across a wall.
         if video.minY > 0.5 {
-            band(frame.top, rect: CGRect(x: video.minX - overlap, y: -overlap, width: video.width + overlap * 2, height: video.minY + overlap * 2), blur: blur)
+            band(frame.top, rect: CGRect(x: video.minX - overlap, y: -overlap, width: video.width + overlap * 2, height: video.minY + overlap * 2), blur: blur, fadeFrom: .top, to: .bottom)
         }
         if video.maxY < windowSize.height - 0.5 {
-            band(frame.bottom, rect: CGRect(x: video.minX - overlap, y: video.maxY - overlap, width: video.width + overlap * 2, height: windowSize.height - video.maxY + overlap * 2), blur: blur)
+            band(frame.bottom, rect: CGRect(x: video.minX - overlap, y: video.maxY - overlap, width: video.width + overlap * 2, height: windowSize.height - video.maxY + overlap * 2), blur: blur, fadeFrom: .bottom, to: .top)
         }
         if video.minX > 0.5 {
-            band(frame.left, rect: CGRect(x: -overlap, y: video.minY - overlap, width: video.minX + overlap * 2, height: video.height + overlap * 2), blur: blur)
+            band(frame.left, rect: CGRect(x: -overlap, y: video.minY - overlap, width: video.minX + overlap * 2, height: video.height + overlap * 2), blur: blur, fadeFrom: .leading, to: .trailing)
         }
         if video.maxX < windowSize.width - 0.5 {
-            band(frame.right, rect: CGRect(x: video.maxX - overlap, y: video.minY - overlap, width: windowSize.width - video.maxX + overlap * 2, height: video.height + overlap * 2), blur: blur)
+            band(frame.right, rect: CGRect(x: video.maxX - overlap, y: video.minY - overlap, width: windowSize.width - video.maxX + overlap * 2, height: video.height + overlap * 2), blur: blur, fadeFrom: .trailing, to: .leading)
         }
     }
 
-    private func band(_ image: CGImage, rect: CGRect, blur: CGFloat) -> some View {
+    /// `fadeFrom` is the window edge, where the band is dimmest; `to` is
+    /// the video edge. The mask is applied before the offset: a mask on an
+    /// offset view keeps the layout position and misses the picture.
+    private func band(_ image: CGImage, rect: CGRect, blur: CGFloat, fadeFrom: UnitPoint, to: UnitPoint) -> some View {
         Image(decorative: image, scale: 1)
             .resizable()
             .interpolation(.high)
             .frame(width: rect.width, height: rect.height)
             .blur(radius: blur)
-            .saturation(1.15)
-            .brightness(-0.1)
+            .saturation(1.2)
+            .brightness(-0.05)
+            .mask(LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: fadeFrom, endPoint: to))
             // Rasterized once per sample, not per composite: the video beside
             // it recomposites 24 times a second and an unflattened blur is a
             // full-window offscreen pass each time.

@@ -74,14 +74,17 @@ public enum MotionPolicy {
             object: nil,
             queue: .main
         ) { _ in
-            cachedReduceMotion = UIAccessibility.isReduceMotionEnabled
+            // The observer block is Sendable and the UIKit flags are
+            // main-actor isolated; the queue is main, so the isolation is
+            // asserted rather than hopped to, same as the macOS branch.
+            MainActor.assumeIsolated { cachedReduceMotion = UIAccessibility.isReduceMotionEnabled }
         }
         NotificationCenter.default.addObserver(
             forName: UIAccessibility.reduceTransparencyStatusDidChangeNotification,
             object: nil,
             queue: .main
         ) { _ in
-            cachedReduceTransparency = UIAccessibility.isReduceTransparencyEnabled
+            MainActor.assumeIsolated { cachedReduceTransparency = UIAccessibility.isReduceTransparencyEnabled }
         }
         #endif
     }()

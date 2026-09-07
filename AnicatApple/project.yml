@@ -68,6 +68,17 @@ targets:
         # pre-iPhone-X app and letterboxes it inside black bars.
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
+        # Without these the phone build is unreachable from outside itself:
+        # `anicat://title/<id>` is refused by LaunchServices, and Handoff
+        # from the Mac arrives as an activity type the app never claimed.
+        # The macOS bundle has carried both for a while; the iOS target
+        # started without them because nothing generated its plist before.
+        CFBundleURLTypes:
+          - CFBundleURLName: Anicat
+            CFBundleURLSchemes: [anicat]
+        NSUserActivityTypes:
+          - com.anicat.playback
+          - com.anicat.reading
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios

@@ -1849,6 +1849,14 @@ private struct AmbientGlowCrossfade<Content: View>: View {
             frontOpacity = 1
         }
         .onChange(of: frame.id) { _, _ in
+            if frontOpacity < 0.99 {
+                // Mid-ramp: swap the picture, keep the ramp. Restarting it
+                // from zero on every sample, thirty a second under an 80 ms
+                // ramp, meant the top layer never got past a third and the
+                // half-faded one snapped to opaque as it became the base.
+                front = frame
+                return
+            }
             back = front
             front = frame
             if reduceMotion {

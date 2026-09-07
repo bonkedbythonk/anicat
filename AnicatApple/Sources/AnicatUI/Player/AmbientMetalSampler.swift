@@ -38,6 +38,8 @@ final class AmbientMetalSampler {
     private var inFlight = false
     private var failures = 0
     private var delivered = 0
+    private var smoothed: [UInt8] = []
+    static let smoothing: Float = 0.35
     private let debugLogging = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
 
     init?(device: MTLDevice) {
@@ -125,6 +127,21 @@ final class AmbientMetalSampler {
         bytes.withUnsafeMutableBytes { raw in
             target.getBytes(raw.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         }
+        // Exponential smoothing across samples, on the 64x36 pixels rather
+        // than in the view: thirty raw samples a second differ by dither
+        // and grain from one frame to the next, and drawn as they came the
+        // bars shimmered ("flickers really fast"). 0.35 of the new sample
+        // per step settles a cut in about four samples, 130 ms, while the
+        // steady picture stops twitching.
+        if smoothed.count == bytes.count {
+            let keep = 1 - Self.smoothing, take = Self.smoothing
+            for i in 0..<bytes.count {
+                smoothed[i] = UInt8(Float(smoothed[i]) * keep + Float(bytes[i]) * take + 0.5)
+            }
+        } else {
+            smoothed = bytes
+        }
+        bytes = smoothed
         // BGRA8 in memory is an ARGB word read little-endian, the same
         // layout mpv's bgr0 screenshots use.
         guard let provider = CGDataProvider(data: Data(bytes) as CFData),

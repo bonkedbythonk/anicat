@@ -264,6 +264,74 @@ public final class PlayerController: @unchecked Sendable {
     /// `nil` is the Off row.
     public var onSelectSubtitleTrack: (@Sendable (_ id: String?) -> Void)?
 
+    /// What this title was last watched with, by language rather than by
+    /// track id — ids mean nothing across releases, and the next episode is
+    /// a different file from a possibly different group. `AppModel` fills it
+    /// from the registry before the stream URL reaches mpv, and `MpvSurface`
+    /// applies it on `MPV_EVENT_FILE_LOADED`.
+    public struct TrackMemory: Sendable, Equatable {
+        public var audioLang: String?
+        public var subtitleLang: String?
+        /// The track's own name, for a pack shipping two tracks of one
+        /// language ("Signs & Songs" beside "Full Subtitles") — the lang
+        /// alone cannot tell those apart.
+        public var subtitleTitle: String?
+
+        public init(audioLang: String? = nil, subtitleLang: String? = nil, subtitleTitle: String? = nil) {
+            self.audioLang = audioLang
+            self.subtitleLang = subtitleLang
+            self.subtitleTitle = subtitleTitle
+        }
+
+        public var isEmpty: Bool {
+            audioLang == nil && subtitleLang == nil && subtitleTitle == nil
+        }
+    }
+
+    public var titleTrackMemory: TrackMemory?
+    /// Persists `titleTrackMemory` against the playing title. `nil` is
+    /// "forget this title". AppModel owns it: this controller knows the
+    /// episode number but not the catalog id the row is keyed by.
+    public var onRecordTrackMemory: (@Sendable (_ memory: TrackMemory?) -> Void)?
+
+    /// Records an audio track the viewer picked by hand, merged into
+    /// whatever this title already remembers.
+    ///
+    /// Merged rather than built fresh because the engine takes all three
+    /// fields in one call: an audio pick written with a nil subtitle would
+    /// forget a subtitle chosen ten minutes earlier. Reading the other half
+    /// back off the track list instead is no good either — `refreshTracks`
+    /// documents that mpv's selection flags are still the pre-switch ones
+    /// for a quarter of a second after a pick.
+    public func rememberAudioTrack(_ track: PlayerTrack) {
+        var memory = titleTrackMemory ?? TrackMemory()
+        memory.audioLang = track.lang
+        commit(memory)
+    }
+
+    /// `nil` is the Off row, which forgets the subtitle half rather than
+    /// pretending to round-trip: a stored row with no language and no title
+    /// is indistinguishable from no memory at all, so "off" and "never
+    /// chose" cannot both be spelled.
+    public func rememberSubtitleTrack(_ track: PlayerTrack?) {
+        var memory = titleTrackMemory ?? TrackMemory()
+        memory.subtitleLang = track?.lang
+        memory.subtitleTitle = track?.title
+        commit(memory)
+    }
+
+    /// "Forget track choices for this title" — the next play falls back to
+    /// the global Sub/Dub rule.
+    public func forgetTrackMemory() {
+        titleTrackMemory = nil
+        onRecordTrackMemory?(nil)
+    }
+
+    private func commit(_ memory: TrackMemory) {
+        titleTrackMemory = memory.isEmpty ? nil : memory
+        onRecordTrackMemory?(titleTrackMemory)
+    }
+
     // The release picker, wired to the same engine call the detail page's
     // "Stream Servers" popover uses. AppModel owns it: this controller
     // knows the episode number but not the catalog id or the search title

@@ -67,6 +67,9 @@ extension AppModel {
                 }
             }
         }
+        playerController.onRecordTrackMemory = { [weak self] memory in
+            Task { @MainActor in self?.recordTrackMemory(memory) }
+        }
         playerController.onSelectRelease = { [weak self] name in
             // Through `activeResolveTask`, like the detail page's own play
             // path: the "Finding a stream" overlay this raises has a Cancel
@@ -608,6 +611,47 @@ extension AppModel {
         }
     }
 
+    /// Persists an explicit track pick against the playing title. `nil`
+    /// forgets it.
+    ///
+    /// On `engineIOQueue` like every other registry write: this is a
+    /// synchronous SQLite call, and the queue's own comment records what one
+    /// of those costs when it runs on the main actor mid-playback.
+    func recordTrackMemory(_ memory: PlayerController.TrackMemory?) {
+        guard let engine, let catalogId = currentPlaybackCatalogId else { return }
+        engineIOQueue.async {
+            try? engine.recordTitleTrackPreference(
+                catalogId: catalogId,
+                audioLang: memory?.audioLang,
+                subtitleLang: memory?.subtitleLang,
+                subtitleTitle: memory?.subtitleTitle
+            )
+        }
+    }
+
+    /// This title's remembered tracks, or `nil` when it has none.
+    ///
+    /// Awaited rather than fired off, and by the caller *before* the stream
+    /// URL reaches mpv: `MpvSurface` applies the memory on
+    /// `MPV_EVENT_FILE_LOADED`, and a read started alongside the load lands
+    /// after that event as often as not, which would silently drop the
+    /// remembered pick for that episode. Still on `engineIOQueue`, so the
+    /// main actor waits on the continuation rather than on SQLite.
+    func loadTrackMemory(catalogId: Int64, engine: AnicatEngine) async -> PlayerController.TrackMemory? {
+        await withCheckedContinuation { continuation in
+            engineIOQueue.async {
+                let stored = (try? engine.titleTrackPreference(catalogId: catalogId)) ?? nil
+                continuation.resume(returning: stored.map {
+                    PlayerController.TrackMemory(
+                        audioLang: $0.audioLang,
+                        subtitleLang: $0.subtitleLang,
+                        subtitleTitle: $0.subtitleTitle
+                    )
+                })
+            }
+        }
+    }
+
     /// Stops playback, records final progress into SQLite, and clears the Apple Handoff broadcast.
     public func stopPlayback() {
         // Both calls are IPC writes into the Rust engine — `recordProgress`
@@ -861,6 +905,10 @@ extension AppModel {
             self.playerController.awaitingNewFile = false
             throw NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handleURL)"])
         }
+
+        // Read here, above the assignment that hands mpv the URL — see
+        // `loadTrackMemory` for why the ordering is the whole point.
+        self.playerController.titleTrackMemory = await loadTrackMemory(catalogId: catalogId, engine: engine)
 
         // Before returning streamURL, configure playerController with actual title, episode number, and duration
         self.playerController.title = effectiveTitle

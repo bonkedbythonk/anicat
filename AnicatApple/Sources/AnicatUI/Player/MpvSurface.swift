@@ -806,6 +806,11 @@ public struct MpvSurface {
         /// rule over the top of it. Scoped to one file: track ids mean
         /// nothing across releases, so `loadFile` clears it.
         private var explicitSubtitleTrackId: String?
+        /// Whether this file has already had the title's remembered tracks
+        /// put back. `MPV_EVENT_FILE_LOADED` is not the only event that can
+        /// arrive for one file, and re-applying would undo a pick the viewer
+        /// made after the load.
+        private var didApplyTrackMemory = false
         // Signaled once by the event-loop task's own thread when it has
         // actually stopped touching `mpv`, so `stop()` can block until that
         // happens before it frees the render context or destroys the
@@ -1056,6 +1061,7 @@ public struct MpvSurface {
             // and clearing there would drop the viewer's subtitle pick on
             // the next unrelated redraw.
             explicitSubtitleTrackId = nil
+            didApplyTrackMemory = false
             // paused-for-cache stays false until mpv has actually started
             // decoding, so the initial "resolving the first frame" stretch
             // has no property to key off — set it optimistically here and
@@ -1246,6 +1252,51 @@ public struct MpvSurface {
             // before the audio switch. Setting `sid` to the track already
             // showing costs nothing; trusting a stale flag costs the pick.
             mpv_set_property_string(mpv, "sid", wanted)
+        }
+
+        /// Puts back the audio and subtitle languages this title was last
+        /// watched with, over whatever mpv's own load-time `alang` selection
+        /// landed on. Runs once per file and only for a title that has a
+        /// remembered pick, so a title with no memory is still governed by
+        /// the global Sub/Dub choice exactly as before.
+        ///
+        /// Called from the event loop's own thread, which is the one thread
+        /// allowed to make the blocking property reads `trackList` is built
+        /// out of.
+        func applyTrackMemory(_ memory: PlayerController.TrackMemory?) {
+            guard mpv != nil, let memory, !didApplyTrackMemory else { return }
+            didApplyTrackMemory = true
+            let tracks = trackList()
+            if let lang = memory.audioLang,
+               let match = Self.matchTrack(in: tracks.audio, lang: lang, title: nil) {
+                selectAudioTrack(id: match.id)
+            }
+            if let lang = memory.subtitleLang,
+               let match = Self.matchTrack(in: tracks.subtitle, lang: lang, title: memory.subtitleTitle) {
+                // Through `selectSubtitleTrack`, so the remembered id lands
+                // in `explicitSubtitleTrackId` too: a remembered pick is a
+                // pick made by hand, one episode earlier, and without that a
+                // Sub/Dub toggle later in this file would run the language
+                // rule straight over the top of it.
+                selectSubtitleTrack(id: match.id)
+            }
+        }
+
+        /// The track a remembered language names. The stored title decides
+        /// between two tracks of one language and is only ever a tiebreak —
+        /// a release that dropped the "Full Subtitles" track still gets its
+        /// English one rather than nothing.
+        static func matchTrack(in tracks: [PlayerTrack], lang: String, title: String?) -> PlayerTrack? {
+            let sameLanguage = tracks.filter {
+                ($0.lang ?? "").caseInsensitiveCompare(lang) == .orderedSame
+            }
+            if let title,
+               let named = sameLanguage.first(where: {
+                   ($0.title ?? "").caseInsensitiveCompare(title) == .orderedSame
+               }) {
+                return named
+            }
+            return sameLanguage.first
         }
 
         /// The Sub/Dub preference, in the one vocabulary `anicat_sub_dub` is
@@ -1506,13 +1557,17 @@ public struct MpvSurface {
                         // same reason, because main is what calls it).
                         let chapters = self.readChapters()
                         let duration = self.stringProperty("duration").flatMap(Double.init)
-                        await MainActor.run {
+                        let memory = await MainActor.run {
                             self.controller.awaitingNewFile = false
                             // Unconditional, empty list included: a release
                             // without chapters must not inherit the previous
                             // episode's windows.
                             self.controller.setChapters(chapters, duration: duration)
+                            return self.controller.titleTrackMemory
                         }
+                        // Last writer of `aid`/`sid` for this file, after
+                        // mpv's own load-time selection has settled.
+                        self.applyTrackMemory(memory)
                         continue
                     }
 

@@ -1105,8 +1105,14 @@ public struct PlayerView: View {
 
             Divider()
 
+            // Remembered against the title, unlike the Sub/Dub row below:
+            // this is a pick aimed at one show ("this group's dub", "the
+            // full subtitles, not the signs track"), and the automatic
+            // result of the global toggle is not, so only the pick made here
+            // by hand is written down.
             trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
                 controller.onSelectAudioTrack?(track.id)
+                controller.rememberAudioTrack(track)
                 refreshTracks()
             }
             // An Off row in the list rather than a toggle beside it:
@@ -1114,8 +1120,23 @@ public struct PlayerView: View {
             // `sid`, and a separate control would be a second place the
             // same state has to be read back from.
             trackPicker(kind: .subtitle, label: "Subtitles", rows: subtitleRows) { track in
-                controller.onSelectSubtitleTrack?(track.id == PlayerTrack.off ? nil : track.id)
+                let isOff = track.id == PlayerTrack.off
+                controller.onSelectSubtitleTrack?(isOff ? nil : track.id)
+                controller.rememberSubtitleTrack(isOff ? nil : track)
                 refreshTracks()
+            }
+
+            if controller.titleTrackMemory != nil {
+                Button {
+                    controller.forgetTrackMemory()
+                } label: {
+                    Text("Forget track choices for this title")
+                        .font(.system(size: 11))
+                        .foregroundColor(SumiTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
             }
 
             // Picking a track above names one track in this release. This

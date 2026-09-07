@@ -1586,20 +1586,12 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 return nil
             }
             // 'p': previous episode. Shift excluded explicitly — this block
-            // guards only the other three modifiers, so Shift+P was landing
-            // here and there was no key left to give Picture in Picture.
+            // guards only the other three modifiers, so a Shift+P chord
+            // would otherwise skip an episode.
             if chars == "p" && !isShift {
                 model.playerController.previousEpisode()
                 return nil
             }
-        }
-
-        // Shift+P: Picture in Picture. Modelled on Shift+V below rather than
-        // a monitor of the player's own: two local monitors claiming one key
-        // resolve in whichever order AppKit happens to dispatch them.
-        if model.activeStreamURL != nil && isShift && !isCmd && !isCtrl && !isAlt && chars == "p" {
-            PictureInPicture.shared.toggle(aspectRatio: model.playerController.videoAspectRatio)
-            return nil
         }
 
         // Shift+V: rotate video 90 degrees (off / CW / CCW)

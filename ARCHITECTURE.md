@@ -105,8 +105,7 @@ work rather than a second target.
   lights each letterbox bar with the band of picture it touches, backing
   off when a sample runs over 30 ms; `KeyboardBacklightDimmer` fades the
   keyboard through the private `KeyboardBrightnessClient` during night
-  playback; picture in picture shrinks the app's own window to a floating
-  480x270; audio and subtitle picks are remembered per title in the
+  playback; audio and subtitle picks are remembered per title in the
   registry. After a resize the coordinator flips the aspect override and
   back, because mpv's MoltenVK context reads the drawable size only on a
   video reconfigure.

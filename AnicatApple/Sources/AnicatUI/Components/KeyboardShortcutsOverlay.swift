@@ -57,7 +57,6 @@ public struct KeyboardShortcutsOverlay: View {
                 ShortcutItem(id: "seekback", label: "Seek backward 10s", keys: ["←"]),
                 ShortcutItem(id: "seekfwd", label: "Seek forward 10s", keys: ["→"]),
                 ShortcutItem(id: "prevepisode", label: "Previous episode", keys: ["P"]),
-                ShortcutItem(id: "pip", label: "Picture in Picture", keys: ["Shift", "P"]),
                 ShortcutItem(id: "anime4k", label: "Toggle Anime4K upscaling", keys: ["Ctrl", "1"])
             ]
         ),

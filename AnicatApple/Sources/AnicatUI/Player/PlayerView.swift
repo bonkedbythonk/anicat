@@ -70,21 +70,6 @@ public struct PlayerView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = true
-    /// The whole window is the picture-in-picture — see `PictureInPicture`
-    /// for why there is no second window and no AVKit here.
-    private var isPiP: Bool {
-        #if os(macOS)
-        return PictureInPicture.shared.isActive
-        #else
-        return false
-        #endif
-    }
-
-    /// Chrome is suppressed in PiP, and so are the pill and the card: a
-    /// 480x270 window has room for the picture and a play/pause button.
-    private var showsFullChrome: Bool {
-        !isMinimized && !isPiP
-    }
 
     private static let miniSize = CGSize(width: 320, height: 180)
 
@@ -418,86 +403,78 @@ public struct PlayerView: View {
                 // (a 16:9 window) the excess is a gradient scrim that exists
                 // only while the controls do, so a hidden chrome leaves the
                 // picture untouched and a click there reaches the video.
-                if showsFullChrome {
-                    VStack(spacing: 0) {
-                        Group {
-                            if controller.areControlsVisible {
-                                topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
-                                    .transition(barTransition(from: .top))
-                            }
+                VStack(spacing: 0) {
+                    Group {
+                        if controller.areControlsVisible {
+                            topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                .transition(barTransition(from: .top))
                         }
-                        .frame(height: topGap)
-                        .frame(maxWidth: .infinity)
-                        .background(alignment: .top) {
-                            VStack(spacing: 0) {
-                                // Letterbox black without the glow. With it, a
-                                // scrim only while the controls are up: clear
-                                // under them put the transport on a bright
-                                // blurred picture and the labels vanished.
-                                chromeGround
-                                    .frame(height: naturalTop)
-                                if topGap > naturalTop, controller.areControlsVisible {
-                                    LinearGradient(
-                                        colors: [Color.black.opacity(0.78), Color.black.opacity(0)],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                    .frame(height: topGap - naturalTop)
-                                }
-                            }
-                        }
-                        .allowsHitTesting(controller.areControlsVisible)
-
-                        Spacer(minLength: 0)
-
-                        Group {
-                            if controller.areControlsVisible {
-                                PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
-                                    .transition(barTransition(from: .bottom))
-                            }
-                        }
-                        .frame(height: bottomGap)
-                        .frame(maxWidth: .infinity)
-                        .background(alignment: .bottom) {
-                            VStack(spacing: 0) {
-                                if bottomGap > naturalBottom, controller.areControlsVisible {
-                                    LinearGradient(
-                                        colors: [Color.black.opacity(0), Color.black.opacity(0.82)],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                    .frame(height: bottomGap - naturalBottom)
-                                }
-                                chromeGround
-                                    .frame(height: naturalBottom)
-                            }
-                        }
-                        .allowsHitTesting(controller.areControlsVisible)
                     }
-                    .animation(.smooth, value: controller.areControlsVisible)
-                    .transition(Self.chromeTransition)
+                    .frame(height: topGap)
+                    .frame(maxWidth: .infinity)
+                    .background(alignment: .top) {
+                        VStack(spacing: 0) {
+                            // Letterbox black without the glow. With it, a
+                            // scrim only while the controls are up: clear
+                            // under them put the transport on a bright
+                            // blurred picture and the labels vanished.
+                            chromeGround
+                                .frame(height: naturalTop)
+                            if topGap > naturalTop, controller.areControlsVisible {
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0.78), Color.black.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: topGap - naturalTop)
+                            }
+                        }
+                    }
+                    .allowsHitTesting(controller.areControlsVisible)
 
-                    // Skip pill / auto-skip flash (bottom right). Kept floating
-                    // over the video itself, unlike the rest of the chrome — it's a
-                    // contextual action tied to what's playing right now, meant to
-                    // be seen right where the eye already is, the way
-                    // Netflix/Crunchyroll place it.
-                    skipOverlay
-                        .frame(width: videoRect.width, height: videoRect.height)
-                        .position(x: videoRect.midX, y: videoRect.midY)
+                    Spacer(minLength: 0)
 
-                    // Same corner as the pill above, which is why the pill stands
-                    // down while this is up rather than the two stacking.
-                    nextEpisodeCard
-                        .frame(width: videoRect.width, height: videoRect.height)
-                        .position(x: videoRect.midX, y: videoRect.midY)
+                    Group {
+                        if controller.areControlsVisible {
+                            PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                .transition(barTransition(from: .bottom))
+                        }
+                    }
+                    .frame(height: bottomGap)
+                    .frame(maxWidth: .infinity)
+                    .background(alignment: .bottom) {
+                        VStack(spacing: 0) {
+                            if bottomGap > naturalBottom, controller.areControlsVisible {
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0), Color.black.opacity(0.82)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: bottomGap - naturalBottom)
+                            }
+                            chromeGround
+                                .frame(height: naturalBottom)
+                        }
+                    }
+                    .allowsHitTesting(controller.areControlsVisible)
                 }
+                .animation(.smooth, value: controller.areControlsVisible)
+                .transition(Self.chromeTransition)
 
-                #if os(macOS)
-                if isPiP {
-                    pipChrome
-                }
-                #endif
+                // Skip pill / auto-skip flash (bottom right). Kept floating
+                // over the video itself, unlike the rest of the chrome — it's a
+                // contextual action tied to what's playing right now, meant to
+                // be seen right where the eye already is, the way
+                // Netflix/Crunchyroll place it.
+                skipOverlay
+                    .frame(width: videoRect.width, height: videoRect.height)
+                    .position(x: videoRect.midX, y: videoRect.midY)
+
+                // Same corner as the pill above, which is why the pill stands
+                // down while this is up rather than the two stacking.
+                nextEpisodeCard
+                    .frame(width: videoRect.width, height: videoRect.height)
+                    .position(x: videoRect.midX, y: videoRect.midY)
             } else {
                 // Mini-player chrome: a transparent tap-to-restore catcher
                 // over the whole small video (it sits above `MpvSurface`
@@ -547,9 +524,6 @@ public struct PlayerView: View {
             controller.cancelAutohide()
             #if os(macOS)
             keyMonitor.stop()
-            // The window is only small and floating because a player asked
-            // it to be; nothing else would ever put it back.
-            PictureInPicture.shared.exit()
             #endif
         }
         #if os(macOS)
@@ -581,16 +555,6 @@ public struct PlayerView: View {
         // straight into the mini-player never changes this value.
         .onChange(of: isMinimized, initial: true) { _, minimized in
             controller.isMiniPlayerActive = minimized
-            #if os(macOS)
-            // The two window modes are mutually exclusive by construction and
-            // nothing else enforces it. PiP hides the minimize button, but
-            // `isPlayerMinimized` is also flipped from the menu bar, and the
-            // result was the 320x180 mini-player drawn inside the 480x270
-            // floating window — a box in a box.
-            if minimized {
-                PictureInPicture.shared.exit()
-            }
-            #endif
         }
         // The always-present base for the ambient glow, and the whole of it
         // on any machine or build where frame sampling turns out not to be
@@ -725,58 +689,6 @@ public struct PlayerView: View {
                 .allowsHitTesting(false)
         }
     }
-
-    #if os(macOS)
-    /// The only chrome a 480x270 window has room for. Revealed by the same
-    /// `areControlsVisible` the full player uses — the root already turns it
-    /// on with any pointer movement and the autohide timer takes it away
-    /// again, so this needs no hover layer of its own, and adding one would
-    /// have sat over the video swallowing the click that toggles play/pause.
-    @ViewBuilder
-    private var pipChrome: some View {
-        if controller.areControlsVisible {
-            VStack {
-                Spacer()
-                HStack(spacing: 4) {
-                    Button(action: { controller.togglePlayPause() }) {
-                        Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .help(controller.isPlaying ? "Pause" : "Play")
-
-                    Button(action: { PictureInPicture.shared.exit() }) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .help("Restore")
-                    .accessibilityLabel("Restore the player")
-
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .help("Close")
-                    .accessibilityLabel("Close the player")
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.black.opacity(0.72))
-                .clipShape(Capsule())
-                .padding(.bottom, 10)
-            }
-            .transition(.opacity)
-        }
-    }
-    #endif
 
     /// The window the Skip pill is offering, if any. Nothing while auto-skip
     /// is on: the jump has already happened by the time a pill could be seen,
@@ -1007,26 +919,6 @@ public struct PlayerView: View {
                 .buttonStyle(.sumiPressable)
                 .help("Minimize Player")
                 .accessibilityLabel("Minimize Player")
-
-                #if os(macOS)
-                // Picture in Picture: the window itself shrinks and floats.
-                // The keyboard route is Shift+P, bound in
-                // `RootView.handleKeyDown` beside plain P for Previous
-                // Episode — one monitor owns both, because two local
-                // monitors claiming one key resolve in whichever order
-                // AppKit happens to dispatch them.
-                Button(action: {
-                    PictureInPicture.shared.toggle(aspectRatio: controller.videoAspectRatio)
-                }) {
-                    Image(systemName: "rectangle.inset.bottomright.filled")
-                        .font(.system(size: 13))
-                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.sumiPressable)
-                .help("Picture in Picture")
-                .accessibilityLabel("Picture in Picture")
-                #endif
 
                 // Auto-Play Next
                 Button(action: { controller.toggleAutoPlayNext() }) {

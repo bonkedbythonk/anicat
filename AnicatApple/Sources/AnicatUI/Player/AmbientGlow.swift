@@ -1,77 +1,108 @@
 import Foundation
 import SwiftUI
+import Accelerate
 import CoreGraphics
 import ImageIO
 
-/// A linear-light-ish colour in 0...1, kept as a plain value so the sampling
-/// below can be exercised without a running player and without SwiftUI.
-public struct AmbientRGB: Sendable, Equatable {
-    public var red: Double
-    public var green: Double
-    public var blue: Double
+/// One thumbnail of the picture, ready to be blurred behind the player.
+///
+/// `id` is what SwiftUI cross-fades on, not the pixels: two consecutive
+/// frames of a static shot are byte-identical, and an `Equatable` that
+/// compared images would have to read 9 KB on every diff to conclude the
+/// drift should stop.
+public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let image: CGImage
 
-    public init(red: Double, green: Double, blue: Double) {
-        self.red = red
-        self.green = green
-        self.blue = blue
+    public init(id: Int, image: CGImage) {
+        self.id = id
+        self.image = image
     }
 
-    public static let black = AmbientRGB(red: 0, green: 0, blue: 0)
-
-    public var color: Color {
-        Color(red: red, green: green, blue: blue)
-    }
-
-    static func mean(_ values: [AmbientRGB]) -> AmbientRGB {
-        guard !values.isEmpty else { return .black }
-        let count = Double(values.count)
-        return AmbientRGB(
-            red: values.reduce(0) { $0 + $1.red } / count,
-            green: values.reduce(0) { $0 + $1.green } / count,
-            blue: values.reduce(0) { $0 + $1.blue } / count
-        )
+    public static func == (lhs: AmbientFrame, rhs: AmbientFrame) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
-/// What each side of the picture is bleeding into the black around it.
-public struct AmbientEdges: Sendable, Equatable {
-    public var top: AmbientRGB
-    public var bottom: AmbientRGB
-    public var left: AmbientRGB
-    public var right: AmbientRGB
+/// The self-disable rule around `screenshot-raw`, kept as a value so the
+/// interval, the budget and the strike policy can be exercised without a
+/// running player.
+public struct AmbientSampleGate: Sendable, Equatable {
+    /// How often a frame is sampled. One second: the drawing cross-fades
+    /// over two, so anything slower reads as a step rather than a drift.
+    public static let interval: CFAbsoluteTime = 1
+    /// `screenshot-raw` runs on mpv's core lock, so a slow sample is a
+    /// dropped frame. Covers the downscale too — both happen before the
+    /// event loop gets back to `mpv_wait_event`.
+    public static let budget: CFAbsoluteTime = 0.015
+    /// Strikes are consecutive, not cumulative: at one sample a second a
+    /// cumulative counter kills the feature after three unlucky moments
+    /// anywhere in an episode — a seek, a cache stall, a scheduling spike —
+    /// and never lets it back. Three in a row is the machine being too slow.
+    public static let slowSampleLimit = 3
 
-    public init(top: AmbientRGB, bottom: AmbientRGB, left: AmbientRGB, right: AmbientRGB) {
-        self.top = top
-        self.bottom = bottom
-        self.left = left
-        self.right = right
+    public private(set) var gaveUp = false
+    private var lastSampleAt: CFAbsoluteTime = 0
+    private var consecutiveSlowSamples = 0
+
+    public init() {}
+
+    public func isDue(at now: CFAbsoluteTime) -> Bool {
+        !gaveUp && now - lastSampleAt >= Self.interval
     }
 
-    public init(uniform: AmbientRGB) {
-        self.init(top: uniform, bottom: uniform, left: uniform, right: uniform)
+    /// Claims the slot for a sample about to run.
+    public mutating func begin(at now: CFAbsoluteTime) {
+        lastSampleAt = now
     }
 
-    public static let neutral = AmbientEdges(uniform: .black)
-
-    /// What the mini-player's halo is tinted with — one colour for a frame
-    /// small enough that four would read as noise.
-    public var mean: AmbientRGB {
-        AmbientRGB.mean([top, bottom, left, right])
+    /// Records how long a sample took. Returns false once the machine has
+    /// failed the budget `slowSampleLimit` times running, after which the
+    /// caller must stop asking for the rest of the session.
+    @discardableResult
+    public mutating func record(elapsed: CFAbsoluteTime) -> Bool {
+        guard elapsed > Self.budget else {
+            consecutiveSlowSamples = 0
+            return true
+        }
+        consecutiveSlowSamples += 1
+        if consecutiveSlowSamples >= Self.slowSampleLimit {
+            gaveUp = true
+            return false
+        }
+        return true
     }
+
+    /// Unsupported outright, rather than slow.
+    public mutating func giveUp() {
+        gaveUp = true
+    }
+
+    /// Only for the log line that reports a slow sample.
+    public var slowStreak: Int { consecutiveSlowSamples }
 }
 
 public enum AmbientGlow {
-    /// Byte offsets of red, green and blue inside one 4-byte pixel. mpv's
-    /// `screenshot-raw` answers `bgr0` on every build this app ships with,
-    /// but the command documents the format as a field rather than a
-    /// guarantee, and reading it the wrong way round tints the whole app.
+    /// How mpv's `screenshot-raw` laid the frame out in memory, as the
+    /// `CGImage` flags that read it back the same way. The command documents
+    /// the format as a field rather than a guarantee, and reading it the
+    /// wrong way round tints the whole app.
+    ///
+    /// Both are `noneSkip*`, never a `premultiplied*` variant: mpv's fourth
+    /// byte is a literal 0, so any alpha-carrying variant draws the entire
+    /// glow fully transparent, with no error raised anywhere to say so.
     public struct PixelOrder: Sendable, Equatable {
-        public let red: Int
-        public let green: Int
-        public let blue: Int
+        public let bitmapInfo: CGBitmapInfo
 
-        public static let bgr0 = PixelOrder(red: 2, green: 1, blue: 0)
-        public static let rgb0 = PixelOrder(red: 0, green: 1, blue: 2)
+        /// Bytes B, G, R, X — an XRGB word read little-endian.
+        public static let bgr0 = PixelOrder(
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue)
+                .union(.byteOrder32Little)
+        )
+        /// Bytes R, G, B, X, which is the default byte order already.
+        public static let rgb0 = PixelOrder(
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
+        )
 
         public static func named(_ format: String) -> PixelOrder? {
             switch format.lowercased() {
@@ -82,100 +113,104 @@ public enum AmbientGlow {
         }
     }
 
-    /// The downsampled frame is 8x8 — enough for four edge strips and no
-    /// more, since everything drawn from it is a wash behind a blurred
-    /// gradient.
-    public static let gridSide = 8
+    /// The long side of the thumbnail everything is drawn from. 64 is
+    /// already more detail than survives a 60pt blur; the point of the
+    /// downscale is that the layer SwiftUI blurs is a few kilobytes rather
+    /// than the 8 MB frame `screenshot-raw` handed over.
+    public static let maxSide = 64
 
-    /// Mean of each edge strip of a row-major 8x8 grid. The corners belong to
-    /// two strips each, which is what makes the four colours agree where they
-    /// meet instead of banding at the corners.
-    public static func edges(fromGrid grid: [AmbientRGB]) -> AmbientEdges? {
-        let side = gridSide
-        guard grid.count == side * side else { return nil }
-        return AmbientEdges(
-            top: AmbientRGB.mean(Array(grid[0..<side])),
-            bottom: AmbientRGB.mean(Array(grid[(side * (side - 1))...])),
-            left: AmbientRGB.mean((0..<side).map { grid[$0 * side] }),
-            right: AmbientRGB.mean((0..<side).map { grid[$0 * side + side - 1] })
+    /// How many source rows each row of the thumbnail is allowed to be
+    /// averaged from before the rest are skipped outright. Eight is well
+    /// past the point where more rows change a 64px thumbnail that is about
+    /// to be blurred at 60pt.
+    static let sourceRowsPerDestinationRow = 8
+
+    /// The thumbnail's dimensions for a frame of `width` x `height`, aspect
+    /// preserved, long side clamped to `maxSide`. A frame already smaller
+    /// than that is not scaled up.
+    public static func thumbnailSize(width: Int, height: Int) -> (width: Int, height: Int)? {
+        guard width > 0, height > 0 else { return nil }
+        let longest = max(width, height)
+        guard longest > maxSide else { return (width, height) }
+        let scale = Double(maxSide) / Double(longest)
+        return (
+            max(1, Int((Double(width) * scale).rounded())),
+            max(1, Int((Double(height) * scale).rounded()))
         )
     }
 
-    /// Downsamples a packed 32-bit frame to 8x8 by point-sampling 64 points
-    /// per cell.
+    /// Downscales a packed 32-bit frame to at most `maxSide` on the long
+    /// side and hands it back as a `CGImage`.
     ///
-    /// Not vImage, and not a full-frame reduction: a 1080p frame is 8 MB, and
-    /// averaging every pixel of it — or handing it to vImage, which has to
-    /// read all of it too — costs far more than the 4096 scattered reads this
-    /// does, for a result that ends up behind a gradient either way. The
-    /// expensive half of this feature is `screenshot-raw` itself, which
-    /// allocates and copies that frame under mpv's core lock; nothing here
-    /// should add to it.
-    public static func grid(
-        bytes: UnsafeRawPointer,
+    /// vImage rather than a hand-rolled sampler: a box filter written in
+    /// Swift has to touch the same 8 MB with bounds checks and no vector
+    /// unit, and the earlier scattered-sample version of this file traded
+    /// that cost for visible aliasing — 4096 point samples of a 1080p frame
+    /// is one pixel in 500, so a moving picture made the result flicker.
+    /// `vImageScale_ARGB8888` is channel-agnostic, so the byte order is not
+    /// its problem: it is carried through untouched and named to `CGImage`.
+    public static func thumbnail(
+        bytes: UnsafeMutableRawPointer,
         width: Int,
         height: Int,
         stride: Int,
         order: PixelOrder
-    ) -> [AmbientRGB]? {
-        let side = gridSide
-        let samplesPerSide = 8
-        let steps = side * samplesPerSide
-        guard width > 0, height > 0, stride >= width * 4 else { return nil }
-        var grid: [AmbientRGB] = []
-        grid.reserveCapacity(side * side)
-        for cellY in 0..<side {
-            for cellX in 0..<side {
-                var red = 0.0, green = 0.0, blue = 0.0
-                var counted = 0
-                for sampleY in 0..<samplesPerSide {
-                    let y = min(((cellY * samplesPerSide + sampleY) * height) / steps, height - 1)
-                    let row = bytes.advanced(by: y * stride)
-                    for sampleX in 0..<samplesPerSide {
-                        let x = min(((cellX * samplesPerSide + sampleX) * width) / steps, width - 1)
-                        let pixel = row.advanced(by: x * 4)
-                        red += Double(pixel.load(fromByteOffset: order.red, as: UInt8.self))
-                        green += Double(pixel.load(fromByteOffset: order.green, as: UInt8.self))
-                        blue += Double(pixel.load(fromByteOffset: order.blue, as: UInt8.self))
-                        counted += 1
-                    }
-                }
-                let scale = Double(counted) * 255
-                grid.append(AmbientRGB(red: red / scale, green: green / scale, blue: blue / scale))
-            }
+    ) -> CGImage? {
+        guard let size = thumbnailSize(width: width, height: height), stride >= width * 4 else { return nil }
+        // Rows are decimated before vImage sees them, by handing it a stride
+        // `rowStep` times the real one and a proportionally shorter buffer.
+        // The whole cost of this call is reading the source frame, so
+        // dropping rows it would only have averaged away is nearly free:
+        // measured on this machine, 1080p 2.41ms -> 0.65ms and 4K
+        // 9.78ms -> 1.08ms. The 4K figure is the reason it exists — at
+        // 9.78ms plus the screenshot itself, every sample overran the 15ms
+        // budget and the feature disabled itself three seconds in.
+        let rowStep = max(1, height / (size.height * Self.sourceRowsPerDestinationRow))
+        var source = vImage_Buffer(
+            data: bytes,
+            height: vImagePixelCount(height / rowStep),
+            width: vImagePixelCount(width),
+            rowBytes: stride * rowStep
+        )
+        let destinationRowBytes = size.width * 4
+        var scaled = Data(count: destinationRowBytes * size.height)
+        let ok = scaled.withUnsafeMutableBytes { raw -> Bool in
+            guard let base = raw.baseAddress else { return false }
+            var destination = vImage_Buffer(
+                data: base,
+                height: vImagePixelCount(size.height),
+                width: vImagePixelCount(size.width),
+                rowBytes: destinationRowBytes
+            )
+            return vImageScale_ARGB8888(&source, &destination, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError
         }
-        return grid
+        guard ok, let provider = CGDataProvider(data: scaled as CFData) else { return nil }
+        return CGImage(
+            width: size.width,
+            height: size.height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: destinationRowBytes,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: order.bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
     }
 
-    /// The fallback source: one colour for the whole episode, from its still.
-    /// Always computed, whether or not frame sampling is available, so a
-    /// player that never gets a usable screenshot still has something to
-    /// bleed — and so the glow is up before the first frame has decoded.
-    public static func averageColor(of url: URL) async -> AmbientRGB? {
+    /// The fallback source: the episode's own still, at the same size a
+    /// sampled frame arrives at, so there is one drawing path rather than
+    /// two. Always fetched, whether or not frame sampling turns out to be
+    /// available, so the glow is up before the first frame has decoded.
+    public static func still(from url: URL) async -> CGImage? {
         guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 32,
-              ] as CFDictionary)
+              let source = CGImageSourceCreateWithData(data as CFData, nil)
         else { return nil }
-        // A 1x1 context is the cheapest area average there is: Core Graphics
-        // does the box filter on the way in.
-        var pixel: [UInt8] = [0, 0, 0, 0]
-        guard let context = CGContext(
-            data: &pixel,
-            width: 1,
-            height: 1,
-            bitsPerComponent: 8,
-            bytesPerRow: 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        return AmbientRGB(
-            red: Double(pixel[0]) / 255,
-            green: Double(pixel[1]) / 255,
-            blue: Double(pixel[2]) / 255
-        )
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,
+        ] as CFDictionary)
     }
 }

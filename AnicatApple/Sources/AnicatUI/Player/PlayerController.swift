@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Observation
+import CoreGraphics
 #if os(macOS)
 import AppKit
 
@@ -191,8 +192,8 @@ public final class PlayerController: @unchecked Sendable {
     /// auto-next, exactly as before this card existed.
     public var isMiniPlayerActive: Bool = false
 
-    /// Where the ambient glow's colours are coming from right now. The
-    /// episode still is the base and is always computed; frame sampling
+    /// Where the ambient glow's picture is coming from right now. The
+    /// episode still is the base and is always fetched; frame sampling
     /// replaces it once a `screenshot-raw` has come back cheaply enough, and
     /// hands back to it if the sampler gives up.
     public enum AmbientSource: Sendable, Equatable {
@@ -200,33 +201,47 @@ public final class PlayerController: @unchecked Sendable {
         case thumbnail
         case frame
     }
-    public var ambientEdges: AmbientEdges = .neutral
-    public var ambientSource: AmbientSource = .none
+    public private(set) var ambientFrame: AmbientFrame?
+    public private(set) var ambientSource: AmbientSource = .none
+    /// Monotonic, never reset: it is the cross-fade's identity, and a
+    /// counter that restarted per episode would make the first frame of a
+    /// new episode compare equal to the last of the old one and swap with no
+    /// fade at all.
+    private var ambientFrameCount = 0
+    /// The episode still, held so `ambientSamplingStopped` has something to
+    /// fall back to an hour into a session.
+    private var ambientStill: CGImage?
+
+    /// A frame the sampler just took. Always wins: it is the live picture.
+    public func setAmbientFrame(_ image: CGImage) {
+        ambientFrameCount += 1
+        ambientFrame = AmbientFrame(id: ambientFrameCount, image: image)
+        ambientSource = .frame
+    }
+
     /// Set by the player from the playing episode's still, once per episode.
-    public var ambientThumbnailColor: AmbientRGB? {
-        didSet {
-            guard ambientSource != .frame else { return }
-            if let ambientThumbnailColor {
-                ambientEdges = AmbientEdges(uniform: ambientThumbnailColor)
-                ambientSource = .thumbnail
-            } else {
-                ambientEdges = .neutral
-                ambientSource = .none
-            }
-        }
+    public func setAmbientStill(_ image: CGImage?) {
+        ambientStill = image
+        guard ambientSource != .frame else { return }
+        showAmbientStill()
     }
 
     /// Frame sampling gave up (too slow, or unsupported by this build of
     /// mpv). Falls back to whatever the episode still produced.
     public func ambientSamplingStopped() {
         guard ambientSource == .frame else { return }
-        if let ambientThumbnailColor {
-            ambientEdges = AmbientEdges(uniform: ambientThumbnailColor)
-            ambientSource = .thumbnail
-        } else {
-            ambientEdges = .neutral
+        showAmbientStill()
+    }
+
+    private func showAmbientStill() {
+        guard let ambientStill else {
+            ambientFrame = nil
             ambientSource = .none
+            return
         }
+        ambientFrameCount += 1
+        ambientFrame = AmbientFrame(id: ambientFrameCount, image: ambientStill)
+        ambientSource = .thumbnail
     }
     public var nextEpisodeCountdown = NextEpisodeCountdown()
     /// How long before the end the card comes up for a file with no outro

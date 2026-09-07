@@ -318,19 +318,16 @@ public struct PlayerView: View {
                 )
                 .background {
                     if isMinimized {
-                        // The halo is a second shadow on the shape already
-                        // behind the video, not a modifier on the surface:
-                        // a shadow on the layer mpv redraws is the offscreen
-                        // pass the comment above rules out. One colour rather
-                        // than four — at 320x180 the four edges read as noise.
+                        // A shadow on the shape already behind the video,
+                        // never a modifier on the surface: a shadow on the
+                        // layer mpv redraws is the offscreen pass the comment
+                        // above rules out. No ambient glow here — the glow is
+                        // a blurred copy of the frame filling the letterbox,
+                        // and a 320x180 box floating over the app has no
+                        // letterbox to fill.
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.black)
                             .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
-                            .shadow(
-                                color: (glowEdges?.mean.color ?? .clear).opacity(glowEdges == nil ? 0 : 0.5),
-                                radius: 26
-                            )
-                            .animation(reduceMotion ? nil : .smooth(duration: 1.5), value: controller.ambientEdges)
                     }
                 }
                 .position(isMinimized ? miniCenter : CGPoint(x: windowSize.width / 2, y: windowSize.height / 2))
@@ -399,9 +396,9 @@ public struct PlayerView: View {
                         .background(alignment: .top) {
                             VStack(spacing: 0) {
                                 // Clear where the glow is on: this fill is the
-                                // letterbox black, and painting it over the bleed
+                                // letterbox black, and painting it over the glow
                                 // would be painting over the whole feature.
-                                (glowEdges == nil ? Color.black : Color.clear)
+                                (glowFrame == nil ? Color.black : Color.clear)
                                     .frame(height: naturalTop)
                                 if topGap > naturalTop, controller.areControlsVisible {
                                     LinearGradient(
@@ -434,7 +431,7 @@ public struct PlayerView: View {
                                     )
                                     .frame(height: bottomGap - naturalBottom)
                                 }
-                                (glowEdges == nil ? Color.black : Color.clear)
+                                (glowFrame == nil ? Color.black : Color.clear)
                                     .frame(height: naturalBottom)
                             }
                         }
@@ -565,12 +562,12 @@ public struct PlayerView: View {
         // three seconds into it.
         .task(id: ambientThumbnailURL) {
             guard let url = ambientThumbnailURL else {
-                controller.ambientThumbnailColor = nil
+                controller.setAmbientStill(nil)
                 return
             }
-            let color = await AmbientGlow.averageColor(of: url)
+            let still = await AmbientGlow.still(from: url)
             guard !Task.isCancelled else { return }
-            controller.ambientThumbnailColor = color
+            controller.setAmbientStill(still)
         }
         // Latched, not mirrored: see `hasShownFirstFrame`. The curve is the
         // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
@@ -608,18 +605,16 @@ public struct PlayerView: View {
         return "Buffering…"
     }
 
-    /// The colours the letterbox bars (and the mini-player's halo) bleed
-    /// right now, or nil when the glow is off. Reduce Transparency turns it
-    /// off outright: the whole effect is a translucent wash of the picture
-    /// over the app's own black, which is the thing that setting asks not to
-    /// happen.
-    private var glowEdges: AmbientEdges? {
-        guard ambientGlowEnabled, !reduceTransparency,
-              controller.ambientSource != .none else { return nil }
-        return controller.ambientEdges
+    /// The thumbnail the letterbox bars are lit from right now, or nil when
+    /// the glow is off. Reduce Transparency turns it off outright: the whole
+    /// effect is a translucent wash of the picture over the app's own black,
+    /// which is the thing that setting asks not to happen.
+    private var glowFrame: AmbientFrame? {
+        guard ambientGlowEnabled, !reduceTransparency else { return nil }
+        return controller.ambientFrame
     }
 
-    /// The still the fallback colour is taken from: the playing episode's,
+    /// The still the fallback picture is taken from: the playing episode's,
     /// which the morph source only sometimes is (a menu-bar Resume or an
     /// auto-next has no row behind it).
     private var ambientThumbnailURL: URL? {
@@ -627,52 +622,67 @@ public struct PlayerView: View {
             ?? morphThumbnailURL
     }
 
-    /// The bleed itself: one gradient per bar, running from the colour at the
-    /// picture's edge to nothing at the window's. No blur — the colour is
-    /// already the mean of an edge strip, so there is no detail left in it
-    /// for a blur to soften, and a blur filter over a layer that sits beside
-    /// 60fps video is an offscreen pass this file's other comments already
-    /// record the cost of.
+    /// The glow: a blurred copy of the picture filling the window, masked to
+    /// the letterbox so nothing is composited under an opaque video frame.
+    ///
+    /// The mask is even-odd rather than four rects, so the bars and the
+    /// pillars are one layer and there is no seam where two of them meet at
+    /// a corner.
     @ViewBuilder
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
-        if let edges = glowEdges {
+        if let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
             let video = geometry.videoRect
-            ZStack(alignment: .topLeading) {
-                if video.minY > 0 {
-                    bleed(edges.top, from: .bottom)
-                        .frame(width: windowSize.width, height: video.minY)
-                        .position(x: windowSize.width / 2, y: video.minY / 2)
-                }
-                if video.maxY < windowSize.height {
-                    let height = windowSize.height - video.maxY
-                    bleed(edges.bottom, from: .top)
-                        .frame(width: windowSize.width, height: height)
-                        .position(x: windowSize.width / 2, y: video.maxY + height / 2)
-                }
-                if video.minX > 0 {
-                    bleed(edges.left, from: .trailing)
-                        .frame(width: video.minX, height: windowSize.height)
-                        .position(x: video.minX / 2, y: windowSize.height / 2)
-                }
-                if video.maxX < windowSize.width {
-                    let width = windowSize.width - video.maxX
-                    bleed(edges.right, from: .leading)
-                        .frame(width: width, height: windowSize.height)
-                        .position(x: video.maxX + width / 2, y: windowSize.height / 2)
-                }
+            ZStack {
+                glowImage(frame, windowSize: windowSize)
+                    .id(frame.id)
+                    .transition(.opacity)
             }
             .frame(width: windowSize.width, height: windowSize.height)
+            // Opacity on the group, not on each frame: samples arrive once a
+            // second and the fade runs for two, so two or three copies are
+            // alive at any moment and per-copy alphas would sum to a visible
+            // pulse at exactly the sample rate — the flicker this whole
+            // rewrite exists to remove.
+            .compositingGroup()
+            .opacity(0.55)
+            .mask(alignment: .topLeading) {
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: windowSize))
+                    path.addRect(video)
+                }
+                .fill(style: FillStyle(eoFill: true))
+                .frame(width: windowSize.width, height: windowSize.height)
+            }
             .allowsHitTesting(false)
-            .animation(reduceMotion ? nil : .smooth(duration: 1.5), value: controller.ambientEdges)
+            .animation(reduceMotion ? nil : .smooth(duration: 2.0), value: frame.id)
         }
     }
 
-    private func bleed(_ rgb: AmbientRGB, from edge: UnitPoint) -> some View {
-        LinearGradient(
-            colors: [rgb.color.opacity(0.55), rgb.color.opacity(0)],
-            startPoint: edge,
-            endPoint: UnitPoint(x: 1 - edge.x, y: 1 - edge.y)
-        )
+    /// One sampled frame, blurred to fill the window.
+    private func glowImage(_ frame: AmbientFrame, windowSize: CGSize) -> some View {
+        Image(decorative: frame.image, scale: 1)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            // Overfilled by layout, not by `scaleEffect`: a blur pulls
+            // transparency in from its own layer's edges, and the bars this
+            // is masked to are exactly those edges, so without the overfill
+            // the glow fades out along the window border and reads as a
+            // vignette rather than as spill. `scaleEffect` would leave the
+            // layout bounds at the window size, and the rasterizer below is
+            // free to size its buffer to those bounds and crop the overfill
+            // straight back off.
+            .frame(width: windowSize.width * 1.2, height: windowSize.height * 1.2)
+            .blur(radius: 60)
+            .saturation(1.1)
+            .brightness(-0.15)
+            // Rasterized per frame, not per composite: each of these layers
+            // is static for the two seconds it lives, but the video beside it
+            // recomposites 24 times a second, and an unflattened 60pt blur
+            // is the same full-window offscreen pass this file's mini-player
+            // comment records as the app-wide lag while minimized.
+            .drawingGroup()
+            .frame(width: windowSize.width, height: windowSize.height)
+            .clipped()
     }
 
     #if os(macOS)

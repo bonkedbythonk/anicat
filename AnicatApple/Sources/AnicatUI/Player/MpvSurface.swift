@@ -1369,52 +1369,46 @@ public struct MpvSurface {
         func sampleAmbientIfDue() async {
             // Checked before the main-actor hop below, not after: this runs
             // on every 50ms idle tick, and hopping twenty times a second to
-            // read three booleans that matter once every three seconds is
-            // the whole cost of the feature in the steady state.
-            guard !ambientSamplingGaveUp,
-                  CFAbsoluteTimeGetCurrent() - lastAmbientSampleAt >= Self.ambientSampleInterval
-            else { return }
+            // read three booleans that matter once a second is the whole
+            // cost of the feature in the steady state.
+            guard ambientGate.isDue(at: CFAbsoluteTimeGetCurrent()) else { return }
             let ready = await MainActor.run {
                 !self.controller.awaitingNewFile && !self.controller.isBuffering && self.controller.isPlaying
             }
-            guard ready, let edges = sampleAmbientEdges() else {
-                if ambientSamplingGaveUp {
+            guard ready, let frame = sampleAmbientFrame() else {
+                if ambientGate.gaveUp {
                     await MainActor.run { self.controller.ambientSamplingStopped() }
                 }
                 return
             }
             await MainActor.run {
-                self.controller.ambientEdges = edges
-                self.controller.ambientSource = .frame
+                self.controller.setAmbientFrame(frame)
             }
         }
 
-        /// When the last ambient sample was taken, and how many of them ran
-        /// long. See `sampleAmbientEdges` for the budget.
-        private var lastAmbientSampleAt: CFAbsoluteTime = 0
-        private var slowAmbientSamples = 0
-        private var ambientSamplingGaveUp = false
-        /// How often a frame is sampled for the ambient glow.
-        private static let ambientSampleInterval: CFAbsoluteTime = 3
-        /// `screenshot-raw` runs on mpv's core lock, so a slow one is a slow
-        /// frame. Three over budget and the feature stops asking for the rest
-        /// of the session rather than costing playback on this machine.
-        private static let ambientSampleBudget: CFAbsoluteTime = 0.015
-        private static let ambientSlowSampleLimit = 3
+        /// The interval, the 15ms budget and the give-up rule. See
+        /// `AmbientSampleGate`.
+        private var ambientGate = AmbientSampleGate()
+        /// How many samples have had their cost printed. The timing line is
+        /// the only way to see what this feature costs on a given machine,
+        /// and printing it once a second for a 24-minute episode would bury
+        /// every other line in the log.
+        private var ambientSamplesLogged = 0
+        private static let ambientSamplesToLog = 3
 
-        /// One `screenshot-raw` reduced to four edge colours, or nil when it
-        /// is not due, not possible, or has been given up on.
+        /// One `screenshot-raw` downscaled to a thumbnail, or nil when it is
+        /// not due, not possible, or has been given up on.
         ///
         /// Called from the event loop rather than from a timer of its own.
         /// `stop()` blocks on `eventLoopStopped` before it frees anything,
         /// precisely because a second thread touching `mpv` at the same
         /// moment was a crash; a sampling queue would be exactly that second
         /// thread, and nothing in `stop()` waits for one.
-        func sampleAmbientEdges() -> AmbientEdges? {
-            guard !ambientSamplingGaveUp, let mpv else { return nil }
+        func sampleAmbientFrame() -> CGImage? {
+            guard let mpv else { return nil }
             let now = CFAbsoluteTimeGetCurrent()
-            guard now - lastAmbientSampleAt >= Self.ambientSampleInterval else { return nil }
-            lastAmbientSampleAt = now
+            guard ambientGate.isDue(at: now) else { return nil }
+            ambientGate.begin(at: now)
             guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true else { return nil }
 
             var result = mpv_node()
@@ -1446,34 +1440,39 @@ public struct MpvSurface {
             guard status >= 0 else {
                 // "video" is refused by a build without the screenshot code,
                 // and by an audio-only file. Neither is worth retrying every
-                // three seconds for the rest of the episode.
+                // second for the rest of the episode.
                 print("[ambient] screenshot-raw unavailable (\(status)); falling back to the episode still")
-                ambientSamplingGaveUp = true
+                ambientGate.giveUp()
                 return nil
             }
             defer { mpv_free_node_contents(&result) }
-            let edges = Self.edges(fromScreenshot: result)
-            let elapsed = CFAbsoluteTimeGetCurrent() - now
-            if elapsed > Self.ambientSampleBudget {
-                slowAmbientSamples += 1
-                print(String(format: "[ambient] screenshot-raw took %.1fms (over budget %d/%d)",
-                             elapsed * 1000, slowAmbientSamples, Self.ambientSlowSampleLimit))
-                if slowAmbientSamples >= Self.ambientSlowSampleLimit {
-                    print("[ambient] frame sampling is too slow on this machine; falling back to the episode still")
-                    ambientSamplingGaveUp = true
-                    return nil
-                }
+            let captured = CFAbsoluteTimeGetCurrent()
+            let frame = Self.thumbnail(fromScreenshot: result)
+            let finished = CFAbsoluteTimeGetCurrent()
+            let elapsed = finished - now
+            if ambientSamplesLogged < Self.ambientSamplesToLog {
+                ambientSamplesLogged += 1
+                print(String(format: "[ambient] screenshot-raw %.1fms + downscale %.1fms = %.1fms",
+                             (captured - now) * 1000, (finished - captured) * 1000, elapsed * 1000))
             }
-            return edges
+            if elapsed > AmbientSampleGate.budget {
+                print(String(format: "[ambient] sample took %.1fms (over budget %d/%d in a row)",
+                             elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit))
+            }
+            guard ambientGate.record(elapsed: elapsed) else {
+                print("[ambient] frame sampling is too slow on this machine; falling back to the episode still")
+                return nil
+            }
+            return frame
         }
 
         /// Walks the map `screenshot-raw` answers with (`w`, `h`, `stride`,
-        /// `format`, `data`) down to four colours.
-        private static func edges(fromScreenshot node: mpv_node) -> AmbientEdges? {
+        /// `format`, `data`) down to a thumbnail.
+        private static func thumbnail(fromScreenshot node: mpv_node) -> CGImage? {
             guard node.format == MPV_FORMAT_NODE_MAP, let list = node.u.list else { return nil }
             var width = 0, height = 0, stride = 0
             var order: AmbientGlow.PixelOrder?
-            var data: UnsafeRawPointer?
+            var data: UnsafeMutableRawPointer?
             var size = 0
             for index in 0..<Int(list.pointee.num) {
                 guard let keyPointer = list.pointee.keys?[index],
@@ -1486,16 +1485,16 @@ public struct MpvSurface {
                     order = value.u.string.map { AmbientGlow.PixelOrder.named(String(cString: $0)) } ?? nil
                 case "data":
                     if let bytes = value.u.ba {
-                        data = UnsafeRawPointer(bytes.pointee.data)
+                        data = bytes.pointee.data
                         size = bytes.pointee.size
                     }
                 default: continue
                 }
             }
-            guard let order, let data, size >= stride * height,
-                  let grid = AmbientGlow.grid(bytes: data, width: width, height: height, stride: stride, order: order)
-            else { return nil }
-            return AmbientGlow.edges(fromGrid: grid)
+            guard let order, let data, size >= stride * height else { return nil }
+            return AmbientGlow.thumbnail(
+                bytes: data, width: width, height: height, stride: stride, order: order
+            )
         }
 
         /// mpv's `chapter-list` for the loaded file, read through the string
@@ -1540,8 +1539,8 @@ public struct MpvSurface {
                         }
                         // The 50ms idle tick is where the ambient glow's
                         // frame sampling rides: no timer, no second thread on
-                        // the handle, and `sampleAmbientEdges` does nothing
-                        // until three seconds have passed.
+                        // the handle, and `sampleAmbientFrame` does nothing
+                        // until a second has passed.
                         await self.sampleAmbientIfDue()
                         continue
                     }

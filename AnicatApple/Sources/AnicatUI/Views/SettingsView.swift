@@ -385,7 +385,7 @@ private struct PlayerTabSection: View {
 
             SettingField(
                 label: "Ambient Glow",
-                description: "Spills the video's own colour out past the letterbox edges, so a 4:3 or ultrawide picture sits in its own light instead of black bars."
+                description: "Fills the black bars with a blurred, drifting copy of the picture, so a 4:3 or ultrawide video sits in its own light instead of hard black."
             ) {
                 SumiSwitch(isOn: $ambientGlow)
             }

@@ -183,8 +183,16 @@ public final class MpvMetalView: NSView {
             self.onDrawableSizeChanged?(target)
         }
         pendingDrawableSync = work
-        if metalLayer.drawableSize == .zero || metalLayer.drawableSize.width <= 1 {
-            // First real size: apply now, mpv's context reads it at configure.
+        // Debounce is only for the mini-player minimize spring, which
+        // re-lays this view out every frame; a swapchain rebuild per frame
+        // was the hitch. Fullscreen enter/exit is one step change, and the
+        // debounce there let mpv configure at the stale windowed size in
+        // the 50ms gap and keep it (the picture stuck in the top-left of a
+        // fullscreen window, seen in the player log on a replay). So: apply
+        // now on the first size, and whenever the window is or is becoming
+        // fullscreen; debounce only a plain windowed resize.
+        let isFullScreen = window?.styleMask.contains(.fullScreen) ?? false
+        if metalLayer.drawableSize == .zero || metalLayer.drawableSize.width <= 1 || isFullScreen {
             work.perform()
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)

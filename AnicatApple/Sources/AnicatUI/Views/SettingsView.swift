@@ -787,10 +787,9 @@ private struct AccountTabSection: View {
                 }
 
                 // Required by TMDB's API terms wherever their data is used,
-                // not a courtesy line: the wording is theirs.
-                Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
-                    .font(.system(size: 11))
-                    .foregroundColor(SumiTheme.muted)
+                // not a courtesy line: the mark and the wording are both
+                // theirs. See `TMDBAttribution`.
+                TMDBAttribution()
                     .padding(.top, 4)
             }
 

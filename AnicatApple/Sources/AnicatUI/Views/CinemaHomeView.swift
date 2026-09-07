@@ -40,6 +40,11 @@ struct CinemaHomeView: View {
                         shelfRow(shelf)
                     }
                 }
+
+                // Every row above is TMDB's data, and their terms ask for the
+                // mark wherever it is shown -- not only on a settings page.
+                TMDBAttribution()
+                    .padding(.top, 8)
             }
             .padding(.horizontal, SumiTheme.spaceLg)
             .padding(.vertical, 24)

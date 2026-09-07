@@ -947,8 +947,8 @@ extension AppModel {
             self.playerController.duration = initialDuration
         }
 
-        // Same explicit curve/duration the detail page's own open/close uses
-        // (`closeDetail`, `loadDetail`) rather than leaning on a bare
+        // One explicit curve here, the same length as the detail page's own
+        // open/close (`closeDetail`, `loadDetail`), rather than a bare
         // `.animation(value:)` modifier at the view side — relying on that
         // alone left the player's entrance timed by whatever SwiftUI's
         // default "smooth" spring happens to be, uncoordinated with
@@ -956,7 +956,7 @@ extension AppModel {
         // bars' own appear animation, the mini-player fading out if it was
         // showing), which is what read as jittery rather than one clean
         // transition.
-        withAnimation(.easeInOut(duration: 0.32)) {
+        withAnimation(.smooth(duration: 0.42)) {
             self.activeStreamURL = streamURL
         }
         playFeedback(.playerOpen)

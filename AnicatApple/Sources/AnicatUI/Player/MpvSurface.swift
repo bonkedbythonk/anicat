@@ -1111,17 +1111,70 @@ public struct MpvSurface {
 
         /// Makes the vo reconfigure so the MoltenVK context re-reads the
         /// layer's drawable size (see `MpvMetalView.onDrawableSizeChanged`).
+        ///
         /// mpv reconfigures the vo only when the output image parameters
-        /// change, so a filter that changes nothing would not do; the aspect
-        /// override is flipped to a different value and straight back, two
-        /// reconfigs inside one frame interval. A file that is not loaded
-        /// yet gets its size read at its own configure, so nothing is sent.
+        /// change, and only when a frame next passes through the filter
+        /// chain. The first version of this set the aspect override to a
+        /// detour and straight back, two commands in one frame interval,
+        /// and mpv, seeing the same parameters at the next frame, did
+        /// nothing at all: the player log shows three "forcing a reconfig"
+        /// lines in a row with the vo still at the windowed size, and the
+        /// picture at 72% in the top-left of the window. So the detour is
+        /// held until the vo has actually reconfigured (or 250 ms, whichever
+        /// is first) and then the original is restored, which is a second
+        /// reconfig at the same drawable size.
+        ///
+        /// The detour is the picture's own aspect widened by one part in two
+        /// thousand: a different rational for mpv, one pixel across a 1920
+        /// wide picture for the eye. The 1.0 / 1.5 detour it replaces was a
+        /// visible squeeze for however long it lasted.
         func nudgeVideoReconfig() {
             guard mpv != nil else { return }
+            nudgeLock.lock()
+            defer { nudgeLock.unlock() }
+            guard restoreAspectOverride == nil else { return }
             let current = stringProperty("video-aspect-override") ?? "-1"
-            let detour = current == "1.000000" || current == "1" ? "1.500000" : "1.000000"
+            let aspect = stringProperty("video-params/aspect").flatMap(Double.init)
+                ?? stringProperty("video-aspect-override").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil }
+                ?? 16.0 / 9.0
+            let detour = String(format: "%.6f", aspect * 1.0005)
+            restoreAspectOverride = current
+            nudgeOSDBefore = stringProperty("osd-dimensions/w")
             runCommand(["set", "video-aspect-override", detour])
-            runCommand(["set", "video-aspect-override", current])
+            scheduleNudgeRestore(after: 0.03)
+        }
+
+        private let nudgeLock = NSLock()
+        private var restoreAspectOverride: String?
+        private var nudgeOSDBefore: String?
+        private var nudgeWaitedFor: Double = 0
+
+        /// Polls for the reconfig the detour was meant to cause, then puts
+        /// the original override back. Polling rather than waiting for
+        /// `MPV_EVENT_VIDEO_RECONFIG`: that event also fires for the restore
+        /// itself and for every file load, and telling them apart is more
+        /// state than a 30 ms check needs.
+        private func scheduleNudgeRestore(after delay: Double) {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                self.nudgeLock.lock()
+                guard let original = self.restoreAspectOverride else {
+                    self.nudgeLock.unlock()
+                    return
+                }
+                self.nudgeWaitedFor += delay
+                let reconfigured = self.stringProperty("osd-dimensions/w") != self.nudgeOSDBefore
+                    || self.nudgeOSDBefore == nil
+                if !reconfigured && self.nudgeWaitedFor < 0.25 {
+                    self.nudgeLock.unlock()
+                    self.scheduleNudgeRestore(after: 0.03)
+                    return
+                }
+                self.restoreAspectOverride = nil
+                self.nudgeWaitedFor = 0
+                self.nudgeLock.unlock()
+                self.runCommand(["set", "video-aspect-override", original])
+            }
         }
 
         /// The layer size the view last applied, so the vo's own idea of

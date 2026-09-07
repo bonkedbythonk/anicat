@@ -359,7 +359,14 @@ public struct RootView: View {
                 // the housing. Hence: ignored in a window, honoured in
                 // fullscreen.
                 .ignoresSafeArea(edges: FullScreenState.shared.isFullScreen ? [] : .all)
-                .transition(.opacity)
+                // In: fade up from 96%, the window's fullscreen zoom taking
+                // over as it lands (see the delayed `FullScreenGuard.set`).
+                // Out: plain fade; a shrink on the way out fought the
+                // detail page morphing back underneath it.
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                    removal: .opacity
+                ))
                 .zIndex(30)
             }
 
@@ -550,7 +557,13 @@ public struct RootView: View {
                 if !wasPlaying, !window.styleMask.contains(.fullScreen),
                    ProcessInfo.processInfo.environment["ANICAT_NO_AUTO_FULLSCREEN"] == nil {
                     enteredFullscreenForPlayback = true
-                    FullScreenGuard.set(true, on: window)
+                    // After the player's own entrance, not on top of it: the
+                    // fade-and-scale in and the window's fullscreen zoom
+                    // running together read as two animations fighting.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
+                        guard model.activeStreamURL != nil, let window = AppWindow.main else { return }
+                        FullScreenGuard.set(true, on: window)
+                    }
                 }
             } else {
                 AppWindow.setToolbarVisible(false)

@@ -21,8 +21,23 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
     public let bottom: CGImage
     public let left: CGImage
     public let right: CGImage
+    /// The same four bands as colour stops for `AmbientGlowView`'s gradient
+    /// layers: `horizontalStops` along the top and bottom bars,
+    /// `verticalStops` down the pillars. Fixed counts, whatever the
+    /// thumbnail's size: Core Animation only interpolates between colour
+    /// arrays of equal length, and the drawable's aspect changes with the
+    /// window.
+    public let topColors: [CGColor]
+    public let bottomColors: [CGColor]
+    public let leftColors: [CGColor]
+    public let rightColors: [CGColor]
 
     public static let bandFraction: CGFloat = 0.2
+    /// 32 stops across a bar: about 60 pt apart on a 1920 pt screen, which
+    /// with the linear interpolation between stops is as soft as the 36 pt
+    /// blur the image version used, without the blur.
+    public static let horizontalStops = 32
+    public static let verticalStops = 18
 
     public init(id: Int, image: CGImage) {
         self.id = id
@@ -34,13 +49,60 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
         // TV. A 64x7 band stretched over a 110 pt bar showed its seven
         // source rows as horizontal stripes through the blur.
         let topCrop = image.cropping(to: CGRect(x: 0, y: 0, width: w, height: bh)) ?? image
-        let bottomCrop = image.cropping(to: CGRect(x: 0, y: h - bh, width: w, height: bh)) ?? image
+        // The bottom band is taken from just above the subtitle zone, the
+        // rows 12% to 22% up from the edge, rather than the edge itself:
+        // the drawable carries the rendered subtitles, and white text
+        // popping in and out of the bottom fifth was the remaining
+        // "flicker" once the sampling itself was smooth.
+        let subtitleZone = (h * 0.12).rounded()
+        let bottomCrop = image.cropping(to: CGRect(x: 0, y: h - subtitleZone - bh / 2, width: w, height: bh / 2)) ?? image
         let leftCrop = image.cropping(to: CGRect(x: 0, y: 0, width: bw, height: h)) ?? image
         let rightCrop = image.cropping(to: CGRect(x: w - bw, y: 0, width: bw, height: h)) ?? image
         top = Self.collapse(topCrop, to: CGSize(width: w, height: 1)) ?? topCrop
         bottom = Self.collapse(bottomCrop, to: CGSize(width: w, height: 1)) ?? bottomCrop
         left = Self.collapse(leftCrop, to: CGSize(width: 1, height: h)) ?? leftCrop
         right = Self.collapse(rightCrop, to: CGSize(width: 1, height: h)) ?? rightCrop
+        topColors = Self.stops(of: topCrop, count: Self.horizontalStops, horizontal: true)
+        bottomColors = Self.stops(of: bottomCrop, count: Self.horizontalStops, horizontal: true)
+        leftColors = Self.stops(of: leftCrop, count: Self.verticalStops, horizontal: false)
+        rightColors = Self.stops(of: rightCrop, count: Self.verticalStops, horizontal: false)
+    }
+
+    /// `count` colours along `image`, each the mean of its slice, then a
+    /// 1-2-1 smoothing across neighbours and a little more saturation and
+    /// a little less brightness, the grading the blurred version applied
+    /// with view modifiers. The smoothing is what a blur did for a hard
+    /// edge in the picture: without it a bright sleeve against a dark wall
+    /// put a visible kink in the bar where two adjacent stops differ.
+    static func stops(of image: CGImage, count: Int, horizontal: Bool) -> [CGColor] {
+        let size = horizontal ? CGSize(width: count, height: 1) : CGSize(width: 1, height: count)
+        guard let strip = collapse(image, to: size),
+              let data = strip.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data)
+        else { return Array(repeating: CGColor(gray: 0, alpha: 1), count: count) }
+        let stride = strip.bytesPerRow
+        // `collapse` draws noneSkipFirst little-endian: B, G, R, X in memory.
+        var raw: [(r: Float, g: Float, b: Float)] = (0..<count).map { i in
+            let offset = horizontal ? i * 4 : i * stride
+            return (Float(bytes[offset + 2]) / 255, Float(bytes[offset + 1]) / 255, Float(bytes[offset]) / 255)
+        }
+        if count >= 3 {
+            let source = raw
+            for i in 1..<(count - 1) {
+                raw[i] = (
+                    (source[i - 1].r + 2 * source[i].r + source[i + 1].r) / 4,
+                    (source[i - 1].g + 2 * source[i].g + source[i + 1].g) / 4,
+                    (source[i - 1].b + 2 * source[i].b + source[i + 1].b) / 4
+                )
+            }
+        }
+        return raw.map { pixel in
+            let luma = 0.2126 * pixel.r + 0.7152 * pixel.g + 0.0722 * pixel.b
+            func grade(_ c: Float) -> CGFloat {
+                CGFloat(min(1, max(0, luma + (c - luma) * 1.2 - 0.05)))
+            }
+            return CGColor(srgbRed: grade(pixel.r), green: grade(pixel.g), blue: grade(pixel.b), alpha: 1)
+        }
     }
 
     /// Draws `image` scaled into `size` with averaging interpolation, which

@@ -376,7 +376,27 @@ public struct PlayerView: View {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 72))
                         .foregroundColor(SumiTheme.indigo.opacity(0.9))
-                        .transition(.scale.combined(with: .opacity))
+                        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.7).combined(with: .opacity))
+                }
+
+                // Seek feedback: the amount jumped, over the half of the
+                // picture it jumped towards, the way a double-tap on a
+                // phone player answers. The bar's own time readout is
+                // 11.5 pt in a corner; a ten-second jump from the keyboard
+                // otherwise showed nothing where the eye is.
+                if let flash = controller.seekFlash {
+                    seekFlashBadge(flash)
+                        .id(flash.token)
+                        .position(
+                            x: flash.delta < 0 ? videoRect.minX + videoRect.width * 0.25 : videoRect.minX + videoRect.width * 0.75,
+                            y: videoRect.midY
+                        )
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .scale(scale: 0.6).combined(with: .opacity),
+                            removal: .scale(scale: 1.15).combined(with: .opacity)
+                        ))
+                        .allowsHitTesting(false)
                 }
 
                 // Top/bottom chrome, `topGap`/`bottomGap` tall. Where that
@@ -390,6 +410,7 @@ public struct PlayerView: View {
                         Group {
                             if controller.areControlsVisible {
                                 topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                    .transition(barTransition(from: .top))
                             }
                         }
                         .frame(height: topGap)
@@ -419,6 +440,7 @@ public struct PlayerView: View {
                         Group {
                             if controller.areControlsVisible {
                                 PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                    .transition(barTransition(from: .bottom))
                             }
                         }
                         .frame(height: bottomGap)
@@ -594,6 +616,8 @@ public struct PlayerView: View {
         }
         .animation(.smooth, value: controller.areControlsVisible)
         .animation(.snappy, value: controller.isBuffering)
+        .animation(.snappy(duration: 0.28), value: controller.isPlaying)
+        .animation(.snappy(duration: 0.3), value: controller.seekFlash)
         }
     }
 
@@ -611,6 +635,29 @@ public struct PlayerView: View {
     /// the glow is off. Reduce Transparency turns it off outright: the whole
     /// effect is a translucent wash of the picture over the app's own black,
     /// which is the thing that setting asks not to happen.
+    /// The bars come in from their own edge of the window and leave the
+    /// same way, a few points of travel under the fade. A bare fade left
+    /// the transport appearing in place, which next to the rest of the
+    /// app's motion read as a cut.
+    private func barTransition(from edge: Edge) -> AnyTransition {
+        if reduceMotion { return .opacity }
+        return .move(edge: edge).combined(with: .opacity)
+    }
+
+    private func seekFlashBadge(_ flash: PlayerController.SeekFlash) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: flash.delta < 0 ? "gobackward" : "goforward")
+                .font(.system(size: 22, weight: .semibold))
+            Text("\(Int(abs(flash.delta).rounded()))s")
+                .sumiTabularMono(size: 16, weight: .semibold)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.55))
+        .clipShape(Capsule())
+    }
+
     /// What the chrome bars sit on. See the top bar's comment.
     private var chromeGround: Color {
         if glowFrame == nil { return .black }
@@ -636,76 +683,17 @@ public struct PlayerView: View {
             ?? morphThumbnailURL
     }
 
-    /// The glow: a blurred copy of the picture filling the window, masked to
-    /// the letterbox so nothing is composited under an opaque video frame.
-    ///
-    /// The mask is even-odd rather than four rects, so the bars and the
-    /// pillars are one layer and there is no seam where two of them meet at
-    /// a corner.
+    /// The glow: four gradient layers in the letterbox bars, colours eased
+    /// by Core Animation. See `AmbientGlowView` for why it is not a blurred
+    /// image any more. Confined to the bars by geometry, so nothing is
+    /// composited over the picture.
     @ViewBuilder
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
         if let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
-            let video = geometry.videoRect
-            AmbientGlowCrossfade(frame: frame, reduceMotion: reduceMotion) { shown in
-                glowBands(shown, video: video, windowSize: windowSize)
-            }
-            .frame(width: windowSize.width, height: windowSize.height, alignment: .topLeading)
-            .compositingGroup()
-            .opacity(0.6)
-            .mask(alignment: .topLeading) {
-                Path { path in
-                    path.addRect(CGRect(origin: .zero, size: windowSize))
-                    path.addRect(video)
-                }
-                .fill(style: FillStyle(eoFill: true))
-                .frame(width: windowSize.width, height: windowSize.height)
-            }
-            .allowsHitTesting(false)
+            AmbientGlowView(frame: frame, video: geometry.videoRect, windowSize: windowSize, reduceMotion: reduceMotion)
+                .frame(width: windowSize.width, height: windowSize.height, alignment: .topLeading)
+                .allowsHitTesting(false)
         }
-    }
-
-    /// One blurred band of picture per letterbox bar, each stretched over
-    /// the bar it touches plus an overlap into the video the mask removes:
-    /// a blur pulls transparency in from its layer's edge, and without the
-    /// overlap every bar faded to nothing exactly where it meets the frame.
-    @ViewBuilder
-    private func glowBands(_ frame: AmbientFrame, video: CGRect, windowSize: CGSize) -> some View {
-        let overlap: CGFloat = 48
-        let blur: CGFloat = 36
-        // Each band fades away from the video, brightest where it touches
-        // the picture, the way light off a screen falls off across a wall.
-        if video.minY > 0.5 {
-            band(frame.top, rect: CGRect(x: video.minX - overlap, y: -overlap, width: video.width + overlap * 2, height: video.minY + overlap * 2), blur: blur, fadeFrom: .top, to: .bottom)
-        }
-        if video.maxY < windowSize.height - 0.5 {
-            band(frame.bottom, rect: CGRect(x: video.minX - overlap, y: video.maxY - overlap, width: video.width + overlap * 2, height: windowSize.height - video.maxY + overlap * 2), blur: blur, fadeFrom: .bottom, to: .top)
-        }
-        if video.minX > 0.5 {
-            band(frame.left, rect: CGRect(x: -overlap, y: video.minY - overlap, width: video.minX + overlap * 2, height: video.height + overlap * 2), blur: blur, fadeFrom: .leading, to: .trailing)
-        }
-        if video.maxX < windowSize.width - 0.5 {
-            band(frame.right, rect: CGRect(x: video.maxX - overlap, y: video.minY - overlap, width: windowSize.width - video.maxX + overlap * 2, height: video.height + overlap * 2), blur: blur, fadeFrom: .trailing, to: .leading)
-        }
-    }
-
-    /// `fadeFrom` is the window edge, where the band is dimmest; `to` is
-    /// the video edge. The mask is applied before the offset: a mask on an
-    /// offset view keeps the layout position and misses the picture.
-    private func band(_ image: CGImage, rect: CGRect, blur: CGFloat, fadeFrom: UnitPoint, to: UnitPoint) -> some View {
-        Image(decorative: image, scale: 1)
-            .resizable()
-            .interpolation(.high)
-            .frame(width: rect.width, height: rect.height)
-            .blur(radius: blur)
-            .saturation(1.2)
-            .brightness(-0.05)
-            .mask(LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: fadeFrom, endPoint: to))
-            // Rasterized once per sample, not per composite: the video beside
-            // it recomposites 24 times a second and an unflattened blur is a
-            // full-window offscreen pass each time.
-            .drawingGroup()
-            .frame(width: rect.width, height: rect.height)
-            .offset(x: rect.minX, y: rect.minY)
     }
 
     #if os(macOS)
@@ -1577,15 +1565,33 @@ private struct PlayerBottomBar: View {
         return boundaries.contains { $0 > lower && $0 <= upper }
     }
 
+    /// The bar is 4 pt at rest and 6 pt with a knob while the pointer is
+    /// over it or a scrub is in progress, so the thing about to be dragged
+    /// announces itself before the drag; a constant 4 pt line gave no cue
+    /// that it was live at all.
+    private var scrubberIsLive: Bool {
+        hoverFraction != nil || controller.isScrubbing
+    }
+
     private var scrubber: some View {
         GeometryReader { geo in
+            let thickness: CGFloat = scrubberIsLive ? 6 : 4
+            let playhead = geo.size.width * CGFloat(controller.progressFraction)
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.white.opacity(0.2))
-                    .frame(height: 4)
+                    .frame(height: thickness)
                 Capsule()
                     .fill(SumiTheme.indigo)
-                    .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 4)
+                    .frame(width: playhead, height: thickness)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 12, height: 12)
+                    .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                    .scaleEffect(scrubberIsLive ? 1 : 0.01)
+                    .opacity(scrubberIsLive ? 1 : 0)
+                    .offset(x: playhead - 6)
+                    .allowsHitTesting(false)
                 // Chapter marks. 1pt, over the track rather than notched out
                 // of it: a gap in the filled bar would read as buffering
                 // rather than as a boundary. Drawn only where mpv reported
@@ -1601,6 +1607,7 @@ private struct PlayerBottomBar: View {
                 }
             }
             .frame(maxHeight: .infinity)
+            .animation(.snappy(duration: 0.22), value: scrubberIsLive)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -1660,6 +1667,8 @@ private struct PlayerBottomBar: View {
             Button(action: { controller.togglePlayPause() }) {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 14, weight: .bold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(.snappy(duration: 0.25), value: controller.isPlaying)
                     .foregroundColor(SumiTheme.background)
                     .frame(width: 30, height: 30)
                     .background(SumiTheme.indigo)
@@ -1818,59 +1827,3 @@ enum PlayerChrome {
     static var muted: Color { SumiPalette.ink.muted }
 }
 
-
-/// Two layers, the previous frame under the current one, and only the top
-/// one fades in. A SwiftUI transition faded the old layer out while the
-/// new one faded in, and two half-transparent copies over black add up to
-/// three quarters of the light, so at twenty samples a second the bars
-/// pulsed at the sample rate: "goes on and off slightly, constantly". With
-/// the old frame held opaque underneath, the composite never dips.
-private struct AmbientGlowCrossfade<Content: View>: View {
-    let frame: AmbientFrame
-    let reduceMotion: Bool
-    @ViewBuilder let content: (AmbientFrame) -> Content
-
-    @State private var back: AmbientFrame?
-    @State private var front: AmbientFrame?
-    @State private var frontOpacity: Double = 1
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            if let back {
-                content(back)
-            }
-            if let front {
-                content(front)
-                    .opacity(frontOpacity)
-            }
-        }
-        .onAppear {
-            front = frame
-            frontOpacity = 1
-        }
-        .onChange(of: frame.id) { _, _ in
-            if frontOpacity < 0.99 {
-                // Mid-ramp: swap the picture, keep the ramp. Restarting it
-                // from zero on every sample, thirty a second under an 80 ms
-                // ramp, meant the top layer never got past a third and the
-                // half-faded one snapped to opaque as it became the base.
-                front = frame
-                return
-            }
-            back = front
-            front = frame
-            if reduceMotion {
-                frontOpacity = 1
-                return
-            }
-            // A ramp shorter than the sample interval would never be seen
-            // through; longer than two intervals and the light lags. 80 ms
-            // against 33 ms samples from the drawable: at most two frames
-            // arrive mid-ramp, and the half-shown one becomes the base.
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { frontOpacity = 0 }
-            withAnimation(.linear(duration: 0.08)) { frontOpacity = 1 }
-        }
-    }
-}

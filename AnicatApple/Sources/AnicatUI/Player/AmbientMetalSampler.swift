@@ -39,7 +39,11 @@ final class AmbientMetalSampler {
     private var failures = 0
     private var delivered = 0
     private var smoothed: [UInt8] = []
-    static let smoothing: Float = 0.35
+    /// 0.45 of the new sample per step. Heavier smoothing lived here while
+    /// the view hard-cut between images; now that `AmbientGlowView` eases
+    /// every colour stop over 100 ms on the render server, this only has
+    /// to take the grain out, and a cut settles in three samples.
+    static let smoothing: Float = 0.45
     private let debugLogging = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
 
     init?(device: MTLDevice) {
@@ -130,9 +134,7 @@ final class AmbientMetalSampler {
         // Exponential smoothing across samples, on the 64x36 pixels rather
         // than in the view: thirty raw samples a second differ by dither
         // and grain from one frame to the next, and drawn as they came the
-        // bars shimmered ("flickers really fast"). 0.35 of the new sample
-        // per step settles a cut in about four samples, 130 ms, while the
-        // steady picture stops twitching.
+        // bars shimmered ("flickers really fast").
         if smoothed.count == bytes.count {
             let keep = 1 - Self.smoothing, take = Self.smoothing
             for i in 0..<bytes.count {

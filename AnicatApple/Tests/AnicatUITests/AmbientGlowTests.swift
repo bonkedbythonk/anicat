@@ -94,6 +94,30 @@ struct AmbientGlowTests {
         #expect(AmbientGlow.PixelOrder.named("yuv420p") == nil)
     }
 
+    /// The gradient layers only interpolate between colour arrays of one
+    /// length, so the stop count must not follow the thumbnail's size; and
+    /// each bar must be lit by its own edge of the picture, red above, blue
+    /// below, or the light does not line up with the frame.
+    @Test("Colour stops have fixed counts and come from their own edge")
+    func colourStops() throws {
+        let image = try #require(thumbnail(width: 320, height: 180) { _, y in
+            y < 90 ? (255, 0, 0) : (0, 0, 255)
+        })
+        let frame = AmbientFrame(id: 1, image: image)
+        #expect(frame.topColors.count == AmbientFrame.horizontalStops)
+        #expect(frame.bottomColors.count == AmbientFrame.horizontalStops)
+        #expect(frame.leftColors.count == AmbientFrame.verticalStops)
+        #expect(frame.rightColors.count == AmbientFrame.verticalStops)
+        let top = try #require(frame.topColors[16].components)
+        #expect(top[0] > 0.6 && top[2] < 0.2)
+        let bottom = try #require(frame.bottomColors[16].components)
+        #expect(bottom[2] > 0.6 && bottom[0] < 0.2)
+        // The pillars run top to bottom: first stop red, last stop blue.
+        let first = try #require(frame.leftColors.first?.components)
+        let last = try #require(frame.leftColors.last?.components)
+        #expect(first[0] > 0.6 && last[2] > 0.6)
+    }
+
     @Test("A malformed frame yields nothing rather than reading past it")
     func rejectsMalformed() {
         var bytes = [UInt8](repeating: 0, count: 64)

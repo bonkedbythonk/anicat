@@ -157,6 +157,16 @@ public final class PlayerController: @unchecked Sendable {
     /// video that jumps ninety seconds with no explanation reads as a seek
     /// bug rather than a feature.
     public var skipFlashLabel: String?
+    /// The relative seek that just happened, for the badge over the
+    /// picture. `token` changes on every seek so two jumps in the same
+    /// direction re-run the badge's transition rather than merging.
+    public struct SeekFlash: Equatable, Sendable {
+        public let delta: Double
+        public let token: Int
+    }
+    public private(set) var seekFlash: SeekFlash?
+    private var seekFlashTask: Task<Void, Never>?
+    private var seekFlashCount = 0
     private var skipFlashTask: Task<Void, Never>?
     /// The last AniSkip answer for this episode, kept so a chapter list that
     /// arrives after it (or a `setChapters` on a later file) can be merged
@@ -475,6 +485,18 @@ public final class PlayerController: @unchecked Sendable {
 
     public func seekRelative(by delta: Double) {
         seek(to: currentTime + delta)
+        flashSeek(delta)
+    }
+
+    private func flashSeek(_ delta: Double) {
+        seekFlashCount += 1
+        seekFlash = SeekFlash(delta: delta, token: seekFlashCount)
+        seekFlashTask?.cancel()
+        seekFlashTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            self?.seekFlash = nil
+        }
     }
 
     public func toggleAnime4K() {

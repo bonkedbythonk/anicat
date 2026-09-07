@@ -1,7 +1,6 @@
 import SwiftUI
 import AnicatUI
 import AnicatCoreKit
-import CoreSpotlight
 
 #if os(macOS)
 /// Pins the process to dark aqua at launch.
@@ -240,9 +239,9 @@ struct AnicatApp: App {
                 .environment(\.studioPageActions, model.studioPageActions)
                 .task {
                     await model.initialize()
-                    // A notification tap or Spotlight hit that launched the
-                    // app got here before there was an engine to route it
-                    // with; this is where it finally runs.
+                    // A notification tap that launched the app got here
+                    // before there was an engine to route it with; this is
+                    // where it finally runs.
                     model.drainPendingDeepLink()
                     if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {
                         model.debugPlayLocalFile(path)
@@ -250,9 +249,6 @@ struct AnicatApp: App {
                 }
                 .onOpenURL { url in
                     model.handleOpenURL(url)
-                }
-                .onContinueUserActivity(CSSearchableItemActionType) { activity in
-                    model.handleSpotlightActivity(activity)
                 }
                 .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
                 .background(WindowConfigurator())
@@ -445,15 +441,12 @@ struct AnicatApp: App {
                     await model.initialize()
                     model.drainPendingDeepLink()
                 }
-                // The URL scheme, Spotlight and notifications are not macOS
-                // features: all three have iOS counterparts, and a scene that
-                // only wired them up on one platform would compile on the
-                // other and silently do nothing.
+                // The URL scheme and notifications are not macOS features:
+                // both have iOS counterparts, and a scene that only wired
+                // them up on one platform would compile on the other and
+                // silently do nothing.
                 .onOpenURL { url in
                     model.handleOpenURL(url)
-                }
-                .onContinueUserActivity(CSSearchableItemActionType) { activity in
-                    model.handleSpotlightActivity(activity)
                 }
                 .background(SystemIntegrationObserver(model: model))
         }

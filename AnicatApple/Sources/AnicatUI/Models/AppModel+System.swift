@@ -1,12 +1,11 @@
 import Foundation
 import SwiftUI
-import CoreSpotlight
 #if canImport(AppKit)
 import AppKit
 #endif
 
 /// The macOS/iOS integration surfaces, joined to the model: the `anicat://`
-/// scheme, App Intents, Spotlight, notifications and the dock badge.
+/// scheme, App Intents, notifications and the dock badge.
 ///
 /// Every one of them arrives from outside the view tree, and every one of
 /// them ends in a `DeepLink` handled by `handleDeepLink` — so there is one
@@ -32,23 +31,10 @@ extension AppModel {
         return true
     }
 
-    /// Entry point for a Spotlight result. `CSSearchableItemActionType`
-    /// activities carry the unique id and nothing else, which is why
-    /// `SpotlightIndexer` encodes the catalog id into it.
-    @discardableResult
-    @MainActor
-    public func handleSpotlightActivity(_ activity: NSUserActivity) -> Bool {
-        guard activity.activityType == CSSearchableItemActionType,
-              let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
-              let link = SpotlightIndexer.deepLink(forIdentifier: identifier) else { return false }
-        handleDeepLink(link)
-        return true
-    }
-
     @MainActor
     public func handleDeepLink(_ link: DeepLink) {
-        // A notification tap or a Spotlight hit can launch the app, and it
-        // arrives long before `initialize()` has an engine. `openDetail` and
+        // A notification tap can launch the app, and it arrives long before
+        // `initialize()` has an engine. `openDetail` and
         // `playFromShelf` both bail on a nil engine without saying so, so
         // without this the app opened and then sat on the home screen.
         guard isInitialized else {
@@ -95,32 +81,6 @@ extension AppModel {
         handleDeepLink(link)
     }
 
-    // MARK: - Spotlight
-
-    /// The viewer's own titles, deduplicated by id. Sourced from the library,
-    /// the watching list and whatever else has left a name in `knownTitles` —
-    /// which is where the history log's titles end up.
-    var spotlightEntries: [SpotlightIndexer.Entry] {
-        var seen = Set<Int64>()
-        var entries: [SpotlightIndexer.Entry] = []
-        for item in libraryItems + watchingItems + mangaReading + novelReading where seen.insert(item.id).inserted {
-            entries.append(
-                SpotlightIndexer.Entry(
-                    id: item.id,
-                    title: item.title,
-                    coverURL: item.coverImageURL,
-                    isManga: item.isManga
-                )
-            )
-        }
-        for (id, title) in knownTitles where seen.insert(id).inserted {
-            entries.append(
-                SpotlightIndexer.Entry(id: id, title: title, coverURL: knownCovers[id], isManga: false)
-            )
-        }
-        return entries
-    }
-
     /// What `SystemIntegrationObserver` compares to decide the lists have
     /// moved. Counts rather than every id, plus the library's own filter,
     /// because this is recomputed on every change to any observed property
@@ -142,24 +102,12 @@ extension AppModel {
         libraryDownloads.map { "\($0.id):\($0.state)" }.joined(separator: ",")
     }
 
-    /// Re-indexes Spotlight, checks for episodes to announce and restamps the
-    /// dock badge. Called after the library lists change; safe to call as
-    /// often as they do.
+    /// Checks for episodes to announce and restamps the dock badge. Called
+    /// after the library lists change; safe to call as often as they do.
     @MainActor
     public func refreshSystemIntegrations() {
         updateDockBadge()
         notifyAboutNewEpisodes()
-
-        let entries = spotlightEntries
-        spotlightIndexTask?.cancel()
-        spotlightIndexTask = Task.detached(priority: .background) {
-            // `refreshAll` writes five list properties in a row and each one
-            // lands here; the sleep collapses those into one index pass over
-            // the whole library instead of five.
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            await SpotlightIndexer.reindex(entries)
-        }
     }
 
     // MARK: - Notifications

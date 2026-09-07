@@ -6,8 +6,8 @@ import SwiftUI
 /// It exists as a view rather than as `didSet` on the properties themselves
 /// because the properties it needs — `upNextItems`, `libraryDownloads`,
 /// `currentNavSection` — belong to the parts of `AppModel` the rest of the
-/// app writes, and a `didSet` there would put notification and Spotlight
-/// work inside the loading path. It is a separate view rather than modifiers
+/// app writes, and a `didSet` there would put notification work inside the
+/// loading path. It is a separate view rather than modifiers
 /// on `RootView` so that recomputing the signatures re-evaluates this body
 /// and not the whole window's.
 public struct SystemIntegrationObserver: View {

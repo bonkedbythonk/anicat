@@ -762,7 +762,7 @@ public final class AppModel {
     // MARK: - System
     //
     // State for the macOS integration surfaces — URL scheme, App Intents,
-    // Spotlight, notifications, dock badge. The behaviour lives in
+    // notifications, dock badge. The behaviour lives in
     // `AppModel+System.swift`; only the storage is here.
 
     /// The running model, for callers that arrive from outside the view tree
@@ -775,7 +775,7 @@ public final class AppModel {
 
     /// A destination that arrived before `initialize()` had finished. Every
     /// route into the app (`openDetail`, `playFromShelf`) bails on a nil
-    /// engine, so a notification tap or Spotlight hit that launches the app
+    /// engine, so a notification tap that launches the app
     /// cold used to open the app and then do nothing at all. Drained once the
     /// engine is up.
     public var pendingDeepLink: DeepLink?
@@ -790,11 +790,6 @@ public final class AppModel {
     /// Same seed-then-compare shape as `lastKnownNewEpisodeKeys`, for
     /// downloads that have reached `.done`.
     var lastKnownCompletedDownloadIds: Set<String>?
-
-    /// Coalesces the Spotlight re-index. `refreshAll` writes five list
-    /// properties in a row and each write would otherwise start its own
-    /// index pass over the whole library.
-    var spotlightIndexTask: Task<Void, Never>?
 
     // MARK: - Syosetu novel reading
     //

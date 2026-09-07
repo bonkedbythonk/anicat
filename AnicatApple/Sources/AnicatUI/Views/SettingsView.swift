@@ -205,11 +205,10 @@ private struct GeneralTabSection: View {
     // Settings ever looked up, so every one of them was a control that
     // changed nothing. They come back with the feature that reads them.
     @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
-    // `SystemNotifications` and `SpotlightIndexer` own the readers and the
-    // defaults; `@AppStorage` needs a literal here, so the two spellings and
-    // the two defaults must agree.
+    // `SystemNotifications` owns the reader and the default; `@AppStorage`
+    // needs a literal here, so the two spellings and the two defaults must
+    // agree.
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
-    @AppStorage("anicat_spotlight_index") private var spotlightIndexing: Bool = true
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -247,24 +246,7 @@ private struct GeneralTabSection: View {
             ) {
                 SumiSwitch(isOn: $notifyNewEpisodes)
             }
-
-            Divider()
-                .background(SumiTheme.border)
-
-            SettingField(
-                label: "Spotlight Indexing",
-                description: "Lets system search find titles in your library. Only your own lists are indexed, never the catalog."
-            ) {
-                SumiSwitch(isOn: $spotlightIndexing)
-            }
         }
-    }
-    // The switch itself only stops the *next* index pass. Clearing on the
-    // edge is what makes turning it off mean something now, rather than
-    // leaving the rows in system search until the lists happen to change.
-    .onChange(of: spotlightIndexing) { _, isOn in
-        guard !isOn else { return }
-        Task.detached(priority: .background) { await SpotlightIndexer.clear() }
     }
     }
 }

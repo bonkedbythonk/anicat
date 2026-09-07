@@ -3,7 +3,7 @@ import Foundation
 /// One `anicat://` address, parsed and back.
 ///
 /// A pure value type on purpose: every system surface that can hand the app a
-/// destination — the URL scheme, a Spotlight result, a notification tap — is
+/// destination — the URL scheme, a notification tap — is
 /// funnelled through this one representation, so `AppModel.handleDeepLink` is
 /// the only place that knows how to reach a screen and the entry points
 /// cannot drift apart.

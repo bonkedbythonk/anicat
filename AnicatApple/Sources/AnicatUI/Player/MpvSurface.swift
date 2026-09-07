@@ -1134,9 +1134,14 @@ public struct MpvSurface {
             defer { nudgeLock.unlock() }
             guard restoreAspectOverride == nil else { return }
             let current = stringProperty("video-aspect-override") ?? "-1"
-            let aspect = stringProperty("video-params/aspect").flatMap(Double.init)
-                ?? stringProperty("video-aspect-override").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil }
-                ?? 16.0 / 9.0
+            // Written as steps: the one-expression version of this chain
+            // took the CI toolchain past its type-check budget.
+            var aspect: Double = 16.0 / 9.0
+            if let reported = stringProperty("video-params/aspect").flatMap(Double.init), reported > 0 {
+                aspect = reported
+            } else if let overridden = Double(current), overridden > 0 {
+                aspect = overridden
+            }
             let detour = String(format: "%.6f", aspect * 1.0005)
             restoreAspectOverride = current
             nudgeOSDBefore = stringProperty("osd-dimensions/w")

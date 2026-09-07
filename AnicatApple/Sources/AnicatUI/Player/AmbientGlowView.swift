@@ -35,6 +35,7 @@ struct AmbientGlowView {
     /// The layer's opacity; the same 0.6 the blurred version used.
     static let opacity: Float = 0.6
 
+    @MainActor
     func apply(to host: AmbientGlowHostView) {
         host.apply(frame: frame, video: video, windowSize: windowSize, animated: !reduceMotion)
     }

@@ -14,6 +14,9 @@ import AppKit
 /// are remembered and applied once the window reports the transition done.
 @MainActor
 public enum FullScreenGuard {
+    /// Posted once a fullscreen transition has finished, either way. The
+    /// player listens: this is the moment its layer has its final size.
+    public static let transitionEndedNotification = Notification.Name("anicat.fullScreenTransitionEnded")
     private static var observers: [NSObjectProtocol] = []
     private static var inTransition = false
     private static var wanted: Bool?
@@ -31,6 +34,7 @@ public enum FullScreenGuard {
         let end: (Notification) -> Void = { _ in
             inTransition = false
             FullScreenState.shared.isFullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
+            NotificationCenter.default.post(name: FullScreenGuard.transitionEndedNotification, object: nil)
             guard let window = self.window, let target = wanted else { return }
             wanted = nil
             if window.styleMask.contains(.fullScreen) != target {

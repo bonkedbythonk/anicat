@@ -168,7 +168,7 @@ public final class MpvMetalView: NSView {
     /// spring's settling tail costs nothing extra: every layout pass cancels
     /// the pending work item, so exactly one rebuild happens 50ms after the
     /// frame stops moving, however long it took to get there.
-    private func syncDrawableSize() {
+    func syncDrawableSize() {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
@@ -920,6 +920,12 @@ public struct MpvSurface {
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
+                    self.fullScreenObserver = NotificationCenter.default.addObserver(
+                        forName: FullScreenGuard.transitionEndedNotification, object: nil, queue: .main
+                    ) { [weak self, weak view] _ in
+                        guard let self, let view else { return }
+                        MainActor.assumeIsolated { self.fullScreenTransitionEnded(view: view) }
+                    }
                     if let layer = view.metalView?.metalLayer,
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
@@ -1110,12 +1116,39 @@ public struct MpvSurface {
         /// The layer size the view last applied, so the vo's own idea of
         /// its size (`osd-dimensions`) can be checked against it.
         private var lastDrawableSize: CGSize = .zero
+        private var fullScreenObserver: NSObjectProtocol?
         private var reconfigAttemptsForSize = 0
 
         func drawableSizeChanged(to size: CGSize) {
             lastDrawableSize = size
             reconfigAttemptsForSize = 0
             nudgeVideoReconfig()
+        }
+
+        /// A fullscreen transition just ended. Whatever the debounced layout
+        /// path did or did not deliver during the animation, this is the one
+        /// moment the layer is certainly at its final size: re-read it,
+        /// then check mpv against it twice, once now and once after the
+        /// stream has had a second to configure. Belt and braces for the
+        /// case the report kept showing: the windowed-size picture in the
+        /// top-left of a fullscreen window.
+        @MainActor
+        func fullScreenTransitionEnded(view: MpvHostView) {
+            view.metalView?.syncDrawableSize()
+            let layer = view.metalView?.metalLayer
+            let size = layer?.drawableSize ?? .zero
+            if size.width > 1 { lastDrawableSize = size }
+            reconfigAttemptsForSize = 0
+            nudgeVideoReconfig()
+            for delay in [0.3, 1.2] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak layer] in
+                    guard let self else { return }
+                    MainActor.assumeIsolated {
+                        if let current = layer?.drawableSize, current.width > 1 { self.lastDrawableSize = current }
+                    }
+                    self.verifyVideoSizeIfDue(force: true)
+                }
+            }
         }
 
         /// Runs on the event-loop thread after a file loads and on its idle

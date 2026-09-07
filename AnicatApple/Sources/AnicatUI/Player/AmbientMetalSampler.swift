@@ -74,6 +74,11 @@ final class AmbientMetalSampler {
         guard !inFlight, now - lastSampleAt >= interval, failures < 5 else { return }
         let full = CGSize(width: source.width, height: source.height)
         let video = Self.aspectFit(full, aspect: videoAspect?() ?? nil)
+        // No bars, nothing to light. A 16:9 picture on a 16:9 screen (or the
+        // 320x180 mini-player) fills the drawable and every band is hidden,
+        // yet the scale, the readback and the colour stops still ran thirty
+        // times a second for a glow nobody could see.
+        guard video.width < full.width - 1 || video.height < full.height - 1 else { return }
         guard let size = AmbientGlow.thumbnailSize(width: Int(video.width), height: Int(video.height)) else { return }
         if target == nil || target?.width != size.width || target?.height != size.height {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(

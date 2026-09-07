@@ -124,6 +124,14 @@ public final class MpvMetalView: NSView {
 
     private var pendingDrawableSync: DispatchWorkItem?
 
+    /// Fired after a settled resize has been applied to the layer. mpv's
+    /// MoltenVK context reads the layer's size only when the video
+    /// reconfigures, never on a plain resize, so after a window or
+    /// fullscreen change libplacebo drew the old-sized picture into the
+    /// top-left of the new-sized drawable and left the rest black. The
+    /// coordinator answers this by forcing one reconfig.
+    var onDrawableSizeChanged: (() -> Void)?
+
     /// The layer's frame follows the bounds immediately (Core Animation
     /// scales the last drawable into it, so the picture never tears or
     /// gaps), but the drawable size, which is what makes MoltenVK rebuild
@@ -146,6 +154,7 @@ public final class MpvMetalView: NSView {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.metalLayer.drawableSize != target else { return }
             self.metalLayer.drawableSize = target
+            self.onDrawableSizeChanged?()
         }
         pendingDrawableSync = work
         if metalLayer.drawableSize == .zero || metalLayer.drawableSize.width <= 1 {
@@ -623,8 +632,15 @@ public final class MpvMetalView: UIView {
         let scale = window?.screen.scale ?? UIScreen.main.scale
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard metalLayer.drawableSize != target else { return }
+        metalLayer.drawableSize = target
+        onDrawableSizeChanged?()
     }
+
+    /// Same contract as the macOS twin: the coordinator forces a vo
+    /// reconfig so mpv's MoltenVK context re-reads the drawable size.
+    var onDrawableSizeChanged: (() -> Void)?
 }
 
 /// The iOS twin of `MpvHostView`, same contract: it owns touch handling and
@@ -870,6 +886,11 @@ public struct MpvSurface {
                     mpv_destroy(handle)
                     return
                 }
+                MainActor.assumeIsolated {
+                    view.metalView?.onDrawableSizeChanged = { [weak self] in
+                        self?.nudgeVideoReconfig()
+                    }
+                }
                 mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
                 mpv_set_option_string(handle, "vo", "gpu-next")
                 mpv_set_option_string(handle, "gpu-api", "vulkan")
@@ -1026,6 +1047,21 @@ public struct MpvSurface {
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
             }
+        }
+
+        /// Makes the vo reconfigure so the MoltenVK context re-reads the
+        /// layer's drawable size (see `MpvMetalView.onDrawableSizeChanged`).
+        /// mpv reconfigures the vo only when the output image parameters
+        /// change, so a filter that changes nothing would not do; the aspect
+        /// override is flipped to a different value and straight back, two
+        /// reconfigs inside one frame interval. A file that is not loaded
+        /// yet gets its size read at its own configure, so nothing is sent.
+        func nudgeVideoReconfig() {
+            guard mpv != nil, !controller.awaitingNewFile, controller.duration > 0 else { return }
+            let current = stringProperty("video-aspect-override") ?? "-1"
+            let detour = current == "1.000000" || current == "1" ? "1.500000" : "1.000000"
+            runCommand(["set", "video-aspect-override", detour])
+            runCommand(["set", "video-aspect-override", current])
         }
 
         func runCommand(_ args: [String]) {

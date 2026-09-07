@@ -1307,6 +1307,7 @@ public struct MediaDetailView: View {
                 .lineSpacing(4.5)
                 .foregroundColor(SumiTheme.foreground.opacity(0.8))
                 .lineLimit(isSynopsisExpanded ? nil : 3)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {

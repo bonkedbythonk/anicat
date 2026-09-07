@@ -46,24 +46,25 @@ struct TrailerPlayer: View {
 private struct TrailerWebView: NSViewRepresentable {
     let url: URL
 
+    func makeCoordinator() -> TrailerLoadState { TrailerLoadState() }
+
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: TrailerWebViewConfiguration.make())
         // The banner sits on the page ground with a gradient over it, and a
         // web view paints opaque white until the embed's first frame lands.
         view.underPageBackgroundColor = .clear
-        view.load(URLRequest(url: url))
+        TrailerEmbedPage.load(url, into: view, state: context.coordinator)
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        guard view.url != url else { return }
-        view.load(URLRequest(url: url))
+        TrailerEmbedPage.load(url, into: view, state: context.coordinator)
     }
 
     /// Loading `about:blank` rather than trusting deallocation: a web view
     /// that is merely released keeps its media session alive long enough to
     /// be heard under the stream the viewer just started.
-    static func dismantleNSView(_ view: WKWebView, coordinator: ()) {
+    static func dismantleNSView(_ view: WKWebView, coordinator: TrailerLoadState) {
         view.stopLoading()
         view.loadHTMLString("", baseURL: nil)
     }
@@ -72,23 +73,22 @@ private struct TrailerWebView: NSViewRepresentable {
 private struct TrailerWebView: UIViewRepresentable {
     let url: URL
 
+    func makeCoordinator() -> TrailerLoadState { TrailerLoadState() }
+
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: TrailerWebViewConfiguration.make())
         view.isOpaque = false
         view.backgroundColor = .clear
-        view.scrollView.backgroundColor = .clear
-        view.scrollView.isScrollEnabled = false
-        view.load(URLRequest(url: url))
+        TrailerEmbedPage.load(url, into: view, state: context.coordinator)
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        guard view.url != url else { return }
-        view.load(URLRequest(url: url))
+        TrailerEmbedPage.load(url, into: view, state: context.coordinator)
     }
 
     /// See the macOS twin: releasing the view is not enough to stop audio.
-    static func dismantleUIView(_ view: WKWebView, coordinator: ()) {
+    static func dismantleUIView(_ view: WKWebView, coordinator: TrailerLoadState) {
         view.stopLoading()
         view.loadHTMLString("", baseURL: nil)
     }
@@ -112,5 +112,35 @@ private enum TrailerWebViewConfiguration {
         configuration.allowsInlineMediaPlayback = true
         #endif
         return configuration
+    }
+}
+
+
+/// Which embed a web view currently shows, so a SwiftUI update with the
+/// same trailer does not reload it mid-play.
+final class TrailerLoadState {
+    var loaded: URL?
+}
+
+/// The embed wrapped in a page of our own instead of loaded as the top
+/// document. Loaded directly, YouTube's player answered "Video player
+/// configuration error": the embed requires a referring page, and a
+/// top-level load has none. A one-iframe page with a base URL gives it one.
+enum TrailerEmbedPage {
+    static let baseURL = URL(string: "https://anicat.app/")
+
+    @MainActor
+    static func load(_ url: URL, into view: WKWebView, state: TrailerLoadState) {
+        guard state.loaded != url else { return }
+        state.loaded = url
+        let src = url.absoluteString
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+        let html = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+        </head><body><iframe src="\(src)" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>
+        """
+        view.loadHTMLString(html, baseURL: baseURL)
     }
 }

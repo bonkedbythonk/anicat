@@ -245,6 +245,10 @@ public struct AniListMarkdownText: View {
     }
 
     public var body: some View {
+        content.textSelection(.enabled)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)

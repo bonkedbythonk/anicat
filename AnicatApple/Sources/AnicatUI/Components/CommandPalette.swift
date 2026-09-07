@@ -117,6 +117,20 @@ public struct CommandPalette: View {
                 .focused($fieldFocused)
                 .onSubmit(runHighlighted)
                 .onChange(of: query) { _, _ in highlighted = 0 }
+                // The app-wide key monitor hands arrows through while a text
+                // field is first responder, and nothing here took them: the
+                // highlight moved only on hover, so the palette could not
+                // be driven from the keyboard it was opened with.
+                .onKeyPress(.downArrow) {
+                    guard !matches.isEmpty else { return .ignored }
+                    highlighted = min(highlighted + 1, matches.count - 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    guard !matches.isEmpty else { return .ignored }
+                    highlighted = max(highlighted - 1, 0)
+                    return .handled
+                }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
                 .overlay(
@@ -138,6 +152,7 @@ public struct CommandPalette: View {
     }
 
     private var results: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(groups, id: \.self) { group in
@@ -168,12 +183,18 @@ public struct CommandPalette: View {
                         .onHover { hovering in
                             if hovering { highlighted = index }
                         }
+                        .id(command.id)
                     }
                 }
             }
             .padding(.bottom, 12)
         }
         .frame(maxHeight: 380)
+        .onChange(of: highlighted) { _, index in
+            guard matches.indices.contains(index) else { return }
+            proxy.scrollTo(matches[index].id, anchor: .center)
+        }
+        }
     }
 
     private func runHighlighted() {

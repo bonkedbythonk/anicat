@@ -114,7 +114,7 @@ final class AmbientMetalSampler {
         inFlight = false
         guard ok, let target else {
             failures += 1
-            if debugLogging { NSLog("[ambient-metal] scale failed (%d)", failures) }
+            PlayerLog.write("[ambient-metal] scale failed (\(failures))")
             return
         }
         failures = 0

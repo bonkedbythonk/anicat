@@ -172,8 +172,8 @@ public final class MpvMetalView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
-        if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
-            NSLog("[metal] bounds %@ scale %.0f drawable %@ superview %@", NSStringFromRect(bounds), scale, NSStringFromSize(metalLayer.drawableSize), superview.map { NSStringFromRect($0.frame) } ?? "-")
+        if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil || metalLayer.drawableSize != CGSize(width: bounds.width * scale, height: bounds.height * scale) {
+            PlayerLog.write(String(format: "[metal] bounds %@ scale %.0f drawable %@ superview %@", NSStringFromRect(bounds), scale, NSStringFromSize(metalLayer.drawableSize), superview.map { NSStringFromRect($0.frame) } ?? "-"))
         }
         pendingDrawableSync?.cancel()
         let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
@@ -917,7 +917,7 @@ public struct MpvSurface {
                     // applied before this closure existed, and a check that
                     // knows no size checks nothing.
                     self.lastDrawableSize = view.metalView?.metalLayer.drawableSize ?? .zero
-                    NSLog("[libmpv] surface attached, layer %.0fx%.0f", self.lastDrawableSize.width, self.lastDrawableSize.height)
+                    PlayerLog.write(String(format: "[libmpv] surface attached, layer %.0fx%.0f", self.lastDrawableSize.width, self.lastDrawableSize.height))
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }
@@ -1173,7 +1173,7 @@ public struct MpvSurface {
                 // Before any guard: a forced check that logs nothing when a
                 // guard fails is what left the owner's report empty.
                 let osdW = stringProperty("osd-dimensions/w") ?? "-", osdH = stringProperty("osd-dimensions/h") ?? "-"
-                NSLog("[libmpv] forced size check: osd %@x%@ layer %.0fx%.0f attempts %d", osdW, osdH, wanted.width, wanted.height, reconfigAttemptsForSize)
+                PlayerLog.write(String(format: "[libmpv] forced size check: osd %@x%@ layer %.0fx%.0f attempts %d", osdW, osdH, wanted.width, wanted.height, reconfigAttemptsForSize))
             }
             guard wanted.width > 1, reconfigAttemptsForSize < 3,
                   let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
@@ -1187,11 +1187,11 @@ public struct MpvSurface {
                 let mt = stringProperty("osd-dimensions/mt") ?? "-", mb = stringProperty("osd-dimensions/mb") ?? "-"
                 let ml = stringProperty("osd-dimensions/ml") ?? "-", mr = stringProperty("osd-dimensions/mr") ?? "-"
                 let aspect = stringProperty("video-aspect-override") ?? "-"
-                NSLog("[libmpv] size check: osd %.0fx%.0f margins t%@ b%@ l%@ r%@ dwidth/dheight %@x%@ aspect-override %@ layer %.0fx%.0f", w, h, mt, mb, ml, mr, dw, dh, aspect, wanted.width, wanted.height)
+                PlayerLog.write(String(format: "[libmpv] size check: osd %.0fx%.0f margins t%@ b%@ l%@ r%@ dwidth/dheight %@x%@ aspect-override %@ layer %.0fx%.0f", w, h, mt, mb, ml, mr, dw, dh, aspect, wanted.width, wanted.height))
             }
             if abs(w - wanted.width) > 1 || abs(h - wanted.height) > 1 {
                 reconfigAttemptsForSize += 1
-                NSLog("[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize)
+                PlayerLog.write(String(format: "[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize))
                 nudgeVideoReconfig()
             }
         }

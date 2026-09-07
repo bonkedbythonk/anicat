@@ -25,7 +25,7 @@ It covers four kinds of media, and they do not share a backend:
 | Light novels | AniList | Syosetu | early |
 | Film and TV | TMDB | Torrents | catalog only, playback not wired yet |
 
-The app was rewritten from Tauri/React to Swift in 2026. An iPhone build is the goal of that rewrite; today only the macOS product compiles.
+The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping product; an iPhone target builds and runs on the simulator, and the phone layout is still to come.
 
 > **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 

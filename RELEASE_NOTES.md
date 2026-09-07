@@ -50,5 +50,5 @@ Full feature list in the [README](https://github.com/bonkedbythonk/anicat#featur
 - Apple silicon only, macOS 14 or later. There is no Intel build.
 - Film and TV are catalog-only: TMDB browsing works, playback is not wired up.
 - Light novels are Syosetu only.
-- No iPhone build yet. The shared views compile for iOS, but there is no iOS
-  app target and the layout is still the desktop one.
+- No iPhone release. An iPhone target builds and runs on the simulator, but
+  the layout is still the desktop one and no phone build is distributed.

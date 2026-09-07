@@ -395,10 +395,11 @@ public struct PlayerView: View {
                         .frame(maxWidth: .infinity)
                         .background(alignment: .top) {
                             VStack(spacing: 0) {
-                                // Clear where the glow is on: this fill is the
-                                // letterbox black, and painting it over the glow
-                                // would be painting over the whole feature.
-                                (glowFrame == nil ? Color.black : Color.clear)
+                                // Letterbox black without the glow. With it, a
+                                // scrim only while the controls are up: clear
+                                // under them put the transport on a bright
+                                // blurred picture and the labels vanished.
+                                chromeGround
                                     .frame(height: naturalTop)
                                 if topGap > naturalTop, controller.areControlsVisible {
                                     LinearGradient(
@@ -431,7 +432,7 @@ public struct PlayerView: View {
                                     )
                                     .frame(height: bottomGap - naturalBottom)
                                 }
-                                (glowFrame == nil ? Color.black : Color.clear)
+                                chromeGround
                                     .frame(height: naturalBottom)
                             }
                         }
@@ -609,6 +610,12 @@ public struct PlayerView: View {
     /// the glow is off. Reduce Transparency turns it off outright: the whole
     /// effect is a translucent wash of the picture over the app's own black,
     /// which is the thing that setting asks not to happen.
+    /// What the chrome bars sit on. See the top bar's comment.
+    private var chromeGround: Color {
+        if glowFrame == nil { return .black }
+        return controller.areControlsVisible ? Color.black.opacity(0.72) : .clear
+    }
+
     private var glowFrame: AmbientFrame? {
         guard ambientGlowEnabled, !reduceTransparency else { return nil }
         return controller.ambientFrame

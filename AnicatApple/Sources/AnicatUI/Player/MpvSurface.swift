@@ -917,7 +917,7 @@ public struct MpvSurface {
                     // applied before this closure existed, and a check that
                     // knows no size checks nothing.
                     self.lastDrawableSize = view.metalView?.metalLayer.drawableSize ?? .zero
-                    NSLog("[libmpv] surface attached, layer %@", NSStringFromSize(self.lastDrawableSize))
+                    NSLog("[libmpv] surface attached, layer %.0fx%.0f", self.lastDrawableSize.width, self.lastDrawableSize.height)
                     view.metalView?.onDrawableSizeChanged = { [weak self] size in
                         self?.drawableSizeChanged(to: size)
                     }

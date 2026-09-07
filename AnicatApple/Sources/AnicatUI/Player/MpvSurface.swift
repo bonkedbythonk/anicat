@@ -130,7 +130,7 @@ public final class MpvMetalView: NSView {
     /// fullscreen change libplacebo drew the old-sized picture into the
     /// top-left of the new-sized drawable and left the rest black. The
     /// coordinator answers this by forcing one reconfig.
-    var onDrawableSizeChanged: (() -> Void)?
+    var onDrawableSizeChanged: ((CGSize) -> Void)?
 
     /// The layer's frame follows the bounds immediately (Core Animation
     /// scales the last drawable into it, so the picture never tears or
@@ -154,7 +154,7 @@ public final class MpvMetalView: NSView {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.metalLayer.drawableSize != target else { return }
             self.metalLayer.drawableSize = target
-            self.onDrawableSizeChanged?()
+            self.onDrawableSizeChanged?(target)
         }
         pendingDrawableSync = work
         if metalLayer.drawableSize == .zero || metalLayer.drawableSize.width <= 1 {
@@ -635,12 +635,12 @@ public final class MpvMetalView: UIView {
         let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         guard metalLayer.drawableSize != target else { return }
         metalLayer.drawableSize = target
-        onDrawableSizeChanged?()
+        onDrawableSizeChanged?(target)
     }
 
     /// Same contract as the macOS twin: the coordinator forces a vo
     /// reconfig so mpv's MoltenVK context re-reads the drawable size.
-    var onDrawableSizeChanged: (() -> Void)?
+    var onDrawableSizeChanged: ((CGSize) -> Void)?
 }
 
 /// The iOS twin of `MpvHostView`, same contract: it owns touch handling and
@@ -887,8 +887,8 @@ public struct MpvSurface {
                     return
                 }
                 MainActor.assumeIsolated {
-                    view.metalView?.onDrawableSizeChanged = { [weak self] in
-                        self?.nudgeVideoReconfig()
+                    view.metalView?.onDrawableSizeChanged = { [weak self] size in
+                        self?.drawableSizeChanged(to: size)
                     }
                 }
                 mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
@@ -1057,11 +1057,46 @@ public struct MpvSurface {
         /// reconfigs inside one frame interval. A file that is not loaded
         /// yet gets its size read at its own configure, so nothing is sent.
         func nudgeVideoReconfig() {
-            guard mpv != nil, !controller.awaitingNewFile, controller.duration > 0 else { return }
+            guard mpv != nil else { return }
             let current = stringProperty("video-aspect-override") ?? "-1"
             let detour = current == "1.000000" || current == "1" ? "1.500000" : "1.000000"
             runCommand(["set", "video-aspect-override", detour])
             runCommand(["set", "video-aspect-override", current])
+        }
+
+        /// The layer size the view last applied, so the vo's own idea of
+        /// its size (`osd-dimensions`) can be checked against it.
+        private var lastDrawableSize: CGSize = .zero
+        private var reconfigAttemptsForSize = 0
+
+        func drawableSizeChanged(to size: CGSize) {
+            lastDrawableSize = size
+            reconfigAttemptsForSize = 0
+            nudgeVideoReconfig()
+        }
+
+        /// Runs on the event-loop thread after a file loads and on its idle
+        /// tick: if mpv still reports the old size, nudge again. The first
+        /// nudge from the size change can land while the file is still
+        /// loading (a cached episode resolves in under a second, inside the
+        /// fullscreen transition) and the configure that follows reads a
+        /// stale size; the screenshot that motivated this showed a windowed
+        /// 1280x820 picture in the top-left of a 1512x982 fullscreen window.
+        private var lastSizeCheckAt: CFAbsoluteTime = 0
+        func verifyVideoSizeIfDue(force: Bool = false) {
+            let now = CFAbsoluteTimeGetCurrent()
+            guard force || now - lastSizeCheckAt >= 0.5 else { return }
+            lastSizeCheckAt = now
+            let wanted = lastDrawableSize
+            guard wanted.width > 1, reconfigAttemptsForSize < 3,
+                  let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
+                  let h = stringProperty("osd-dimensions/h").flatMap(Double.init),
+                  w > 0, h > 0 else { return }
+            if abs(w - wanted.width) > 1 || abs(h - wanted.height) > 1 {
+                reconfigAttemptsForSize += 1
+                print(String(format: "[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize))
+                nudgeVideoReconfig()
+            }
         }
 
         func runCommand(_ args: [String]) {
@@ -1579,6 +1614,7 @@ public struct MpvSurface {
                         // the handle, and `sampleAmbientFrame` does nothing
                         // until a second has passed.
                         await self.sampleAmbientIfDue()
+                        self.verifyVideoSizeIfDue()
                         continue
                     }
                     guard let self = self, self.isRunning else {
@@ -1586,6 +1622,8 @@ public struct MpvSurface {
                     }
 
                     if ev.event_id == MPV_EVENT_FILE_LOADED {
+                        self.reconfigAttemptsForSize = 0
+                        self.verifyVideoSizeIfDue(force: true)
                         // Read here, on the event loop's own thread: these
                         // are blocking property reads that wait on mpv's core
                         // lock, and this is the one thread already allowed to

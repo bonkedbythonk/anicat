@@ -102,8 +102,15 @@ AniList is only used for tracking. Playback and the episode list do not require 
   <br><br>
   <img src="assets/branding/detail.png" alt="Anime detail page" width="720">
   <br><br>
-  <img src="assets/branding/manga.png" alt="Manga reader" width="720">
+  <img src="assets/branding/manga.png" alt="Manga shelves" width="720">
+  <br><br>
+  <img src="assets/branding/stats.png" alt="Watch statistics" width="720">
 </div>
+
+The screenshots come from a build run with `ANICAT_SCREENSHOT_MODE=1`, which
+swaps the personal data (lists, history, profile, statistics) for fixtures
+built from the trending catalog, so they show layout rather than anyone's
+watch history.
 
 ---
 

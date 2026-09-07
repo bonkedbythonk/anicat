@@ -288,6 +288,9 @@ private struct PlayerTabSection: View {
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
+    // `PlayerController.isNextEpisodeCardEnabled` owns the reader and the
+    // default; the literal here and the one there must agree.
+    @AppStorage("anicat_next_up_card") private var nextUpCard: Bool = true
     // Same literal-key constraint as Discord below; `KeyboardDimSchedule`
     // owns the readers and the defaults, and the two must agree.
     @AppStorage("anicat_keyboard_dim") private var keyboardDim: Bool = false
@@ -365,6 +368,16 @@ private struct PlayerTabSection: View {
                 description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Next episode card",
+                description: "Counts down to the next episode over the ending, with the option to start it now or stay where you are. Turning it off does not turn off auto-play; the next episode simply arrives without asking."
+            ) {
+                SumiSwitch(isOn: $nextUpCard)
             }
 
             Divider()

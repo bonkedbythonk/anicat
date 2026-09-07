@@ -959,10 +959,11 @@ public struct PlayerView: View {
 
                 #if os(macOS)
                 // Picture in Picture: the window itself shrinks and floats.
-                // Button only — `P` is bound to Previous Episode in
-                // `RootView.handleKeyDown`, and a second local monitor
-                // claiming the same key would resolve in whichever order
-                // AppKit happened to dispatch the two.
+                // The keyboard route is Shift+P, bound in
+                // `RootView.handleKeyDown` beside plain P for Previous
+                // Episode — one monitor owns both, because two local
+                // monitors claiming one key resolve in whichever order
+                // AppKit happens to dispatch them.
                 Button(action: {
                     PictureInPicture.shared.toggle(aspectRatio: controller.videoAspectRatio)
                 }) {

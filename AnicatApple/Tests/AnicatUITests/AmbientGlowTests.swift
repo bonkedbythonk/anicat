@@ -116,33 +116,26 @@ struct AmbientGlowTests {
         #expect(gate.isDue(at: 100 + AmbientSampleGate.interval))
     }
 
-    /// Strikes are consecutive, not cumulative: at one sample a second a
-    /// cumulative counter would kill the feature after three unlucky moments
-    /// anywhere in an episode and never let it back.
-    @Test("Three slow samples in a row disable sampling, scattered ones do not")
-    func gateGivesUpOnConsecutiveSlowSamples() {
+    /// Slow samples back the interval off instead of stopping sampling: a
+    /// stopped sampler froze the bars on the episode still for the whole
+    /// session, which read as the glow being stuck.
+    @Test("Three slow samples in a row double the interval, twenty fast ones halve it back")
+    func gateBacksOffAndRecovers() {
+        var gate = AmbientSampleGate()
+        for _ in 0..<3 { gate.record(elapsed: 0.050) }
+        #expect(gate.currentInterval == AmbientSampleGate.interval * 2)
+        #expect(!gate.gaveUp)
+        for _ in 0..<30 { gate.record(elapsed: 0.050) }
+        #expect(gate.currentInterval == AmbientSampleGate.maxInterval)
+        for _ in 0..<20 { gate.record(elapsed: 0.002) }
+        #expect(gate.currentInterval == AmbientSampleGate.maxInterval / 2)
+        // Scattered slow samples never move it.
         var scattered = AmbientSampleGate()
         for _ in 0..<10 {
-            // Bound before the check: `#expect` rewrites its argument into a
-            // closure over an immutable copy, so a mutating call inside it
-            // does not compile.
-            let overBudget = scattered.record(elapsed: 0.030)
-            let inBudget = scattered.record(elapsed: 0.002)
-            #expect(overBudget)
-            #expect(inBudget)
+            scattered.record(elapsed: 0.050)
+            scattered.record(elapsed: 0.002)
         }
-        #expect(!scattered.gaveUp)
-
-        var slow = AmbientSampleGate()
-        let first = slow.record(elapsed: 0.030)
-        let second = slow.record(elapsed: 0.030)
-        let third = slow.record(elapsed: 0.030)
-        #expect(first)
-        #expect(second)
-        #expect(!third)
-        #expect(slow.gaveUp)
-        // A gate that gave up stays given up, whatever the clock says.
-        #expect(!slow.isDue(at: 10_000))
+        #expect(scattered.currentInterval == AmbientSampleGate.interval)
     }
 
     @Test("An unsupported screenshot stops the sampler outright")

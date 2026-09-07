@@ -1495,9 +1495,10 @@ public struct MpvSurface {
                 print(String(format: "[ambient] sample took %.1fms (over budget %d/%d in a row)",
                              elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit))
             }
-            guard ambientGate.record(elapsed: elapsed) else {
-                print("[ambient] frame sampling is too slow on this machine; falling back to the episode still")
-                return nil
+            let before = ambientGate.currentInterval
+            ambientGate.record(elapsed: elapsed)
+            if ambientGate.currentInterval != before {
+                print(String(format: "[ambient] sampling every %.0fms now", ambientGate.currentInterval * 1000))
             }
             return frame
         }

@@ -44,32 +44,37 @@ public struct AmbientFrame: @unchecked Sendable, Equatable, Identifiable {
 /// interval, the budget and the strike policy can be exercised without a
 /// running player.
 public struct AmbientSampleGate: Sendable, Equatable {
-    /// How often a frame is sampled. 100 ms, ten a second, under a
-    /// 0.3 s fade in the view: one a second lagged cuts by up to a second
-    /// and read as "too slow". The idle tick that drives it is 50 ms, and
-    /// the downscale measured 0.65 ms for 1080p, so ten a second is
-    /// under 7 ms of work a second before `screenshot-raw` itself.
+    /// How often a frame is sampled when the machine keeps up: 100 ms, ten
+    /// a second, under a 0.3 s fade in the view. One a second lagged cuts
+    /// by up to a second and read as "too slow".
     public static let interval: CFAbsoluteTime = 0.1
+    /// The slowest the gate backs off to. Still a live picture, just a
+    /// lazier one; the previous rule stopped sampling altogether after
+    /// three slow samples and left the bars frozen on the episode still,
+    /// which read as "the glow is stuck".
+    public static let maxInterval: CFAbsoluteTime = 1.0
     /// `screenshot-raw` runs on mpv's core lock, so a slow sample is a
-    /// dropped frame. Covers the downscale too — both happen before the
-    /// event loop gets back to `mpv_wait_event`.
-    public static let budget: CFAbsoluteTime = 0.015
-    /// Strikes are consecutive, not cumulative: at one sample a second a
-    /// cumulative counter kills the feature after three unlucky moments
-    /// anywhere in an episode — a seek, a cache stall, a scheduling spike —
-    /// and never lets it back. Three in a row is the machine being too slow.
+    /// dropped frame. Covers the downscale too. 30 ms rather than 15: a
+    /// 1080p frame conversion alone lands near 15 on a busy core, and one
+    /// dropped frame every so often costs less than a frozen glow.
+    public static let budget: CFAbsoluteTime = 0.030
+    /// Slow samples in a row before the interval doubles.
     public static let slowSampleLimit = 3
+    /// Fast samples in a row before the interval halves back.
+    public static let recoverySampleLimit = 20
 
     public private(set) var gaveUp = false
+    public private(set) var currentInterval: CFAbsoluteTime = AmbientSampleGate.interval
     private var lastSampleAt: CFAbsoluteTime = 0
     private var consecutiveSlowSamples = 0
+    private var consecutiveFastSamples = 0
 
     public init() {}
 
     public func isDue(at now: CFAbsoluteTime) -> Bool {
         // A millisecond of slack: (100 + 0.1) - 100 is 0.0999 in binary
         // floating point, which held a sample due exactly on the interval.
-        !gaveUp && now - lastSampleAt >= Self.interval - 0.001
+        !gaveUp && now - lastSampleAt >= currentInterval - 0.001
     }
 
     /// Claims the slot for a sample about to run.
@@ -77,19 +82,25 @@ public struct AmbientSampleGate: Sendable, Equatable {
         lastSampleAt = now
     }
 
-    /// Records how long a sample took. Returns false once the machine has
-    /// failed the budget `slowSampleLimit` times running, after which the
-    /// caller must stop asking for the rest of the session.
+    /// Records how long a sample took and adapts the interval: three slow
+    /// in a row double it (to at most `maxInterval`), twenty fast in a row
+    /// halve it back. Always returns true; only `giveUp` stops sampling.
     @discardableResult
     public mutating func record(elapsed: CFAbsoluteTime) -> Bool {
-        guard elapsed > Self.budget else {
+        if elapsed > Self.budget {
+            consecutiveFastSamples = 0
+            consecutiveSlowSamples += 1
+            if consecutiveSlowSamples >= Self.slowSampleLimit {
+                consecutiveSlowSamples = 0
+                currentInterval = min(Self.maxInterval, currentInterval * 2)
+            }
+        } else {
             consecutiveSlowSamples = 0
-            return true
-        }
-        consecutiveSlowSamples += 1
-        if consecutiveSlowSamples >= Self.slowSampleLimit {
-            gaveUp = true
-            return false
+            consecutiveFastSamples += 1
+            if consecutiveFastSamples >= Self.recoverySampleLimit, currentInterval > Self.interval {
+                consecutiveFastSamples = 0
+                currentInterval = max(Self.interval, currentInterval / 2)
+            }
         }
         return true
     }

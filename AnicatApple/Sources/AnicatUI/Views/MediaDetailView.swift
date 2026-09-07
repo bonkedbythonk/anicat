@@ -297,6 +297,13 @@ public struct MediaDetailView: View {
     /// +1 when the incoming tab sits further along the bar, -1 when it sits
     /// behind: which way `tabTransition` slides.
     @State private var tabSlide: CGFloat = 1
+    /// The trailer plays over the banner. `trailerFromHover` separates the
+    /// two ways it can be open: one that closes itself when the pointer
+    /// leaves, and one the viewer asked for and has to close by hand.
+    @State private var isTrailerOpen = false
+    @State private var trailerFromHover = false
+    @State private var isPosterHovered = false
+    @State private var isTrailerHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var detailTabNamespace
     @Namespace private var viewModeNamespace
@@ -400,6 +407,70 @@ public struct MediaDetailView: View {
             scrollBody
             compactHeaderLayer
         }
+        .task(id: isTrailerRegionHovered) { await followTrailerHover() }
+        // A trailer left running behind another tab is audio with nothing on
+        // screen to explain it.
+        .onChange(of: activeTab) { _, _ in closeTrailer() }
+    }
+
+    // MARK: - Trailer
+
+    /// False for a title with no trailer, and for one whose trailer is on a
+    /// site `TrailerPlayer` cannot embed — the pill would otherwise open a
+    /// black rectangle.
+    private var hasTrailer: Bool {
+        guard let trailerId = details.trailerId else { return false }
+        return TrailerPlayer.embedURL(site: details.trailerSite, videoId: trailerId) != nil
+    }
+
+    /// The poster starts the trailer; the banner only keeps it alive. Both
+    /// feed one value so the delay task below has a single id to key on.
+    private var isTrailerRegionHovered: Bool { isPosterHovered || isTrailerHovered }
+
+    /// One task per hover edge, cancelled by `task(id:)` the moment the
+    /// pointer changes its mind — which is what lets both delays be long
+    /// enough to mean something without a timer to invalidate by hand.
+    private func followTrailerHover() async {
+        guard hasTrailer else { return }
+        if isTrailerRegionHovered {
+            // Reduced motion leaves the pill and nothing else: video that
+            // starts because a pointer came to rest is precisely the
+            // movement the setting asks not to be shown.
+            guard isPosterHovered, !isTrailerOpen, !MotionPolicy.reduce else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            openTrailer(fromHover: true)
+        } else {
+            // A trailer the viewer opened from the pill stays until they
+            // close it; only the one hover opened closes itself.
+            guard isTrailerOpen, trailerFromHover else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            closeTrailer()
+        }
+    }
+
+    private func openTrailer(fromHover: Bool) {
+        withAnimation(.sumi(.pop)) {
+            isTrailerOpen = true
+            trailerFromHover = fromHover
+        }
+    }
+
+    private func closeTrailer() {
+        guard isTrailerOpen else { return }
+        withAnimation(.sumi(.pop)) {
+            isTrailerOpen = false
+            trailerFromHover = false
+        }
+    }
+
+    /// Every path that starts a stream goes through here first. The detail
+    /// page stays mounted underneath the player, so a trailer left open is a
+    /// second soundtrack over the episode.
+    private func startingPlayback(_ action: () -> Void) {
+        closeTrailer()
+        action()
     }
 
     private var scrollBody: some View {
@@ -454,21 +525,26 @@ public struct MediaDetailView: View {
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: 288)
-                .overlay { bannerImage }
+                .overlay { bannerContent }
                 .clipped()
 
             // `.hero-gradient`: the page ground at the bottom, a 60% black at
-            // 40% up, clear at the top.
-            LinearGradient(
-                stops: [
-                    .init(color: SumiTheme.background, location: 0),
-                    .init(color: Color(red: 5/255, green: 5/255, blue: 5/255).opacity(0.6), location: 0.40),
-                    .init(color: .clear, location: 1),
-                ],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-            .frame(height: 288)
+            // 40% up, clear at the top. Dropped while the trailer plays: it
+            // exists to keep the title legible over a still, and over moving
+            // video it only dims the thing the viewer asked to watch.
+            if !isTrailerOpen {
+                LinearGradient(
+                    stops: [
+                        .init(color: SumiTheme.background, location: 0),
+                        .init(color: Color(red: 5/255, green: 5/255, blue: 5/255).opacity(0.6), location: 0.40),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
+                .frame(height: 288)
+                .allowsHitTesting(false)
+            }
 
             // Top Left Back Button
             VStack(alignment: .leading) {
@@ -497,6 +573,38 @@ public struct MediaDetailView: View {
         }
         .frame(height: 288)
         .clipped()
+        // On the whole banner rather than on the web view itself: a
+        // `WKWebView` is a child `NSView` with its own tracking areas, and
+        // whether SwiftUI still sees the pointer over it is not something to
+        // stake the auto-close timer on.
+        .stableHover { isTrailerHovered = $0 }
+    }
+
+    /// The banner still, or the trailer in its place.
+    @ViewBuilder
+    private var bannerContent: some View {
+        if isTrailerOpen, let trailerId = details.trailerId {
+            TrailerPlayer(site: details.trailerSite, videoId: trailerId)
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        closeTrailer()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(SumiTheme.foreground)
+                            .frame(width: 26, height: 26)
+                            .background(SumiTheme.background.opacity(0.7))
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(SumiTheme.border, lineWidth: 1))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .padding(12)
+                }
+                .sumiTransition(.opacity)
+        } else {
+            bannerImage
+        }
     }
 
     /// The banner still, moving at half the scroll speed and dimming as it
@@ -576,7 +684,7 @@ public struct MediaDetailView: View {
 
             if let episode = resumeTarget {
                 Button {
-                    onPlayEpisode(episode)
+                    startingPlayback { onPlayEpisode(episode) }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill").font(.system(size: 10))
@@ -659,6 +767,7 @@ public struct MediaDetailView: View {
             .transition(.opacity)
             .compositingGroup()
             .shadow(color: .black.opacity(0.55), radius: 24, y: 10)
+            .stableHover { isPosterHovered = $0 }
     }
 
     private var info: some View {
@@ -798,9 +907,39 @@ public struct MediaDetailView: View {
                     .fontWeight(.semibold)
             }
 
+            if hasTrailer {
+                trailerPill
+            }
+
             Spacer(minLength: 0)
         }
         .sumiTabularMono(size: 10.5)
+    }
+
+    private var trailerPill: some View {
+        Button {
+            if isTrailerOpen {
+                closeTrailer()
+            } else {
+                openTrailer(fromHover: false)
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: isTrailerOpen ? "xmark" : "play.rectangle.fill")
+                    .font(.system(size: 9))
+                Text("TRAILER")
+            }
+            .sumiTabularMono(size: 10)
+            .foregroundColor(isTrailerOpen ? SumiTheme.background : SumiTheme.indigo)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(isTrailerOpen ? SumiTheme.indigo : SumiTheme.indigo.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(SumiTheme.indigo.opacity(0.35), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.sumiPressable)
+        .animation(.sumi(.pop), value: isTrailerOpen)
     }
 
     private var genrePills: some View {
@@ -822,7 +961,7 @@ public struct MediaDetailView: View {
         HStack(spacing: 10) {
             if !episodes.isEmpty {
                 Button {
-                    if let episode = resumeTarget { onPlayEpisode(episode) }
+                    if let episode = resumeTarget { startingPlayback { onPlayEpisode(episode) } }
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "play.fill").font(.system(size: 13))
@@ -846,7 +985,7 @@ public struct MediaDetailView: View {
                 // start over from and the control would be noise.
                 if let episode = resumeTarget, resumeSecondsForTarget != nil {
                     Button {
-                        onPlayEpisodeFromStart(episode)
+                        startingPlayback { onPlayEpisodeFromStart(episode) }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "gobackward").font(.system(size: 12))
@@ -1371,10 +1510,10 @@ public struct MediaDetailView: View {
                 selectedViewMode: selectedViewMode,
                 downloadStates: downloadStates,
                 isLoading: isLoading,
-                onPlayEpisode: onPlayEpisode,
+                onPlayEpisode: { episode in startingPlayback { onPlayEpisode(episode) } },
                 onSetEpisodeWatched: onSetEpisodeWatched,
                 onLoadReleaseCandidates: onLoadReleaseCandidates,
-                onPlayWithRelease: onPlayWithRelease,
+                onPlayWithRelease: { episode, name in startingPlayback { onPlayWithRelease(episode, name) } },
                 onDownloadEpisode: onDownloadEpisode,
                 catalogId: details.id,
                 playerNamespace: playerNamespace,

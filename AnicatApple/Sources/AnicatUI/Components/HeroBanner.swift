@@ -39,6 +39,17 @@ public struct HeroBanner: View {
         /// mapping. AniSkip (intro/outro skip times) is keyed by MAL id, not
         /// AniList's — this is the only bridge between the two catalogs.
         public let malId: Int64?
+        /// `YOUTUBE` or `DAILYMOTION`. AniList stores no playable URL, so
+        /// `TrailerPlayer` builds an embed URL from the pair.
+        ///
+        /// Optional, like every field added to this struct after the first
+        /// `DetailCache` snapshots were written: a non-Optional property
+        /// with a default value still goes through `decode` rather than
+        /// `decodeIfPresent` in the synthesized initializer, so it would
+        /// fail every cached file on disk instead of defaulting.
+        public let trailerSite: String?
+        public let trailerId: String?
+        public let trailerThumbnail: String?
 
         /// A neighbouring season, as the detail page's chain cards draw it.
         public struct Relation: Sendable, Identifiable, Codable {
@@ -79,8 +90,14 @@ public struct HeroBanner: View {
             listEntryId: Int64? = nil,
             listProgress: Int? = nil,
             isFavourite: Bool = false,
-            malId: Int64? = nil
+            malId: Int64? = nil,
+            trailerSite: String? = nil,
+            trailerId: String? = nil,
+            trailerThumbnail: String? = nil
         ) {
+            self.trailerSite = trailerSite
+            self.trailerId = trailerId
+            self.trailerThumbnail = trailerThumbnail
             self.status = status
             self.episodeCount = episodeCount
             self.resumeEpisode = resumeEpisode

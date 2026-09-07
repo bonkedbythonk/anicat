@@ -319,7 +319,10 @@ extension AppModel {
                 listEntryId: d.listEntryId,
                 listProgress: d.listProgress.map(Int.init),
                 isFavourite: d.isFavourite,
-                malId: d.malId
+                malId: d.malId,
+                trailerSite: d.trailerSite,
+                trailerId: d.trailerId,
+                trailerThumbnail: d.trailerThumbnail
             )
             if cached == nil {
                 withAnimation(.easeInOut(duration: 0.24)) {

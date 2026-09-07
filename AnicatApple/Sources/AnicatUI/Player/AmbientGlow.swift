@@ -67,7 +67,9 @@ public struct AmbientSampleGate: Sendable, Equatable {
     public init() {}
 
     public func isDue(at now: CFAbsoluteTime) -> Bool {
-        !gaveUp && now - lastSampleAt >= Self.interval
+        // A millisecond of slack: (100 + 0.1) - 100 is 0.0999 in binary
+        // floating point, which held a sample due exactly on the interval.
+        !gaveUp && now - lastSampleAt >= Self.interval - 0.001
     }
 
     /// Claims the slot for a sample about to run.

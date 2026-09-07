@@ -54,6 +54,12 @@ jobs:
         working-directory: AnicatApple
         run: swift build --product Anicat
 
+      # AnicatUI compiles for the iOS Simulator since 2026-09-06 and has to
+      # stay that way; AppKit leaking into a shared view only shows up here.
+      - name: swift build (iOS Simulator)
+        working-directory: AnicatApple
+        run: swift build --product AnicatUI --triple arm64-apple-ios17.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
+
       # Not `swift test`: several suites call the live AniList API and fail
       # outright during its outages, which would make CI red for reasons
       # unrelated to the change.

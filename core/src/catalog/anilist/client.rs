@@ -163,10 +163,19 @@ impl AniListClient {
                 return Err(format!("AniList HTTP 429: Too Many Requests — cooling down {}s", cooldown));
             }
             // Extract the human-readable message from the GraphQL error body
-            // (AniList returns JSON even for 4xx, e.g. downtime 403).
+            // (AniList returns JSON even for 4xx). Only the outage answer
+            // carries the `anilist_down:` marker the UI keys its "AniList is
+            // down" state on: a 401 "Invalid token" on a list edit or a 400
+            // validation error used to wear the same prefix and the app told
+            // the user AniList was down when their token had expired.
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(msg) = val["errors"][0]["message"].as_str() {
-                    return Err(format!("anilist_down:{}", msg));
+                    let outage = status.as_u16() == 403 && msg.to_ascii_lowercase().contains("disabled");
+                    return Err(if outage {
+                        format!("anilist_down:{}", msg)
+                    } else {
+                        format!("AniList: {}", msg)
+                    });
                 }
             }
             return Err(format!("AniList HTTP {}: {}", status.as_u16(), text));

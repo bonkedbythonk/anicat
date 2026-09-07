@@ -69,9 +69,47 @@ work rather than a second target.
 - **Continuity** (`Continuity/`): Handoff via `NSUserActivity` for playback
   and reading, Bonjour discovery of other instances, Keychain storage of the
   AniList token.
-- **Design system** (`DesignSystem/`): `SumiTheme` ("Ink & Index"), bundled
-  Geist and IBM Plex Mono, `CachedAsyncImage` (decodes at display size off
-  the main actor), an FPS and main-thread-stall HUD.
+- **Design system** (`DesignSystem/`): `SumiTheme` tokens resolved through
+  `ThemeStore` (Ink & Index, Paper, OLED, follow system; `ThemedRoot`
+  reroots the tree on a switch), bundled Geist and IBM Plex Mono,
+  `CachedAsyncImage` (decodes at display size off the main actor),
+  `MotionPolicy` (springs that collapse to fades under Reduce Motion),
+  `SoundDesign` (synthesised feedback sounds and haptics, off by default),
+  an FPS and main-thread-stall HUD.
+- **Scrolling** (`DesignSystem/ResponsiveScrollingPatch.swift`,
+  `ScrollEventTap.swift`): SwiftUI's `HostingScrollView` opts out of
+  AppKit's responsive scrolling and scrolls at every second refresh, so the
+  class flag is flipped at launch and vertical pages run at 120 Hz;
+  horizontal shelves are moved to a runtime subclass that stays on the old
+  path. Responsive scrolling keeps trackpad events off local `NSEvent`
+  monitors, so the swipe-back tracker and hover suppression read a
+  listen-only CGEvent tap instead. `FullScreenGuard` serialises fullscreen
+  toggles so two inside one transition cannot wedge the window.
+- **System** (`System/`): `anicat://` deep links (`DeepLink`), App Intents
+  (compiled, but Shortcuts lists them only once an Xcode target runs the
+  metadata extractor), a Core Spotlight index of the viewer's lists,
+  new-episode and download notifications with a dock badge, all routed
+  through `AppModel.handleDeepLink`.
+- **People and studios** (`Models/AppModel+People.swift`, `PersonPageView`):
+  character, staff, thread and studio pages render inside the content
+  column on a stack above the detail page; Escape, swipe back and the mouse
+  back button pop it before the page beneath.
+- **Readers** (`MangaReaderView`, `SyosetuReaderView`, `AppModel+Reader`):
+  single, spread (RTL/LTR, cover offset) and webtoon modes, next-chapter
+  preload at 70%, AniList chapter progress on finish; the novel reader keeps
+  typography, chapter navigation and a per-chapter position.
+- **Player extras** (`Player/`): OP/ED chapters from the file become skip
+  windows ahead of AniSkip; a next-episode card fronts auto-next with a
+  cancel; `AmbientGlow` samples the frame ten times a second through
+  `screenshot-raw` on mpv's event-loop thread, downscales to 64 px and
+  lights each letterbox bar with the band of picture it touches, backing
+  off when a sample runs over 30 ms; `KeyboardBacklightDimmer` fades the
+  keyboard through the private `KeyboardBrightnessClient` during night
+  playback; picture in picture shrinks the app's own window to a floating
+  480x270; audio and subtitle picks are remembered per title in the
+  registry. After a resize the coordinator flips the aspect override and
+  back, because mpv's MoltenVK context reads the drawable size only on a
+  video reconfigure.
 
 ### Rust engine
 
@@ -84,14 +122,20 @@ lives here, and nothing here knows there is a UI.
   mode from the built `.dylib` rather than from a `.udl`.
 - **`catalog/`** — AniList over GraphQL, TMDB over REST, and a TTL cache
   keyed per call that writes through to `catalog-cache.sqlite` and reloads
-  on launch. An AniList outage is reported with an `anilist_down:` prefix so
-  the UI can show its banner instead of a generic error.
+  on launch. A 403 whose message says the API is disabled is reported with
+  an `anilist_down:` prefix so the UI can show its banner; every other
+  GraphQL error keeps its own message. Also: the airing schedule for the
+  calendar, per-viewer recommendations (seeds from the viewer's lists, one
+  batched request), studio detail, trailer fields, and a Jikan lookup that
+  fills a missing MyAnimeList id so AniSkip still fires.
 - **`media.rs`** — `MediaKey(catalog, id)`. The Tauri build shifted TMDB ids
   into numeric bands inside one `i64`; the pair is now explicit and a new
   catalog is a new enum variant.
 - **`db/`** — rusqlite registry: watch history (per-episode stop position and
-  duration), provider slugs, local library, per-title prefs. Numbered,
-  idempotent `user_version` migrations.
+  duration), provider slugs, local library, per-title prefs, remembered
+  releases, per-title audio and subtitle picks, and the aggregation behind
+  the Stats page (hours, streaks, per-day counts). Numbered, idempotent
+  `user_version` migrations.
 - **`reader/`** — MangaDex over its public REST API first; MangaKatana as an
   HTML fallback for titles MangaDex has matched but has nothing readable
   under. Syosetu for web novels.
@@ -101,7 +145,12 @@ lives here, and nothing here knows there is a UI.
   wanted episode and refuses rather than guesses. Downloads run through an
   embedded `librqbit` session into a size-capped LRU cache and are served to
   mpv by `stream.rs`, a loopback HTTP range server whose port the OS assigns
-  and `stream_port()` reports. Uploading is compiled out. `cinema.rs` and
+  and `stream_port()` reports. The cache sweep steps over the torrent a
+  player is reading and the one just resolved, whatever their age. When no
+  release names the wanted episode, `search.rs` samples the numbers the
+  groups use and re-runs at the franchise's absolute number if a contiguous
+  run matches the aired count (Bleach TYBW's fourth cour ships episode 1
+  as 41). Uploading is compiled out. `cinema.rs` and
   `series.rs` (TMDB-matched films and TV) are in the crate but
   `resolve_stream` refuses non-AniList requests until the TMDB detail path is
   wired.

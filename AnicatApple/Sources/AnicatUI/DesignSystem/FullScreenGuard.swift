@@ -100,4 +100,14 @@ public final class FullScreenState {
     public var isFullScreen = false
     private init() {}
 }
+#else
+/// No window fullscreen on iOS; the player's safe-area rule reads this and
+/// gets "not fullscreen", which is the honouring branch it wants there.
+@Observable
+@MainActor
+public final class FullScreenState {
+    public static let shared = FullScreenState()
+    public var isFullScreen = false
+    private init() {}
+}
 #endif

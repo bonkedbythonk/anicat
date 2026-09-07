@@ -350,12 +350,15 @@ public struct RootView: View {
                     morphThumbnailURL: model.openingPlayerThumbnailURL
                 )
                 // The player measures the window through its own
-                // GeometryReader; inside the safe area that measurement was
-                // 28pt short of the window under the transparent title bar,
-                // so the video sat centred in the shorter box, the top bar
-                // read 28pt taller than the bottom, and the glow bands were
-                // laid out against the wrong edges.
-                .ignoresSafeArea()
+                // GeometryReader. In a window the safe area is the strip
+                // under the transparent title bar, which is visible, so
+                // honouring it left the video centred in a box 28pt short
+                // and the top bar 28pt taller than the bottom. In fullscreen
+                // the safe area is the notch strip, which is not visible, so
+                // ignoring it there put the picture 16pt off centre under
+                // the housing. Hence: ignored in a window, honoured in
+                // fullscreen.
+                .ignoresSafeArea(edges: FullScreenState.shared.isFullScreen ? [] : .all)
                 .transition(.opacity)
                 .zIndex(30)
             }

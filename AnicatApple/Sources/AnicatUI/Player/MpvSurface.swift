@@ -923,6 +923,7 @@ public struct MpvSurface {
                     if let layer = view.metalView?.metalLayer,
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
+                        sampler.videoAspect = { [weak self] in self?.controller.videoAspectRatio }
                         sampler.onThumbnail = { [weak self] image in
                             guard let self else { return }
                             guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true,

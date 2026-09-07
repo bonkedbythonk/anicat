@@ -19,6 +19,12 @@ import QuartzCore
 final class AmbientMetalSampler {
     /// Delivered on the main actor with the finished thumbnail.
     var onThumbnail: ((CGImage) -> Void)?
+    /// The playing video's display aspect, read at sample time. The
+    /// drawable is the whole window, letterbox bars included; scaling all
+    /// of it gave a thumbnail whose top and bottom fifths were the black
+    /// bars themselves, and the glow lit the bars with their own black.
+    /// The scale kernel is pointed at the aspect-fit rect inside instead.
+    var videoAspect: (() -> Double?)?
     /// Minimum spacing between samples. 33 ms: every other frame at 60,
     /// every frame at 24, and about a fifth of the presents on a 120 Hz
     /// panel; the fade in the view is 80 ms, so anything tighter is unseen.
@@ -60,7 +66,9 @@ final class AmbientMetalSampler {
     private func sample(_ source: MTLTexture) {
         let now = CACurrentMediaTime()
         guard !inFlight, now - lastSampleAt >= interval, failures < 5 else { return }
-        guard let size = AmbientGlow.thumbnailSize(width: source.width, height: source.height) else { return }
+        let full = CGSize(width: source.width, height: source.height)
+        let video = Self.aspectFit(full, aspect: videoAspect?() ?? nil)
+        guard let size = AmbientGlow.thumbnailSize(width: Int(video.width), height: Int(video.height)) else { return }
         if target == nil || target?.width != size.width || target?.height != size.height {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .bgra8Unorm, width: size.width, height: size.height, mipmapped: false)
@@ -71,12 +79,33 @@ final class AmbientMetalSampler {
         guard let target, let buffer = queue.makeCommandBuffer() else { return }
         lastSampleAt = now
         inFlight = true
+        var transform = MPSScaleTransform(
+            scaleX: Double(target.width) / Double(video.width),
+            scaleY: Double(target.height) / Double(video.height),
+            translateX: -Double(video.minX) * Double(target.width) / Double(video.width),
+            translateY: -Double(video.minY) * Double(target.height) / Double(video.height)
+        )
+        withUnsafePointer(to: &transform) { scale.scaleTransform = $0 }
         scale.encode(commandBuffer: buffer, sourceTexture: source, destinationTexture: target)
+        scale.scaleTransform = nil
         buffer.addCompletedHandler { [weak self] finished in
             let ok = finished.error == nil
             Task { @MainActor in self?.finish(ok: ok) }
         }
         buffer.commit()
+    }
+
+    /// Where mpv puts the picture inside the drawable: aspect-fit, centred,
+    /// the same placement `PlayerView.aspectFitRect` assumes for the chrome.
+    static func aspectFit(_ container: CGSize, aspect: Double?) -> CGRect {
+        guard let aspect, aspect > 0, container.width > 0, container.height > 0 else {
+            return CGRect(origin: .zero, size: container)
+        }
+        let containerAspect = container.width / container.height
+        let size = aspect > containerAspect
+            ? CGSize(width: container.width, height: (container.width / aspect).rounded())
+            : CGSize(width: (container.height * aspect).rounded(), height: container.height)
+        return CGRect(x: ((container.width - size.width) / 2).rounded(), y: ((container.height - size.height) / 2).rounded(), width: size.width, height: size.height)
     }
 
     private func finish(ok: Bool) {

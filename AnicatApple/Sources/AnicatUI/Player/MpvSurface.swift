@@ -1172,7 +1172,10 @@ public struct MpvSurface {
                   let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
                   let h = stringProperty("osd-dimensions/h").flatMap(Double.init),
                   w > 0, h > 0 else { return }
-            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil || force {
+                // Forced checks are rare (file load, fullscreen change), so
+                // they always log: the line is what a report needs and the
+                // owner cannot be asked to relaunch from a terminal for it.
                 let dw = stringProperty("dwidth") ?? "-", dh = stringProperty("dheight") ?? "-"
                 let mt = stringProperty("osd-dimensions/mt") ?? "-", mb = stringProperty("osd-dimensions/mb") ?? "-"
                 let ml = stringProperty("osd-dimensions/ml") ?? "-", mr = stringProperty("osd-dimensions/mr") ?? "-"

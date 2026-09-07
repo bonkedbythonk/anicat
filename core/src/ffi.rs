@@ -901,6 +901,7 @@ impl AnicatEngine {
                     // A film has no episode number in its release name.
                     allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
                     episode_count: info.episode_count,
+                    aired_episodes: info.aired_episodes,
                     prefer_dub: req.prefer_dub,
                     // libmpv decodes everything a release can be encoded in,
                     // so nothing here is filtered on codec. This flag existed
@@ -984,6 +985,7 @@ impl AnicatEngine {
                     titles: &info.titles,
                     allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
                     episode_count: info.episode_count,
+                    aired_episodes: info.aired_episodes,
                     // The picker shows every release regardless of dub
                     // preference — that choice belongs to whoever is
                     // picking, not to the same default the auto-pick uses.
@@ -1052,6 +1054,7 @@ impl AnicatEngine {
                     titles: &info.titles,
                     allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
                     episode_count: info.episode_count,
+                    aired_episodes: info.aired_episodes,
                     prefer_dub,
                     browser_client: false,
                     chosen_name: None,

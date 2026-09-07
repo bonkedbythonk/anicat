@@ -107,6 +107,9 @@ pub struct ResolveTarget<'a> {
     /// a release that numbers a split cour absolutely — see
     /// `search::absolute_episode`.
     pub episode_count: Option<i64>,
+    /// How many of them have aired, when known. See
+    /// `search::ReleaseCriteria::aired_episodes`.
+    pub aired_episodes: Option<i64>,
     pub prefer_dub: bool,
     /// The stream is bound for a browser `<video>` element rather than mpv,
     /// which narrows what codecs are acceptable. See
@@ -671,7 +674,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -679,6 +682,7 @@ impl TorrentManager {
             browser_client,
             extras: entry.kind == layout::EntryKind::Extra,
             episode_count,
+            aired_episodes,
         };
         let mut stage = std::time::Instant::now();
         let session = self.session().await?;
@@ -1084,8 +1088,8 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
     ) -> Vec<TorrentChoice> {
         let ResolveTarget {
-            media, episode, titles, allow_episodeless, episode_count, prefer_dub, browser_client,
-            movie, series: series_criteria, entry, sibling_titles, ..
+            media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub,
+            browser_client, movie, series: series_criteria, entry, sibling_titles, ..
         } = target;
         if titles.is_empty() {
             return vec![];
@@ -1111,6 +1115,7 @@ impl TorrentManager {
                         browser_client,
                         extras: entry.kind == layout::EntryKind::Extra,
                         episode_count,
+                        aired_episodes,
                     },
                     // The picker exists to show what the auto-pick didn't
                     // take, so it asks every title variant even though the
@@ -2089,6 +2094,10 @@ pub struct MediaInfo {
     pub titles: Vec<String>,
     /// AniList `episodes`, or aired-so-far for currently-airing shows.
     pub episode_count: Option<i64>,
+    /// How many episodes have aired. Equal to `episode_count` for a finished
+    /// entry, smaller while one is still airing — see
+    /// `search::ReleaseCriteria::aired_episodes`.
+    pub aired_episodes: Option<i64>,
     /// Where this entry sits in its franchise — see `layout::EntryHint`.
     pub hint: layout::EntryHint,
     /// The franchise's other AniList entries, by title. See
@@ -2114,6 +2123,7 @@ pub async fn gather_media_info(
     }
 
     let mut episode_count = None;
+    let mut aired_episodes = None;
     let mut kind = layout::EntryKind::Tv;
     // Whether AniList knows of an earlier TV entry this one continues. Not a
     // season number — a franchise can be three entries deep — but enough to
@@ -2145,14 +2155,20 @@ pub async fn gather_media_info(
                     titles.push(s);
                 }
             }
-            episode_count = m
-                .episodes
-                .map(|e| e as i64)
-                .or_else(|| {
-                    m.next_airing_episode
-                        .and_then(|n| n.episode)
-                        .map(|e| (e as i64 - 1).max(0))
-                });
+            // Two different numbers, and a currently-airing cour is where
+            // they part: AniList fills `episodes` with the whole run's length
+            // as soon as it is announced (10 for Bleach's fourth cour) while
+            // `nextAiringEpisode` says only seven have aired. `episode_count`
+            // keeps preferring the announced length -- `layout` and
+            // `absolute_episode` ask "how long is this entry" -- and
+            // `aired_episodes` carries what actually exists, which is what
+            // `absolute_offset` has to compare a run of release numbers to.
+            let aired = m
+                .next_airing_episode
+                .and_then(|n| n.episode)
+                .map(|e| (e as i64 - 1).max(0));
+            episode_count = m.episodes.map(|e| e as i64).or(aired);
+            aired_episodes = aired.or(episode_count);
             // An OVA or a specials collection is not a season of anything:
             // release groups file both under `Extras/`, `Specials/` or `S00`,
             // and number them in their own `SP01..` sequence.
@@ -2222,7 +2238,7 @@ pub async fn gather_media_info(
             None
         },
     };
-    MediaInfo { titles, episode_count, hint, siblings: sibling_titles }
+    MediaInfo { titles, episode_count, aired_episodes, hint, siblings: sibling_titles }
 }
 
 fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
@@ -2425,6 +2441,7 @@ mod tests {
                 browser_client: false,
                 extras: false,
                 episode_count: Some(12),
+                aired_episodes: Some(12),
             },
         };
         let pool = vec![search::Candidate {
@@ -2596,7 +2613,7 @@ mod tests {
         let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
             .try_init();
         let titles = vec!["Sousou no Frieren".to_string()];
-        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }, search::Breadth::Full).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None, aired_episodes: None }, search::Breadth::Full).await;
         assert!(!cands.is_empty(), "no candidates found");
         let best = &cands[0];
         println!("best: {} (score {}, seeders {})", best.name, best.score, best.seeders);
@@ -2609,7 +2626,7 @@ mod tests {
         );
         // A short/ambiguous title must not match unrelated shows.
         let titles = vec!["Monster".to_string()];
-        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None }, search::Breadth::Full).await;
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 3, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None, aired_episodes: None }, search::Breadth::Full).await;
         for c in &cands {
             let n = search::normalize(&c.name);
             assert!(!n.contains("pocket"), "false positive: {}", c.name);
@@ -2649,6 +2666,7 @@ mod tests {
             browser_client: false,
             extras: false,
             episode_count: None,
+            aired_episodes: None,
         };
         let full_started = std::time::Instant::now();
         let full =
@@ -2690,7 +2708,7 @@ mod tests {
             &client(),
             &titles,
             &[],
-            search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
+            search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None, aired_episodes: None },
             search::Breadth::Full,
         )
         .await;
@@ -2776,7 +2794,7 @@ mod tests {
                 &client(),
                 &titles,
                 &[],
-                search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None },
+                search::ReleaseCriteria { episode: 6, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None, aired_episodes: None },
                 search::Breadth::Full,
             )
             .await;
@@ -2812,6 +2830,7 @@ mod tests {
                 titles: &titles,
                 allow_episodeless: false,
                 episode_count: Some(12),
+                aired_episodes: Some(12),
                 prefer_dub: false,
                 browser_client: false,
                 chosen_name: None,
@@ -2864,6 +2883,7 @@ mod tests {
             titles: &titles,
             allow_episodeless: false,
             episode_count: Some(28),
+            aired_episodes: Some(28),
             prefer_dub: false,
             browser_client: false,
             chosen_name: None,
@@ -3069,6 +3089,7 @@ mod tests {
                     browser_client: false,
                     extras: case.hint.kind == layout::EntryKind::Extra,
                     episode_count: case.episode_count,
+                    aired_episodes: case.episode_count,
                 },
                 search::Breadth::Full,
             )
@@ -3275,6 +3296,7 @@ mod tests {
                         titles: &titles,
                         allow_episodeless: case.allow_episodeless,
                         episode_count: case.episode_count,
+                        aired_episodes: case.episode_count,
                         prefer_dub: false,
                         browser_client: false,
                         chosen_name: None,
@@ -3370,6 +3392,7 @@ mod tests {
                 browser_client: false,
                 extras: false,
                 episode_count: Some(28),
+                aired_episodes: Some(28),
             },
             search::Breadth::Full,
         )
@@ -3467,6 +3490,7 @@ mod tests {
                     titles: &titles,
                     allow_episodeless: false,
                     episode_count: Some(28),
+                    aired_episodes: Some(28),
                     browser_client: false,
                     prefer_dub: false,
                     chosen_name: None,
@@ -3530,6 +3554,7 @@ mod tests {
                     titles: &titles,
                     allow_episodeless: true,
                     episode_count: Some(1),
+                    aired_episodes: Some(1),
                     browser_client: false,
                     prefer_dub: false,
                     chosen_name: None,
@@ -3591,6 +3616,7 @@ mod tests {
                     titles: &titles,
                     allow_episodeless: false,
                     episode_count: None,
+                    aired_episodes: None,
                     browser_client: false,
                     prefer_dub: false,
                     chosen_name: None,
@@ -3662,6 +3688,7 @@ mod tests {
             titles: &titles,
             allow_episodeless: false,
             episode_count: Some(12),
+            aired_episodes: Some(12),
             browser_client: false,
             prefer_dub: false,
             chosen_name: None,
@@ -3722,6 +3749,106 @@ mod tests {
 
         let _ = session.stop().await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The titles AniList carries for the fourth cour of Bleach: Thousand-Year
+    /// Blood War (id 185874, 10 episodes, still airing). Shared by the live
+    /// test below.
+    fn bleach_calamity_titles() -> Vec<String> {
+        vec![
+            "BLEACH: Sennen Kessen-hen - Kashin-tan".to_string(),
+            "BLEACH: Thousand-Year Blood War - The Calamity".to_string(),
+            "BLEACH: Thousand-Year Blood War Part 4".to_string(),
+            "BLEACH: Thousand-Year Blood War The Final Season".to_string(),
+            "BLEACH TYBW".to_string(),
+        ]
+    }
+
+    /// Live. `cargo test --lib torrent::tests::live_bleach -- --ignored --nocapture`
+    ///
+    /// "Can't find ep 1 for Bleach the Calamity". Every group numbers this
+    /// cour by the franchise (41-50) rather than from 1, so the per-episode
+    /// queries ask for an episode nothing on Nyaa is named after. Before the
+    /// fix: one candidate, an untagged AV1 three-episode pack at score 380
+    /// that `layout` then refuses. After: six, all naming episode 41, best at
+    /// 381 seeders. Dumps the raw probe so the failure stays visible.
+    ///
+    /// `aired` is read off the live feed rather than hard-coded: AniList said
+    /// 7 of 10 on 2026-09-07 and this cour is still airing, so a constant here
+    /// would rot within the week. That is exactly the number the app takes
+    /// from `nextAiringEpisode`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_bleach_tybw_fourth_cour_finds_its_first_episode() {
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
+        let titles = bleach_calamity_titles();
+
+        // What the indexes actually hold for this entry, before any episode
+        // filtering: the raw RSS for the episodeless query, with the matcher's
+        // verdict and the episode each name states. This is the evidence the
+        // fix runs on, so it is printed whether the assertions pass or not.
+        let alts: Vec<String> = titles.iter().map(|t| search::normalize(t)).collect();
+        let mut seen: Vec<i64> = vec![];
+        for title in ["BLEACH Sennen Kessen-hen - Kashin-tan", "BLEACH Thousand-Year Blood War - The Calamity"] {
+            let url = format!(
+                "https://nyaa.si/?page=rss&c=1_2&f=0&s=seeders&o=desc&q={}%201080p",
+                search::urlencoding_encode(title)
+            );
+            let body = client().get(&url).send().await.unwrap().text().await.unwrap();
+            let item_re = regex_lite::Regex::new(r"(?s)<item>.*?<title>(.*?)</title>").unwrap();
+            let norm = search::normalize(title);
+            println!("--- probe '{}' ---", title);
+            for c in item_re.captures_iter(&body) {
+                let name = c[1].trim().to_string();
+                let matched = search::title_matches_with_alts(&norm, &name, &alts);
+                let ep = search::filename_episode(&name);
+                println!("  match={} ep={:?} {}", matched, ep, name);
+                if let (true, Some(e)) = (matched, ep) {
+                    seen.push(e);
+                }
+            }
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        println!("released episode numbers: {:?}", seen);
+        assert!(seen.len() >= 2, "nyaa returned no numbered releases for this cour");
+        let first = seen[0];
+        assert_eq!(
+            seen.last().unwrap() - first + 1,
+            seen.len() as i64,
+            "the released run has a hole in it; the fix refuses this and so does the assertion"
+        );
+
+        let criteria = search::ReleaseCriteria {
+            episode: 1,
+            allow_episodeless: false,
+            prefer_dub: false,
+            browser_client: false,
+            extras: false,
+            // AniList id 185874: ten episodes announced. `aired` is taken from
+            // the run above rather than pinned, since the cour is still airing
+            // and a constant would rot within the week -- it is the same
+            // number the app reads out of `nextAiringEpisode`.
+            episode_count: Some(10),
+            aired_episodes: Some(seen.len() as i64),
+        };
+        let cands = search::find_candidates(&client(), &titles, &[], criteria, search::Breadth::Full).await;
+        println!("candidates for episode 1: {}", cands.len());
+        for c in cands.iter().take(10) {
+            println!("  score {:5} seeders {:5} batch={} {}", c.score, c.seeders, c.assume_batch, c.name);
+        }
+        assert!(!cands.is_empty(), "no candidates for episode 1 of the fourth cour");
+        let best = &cands[0];
+        // Episode 1 of this entry is the first absolute number the groups use
+        // (41 on 2026-09-07). A release naming any other one is the wrong
+        // episode, which is worse than none.
+        assert!(
+            search::filename_matches_episode(&best.name, first),
+            "best candidate is not the cour's first episode ({}): {}",
+            first,
+            best.name
+        );
     }
 
     #[test]

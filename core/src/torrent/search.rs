@@ -1097,6 +1097,13 @@ pub struct ReleaseCriteria {
     /// where it is what tells a range covering *this* entry apart from one
     /// covering the franchise's other specials.
     pub episode_count: Option<i64>,
+    /// How many of this entry's episodes have actually aired, when known.
+    /// Deliberately separate from `episode_count`, which everything else
+    /// (`absolute_episode`, the extras range rule, `layout`) reads as "how
+    /// long is this entry": a currently-airing cour has all ten of those and
+    /// only seven of these. Read only by `absolute_offset`, where it is what
+    /// makes an inferred offset provable rather than a guess.
+    pub aired_episodes: Option<i64>,
 }
 
 /// Score a release name against the wanted episode. None = reject.
@@ -1107,7 +1114,7 @@ fn score_release(
     siblings: &SiblingTitles<'_>,
     criteria: ReleaseCriteria,
 ) -> Option<(i64, bool)> {
-    let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client, extras, episode_count } = criteria;
+    let ReleaseCriteria { episode, allow_episodeless, prefer_dub, browser_client, extras, episode_count, aired_episodes: _ } = criteria;
     let name_norm = normalize(name);
     // An extras entry is matched with its kind marker dropped — see
     // `strip_extras_marker`. The Nyaa query itself keeps the word, so this
@@ -1593,10 +1600,6 @@ pub async fn find_candidates(
     criteria: ReleaseCriteria,
     breadth: Breadth,
 ) -> Vec<Candidate> {
-    let episode = criteria.episode;
-    let prefer_dub = criteria.prefer_dub;
-    let mut all: Vec<Candidate> = vec![];
-
     // Expand season-naming variants and short forms, keep order, dedupe, cap
     // the fan-out. Each title is followed immediately by its own short form so
     // the cap can never keep a title while dropping the variant of it that
@@ -1623,6 +1626,67 @@ pub async fn find_candidates(
     let alts: Vec<String> = titles.iter().map(|t| normalize(t)).collect();
     let siblings = SiblingTitles { own: titles, related: related_titles };
 
+    let all = search_pool(client, &expanded, &alts, &siblings, criteria, breadth).await;
+    // A release that names this episode outright means the search worked;
+    // everything below is the failure path. What is left is either a show with
+    // no releases at all or one whose releases number this cour the way the
+    // franchise does rather than the way this AniList entry does, and only the
+    // second is worth another round-trip.
+    //
+    // "Names it outright" and not `!assume_batch`: a name parsing as a *range*
+    // that happens to span the wanted number also scores, and also arrives
+    // with `assume_batch` clear. Trusting that would let a franchise pack
+    // listed as "01-13" -- cour one's episodes -- stand in for cour four's
+    // episode 1 and suppress the rescue, which is the wrong-content failure
+    // this whole path exists to avoid. The cost is that a pool of nothing but
+    // range batches now pays for the probe (one Nyaa round, ~700ms) before
+    // being handed back unchanged; a pool with no exact match in it was
+    // already the weak case.
+    if all.iter().any(|c| filename_episode(&c.name) == Some(criteria.episode)) {
+        return all;
+    }
+    let Some(offset) = probe_absolute_offset(client, &expanded, &alts, &siblings, criteria).await
+    else {
+        return all;
+    };
+    let absolute = ReleaseCriteria { episode: criteria.episode + offset, ..criteria };
+    log::info!(
+        "[resolve] torrent search re-running at absolute episode {} (offset {})",
+        absolute.episode, offset
+    );
+    let rescued: Vec<Candidate> = search_pool(client, &expanded, &alts, &siblings, absolute, breadth)
+        .await
+        .into_iter()
+        // The offset moved the *search* onto the franchise's numbering; the
+        // file-selection side (`layout::select`, via `CandidateContext`) still
+        // asks for this entry's own relative episode. That disagreement is
+        // harmless for a release that names one episode -- it holds a single
+        // video file and layout is never consulted -- and is a wrong-episode
+        // bug waiting to happen for a pack, where layout would go looking for
+        // a file literally numbered 1. Keep only the former.
+        .filter(|c| !c.assume_batch)
+        .collect();
+    if rescued.is_empty() { all } else { rescued }
+}
+
+/// One full search of every index for `criteria`, over titles already expanded
+/// into their season variants and short forms.
+///
+/// Split out of `find_candidates` so the whole wave can be run a second time
+/// against a different episode number -- see `probe_absolute_offset`. Nothing
+/// here is aware of that; it searches for exactly the episode it is handed.
+async fn search_pool(
+    client: &reqwest::Client,
+    expanded: &[String],
+    alts: &[String],
+    siblings: &SiblingTitles<'_>,
+    criteria: ReleaseCriteria,
+    breadth: Breadth,
+) -> Vec<Candidate> {
+    let episode = criteria.episode;
+    let prefer_dub = criteria.prefer_dub;
+    let mut all: Vec<Candidate> = vec![];
+
     // The per-episode queries can never legitimately match an untagged
     // release, so they always score with allow_episodeless off regardless of
     // what the caller asked for; only the batch query honours it.
@@ -1634,7 +1698,7 @@ pub async fn find_candidates(
     // playable releases the remaining rounds are querying progressively less
     // likely spellings of a title that already worked.
     let mut rounds: Vec<Vec<(String, String, ReleaseCriteria)>> = vec![];
-    for title in &expanded {
+    for title in expanded {
         let norm = normalize(title);
         // Nyaa's own full-text search takes the query literally, so title
         // punctuation narrows it. AniList's romaji is the canonical,
@@ -1712,12 +1776,12 @@ pub async fn find_candidates(
     let subs_all = futures_util::future::join_all(
         expanded
             .iter()
-            .map(|title| search_subsplease(client, title, &alts, episode, prefer_dub)),
+            .map(|title| search_subsplease(client, title, alts, episode, prefer_dub)),
     );
     let tosho_all = futures_util::future::join_all(
         tosho_queries
             .iter()
-            .map(|(q, norm)| search_animetosho(client, q, norm, &alts, &siblings, criteria)),
+            .map(|(q, norm)| search_animetosho(client, q, norm, alts, siblings, criteria)),
     );
     let nyaa_first = async {
         match rounds.first() {
@@ -1725,7 +1789,7 @@ pub async fn find_candidates(
                 futures_util::future::join_all(
                     queries
                         .iter()
-                        .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
+                        .map(|(q, norm, crit)| search_nyaa(client, q, norm, alts, siblings, *crit)),
                 )
                 .await
             }
@@ -1795,7 +1859,7 @@ pub async fn find_candidates(
         for batch in futures_util::future::join_all(
             queries
                 .iter()
-                .map(|(q, norm, crit)| search_nyaa(client, q, norm, &alts, &siblings, *crit)),
+                .map(|(q, norm, crit)| search_nyaa(client, q, norm, alts, siblings, *crit)),
         )
         .await
         {
@@ -1837,6 +1901,153 @@ pub async fn find_candidates(
             .then(b.seeders.cmp(&a.seeders))
     });
     all
+}
+
+/// What a release adds to this AniList entry's own episode numbering, read off
+/// the numbers the releases themselves state.
+///
+/// A cour split off into its own AniList entry is numbered twice: AniList gives
+/// "BLEACH: Sennen Kessen-hen - Kashin-tan" (id 185874) episodes 1-10 while
+/// every group on Nyaa continues the franchise's count, so its first episode
+/// ships as 41. Nothing is named "- 01", so the per-episode queries return zero
+/// items and the entry has no candidates at all. Measured 2026-09-07: one
+/// untagged AV1 pack, score 380, which `layout` then refuses.
+///
+///   [ToonsHub] BLEACH Thousand-Year Blood War S01E41 1080p CR WEB-DL ...
+///   [AnoZu] Bleach S17E41 ... | Bleach: Thousand-Year Blood War - The Calamity
+///   [Doomdos] - BLEACH_ Thousand-Year Blood War - The Calamity - 41 [1080p ...]
+///   [Lazier] Bleach Thousand-Year Blood War - 41 (WEB 1080p EAC3) | ...
+///
+/// Sister to `absolute_episode`, which does the same job for the files inside
+/// one pack, and guarded the same way: the stated numbers must form a
+/// contiguous run, that run must be exactly as long as this entry has *aired*,
+/// and it must start past this entry's own last episode. The length check is
+/// what makes `lo` trustworthy rather than a guess. Nyaa's feed is ordered by
+/// seeders and read up to a cap, so a busy title can hand back a sample with
+/// the earliest episode missing -- and a sample of 42..47 for a cour with 7
+/// episodes out is 6 long, not 7, so it is refused instead of shifting every
+/// episode by one.
+///
+/// `aired` rather than `episode_count` because AniList publishes the whole
+/// cour's length as soon as it is announced: this entry says 10 episodes while
+/// 7 exist. Comparing against 10 would refuse every airing cour, which is
+/// exactly when a viewer hits this.
+pub fn absolute_offset(
+    stated: &[i64],
+    episode_count: Option<i64>,
+    aired: Option<i64>,
+) -> Option<i64> {
+    let (count, aired) = (episode_count?, aired?);
+    // Two numbers is the least that can establish a run at all; one release
+    // stating a number says nothing about where the run begins.
+    if aired < 2 || aired > count {
+        return None;
+    }
+    let mut nums: Vec<i64> = stated.to_vec();
+    nums.sort_unstable();
+    nums.dedup();
+    let (&lo, &hi) = (nums.first()?, nums.last()?);
+    if hi - lo + 1 != nums.len() as i64 || nums.len() as i64 != aired {
+        return None;
+    }
+    // The run has to start past everything this entry numbers itself, or the
+    // two readings of it are indistinguishable -- the same ambiguity
+    // `absolute_episode` refuses on: for a 12-episode Part 2 shipped as
+    // 12-23, relative episode 12 and absolute release 12 both exist and are
+    // different episodes. Costs the fix a franchise whose earlier cour is
+    // shorter than this one; that is the case where the evidence genuinely
+    // does not say, and guessing it plays the wrong episode.
+    if lo <= count {
+        return None;
+    }
+    Some(lo - 1)
+}
+
+/// Ask each title variant what episode numbers its releases actually carry,
+/// and infer the offset from them.
+///
+/// One extra Nyaa query per variant, and only ever on the path that was about
+/// to answer "no streams found" -- the episodeless query is the one form that
+/// cannot come back empty just because the episode is spelled differently, so
+/// it is the only one worth re-asking. Runs against every variant at once
+/// because the romaji and English spellings return different subsets of the
+/// same releases (measured: 19 items for "Kashin-tan", 25 for "The Calamity",
+/// both covering 41-47), and the union is what has to be contiguous.
+async fn probe_absolute_offset(
+    client: &reqwest::Client,
+    expanded: &[String],
+    alts: &[String],
+    siblings: &SiblingTitles<'_>,
+    criteria: ReleaseCriteria,
+) -> Option<i64> {
+    // An OVA/specials entry is numbered against its franchise's specials
+    // sequence, which `ReleaseCriteria::extras` and `strip_extras_marker`
+    // already handle; a film has no episode number to shift at all.
+    if criteria.extras || criteria.allow_episodeless {
+        return None;
+    }
+    // Nothing to verify an inferred run against, so nothing this could find
+    // would be more than a guess. Checked up front rather than left to
+    // `absolute_offset`, which is only reached after the queries are paid for.
+    if criteria.episode_count.is_none() || criteria.aired_episodes.is_none() {
+        return None;
+    }
+    let stated: Vec<i64> = futures_util::future::join_all(expanded.iter().map(|title| {
+        let query = format!("{} 1080p", search_query_form(title));
+        let norm = normalize(title);
+        async move { stated_episodes(client, &query, &norm, alts, siblings).await }
+    }))
+    .await
+    .into_iter()
+    .flatten()
+    .collect();
+    let offset = absolute_offset(&stated, criteria.episode_count, criteria.aired_episodes)?;
+    // The episode asked for has to land inside the run the releases actually
+    // cover; an offset says nothing about an episode that has not aired.
+    let absolute = criteria.episode + offset;
+    stated.contains(&absolute).then_some(offset)
+}
+
+/// The episode numbers stated by releases that name this entry, ignoring which
+/// episode was asked for.
+///
+/// Deliberately not `search_nyaa` with a loosened filter: `score_release`
+/// rejects a wrong-episode release and a wrong-*show* release identically, and
+/// the whole question here is which of the two happened.
+async fn stated_episodes(
+    client: &reqwest::Client,
+    query: &str,
+    query_title_norm: &str,
+    alts: &[String],
+    siblings: &SiblingTitles<'_>,
+) -> Vec<i64> {
+    let url = format!(
+        "https://nyaa.si/?page=rss&c=1_2&f=0&s=seeders&o=desc&q={}",
+        urlencoding_encode(query)
+    );
+    let Ok(resp) = client.get(&url).send().await else { return vec![] };
+    if !resp.status().is_success() {
+        log::warn!("torrent: nyaa numbering probe returned HTTP {} for '{}'", resp.status(), query);
+        return vec![];
+    }
+    let Ok(body) = resp.text().await else { return vec![] };
+    let item_re = regex_lite::Regex::new(r"(?s)<item>(.*?)</item>").unwrap();
+    let title_re = regex_lite::Regex::new(r"(?s)<title>(.*?)</title>").unwrap();
+    let mut out = vec![];
+    for c in item_re.captures_iter(&body).take(40) {
+        let Some(name) = title_re.captures(&c[1]).map(|t| minimal_unescape(t[1].trim())) else {
+            continue;
+        };
+        if !title_matches_with_alts(query_title_norm, &name, alts)
+            || names_a_sibling(&normalize(&name), siblings.own, siblings.related)
+        {
+            continue;
+        }
+        if let Some(ep) = filename_episode(&name) {
+            out.push(ep);
+        }
+    }
+    out
 }
 
 /// Collapse the several listings of one release into one candidate.
@@ -1938,6 +2149,103 @@ mod tests {
         }
     }
 
+    /// The releases Nyaa carried for the fourth cour of Bleach: Thousand-Year
+    /// Blood War on 2026-09-07, one per group and one per episode that had
+    /// aired. AniList calls this entry (id 185874) episodes 1-10; every one of
+    /// these numbers the same episodes 41-47.
+    const BLEACH_CALAMITY_RELEASES: &[&str] = &[
+        "[ToonsHub] BLEACH Thousand-Year Blood War S01E41 1080p CR WEB-DL AAC2.0 H.264 (BLEACH: Sennen Kessen-hen - Kashin-tan, Multi-Subs)",
+        "[AnoZu] Bleach S17E42 1080p CR WEB-DL AAC 2.0 H.264 | Bleach: Thousand-Year Blood War - The Calamity | Bleach: Sennen Kessen-hen - Kashin-tan",
+        "[Lazier] Bleach Thousand-Year Blood War - 43 (WEB 1080p EAC3) | Bleach: Thousand-Year Blood War - The Calamity | Bleach: Sennen Kessen Hen - Kashin Tan",
+        "[Doomdos] - BLEACH Thousand-Year Blood War - The Calamity - 44 [1080p IQ WEB-DL]",
+        "BLEACH Thousand Year Blood War S04E45 DEFEND YOU 1080p CR WEB-DL AAC2.0 H.264-VARYG (Bleach: Sennen Kessen-hen - Kashin-tan, Multi-Subs)",
+        "[ToonsHub] Bleach Thousand-Year Blood War S01E46 1080p BILI WEB-DL AAC2.0 H.265 (BLEACH: Sennen Kessen-hen - Kashin-tan, Multi-Subs)",
+        "[AnoZu] Bleach S17E47 1080p CR WEB-DL AAC 2.0 H.264 | Bleach: Thousand-Year Blood War - The Calamity | Bleach: Sennen Kessen-hen - Kashin-tan",
+    ];
+
+    fn stated(names: &[&str]) -> Vec<i64> {
+        names.iter().filter_map(|n| filename_episode(n)).collect()
+    }
+
+    /// The bug: asking for episode 1 of a cour whose releases all start at 41
+    /// found nothing, because nothing on Nyaa is named "- 01".
+    #[test]
+    fn a_cour_numbered_by_its_franchise_maps_its_first_episode_onto_the_release_number() {
+        let nums = stated(BLEACH_CALAMITY_RELEASES);
+        assert_eq!(nums, vec![41, 42, 43, 44, 45, 46, 47], "release numbering misread");
+        // 10 announced, 7 aired.
+        assert_eq!(absolute_offset(&nums, Some(10), Some(7)), Some(40));
+    }
+
+    /// Every listing of every episode arrives, so the same number shows up
+    /// several times -- that must not make the run look longer than it is.
+    #[test]
+    fn duplicate_listings_of_one_episode_do_not_lengthen_the_run() {
+        let mut nums = stated(BLEACH_CALAMITY_RELEASES);
+        nums.extend(stated(BLEACH_CALAMITY_RELEASES));
+        assert_eq!(absolute_offset(&nums, Some(10), Some(7)), Some(40));
+    }
+
+    /// The wrong-episode hazard this is guarded against. Nyaa's feed is
+    /// ordered by seeders and read up to a cap, so a busy title can hand back
+    /// a sample the first episode has fallen out of. Taking its minimum would
+    /// shift every episode by one and play episode 2 for a request for
+    /// episode 1; the run being one short of what has aired says so.
+    #[test]
+    fn a_sample_missing_the_first_episode_is_refused_rather_than_shifted() {
+        let nums: Vec<i64> = stated(BLEACH_CALAMITY_RELEASES).into_iter().filter(|e| *e != 41).collect();
+        assert_eq!(nums.len(), 6);
+        assert_eq!(absolute_offset(&nums, Some(10), Some(7)), None);
+    }
+
+    /// A gap in the middle is the same evidence problem: whatever produced it
+    /// could equally have eaten the start of the run.
+    #[test]
+    fn a_run_with_a_hole_in_it_is_refused() {
+        assert_eq!(absolute_offset(&[41, 42, 44, 45, 46, 47, 48], Some(10), Some(7)), None);
+    }
+
+    /// The ordinary case, and the one that must never move: a cour whose
+    /// releases are numbered from 1 like AniList numbers it. "Sword Art
+    /// Online: Alicization - War of Underworld" is a sequel cour of a
+    /// 24-episode predecessor and is still shipped as 01-12.
+    #[test]
+    fn a_cour_numbered_from_one_gets_no_offset() {
+        let nums: Vec<i64> = (1..=12).collect();
+        assert_eq!(absolute_offset(&nums, Some(12), Some(12)), None);
+    }
+
+    /// Without an aired count there is nothing to measure the run against, and
+    /// the announced length is not a substitute: this entry says 10 while
+    /// seven episodes exist, so comparing against it refuses every cour that
+    /// is still airing -- which is when a viewer meets this.
+    #[test]
+    fn an_unknown_or_mismatched_aired_count_refuses() {
+        let nums = stated(BLEACH_CALAMITY_RELEASES);
+        assert_eq!(absolute_offset(&nums, Some(10), None), None);
+        assert_eq!(absolute_offset(&nums, None, Some(7)), None);
+        assert_eq!(absolute_offset(&nums, Some(10), Some(10)), None);
+    }
+
+    /// One release stating one number establishes nothing about where the run
+    /// begins.
+    #[test]
+    fn a_single_stated_episode_establishes_no_run() {
+        assert_eq!(absolute_offset(&[41], Some(10), Some(1)), None);
+    }
+
+    /// What `find_candidates` tests the pool against before deciding the
+    /// search failed. A pack listed as a range spans the number without naming
+    /// it, and `score_release` clears `assume_batch` for it either way -- so
+    /// reading the range as "episode 1 was found" would let a cour-one pack
+    /// suppress the rescue for cour four and play the wrong episode.
+    #[test]
+    fn a_range_batch_does_not_name_the_episode_it_spans() {
+        assert_eq!(filename_episode("[Judas] Bleach Sennen Kessen-hen (01-13) [1080p]"), None);
+        assert_eq!(filename_episode("[SubsPlease] Sousou no Frieren - 01-28 (1080p)"), None);
+        assert_eq!(filename_episode("[SubsPlease] Sousou no Frieren - 01 (1080p)"), Some(1));
+    }
+
     /// The exact shape that made this necessary: AnimeTosho and Nyaa both
     /// list one release, their tracker scrapes disagree about the swarm, and
     /// only one of the two listings knows a direct `.torrent` URL.
@@ -2025,6 +2333,7 @@ mod tests {
             browser_client: false,
             extras: false,
             episode_count: None,
+            aired_episodes: None,
         };
         let scored = |prefer_dub: bool| {
             score_release(subs_only, &normalize("some show"), &alts, &siblings, crit(prefer_dub))
@@ -2097,6 +2406,7 @@ mod tests {
             browser_client: false,
             extras: false,
             episode_count: None,
+            aired_episodes: None,
         }
     }
 
@@ -2109,6 +2419,7 @@ mod tests {
             browser_client: true,
             extras: false,
             episode_count: None,
+            aired_episodes: None,
         }
     }
 
@@ -2783,6 +3094,7 @@ mod extras_tests {
             browser_client: false,
             extras: true,
             episode_count: Some(count),
+            aired_episodes: Some(count),
         };
         // Scored as the real entries are: with their own titles, which is
         // what `names_an_unrelated_extra` reads to tell "Burst Specials" from

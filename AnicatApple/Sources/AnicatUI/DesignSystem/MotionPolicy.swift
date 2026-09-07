@@ -67,8 +67,13 @@ public enum MotionPolicy {
             MainActor.assumeIsolated { refresh() }
         }
         #elseif canImport(UIKit)
-        cachedReduceMotion = UIAccessibility.isReduceMotionEnabled
-        cachedReduceTransparency = UIAccessibility.isReduceTransparencyEnabled
+        // Same shape as the macOS branch: the first read hops to the main
+        // actor rather than asserting it, since the bootstrap can run from
+        // wherever the first `reduce` read happens.
+        Task { @MainActor in
+            cachedReduceMotion = UIAccessibility.isReduceMotionEnabled
+            cachedReduceTransparency = UIAccessibility.isReduceTransparencyEnabled
+        }
         NotificationCenter.default.addObserver(
             forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
             object: nil,

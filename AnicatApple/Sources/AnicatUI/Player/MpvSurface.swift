@@ -1154,10 +1154,17 @@ public struct MpvSurface {
         /// wide picture for the eye. The 1.0 / 1.5 detour it replaces was a
         /// visible squeeze for however long it lasted.
         func nudgeVideoReconfig() {
-            guard mpv != nil else { return }
+            let debug = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
+            guard mpv != nil else {
+                if debug { PlayerLog.write("[nudge] skipped: no handle") }
+                return
+            }
             nudgeLock.lock()
             defer { nudgeLock.unlock() }
-            guard restoreAspectOverride == nil else { return }
+            guard restoreAspectOverride == nil else {
+                if debug { PlayerLog.write("[nudge] skipped: restore pending") }
+                return
+            }
             let current = stringProperty("video-aspect-override") ?? "-1"
             // Written as steps: the one-expression version of this chain
             // took the CI toolchain past its type-check budget.
@@ -1167,10 +1174,24 @@ public struct MpvSurface {
             } else if let overridden = Double(current), overridden > 0 {
                 aspect = overridden
             }
-            let detour = String(format: "%.6f", aspect * 1.0005)
-            restoreAspectOverride = current
+            // Away from whatever is set now, and never restored to a detour.
+            // The player log had `video-aspect-override` parked at 1.778667
+            // (16:9 times 1.0005, the detour itself) for minutes: a nudge had
+            // read the previous nudge's detour as the value to restore, so
+            // every nudge after it set the value already in place, mpv saw
+            // no change and never reconfigured, and the 320x180 mini-player
+            // showed the top-left of a 1673x941 picture. Nothing in the app
+            // sets a real override, so anything positive here is a leftover
+            // detour and goes back to mpv 0.41's default of -2 (container
+            // aspect) rather than being preserved.
+            let up = aspect * 1.0005, down = aspect * 0.9995
+            let detour = abs((Double(current) ?? -1) - up) < 0.0001 ? down : up
+            restoreAspectOverride = (Double(current) ?? 1) <= 0 ? current : "-2"
             nudgeOSDBefore = stringProperty("osd-dimensions/w")
-            runCommand(["set", "video-aspect-override", detour])
+            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+                PlayerLog.write(String(format: "[nudge] override %@ -> %.6f, osd/w %@", current, detour, nudgeOSDBefore ?? "-"))
+            }
+            runCommand(["set", "video-aspect-override", String(format: "%.6f", detour)])
             scheduleNudgeRestore(after: 0.03)
         }
 
@@ -1206,8 +1227,12 @@ public struct MpvSurface {
                     return
                 }
                 self.restoreAspectOverride = nil
+                let waited = self.nudgeWaitedFor
                 self.nudgeWaitedFor = 0
                 self.nudgeLock.unlock()
+                if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+                    PlayerLog.write(String(format: "[nudge] restore to %@ after %.2fs, reconfigured %@", original, waited, reconfigured ? "yes" : "no"))
+                }
                 self.runCommand(["set", "video-aspect-override", original])
             }
         }
@@ -1219,6 +1244,9 @@ public struct MpvSurface {
         private var reconfigAttemptsForSize = 0
 
         func drawableSizeChanged(to size: CGSize) {
+            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+                PlayerLog.write(String(format: "[nudge] drawable now %.0fx%.0f", size.width, size.height))
+            }
             lastDrawableSize = size
             reconfigAttemptsForSize = 0
             nudgeVideoReconfig()

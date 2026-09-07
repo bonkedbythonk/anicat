@@ -107,6 +107,50 @@ enum ScreenshotFixtures {
         return rows.sorted { $0.watchedAt > $1.watchedAt }
     }
 
+    /// A year of watch statistics with a believable rhythm: most evenings
+    /// one or two episodes, weekends more, a few gaps. Deterministic, so two
+    /// screenshots taken a day apart agree.
+    static func watchStats(days: Int, topTitleIDs: [Int64]) -> FfiWatchStats {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let calendar = Calendar.current
+        var perDay: [FfiDayCount] = []
+        var episodes: Int32 = 0
+        var seconds: Int64 = 0
+        var streak = 0, longest = 0
+        for back in stride(from: days - 1, through: 0, by: -1) {
+            let date = calendar.date(byAdding: .day, value: -back, to: Date()) ?? Date()
+            let weekday = calendar.component(.weekday, from: date)
+            // A cheap hash of the day index picks the count; weekends lean
+            // higher and one week in five is skipped entirely.
+            let hash = (back * 2654435761) % 97
+            var count: Int32 = hash < 30 ? 0 : hash < 70 ? 1 : hash < 88 ? 2 : 3
+            if weekday == 1 || weekday == 7, count > 0 { count += 1 }
+            if (back / 7) % 5 == 3 { count = 0 }
+            if count > 0 { streak += 1; longest = max(longest, streak) } else { streak = 0 }
+            episodes += count
+            seconds += Int64(count) * 1_420
+            perDay.append(FfiDayCount(date: formatter.string(from: date), episodes: count, seconds: Int64(count) * 1_420))
+        }
+        let counts: [Int32] = [14, 11, 9, 7, 6, 4, 3, 2]
+        let topTitles = topTitleIDs.prefix(8).enumerated().map { index, id in
+            FfiTitleCount(catalog: .anilist, catalogId: id, episodes: counts[index], seconds: Int64(counts[index]) * 1_420)
+        }
+        let first = calendar.date(byAdding: .day, value: -(days - 1), to: Date()) ?? Date()
+        return FfiWatchStats(
+            totalWatchSeconds: seconds,
+            episodesWatched: episodes,
+            titlesStarted: Int32(min(topTitleIDs.count, 8) + days / 30),
+            perDay: perDay,
+            currentStreakDays: Int32(streak),
+            longestStreakDays: Int32(longest),
+            topTitles: topTitles,
+            busiestHour: 21,
+            firstWatchAt: ISO8601DateFormatter().string(from: first)
+        )
+    }
+
     /// The list entry an open detail page shows: partway through, unscored.
     static func listEntry(episodeCount: Int?) -> (status: String, progress: Int, resumeEpisode: Int, resumeSeconds: Int) {
         let progress = max(1, min(7, (episodeCount ?? 12) - 1))

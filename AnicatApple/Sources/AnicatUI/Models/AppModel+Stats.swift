@@ -62,6 +62,14 @@ extension AppModel {
     /// the page actually needs.
     public func loadWatchStats() {
         guard let engine else { return }
+        if ScreenshotFixtures.isEnabled {
+            // The registry is the owner's real watch log, shared with the
+            // test bundle; the Stats page is fixture data like the shelves.
+            let ids = watchingItems.map(\.id)
+            watchStatsSnapshot = ScreenshotFixtures.watchStats(days: 365, topTitleIDs: ids)
+            watchStatsRecentSnapshot = ScreenshotFixtures.watchStats(days: 30, topTitleIDs: Array(ids.dropFirst(2)) + Array(ids.prefix(2)))
+            return
+        }
         watchStatsSnapshot = try? engine.watchStats(days: 365)
         watchStatsRecentSnapshot = try? engine.watchStats(days: 30)
     }

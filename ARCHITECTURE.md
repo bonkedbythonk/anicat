@@ -138,7 +138,9 @@ lives here, and nothing here knows there is a UI.
   `user_version` migrations.
 - **`reader/`** — MangaDex over its public REST API first; MangaKatana as an
   HTML fallback for titles MangaDex has matched but has nothing readable
-  under. Syosetu for web novels.
+  under, and as the fill for a sparse feed (a licensed title keeps only its
+  newest simulpub chapters on MangaDex; the rest of the run is merged in
+  from MangaKatana, deduplicated by chapter number). Syosetu for web novels.
 - **`torrent/`** — the anime source. Candidates come from three independent
   indexes fired as one wave (SubsPlease, AnimeTosho, Nyaa RSS) plus SeaDex's
   curated per-entry pick. `layout.rs` decides which file inside a pack is the

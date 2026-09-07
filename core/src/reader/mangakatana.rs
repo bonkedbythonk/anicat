@@ -2,7 +2,9 @@
 //! the AniList match but has nothing readable under it (a publisher takedown
 //! leaves every English chapter at `pages: 0`; see `reader::mangadex`'s
 //! `matches_anilist` doc comment for the concrete case: "Tomodachi Game" has
-//! 127 chapters on MangaKatana and zero readable ones on MangaDex). MangaKatana
+//! 127 chapters on MangaKatana and zero readable ones on MangaDex), and the
+//! fill when MangaDex has too little (One Piece: one readable chapter, 1191,
+//! against 1198 here; see `reader::mangadex`'s module note). MangaKatana
 //! carries no AniList cross-reference, so results here are title-matched only
 //! and are always tried after MangaDex, never instead of it.
 //!

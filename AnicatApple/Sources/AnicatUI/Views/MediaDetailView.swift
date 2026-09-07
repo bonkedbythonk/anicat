@@ -890,59 +890,70 @@ public struct MediaDetailView: View {
     @ViewBuilder
     private var moreFromStudio: some View {
         if let studio = shelfStudio {
-            Group {
+            // The VStack is unconditional and only its contents are gated:
+            // the shelf starts empty, and a `.task` attached to a branch
+            // that renders nothing is not reliably installed — the fetch it
+            // is waiting on is the one that would have filled it.
+            VStack(alignment: .leading, spacing: 12) {
                 if !studioWorks.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Button {
-                            studioPageActions.open(studio.id)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("MORE FROM \(studio.name.uppercased())")
-                                    .sumiTabularMono(size: 11)
-                                    .foregroundColor(SumiTheme.indigo)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundColor(SumiTheme.indigo.opacity(0.7))
-                            }
-                            .contentShape(Rectangle())
+                    Button {
+                        studioPageActions.open(studio.id)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("MORE FROM \(studio.name.uppercased())")
+                                .sumiTabularMono(size: 11)
+                                .foregroundColor(SumiTheme.indigo)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(SumiTheme.indigo.opacity(0.7))
                         }
-                        .buttonStyle(.sumiPressable)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 16) {
-                                ForEach(studioWorks) { work in
-                                    PersonMediaPoster(
-                                        title: work.title,
-                                        coverImage: work.coverImage,
-                                        year: nil,
-                                        caption: work.format
-                                    ) {
-                                        onSelectMediaId?(
-                                            work.id,
-                                            work.title,
-                                            URL(string: work.coverImage),
-                                            AppModel.isMangaFormat(work.format)
-                                        )
-                                    }
-                                    .frame(width: 140)
-                                }
-                            }
-                            .padding(.bottom, 4)
-                        }
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 56)
-                    .padding(.bottom, 64)
-                    .frame(maxWidth: 1150, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .transition(.opacity)
+                    .buttonStyle(.sumiPressable)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 16) {
+                            ForEach(studioWorks) { work in
+                                PersonMediaPoster(
+                                    title: work.title,
+                                    coverImage: work.coverImage,
+                                    year: nil,
+                                    caption: work.format
+                                ) {
+                                    onSelectMediaId?(
+                                        work.id,
+                                        work.title,
+                                        URL(string: work.coverImage),
+                                        AppModel.isMangaFormat(work.format)
+                                    )
+                                }
+                                .frame(width: 140)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
                 }
             }
+            .padding(.horizontal, 56)
+            // Zero while empty: the container has to stay mounted for the
+            // `.task` below, and a title whose studio has nothing else to
+            // show would otherwise pad the page with a blank band.
+            .padding(.bottom, studioWorks.isEmpty ? 0 : 64)
+            .frame(maxWidth: 1150, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .task(id: studio.id) {
                 let works = await studioPageActions.works(studio.id)
                 // The studio's own list includes the title being viewed;
                 // dropping it here rather than in the cache keeps that
                 // cache shareable with every other title the studio made.
                 let others = works.filter { $0.id != details.id }.prefix(Self.studioShelfCount)
+                // An empty answer is not necessarily "this studio has
+                // nothing": a second title by the same studio opened while
+                // the first one's fetch is still running is told the
+                // request is already in flight. Writing that emptiness in
+                // would leave the shelf blank with nothing left to refire
+                // it.
+                guard !others.isEmpty else { return }
                 withAnimation(.sumi(.page)) {
                     studioWorks = Array(others)
                 }
@@ -1653,6 +1664,7 @@ public struct MediaDetailView: View {
             CharactersTabSection(characters: characters, onSelectCharacter: onSelectCharacter)
         case .related:
             RelatedTabSection(
+                details: details,
                 relations: relations,
                 prequel: details.prequel,
                 sequel: details.sequel,
@@ -2106,11 +2118,14 @@ private struct CharactersTabSection: View {
 }
 
 private struct RelatedTabSection: View {
+    let details: HeroBanner.Details
     let relations: [MediaDetailView.RelationItem]
     let prequel: HeroBanner.Details.Relation?
     let sequel: HeroBanner.Details.Relation?
     let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
     let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
+
+    @State private var mode = "grid"
 
     private static let mainTypes: Set<String> = ["PREQUEL", "SEQUEL", "ADAPTATION", "PARENT", "SOURCE"]
 
@@ -2118,6 +2133,28 @@ private struct RelatedTabSection: View {
         if relations.isEmpty && prequel == nil && sequel == nil {
             SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
         } else {
+            VStack(alignment: .leading, spacing: 20) {
+                SumiSegmentedControl(
+                    options: [("grid", "Grid"), ("timeline", "Timeline")],
+                    selection: $mode
+                )
+                .fixedSize()
+
+                if mode == "timeline" {
+                    WatchOrderTimeline(
+                        details: details,
+                        relations: relations,
+                        onSelectMediaId: onSelectMediaId
+                    )
+                } else {
+                    grid
+                }
+            }
+        }
+    }
+
+    private var grid: some View {
+        Group {
             VStack(alignment: .leading, spacing: 20) {
                 let mainRels = relations.filter { Self.mainTypes.contains($0.relationType) }
                 let otherRels = relations.filter { !Self.mainTypes.contains($0.relationType) }
@@ -2169,6 +2206,176 @@ private struct RelatedTabSection: View {
                 }
             }
         }
+    }
+}
+
+/// The Related tab's Timeline: the title and everything around it in the
+/// order someone would watch them, grouped by year.
+///
+/// `FfiRelation` carries no start date, episode count or list entry, so the
+/// years and the badges come from whatever detail snapshots are already on
+/// disk (see `DetailCache.peekFacts`). A relation the viewer has never
+/// opened simply has none, which is why the ordering leans on the relation
+/// type and not on dates — see `WatchOrder`.
+private struct WatchOrderTimeline: View {
+    let details: HeroBanner.Details
+    let relations: [MediaDetailView.RelationItem]
+    let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
+
+    @State private var groups: [WatchOrder.YearGroup] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(groups) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.label)
+                        .sumiTabularMono(size: 11)
+                        .foregroundColor(SumiTheme.indigo)
+
+                    VStack(spacing: 6) {
+                        ForEach(group.entries) { entry in
+                            WatchOrderRow(entry: entry) {
+                                guard !entry.isCurrent else { return }
+                                onSelectMediaId?(
+                                    entry.id,
+                                    entry.title,
+                                    entry.coverURL,
+                                    AppModel.isMangaFormat(entry.format)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Reading a snapshot per relation is file I/O, so it stays off the
+        // body and out of the main actor's way; the timeline draws empty
+        // for the frame it takes.
+        //
+        // Keyed on the relation count as well as the title: the page
+        // renders from a cached snapshot first and the fresh fetch fills
+        // `relations` afterwards. On the id alone the Grid picked those up
+        // (it reads the array in its own body) and the timeline kept
+        // showing the current title by itself.
+        .task(id: "\(details.id)-\(relations.count)") {
+            let entries = await Self.entries(details: details, relations: relations)
+            groups = WatchOrder.grouped(entries)
+        }
+    }
+
+    private static func entries(
+        details: HeroBanner.Details,
+        relations: [MediaDetailView.RelationItem]
+    ) async -> [WatchOrder.Entry] {
+        await Task.detached(priority: .userInitiated) {
+            let current = WatchOrder.Entry(
+                id: details.id,
+                title: details.title,
+                relationType: nil,
+                format: details.format,
+                coverURL: details.coverURL,
+                year: details.year,
+                episodeCount: details.episodeCount,
+                listStatus: details.listStatus,
+                isCurrent: true
+            )
+            let mapped = relations.map { relation -> WatchOrder.Entry in
+                let isManga = AppModel.isMangaFormat(relation.format)
+                // A title can be cached under either kind — the detail
+                // loader falls back to the opposite one when AniList
+                // disagrees with the format — so a miss is retried the
+                // other way round before giving up.
+                let facts = DetailCache.peekFacts(id: relation.id, isManga: isManga)
+                    ?? DetailCache.peekFacts(id: relation.id, isManga: !isManga)
+                return WatchOrder.Entry(
+                    id: relation.id,
+                    title: relation.title,
+                    relationType: relation.relationType,
+                    format: relation.format,
+                    coverURL: relation.coverURL,
+                    year: facts?.year,
+                    episodeCount: facts?.episodeCount,
+                    listStatus: facts?.listStatus
+                )
+            }
+            return WatchOrder.sort(relations: mapped, current: current)
+        }.value
+    }
+}
+
+/// One title on the timeline. The viewed title keeps its left rail so the
+/// eye finds "you are here" without reading a single row label.
+private struct WatchOrderRow: View {
+    let entry: WatchOrder.Entry
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                Rectangle()
+                    .fill(entry.isCurrent ? SumiTheme.indigo : Color.clear)
+                    .frame(width: 2)
+
+                Color.clear
+                    .frame(width: 34, height: 48)
+                    .overlay {
+                        CachedAsyncImage(url: entry.coverURL, maxPixelSize: 120) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(SumiTheme.card)
+                        }
+                    }
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.title)
+                        .font(.system(size: 13, weight: entry.isCurrent ? .bold : .semibold))
+                        .foregroundColor(isHovered && !entry.isCurrent ? SumiTheme.indigo : SumiTheme.foreground)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        Text(badgeLabel)
+                            .sumiTabularMono(size: 9.5)
+                            .foregroundColor(entry.isCurrent ? SumiTheme.indigo : SumiTheme.muted)
+                        if let format = entry.format {
+                            Text(format)
+                                .sumiTabularMono(size: 9.5)
+                                .foregroundColor(SumiTheme.muted.opacity(0.8))
+                        }
+                        if let count = entry.episodeCount, count > 0 {
+                            Text("\(count) EP")
+                                .sumiTabularMono(size: 9.5)
+                                .foregroundColor(SumiTheme.muted.opacity(0.8))
+                        }
+                        if let status = entry.listStatus {
+                            Text(status.replacingOccurrences(of: "_", with: " "))
+                                .sumiTabularMono(size: 9.5)
+                                .foregroundColor(SumiTheme.indigo.opacity(0.8))
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.trailing, 10)
+            .padding(.vertical, 6)
+            .background(isHovered && !entry.isCurrent ? SumiTheme.card : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .disabled(entry.isCurrent)
+        .stableHover { isHovered = $0 }
+        .animation(.sumi(.pop), value: isHovered)
+    }
+
+    private var badgeLabel: String {
+        if entry.isCurrent { return "YOU ARE HERE" }
+        guard let type = entry.relationType else { return "RELATED" }
+        return type.replacingOccurrences(of: "_", with: " ")
     }
 }
 

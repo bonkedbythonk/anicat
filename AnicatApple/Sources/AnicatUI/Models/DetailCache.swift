@@ -58,6 +58,30 @@ enum DetailCache {
         return try? JSONDecoder().decode(Snapshot.self, from: data)
     }
 
+    /// The handful of facts about a title that `FfiRelation` does not
+    /// carry, for a caller that wants them about a title it is *listing*
+    /// rather than opening.
+    struct Facts: Sendable {
+        let year: Int?
+        let episodeCount: Int?
+        let listStatus: String?
+    }
+
+    /// Like `load`, minus the mtime touch — and that difference is the
+    /// whole reason it exists. The watch-order timeline reads a snapshot
+    /// for every relation of the open title; going through `load` would
+    /// promote a dozen titles the viewer never opened to the top of the
+    /// LRU and evict ones they actually read.
+    static func peekFacts(id: Int64, isManga: Bool) -> Facts? {
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: isManga)),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return nil }
+        return Facts(
+            year: snapshot.details.year,
+            episodeCount: snapshot.details.episodeCount,
+            listStatus: snapshot.details.listStatus
+        )
+    }
+
     /// Seconds since this snapshot was written, read *before* `load()` touches
     /// the mtime for LRU purposes — call this first if both are needed.
     static func ageInSeconds(id: Int64, isManga: Bool) -> TimeInterval? {

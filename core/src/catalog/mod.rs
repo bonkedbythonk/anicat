@@ -782,16 +782,43 @@ impl Catalogs {
         Ok(())
     }
 
-    /// Toggles the AniList favourite heart for a title.
-    pub async fn toggle_favourite(&self, media_id: i64, is_manga: bool) -> Result<(), String> {
+    /// Toggles the AniList favourite heart for a title and returns whether
+    /// it is a favourite afterwards.
+    ///
+    /// The answer comes from the mutation's own favourites list, not from
+    /// re-reading the media: seven presses in a row in the app each logged
+    /// "was true, now true" because the detail query fired straight after
+    /// the mutation returned the pre-toggle `isFavourite` every time. The
+    /// cached detail row is patched to the answer rather than invalidated
+    /// for the same reason: a refetch would read that stale value back in.
+    /// The list is one page of 50 (AniList's maximum); a title outside it
+    /// falls back to the toggle's own meaning, `!currently`.
+    pub async fn toggle_favourite(
+        &self,
+        media_id: i64,
+        is_manga: bool,
+        currently: bool,
+    ) -> Result<bool, String> {
         let mut vars = HashMap::new();
         let key = if is_manga { "mangaId" } else { "animeId" };
         vars.insert(key.to_string(), serde_json::json!(media_id));
-        let _: serde_json::Value =
+        let response: serde_json::Value =
             self.anilist.execute(anilist::queries::TOGGLE_FAVOURITE_MUTATION, vars).await?;
-        self.cache.invalidate("media_detail");
+        let list = if is_manga { "manga" } else { "anime" };
+        let nodes = response["ToggleFavourite"][list]["nodes"].as_array();
+        let is_favourite = match nodes {
+            Some(nodes) if nodes.iter().any(|n| n["id"].as_i64() == Some(media_id)) => true,
+            Some(nodes) if nodes.len() < 50 => false,
+            _ => !currently,
+        };
+        log::info!(
+            "[favourite] {media_id}: toggled, listed={} of {} returned, now {is_favourite}",
+            is_favourite,
+            nodes.map(|n| n.len()).unwrap_or(0)
+        );
+        self.cache.set_media_detail_favourite(media_id, is_favourite);
         self.cache.invalidate("get_user_profile");
-        Ok(())
+        Ok(is_favourite)
     }
 
     /// Removes a title from the signed-in user's list entirely. Takes the

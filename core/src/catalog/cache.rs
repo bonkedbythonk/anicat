@@ -316,6 +316,27 @@ impl AniListCache {
         }
     }
 
+    /// Rewrites `isFavourite` on every cached `media_detail` row for one
+    /// title, in memory and on disk. See `Catalogs::toggle_favourite` for
+    /// why this is a patch and not an invalidation.
+    pub fn set_media_detail_favourite(&self, media_id: i64, is_favourite: bool) {
+        let prefix = format!("media_detail|id={media_id}|");
+        let mut entries = self.entries.lock().unwrap();
+        let mut touched = Vec::new();
+        for (key, (value, _)) in entries.iter_mut() {
+            if key.starts_with(&prefix) {
+                if let Some(media) = value.get_mut("Media") {
+                    media["isFavourite"] = Value::Bool(is_favourite);
+                    touched.push((key.clone(), value.clone()));
+                }
+            }
+        }
+        drop(entries);
+        for (key, value) in &touched {
+            self.disk_patch(key, value);
+        }
+    }
+
     /// Best-effort lookup of the media's current progress from cached list
     /// data. Used to guard AniList writes so progress only ever moves forward —
     /// returns None when no cached entry is known (cold cache), in which case

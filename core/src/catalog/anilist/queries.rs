@@ -229,8 +229,8 @@ mutation ($id: Int) {
 pub const TOGGLE_FAVOURITE_MUTATION: &str = r#"
 mutation ($animeId: Int, $mangaId: Int) {
   ToggleFavourite(animeId: $animeId, mangaId: $mangaId) {
-    anime { nodes { id } }
-    manga { nodes { id } }
+    anime(perPage: 50) { nodes { id } }
+    manga(perPage: 50) { nodes { id } }
   }
 }
 "#;

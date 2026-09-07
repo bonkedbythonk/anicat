@@ -1486,10 +1486,17 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Network { msg })
     }
 
-    /// Toggles the AniList favourite heart for a title.
-    pub async fn toggle_favourite(&self, catalog_id: i64, is_manga: bool) -> FfiResult<()> {
+    /// Toggles the AniList favourite heart for a title. `currently_favourite`
+    /// is what the page shows; the return value is what AniList holds after
+    /// the toggle (see `Catalogs::toggle_favourite`).
+    pub async fn toggle_favourite(
+        &self,
+        catalog_id: i64,
+        is_manga: bool,
+        currently_favourite: bool,
+    ) -> FfiResult<bool> {
         self.catalogs
-            .toggle_favourite(catalog_id, is_manga)
+            .toggle_favourite(catalog_id, is_manga, currently_favourite)
             .await
             .map_err(|msg| AnicatError::Network { msg })
     }

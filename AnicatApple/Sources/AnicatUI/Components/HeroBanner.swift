@@ -37,7 +37,7 @@ public enum HeroBanner {
         /// comes from local watch history) — marking an episode watched by
         /// hand has to advance this one.
         public let listProgress: Int?
-        public let isFavourite: Bool
+        public var isFavourite: Bool
         /// MyAnimeList's id for this same title, when AniList has the
         /// mapping. AniSkip (intro/outro skip times) is keyed by MAL id, not
         /// AniList's — this is the only bridge between the two catalogs.

@@ -503,16 +503,23 @@ extension AppModel {
 
     public func toggleFavourite() async {
         guard let engine, let details = selectedMediaDetails else { return }
+        let isManga = currentDetailIsManga()
         do {
-            try await engine.toggleFavourite(catalogId: details.id, isManga: currentDetailIsManga())
+            let now = try await engine.toggleFavourite(
+                catalogId: details.id, isManga: isManga, currentlyFavourite: details.isFavourite)
             await recordAniListSuccess()
-            let before = details.isFavourite
-            defer {
-                PlayerLog.write("[favourite] \(details.id): was \(before), now \(selectedMediaDetails?.isFavourite ?? before)")
+            PlayerLog.write("[favourite] \(details.id): was \(details.isFavourite), now \(now)")
+            // Taken from the mutation's answer, not from a refetch: seven
+            // presses in a row logged "was true, now true" because the
+            // detail query re-read after each toggle returned the value from
+            // before it. The engine patches its own cached row to the same
+            // answer, so the snapshot here is what a reopen will read too.
+            guard selectedMediaDetails?.id == details.id else { return }
+            selectedMediaDetails?.isFavourite = now
+            if var snapshot = DetailCache.load(id: details.id, isManga: isManga) {
+                snapshot.details.isFavourite = now
+                DetailCache.save(snapshot, id: details.id, isManga: isManga)
             }
-            // See `removeFromList`/`updateListEntry` — same `openDetail(id:)`
-            // dedup-guard no-op.
-            await loadDetail(id: details.id, isManga: currentDetailIsManga(), forceRefresh: true)
         } catch {
             await recordAniListFailure(error)
             errorMessage = "Could not update favourite: \(error.localizedDescription)"

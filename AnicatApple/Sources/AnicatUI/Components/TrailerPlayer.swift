@@ -96,6 +96,10 @@ private struct TrailerWebView: UIViewRepresentable {
 #endif
 
 private enum TrailerWebViewConfiguration {
+    // WKWebViewConfiguration is main-actor isolated on CI's toolchain (the
+    // local one let a nonisolated static build it); the representables
+    // that call this run on the main actor anyway.
+    @MainActor
     static func make() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         // Without this the embed shows a play button and waits: `autoplay=1`

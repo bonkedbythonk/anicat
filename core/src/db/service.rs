@@ -16,6 +16,25 @@ pub struct TrackPreference {
     pub subtitle_title: Option<String>,
 }
 
+/// One `resolved_releases` row as it travels between devices.
+///
+/// `RememberedRelease` deliberately carries no key and no timestamp -- it is
+/// the answer to "what played this episode" and nothing more. A row on the
+/// wire needs both: the key to land on the other side, and `resolved_at` so
+/// the merge can tell which device saw it last.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportedRelease {
+    pub catalog: String,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    pub name: String,
+    pub magnet: Option<String>,
+    pub torrent_url: Option<String>,
+    pub assume_batch: bool,
+    pub prefer_dub: bool,
+    pub resolved_at: String,
+}
+
 /// `datetime('now')` writes `YYYY-MM-DD HH:MM:SS` with no zone marker, and it
 /// is always UTC. Parsed here, at the one boundary that knows that, so the
 /// aggregation upstream deals in real instants.
@@ -864,10 +883,127 @@ impl Registry {
         Ok(())
     }
 
+    /// Every remembered release, with the timestamp, for handing to another
+    /// device on the LAN.
+    ///
+    /// This table and no other. The registry also holds per-show prefs,
+    /// provider-slug overrides and track languages, and none of them are
+    /// safe to copy blind: a track preference is stored by language plus
+    /// `subtitle_title` as a tie-break for one release's mux, and the other
+    /// device is routinely playing a different one. A remembered release is
+    /// the exception because a stale one is self-healing -- `resolve` tries
+    /// it under a bounded budget and falls through to an ordinary search
+    /// when it is dead.
+    pub fn export_resolved_releases(&self) -> Result<Vec<ExportedRelease>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, episode_number, name, magnet,
+                        torrent_url, assume_batch, prefer_dub, resolved_at
+                 FROM resolved_releases",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(ExportedRelease {
+                    catalog: r.get(0)?,
+                    catalog_id: r.get(1)?,
+                    episode_number: r.get(2)?,
+                    name: r.get(3)?,
+                    magnet: r.get(4)?,
+                    torrent_url: r.get(5)?,
+                    assume_batch: r.get::<_, i64>(6)? != 0,
+                    prefer_dub: r.get::<_, i64>(7)? != 0,
+                    resolved_at: r.get(8)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Merges another device's remembered releases in, newest wins.
+    ///
+    /// The `WHERE` on the upsert is what makes this safe to run in both
+    /// directions and repeatedly: `resolved_at` is written by
+    /// `datetime('now')` in UTC, so it compares as text, and a row that is
+    /// older than the one already here is left alone rather than overwriting
+    /// a resolve this device made more recently. Returns how many rows
+    /// actually changed.
+    pub fn import_resolved_releases(&self, rows: &[ExportedRelease]) -> Result<u32, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let mut changed = 0u32;
+        for row in rows {
+            // A catalog this build does not know is skipped rather than
+            // stored: the column is the source of truth for which id space
+            // `catalog_id` is in, and an unknown one would sit in the table
+            // matching nothing forever.
+            if Catalog::parse(&row.catalog).is_none() {
+                continue;
+            }
+            changed += tx
+                .execute(
+                    "INSERT INTO resolved_releases
+                        (catalog, catalog_id, episode_number, name, magnet,
+                         torrent_url, assume_batch, prefer_dub, resolved_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
+                        name = excluded.name,
+                        magnet = excluded.magnet,
+                        torrent_url = excluded.torrent_url,
+                        assume_batch = excluded.assume_batch,
+                        prefer_dub = excluded.prefer_dub,
+                        resolved_at = excluded.resolved_at
+                     WHERE excluded.resolved_at > resolved_releases.resolved_at",
+                    params![
+                        row.catalog,
+                        row.catalog_id,
+                        row.episode_number,
+                        row.name,
+                        row.magnet,
+                        row.torrent_url,
+                        row.assume_batch as i64,
+                        row.prefer_dub as i64,
+                        row.resolved_at,
+                    ],
+                )
+                .map_err(|e| e.to_string())? as u32;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(changed)
+    }
+
     /// Wipes every table: resume positions, provider-slug overrides, the
     /// offline list mirror, and per-show prefs. Schema/migrations are left
     /// alone — only rows go, not structure — so the next write just refills
     /// an empty database rather than re-running `migrate`.
+    /// Marks an episode finished without moving the resume position.
+    ///
+    /// The 85% rule only ever fires from a playback tick, so pressing "next
+    /// episode" part-way through left the outgoing episode unmarked -- and
+    /// unlike the AniList write, nothing else would ever set it later. The
+    /// position is deliberately untouched: the viewer left where they left.
+    pub fn mark_completed(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode_number: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO watch_history
+                 (catalog, catalog_id, episode_number, stop_time, duration, completed, watched_at)
+             VALUES (?1, ?2, ?3, 0, 0, 1, datetime('now'))
+             ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
+                 completed = 1,
+                 watched_at = excluded.watched_at",
+            params![catalog.as_str(), catalog_id, episode_number],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
     /// Empties the watch log, and only that.
     ///
     /// Deliberately not `clear_all` under another name: that also drops the
@@ -920,6 +1056,66 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exported(name: &str, resolved_at: &str) -> ExportedRelease {
+        ExportedRelease {
+            catalog: "anilist".into(),
+            catalog_id: 21,
+            episode_number: 3,
+            name: name.into(),
+            magnet: Some("magnet:?xt=1".into()),
+            torrent_url: None,
+            assume_batch: false,
+            prefer_dub: false,
+            resolved_at: resolved_at.into(),
+        }
+    }
+
+    #[test]
+    fn an_imported_release_older_than_the_local_one_is_ignored() {
+        let db = Registry::open_in_memory().unwrap();
+        db.import_resolved_releases(&[exported("local", "2026-09-08 12:00:00")])
+            .unwrap();
+
+        // The whole point of carrying `resolved_at` across the wire: a phone
+        // that has not watched this episode in weeks must not push its stale
+        // answer over the Mac's fresh one just by being the side that asked.
+        let changed = db
+            .import_resolved_releases(&[exported("stale", "2026-09-01 12:00:00")])
+            .unwrap();
+        assert_eq!(changed, 0);
+
+        let kept = db.remembered_release(Catalog::Anilist, 21, 3).unwrap().unwrap();
+        assert_eq!(kept.name, "local");
+    }
+
+    #[test]
+    fn an_imported_release_newer_than_the_local_one_wins() {
+        let db = Registry::open_in_memory().unwrap();
+        db.import_resolved_releases(&[exported("old", "2026-09-01 12:00:00")])
+            .unwrap();
+
+        let changed = db
+            .import_resolved_releases(&[exported("fresh", "2026-09-08 12:00:00")])
+            .unwrap();
+        assert_eq!(changed, 1);
+        assert_eq!(
+            db.remembered_release(Catalog::Anilist, 21, 3).unwrap().unwrap().name,
+            "fresh"
+        );
+    }
+
+    #[test]
+    fn a_release_from_a_catalog_this_build_cannot_name_is_dropped() {
+        let db = Registry::open_in_memory().unwrap();
+        let mut row = exported("from the future", "2026-09-08 12:00:00");
+        row.catalog = "kitsu".into();
+
+        // Stored, the row would sit in the table matching nothing forever:
+        // the column is what says which id space `catalog_id` belongs to.
+        assert_eq!(db.import_resolved_releases(&[row]).unwrap(), 0);
+        assert!(db.export_resolved_releases().unwrap().is_empty());
+    }
 
     #[test]
     fn a_chapter_and_an_episode_of_one_title_do_not_overwrite_each_other() {
@@ -1083,6 +1279,16 @@ mod tests {
             Some("One Piece"),
             "clearing the watch log is not clearing the registry"
         );
+    }
+
+    #[test]
+    fn marking_complete_leaves_the_resume_position_alone() {
+        let db = Registry::open_in_memory().unwrap();
+        db.record_progress(Catalog::Anilist, 42, 3, 600, 1400).unwrap();
+        db.mark_completed(Catalog::Anilist, 42, 3).unwrap();
+        let row = db.get_progress(Catalog::Anilist, 42, 3).unwrap().unwrap();
+        assert_eq!(row.stop_time, 600, "next-episode marks watched, it does not seek");
+        assert!(row.completed);
     }
 
     #[test]

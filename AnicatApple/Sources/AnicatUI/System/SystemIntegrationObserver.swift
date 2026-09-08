@@ -38,6 +38,14 @@ public struct SystemIntegrationObserver: View {
                 guard phase == .background else { return }
                 Task { await model.purgeStreamCache() }
             }
+            // A Mac coming into range is the whole trigger. `syncQuietly`
+            // does nothing unless that Mac has approved this phone before,
+            // so this cannot raise an approval alert on a Mac nobody asked
+            // to pair with.
+            .onChange(of: BonjourDiscovery.shared.discoveredMacNode?.id) { _, _ in
+                guard let node = BonjourDiscovery.shared.discoveredMacNode else { return }
+                RemoteClient.shared.syncQuietly(with: node)
+            }
             #endif
             .task {
                 reachability.start {

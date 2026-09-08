@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::catalog::{anilist, cache::AniListCache, Catalogs};
-use crate::db::{Catalog, Registry};
+use crate::db::{Catalog, ExportedRelease, Registry};
 use crate::media::MediaKey;
 use crate::reader::mangadex::MangaDexClient;
 use crate::reader::mangakatana::MangaKatanaClient;
@@ -388,6 +388,27 @@ pub struct FfiDownloadedEpisode {
     pub path: String,
     pub bytes: u64,
     pub downloaded_at: String,
+}
+
+/// One remembered release, on its way to or from another device on the LAN.
+///
+/// `resolved_at` travels with it because the merge is newest-wins in both
+/// directions; without it the receiving side cannot tell a fresher resolve
+/// from a staler one and every sync would clobber whichever device asked
+/// last.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiResolvedRelease {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    pub name: String,
+    pub magnet: Option<String>,
+    pub torrent_url: Option<String>,
+    pub assume_batch: bool,
+    pub prefer_dub: bool,
+    /// `YYYY-MM-DD HH:MM:SS`, UTC, as `datetime('now')` writes it. Compared
+    /// as text, which is only sound because that format sorts correctly.
+    pub resolved_at: String,
 }
 
 /// One chapter kept on disk.
@@ -1199,6 +1220,66 @@ impl AnicatEngine {
     pub async fn purge_stream_cache(&self) -> FfiResult<()> {
         self.torrents.purge_stream_cache().await;
         Ok(())
+    }
+
+    /// Every release this device remembers winning a resolve.
+    ///
+    /// The one table worth copying between a Mac and a phone. A cold resolve
+    /// costs a full indexer wave (measured 2750ms); starting from a
+    /// remembered release costs 955ms, and from a complete cached file
+    /// 798ms. Everything else in the registry is either already synced by
+    /// AniList (progress, list state) or unsafe to copy: a track preference
+    /// is keyed by language plus subtitle title as a tie-break for one
+    /// release's mux, and the other device is routinely playing a different
+    /// release.
+    pub fn export_resolved_releases(&self) -> FfiResult<Vec<FfiResolvedRelease>> {
+        let rows = self
+            .registry
+            .export_resolved_releases()
+            .map_err(|e| AnicatError::Storage { msg: e })?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                // A row whose catalog string this build cannot name is
+                // dropped rather than sent: `FfiCatalog` has no variant for
+                // it, and inventing one would put the id in the wrong space.
+                let catalog = Catalog::parse(&row.catalog)?;
+                Some(FfiResolvedRelease {
+                    catalog: catalog.into(),
+                    catalog_id: row.catalog_id,
+                    episode_number: row.episode_number,
+                    name: row.name,
+                    magnet: row.magnet,
+                    torrent_url: row.torrent_url,
+                    assume_batch: row.assume_batch,
+                    prefer_dub: row.prefer_dub,
+                    resolved_at: row.resolved_at,
+                })
+            })
+            .collect())
+    }
+
+    /// Merges another device's remembered releases in and reports how many
+    /// rows actually moved. Newest `resolved_at` wins, so this is safe to
+    /// run in both directions and safe to run repeatedly.
+    pub fn import_resolved_releases(&self, rows: Vec<FfiResolvedRelease>) -> FfiResult<u32> {
+        let mapped: Vec<ExportedRelease> = rows
+            .into_iter()
+            .map(|row| ExportedRelease {
+                catalog: Catalog::from(row.catalog).as_str().to_string(),
+                catalog_id: row.catalog_id,
+                episode_number: row.episode_number,
+                name: row.name,
+                magnet: row.magnet,
+                torrent_url: row.torrent_url,
+                assume_batch: row.assume_batch,
+                prefer_dub: row.prefer_dub,
+                resolved_at: row.resolved_at,
+            })
+            .collect();
+        self.registry
+            .import_resolved_releases(&mapped)
+            .map_err(|e| AnicatError::Storage { msg: e })
     }
 
     /// Whether cinema mode has a TMDB credential to read with.
@@ -2704,6 +2785,20 @@ impl AnicatEngine {
 
     /// Wipes resume positions, provider overrides, the offline list mirror,
     /// and per-show prefs. Settings' "Clear Local Registry" action.
+    /// Marks an episode finished without moving its resume position, for
+    /// the player's next-episode button: the 85% rule only fires from a
+    /// playback tick, so leaving an episode early never marked it.
+    pub fn mark_episode_completed(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode_number: i64,
+    ) -> FfiResult<()> {
+        self.registry
+            .mark_completed(catalog.into(), catalog_id, episode_number)
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
     /// Empties the watch log without touching resume positions, remembered
     /// releases or track picks -- what the History page's "Clear history"
     /// means, as against Settings' wipe.

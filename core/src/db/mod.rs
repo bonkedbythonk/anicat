@@ -15,4 +15,4 @@ pub mod service;
 pub mod stats;
 
 pub use schema::{migrate, Catalog};
-pub use service::Registry;
+pub use service::{ExportedRelease, Registry};

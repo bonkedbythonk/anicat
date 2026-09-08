@@ -16,6 +16,51 @@ public enum RemoteFrame: Codable, Sendable {
     case helloAck(accepted: Bool, hostName: String)
     case command(RemoteCommand)
     case state(RemoteState)
+    /// "Here are my remembered releases, send me yours." Sent by whichever
+    /// side dialled out.
+    case syncOffer([SyncRelease])
+    case syncReply([SyncRelease])
+}
+
+/// One remembered release on the wire.
+///
+/// Deliberately its own type rather than the generated `FfiResolvedRelease`.
+/// Conforming a type from another module to `Codable` after the fact works
+/// but ties the wire format to whatever the bindings happen to look like,
+/// and the bindings are a build artifact that is regenerated from the
+/// compiled library on every `ffi.rs` change.
+public struct SyncRelease: Codable, Sendable {
+    public var catalog: String
+    public var catalogId: Int64
+    public var episodeNumber: Int64
+    public var name: String
+    public var magnet: String?
+    public var torrentUrl: String?
+    public var assumeBatch: Bool
+    public var preferDub: Bool
+    public var resolvedAt: String
+
+    public init(
+        catalog: String,
+        catalogId: Int64,
+        episodeNumber: Int64,
+        name: String,
+        magnet: String?,
+        torrentUrl: String?,
+        assumeBatch: Bool,
+        preferDub: Bool,
+        resolvedAt: String
+    ) {
+        self.catalog = catalog
+        self.catalogId = catalogId
+        self.episodeNumber = episodeNumber
+        self.name = name
+        self.magnet = magnet
+        self.torrentUrl = torrentUrl
+        self.assumeBatch = assumeBatch
+        self.preferDub = preferDub
+        self.resolvedAt = resolvedAt
+    }
 }
 
 /// What the phone can ask the Mac to do.

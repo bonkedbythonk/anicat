@@ -100,7 +100,15 @@ public final class RemoteHost {
             // Anicat is more than it needs to know.
             guard session.isApproved else { return }
             apply(command)
-        case .helloAck, .state:
+        case .syncOffer(let rows):
+            guard session.isApproved else { return }
+            // Merge first, then answer with everything this Mac knows --
+            // including what just arrived. The other device drops its own
+            // rows back on the floor as older-or-equal, so one round trip
+            // leaves both sides holding the same set.
+            RemoteSync.merge(rows)
+            session.connection.sendFrame(.syncReply(RemoteSync.export()))
+        case .helloAck, .state, .syncReply:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
             break

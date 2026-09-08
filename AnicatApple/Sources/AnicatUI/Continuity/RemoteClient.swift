@@ -37,6 +37,18 @@ public final class RemoteClient {
     private var queued: [RemoteCommand] = []
 
     static let deviceIdKey = "anicat_remote_device_id"
+    /// Macs that have already approved this phone, by service name. Only
+    /// these are dialled without a tap: a `hello` from an unknown device is
+    /// what raises the approval alert over there, and a phone that dialled
+    /// every Mac it saw would throw that alert at whoever is sitting at one.
+    static let knownHostsKey = "anicat_remote_known_hosts"
+
+    /// True while this connection exists only to exchange remembered
+    /// releases, so it hangs up as soon as the reply lands instead of
+    /// leaving the Mac pushing state at 1 Hz for as long as the phone is
+    /// open.
+    private var isQuietSync = false
+    private var quietSyncTimeout: Task<Void, Never>?
 
     private init() {}
 
@@ -94,7 +106,40 @@ public final class RemoteClient {
         receive(on: connection)
     }
 
+    /// Exchanges remembered releases with a Mac that has approved this phone
+    /// before, then hangs up. Silent by design: no UI, and nothing happens
+    /// at all for a Mac this phone has never been paired with.
+    public func syncQuietly(with node: BonjourDiscovery.DiscoveredNode) {
+        guard status == .idle, Self.knownHosts().contains(node.id) else { return }
+        isQuietSync = true
+        connect(to: node)
+        // A stale mDNS record from a Mac that has since quit still accepts a
+        // connection long enough to reach `.ready`, and then nobody ever
+        // answers the hello. Without this the phone would sit in
+        // `.awaitingApproval` forever, on every launch, with no sheet open
+        // for anyone to notice.
+        quietSyncTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard let self, !Task.isCancelled, self.isQuietSync else { return }
+            self.disconnect()
+        }
+    }
+
+    static func knownHosts() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: knownHostsKey) ?? [])
+    }
+
+    private func rememberHost() {
+        guard let name = hostName else { return }
+        var hosts = Self.knownHosts()
+        guard hosts.insert(name).inserted else { return }
+        UserDefaults.standard.set(Array(hosts), forKey: Self.knownHostsKey)
+    }
+
     public func disconnect() {
+        quietSyncTimeout?.cancel()
+        quietSyncTimeout = nil
+        isQuietSync = false
         connection?.cancel()
         connection = nil
         framer = RemoteFramer()
@@ -155,12 +200,20 @@ public final class RemoteClient {
             hostName = name
             status = accepted ? .connected : .denied
             if accepted, let connection {
+                rememberHost()
                 for command in queued { connection.sendFrame(.command(command)) }
+                // Every connection syncs, not just the quiet ones: opening
+                // the remote at all means both apps are up and on the same
+                // Wi-Fi, which is exactly the moment this is free.
+                connection.sendFrame(.syncOffer(RemoteSync.export()))
             }
             queued.removeAll()
         case .state(let incoming):
             state = incoming
-        case .hello, .command:
+        case .syncReply(let rows):
+            RemoteSync.merge(rows)
+            if isQuietSync { disconnect() }
+        case .hello, .command, .syncOffer:
             break
         }
     }

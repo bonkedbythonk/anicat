@@ -86,14 +86,25 @@ public struct SyosetuReaderView: View {
             progressBar
             Divider().background(SumiTheme.border.opacity(0.4))
 
-            if let error = session.errorMessage {
-                SumiEmptyState(headline: "Could not load", detail: error)
-                    .frame(maxHeight: .infinity)
-            } else if session.isLoading && session.chapterText.isEmpty {
-                ProgressView().controlSize(.large).frame(maxHeight: .infinity)
-            } else {
-                chapterText(session)
+            Group {
+                if let error = session.errorMessage {
+                    SumiEmptyState(headline: "Could not load", detail: error)
+                        .frame(maxHeight: .infinity)
+                } else if session.isLoading && session.chapterText.isEmpty {
+                    ProgressView().controlSize(.large).frame(maxHeight: .infinity)
+                } else {
+                    chapterText(session)
+                }
             }
+            // The spinner snapped straight to the first chapter's text.
+            // `.id` because these are a conditional chain: a transition on
+            // the enclosing `Group` never fires while the Group's own
+            // identity is stable. Only the first load crosses here — a later
+            // chapter keeps the previous text on screen while it fetches, so
+            // this phase does not change and the ScrollView is not rebuilt.
+            .sumiTransition(.opacity)
+            .id(bodyPhase(session))
+            .animation(.sumi(.page), value: bodyPhase(session))
 
             footer(session)
         }
@@ -119,6 +130,14 @@ public struct SyosetuReaderView: View {
         .sheet(isPresented: $showToc) {
             tocSheet(session)
         }
+    }
+
+    /// Which of the three states the reader body is in, so one
+    /// `.animation(value:)` can watch the swap between them.
+    private func bodyPhase(_ session: AppModel.SyosetuSession) -> Int {
+        if session.errorMessage != nil { return 0 }
+        if session.isLoading && session.chapterText.isEmpty { return 1 }
+        return 2
     }
 
     private func chapterText(_ session: AppModel.SyosetuSession) -> some View {

@@ -404,7 +404,14 @@ private struct DownloadRow: View {
             HStack(spacing: 6) {
                 ProgressView(value: min(max(percent / 100, 0), 1))
                     .frame(width: 80)
-                Text("\(Int(percent))%").sumiTabularMono(size: 11).foregroundColor(SumiTheme.muted)
+                    // A linear `ProgressView` does not animate its value, and
+                    // `downloadStates` is a 1s poll, so the bar jumped a
+                    // second's worth of width at a time.
+                    .animation(.linear(duration: 1), value: percent)
+                Text("\(Int(percent))%")
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.muted)
+                    .contentTransition(.numericText())
             }
         case .done:
             Image(systemName: "checkmark.circle.fill")

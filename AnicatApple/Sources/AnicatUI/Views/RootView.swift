@@ -698,10 +698,9 @@ public struct RootView: View {
             }
         case .schedule:
             if model.appMode == .cinema {
-                // "Coming Soon": the two rows that are about what has not
-                // aired yet. AniList's airing calendar has no TMDB
-                // counterpart -- TMDB dates a season, not an episode.
-                CinemaHomeView(model: model, namespace: cardNamespace, page: .comingSoon, focusSearchOnAppear: false)
+                // Not in cinema's rail any more; reachable only by a stale
+                // restored section, and Home is the honest landing for it.
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .home, focusSearchOnAppear: false)
             } else {
             ScheduleView(
                 items: model.scheduleItems,
@@ -821,6 +820,9 @@ public struct RootView: View {
             )
             }
         case .manga:
+            if model.appMode == .cinema {
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .films, focusSearchOnAppear: false)
+            } else {
             ReadingView(
                 config: .manga,
                 reading: model.mangaReading,
@@ -833,7 +835,11 @@ public struct RootView: View {
                 onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
                 onBrowse: { model.currentNavSection = .search }
             )
+            }
         case .novels:
+            if model.appMode == .cinema {
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .series, focusSearchOnAppear: false)
+            } else {
             ReadingView(
                 config: .novels,
                 reading: model.novelReading,
@@ -853,6 +859,7 @@ public struct RootView: View {
             .sheet(isPresented: $showSyosetuReader) {
                 SyosetuReaderView(model: model)
                     .frame(minWidth: 560, minHeight: 640)
+            }
             }
         case .history:
             HistoryView(

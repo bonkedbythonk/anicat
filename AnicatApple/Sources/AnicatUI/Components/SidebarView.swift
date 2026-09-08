@@ -24,7 +24,13 @@ public struct SidebarView: View {
         public func label(for mode: AppModel.AppMode) -> String {
             switch (self, mode) {
             case (.upNext, .cinema): return "Home"
-            case (.schedule, .cinema): return "Coming Soon"
+            // Films and Series reuse the cases anime spends on Manga and
+            // Light Novels rather than adding two of their own: a new case
+            // renumbers every 1-9 shortcut (see `numberedSections`), and
+            // these two are unused in cinema anyway. Same split by kind the
+            // anime rail makes, and the same shape of page behind it.
+            case (.manga, .cinema): return "Films"
+            case (.novels, .cinema): return "Series"
             case (.library, .cinema): return "Watching"
             case (.upNext, _): return "Up Next"
             case (.schedule, _): return "Schedule"
@@ -39,7 +45,21 @@ public struct SidebarView: View {
             }
         }
 
-        public var shortcut: String? {
+        public var shortcut: String? { shortcut(for: .anime) }
+
+        public func shortcut(for mode: AppModel.AppMode) -> String? {
+            if mode == .cinema {
+                switch self {
+                case .upNext: return "H"
+                case .manga: return "F"
+                case .novels: return "S"
+                case .library: return "L"
+                case .search: return "/"
+                case .stats: return "T"
+                case .downloads: return "D"
+                default: return nil
+                }
+            }
             switch self {
             case .upNext: return "H"
             case .library: return "L"
@@ -69,7 +89,10 @@ public struct SidebarView: View {
         public static func browseItems(for mode: AppModel.AppMode) -> [NavSection] {
             switch mode {
             case .anime: return browseItems
-            case .cinema: return [.upNext, .schedule, .library, .search, .history, .stats]
+            // No Coming Soon: TMDB dates a season, not an episode, so there
+            // is no calendar to build behind it -- its two rows belong in
+            // Films and Series, which is where they now are.
+            case .cinema: return [.upNext, .manga, .novels, .library, .search, .history, .stats]
             }
         }
 
@@ -98,6 +121,19 @@ public struct SidebarView: View {
         }
 
         public static func fromLetterKey(_ char: Character, mode: AppModel.AppMode) -> NavSection? {
+            if mode == .cinema {
+                // F and S rather than M and N: the two cases carry cinema's
+                // own labels here, and nobody presses M for Films.
+                switch char.lowercased() {
+                case "h": return .upNext
+                case "f": return .manga
+                case "s": return .novels
+                case "l": return .library
+                case "t": return .stats
+                case "d": return .downloads
+                default: return nil
+                }
+            }
             guard let section = fromLetterKey(char) else { return nil }
             return browseItems(for: mode).contains(section) || systemItems.contains(section)
                 ? section
@@ -296,7 +332,7 @@ public struct SidebarView: View {
 
                     Spacer()
 
-                    if let sc = item.shortcut {
+                    if let sc = item.shortcut(for: mode) {
                         // The chip is `meta-mono` at its full 11.5pt, and it — not
                         // the label — sets the row height: measured against the
                         // running Tauri app, a row with a shortcut is 37pt and one

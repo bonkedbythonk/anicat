@@ -16,7 +16,11 @@ struct CinemaHomeView: View {
     /// them drifting apart.
     enum Page {
         case home
-        case comingSoon
+        /// One kind on its own, with the filter row defaulted to it -- the
+        /// same split by kind the anime rail makes with Manga and Light
+        /// Novels.
+        case films
+        case series
         case watching
         case search
     }
@@ -32,11 +36,20 @@ struct CinemaHomeView: View {
     /// The shelves this page draws, by the engine's own row names.
     private var shelves: [AppModel.CinemaShelf] {
         switch page {
-        case .comingSoon:
-            return model.cinemaShelves.filter { $0.id == "upcoming_movies" || $0.id == "airing_series" }
+        case .films:
+            return model.cinemaShelves.filter { $0.id.hasSuffix("_movies") }
+        case .series:
+            return model.cinemaShelves.filter { $0.id.hasSuffix("_series") }
         case .home, .search, .watching:
             return model.cinemaShelves
         }
+    }
+
+    /// Films and Series carry the same filter row Search has, defaulted to
+    /// their own kind: the rows above are a fixed selection, and this is how
+    /// you get past it to "action, 1999, top rated".
+    private var showsFilterRow: Bool {
+        page == .films || page == .series || (page == .search && !isSearching)
     }
 
     @FocusState private var searchFocused: Bool
@@ -57,6 +70,14 @@ struct CinemaHomeView: View {
                 if page == .search {
                     if !isSearching { filterRow }
                     resultsGrid
+                } else if page == .films || page == .series {
+                    filterRow
+                    ForEach(shelves) { shelf in
+                        shelfRow(shelf)
+                    }
+                    if !model.cinemaSearchResults.isEmpty {
+                        resultsGrid
+                    }
                 } else if isSearching {
                     resultsGrid
                 } else if page == .home, !model.cinemaUpNext.isEmpty {
@@ -92,7 +113,12 @@ struct CinemaHomeView: View {
         .task {
             if model.cinemaShelves.isEmpty { await model.loadCinemaHome() }
             if page == .watching || page == .home { await model.loadCinemaLibrary() }
-            if page == .search {
+            if showsFilterRow {
+                // Films and Series set the kind on arrival, so the filter row
+                // and the browse under it agree with the section you are in.
+                if page == .films || page == .series {
+                    model.applyCinemaFilter { $0.isSeries = (page == .series) }
+                }
                 if model.cinemaGenres.isEmpty { await model.loadCinemaGenres() }
                 // The section opens on a browse rather than on nothing.
                 if model.cinemaSearchResults.isEmpty { await model.searchCinema("") }

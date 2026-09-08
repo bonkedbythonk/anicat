@@ -380,7 +380,7 @@ public struct RootView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(SumiTheme.border, lineWidth: 1))
                 .shadow(color: .black.opacity(0.4), radius: 30, y: 10)
                 .padding(40)
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .sumiTransition(.opacity.combined(with: .scale(scale: 0.97)))
                 .zIndex(45)
             }
 

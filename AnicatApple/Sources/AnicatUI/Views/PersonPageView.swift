@@ -17,6 +17,7 @@ public struct PersonPageView: View {
             anilistURL: model.personPageStack.last?.anilistURL,
             onBack: { model.closePersonPage() }
         ) {
+            Group {
             if let error = model.personPageError {
                 PersonPageErrorState(message: error) { model.retryPersonPage() }
             } else if model.isPersonPageLoading {
@@ -86,6 +87,31 @@ public struct PersonPageView: View {
                     EmptyView()
                 }
             }
+            }
+            // The spinner used to snap to the page. The mount site in
+            // `RootView` animates on `personPageStack`, which does not change
+            // when the fetch lands, so nothing there could cover this swap.
+            // `.id` because the branches are a conditional chain: a
+            // transition on the enclosing `Group` never fires while the
+            // Group's own identity is stable.
+            .sumiTransition(.opacity)
+            .id(isShowingPlaceholder)
+            .animation(.sumi(.page), value: isShowingPlaceholder)
+        }
+    }
+
+    /// Whether the scaffold is showing the placeholder rather than a page.
+    /// Three different published properties can put it there, so the crossfade
+    /// watches one derived value instead of trying to name them all.
+    private var isShowingPlaceholder: Bool {
+        if model.personPageError != nil { return false }
+        if model.isPersonPageLoading { return true }
+        switch model.personPageStack.last {
+        case .character: return model.loadedCharacter == nil
+        case .staff: return model.loadedStaff == nil
+        case .studio: return model.loadedStudio == nil
+        case .thread: return model.loadedThread == nil
+        case nil: return false
         }
     }
 

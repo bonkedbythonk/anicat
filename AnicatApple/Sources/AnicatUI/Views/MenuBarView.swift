@@ -244,6 +244,15 @@ private struct TransportRow: View {
                     Capsule()
                         .fill(SumiTheme.indigo)
                         .frame(width: geo.size.width * CGFloat(controller.progressFraction), height: 3)
+                        // `currentTime` is written once a second, so the bar
+                        // jumped a second's width at a time. Not while
+                        // scrubbing: there the drag writes the fraction
+                        // continuously and an animation makes the fill trail
+                        // the pointer.
+                        .animation(
+                            controller.isScrubbing ? nil : .linear(duration: 1),
+                            value: controller.progressFraction
+                        )
                 }
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())

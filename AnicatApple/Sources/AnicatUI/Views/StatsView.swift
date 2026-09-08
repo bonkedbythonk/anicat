@@ -305,10 +305,15 @@ public struct StatsView: View {
 
     private func heatCell(_ day: DayTally?, busiest: Int) -> some View {
         let bucket = day.map { Self.heatBucket(episodes: $0.episodes, max: busiest) } ?? 0
+        // Two values, not one: a day outside the range keeps `bucket` at 0 and
+        // moves only its opacity, so animating on the bucket alone left every
+        // empty cell popping in while the filled ones faded.
         return RoundedRectangle(cornerRadius: 2)
             .fill(bucket == 0 ? SumiTheme.foregroundWash : SumiTheme.indigo.opacity(Self.heatOpacities[bucket]))
             .frame(width: 11, height: 11)
             .opacity(day == nil ? 0 : 1)
+            .animation(.sumi(.pop), value: bucket)
+            .animation(.sumi(.pop), value: day == nil)
             .help(day.map { tally in
                 "\(Self.tooltipFormatter.string(from: tally.date)) — \(tally.episodes) episode\(tally.episodes == 1 ? "" : "s")"
             } ?? "")

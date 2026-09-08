@@ -1164,8 +1164,8 @@ public struct RootView: View {
     /// ran for the whole spring left the two legible on top of each other for
     /// its entire length -- Up Next's rows readable straight through the
     /// synopsis. That reads as a ghost, not as a navigation. Giving the
-    /// opacity its own 0.14s curve collapses the overlap to a few frames while
-    /// the poster morph and the feed's push-back keep the full spring.
+    /// opacity its own curve collapses the overlap to a few frames while the
+    /// poster morph and the feed's push-back keep the full spring.
     ///
     /// The offset is only for an open with no poster to morph -- Up Next's
     /// rows, the schedule, the command palette. Without it those opens had no
@@ -1173,9 +1173,25 @@ public struct RootView: View {
     /// open the poster is mid-`matchedGeometryEffect` inside this view, and
     /// moving the page moves the thing the morph is interpolating towards.
     private var detailTransition: AnyTransition {
-        let fade = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
-        guard model.openingDetailSourceKey == nil else { return fade }
-        return AnyTransition.offset(y: 24).combined(with: fade)
+        // Asymmetric, because the two directions have opposite problems.
+        // Arriving, the page has to cover the feed fast or the two are
+        // readable at once. Leaving, there is nothing to cover -- the feed is
+        // already opaque underneath -- so the same short curve just made the
+        // page blink out. It goes at nearly twice the length on the way out,
+        // which is long enough to read as receding and still short enough
+        // that the overlap never becomes a dissolve.
+        let arrive = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+        let leave = AnyTransition.opacity.animation(.easeInOut(duration: 0.26))
+        guard model.openingDetailSourceKey == nil else {
+            return .asymmetric(insertion: arrive, removal: leave)
+        }
+        return .asymmetric(
+            insertion: AnyTransition.offset(y: 24).combined(with: arrive),
+            // Less travel than it arrived with: a page being dismissed that
+            // slides as far as it came reads as being thrown away rather than
+            // as the layer above closing.
+            removal: AnyTransition.offset(y: 14).combined(with: leave)
+        )
     }
 
     /// Whether the section behind an open detail page is pushed back.

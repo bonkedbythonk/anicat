@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "AnicatApple",
     platforms: [
-        .macOS(.v14),
-        .iOS(.v17)
+        .macOS(.v15),
+        .iOS(.v18)
     ],
     products: [
         .executable(

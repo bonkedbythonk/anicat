@@ -1,9 +1,9 @@
 [env]
-# The Swift package declares macOS 14 / iOS 17, but the macOS 26 SDK tags every
+# The Swift package declares macOS 15 / iOS 18, but the macOS 26 SDK tags every
 # object file it compiles for 26.x unless told otherwise — including the C in
-# aws-lc-rs and rusqlite's bundled SQLite. Linking those into a 14.0 target
+# aws-lc-rs and rusqlite's bundled SQLite. Linking those into a 15.0 target
 # produces a screen of "built for newer 'macOS' version than being linked"
 # warnings per object file. Pinning here covers cargo invoked directly as well
 # as through scripts/build-xcframework.sh.
-MACOSX_DEPLOYMENT_TARGET = "14.0"
-IPHONEOS_DEPLOYMENT_TARGET = "17.0"
+MACOSX_DEPLOYMENT_TARGET = "15.0"
+IPHONEOS_DEPLOYMENT_TARGET = "18.0"

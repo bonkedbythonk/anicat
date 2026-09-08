@@ -58,14 +58,17 @@ jobs:
       # stay that way; AppKit leaking into a shared view only shows up here.
       - name: swift build (iOS Simulator)
         working-directory: AnicatApple
-        run: swift build --product AnicatUI --triple arm64-apple-ios17.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
+        run: swift build --product AnicatUI --triple arm64-apple-ios18.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
 
       # The compile check above builds a library and stops there: it never
       # links an executable, never reads Info.plist and never produces a
       # bundle, so a missing product dependency, a malformed plist key or a
       # target that cannot bundle all pass it. Only building the app catches
       # those, and the project is generated rather than committed, so CI has
-      # to run xcodegen before it can build anything.
+      # to run xcodegen before it can build anything. `ARCHS=arm64` because a
+      # generic simulator destination asks for x86_64 as well, and
+      # build-xcframework.sh prelinks aarch64 targets only — the link then
+      # fails on a slice no runner needs.
       - name: Build the iOS app
         working-directory: AnicatApple
         run: |
@@ -74,7 +77,7 @@ jobs:
           xcodebuild -project Anicat.xcodeproj -scheme AnicatiOS \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build-xcode \
-            CODE_SIGNING_ALLOWED=NO build
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
       # Not `swift test`: several suites call the live AniList API and fail
       # outright during its outages, which would make CI red for reasons

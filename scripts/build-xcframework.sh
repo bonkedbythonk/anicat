@@ -47,9 +47,9 @@ prelink() {
   rm -f "$dir/libanicat_core_sealed.a"
   ar crs "$dir/libanicat_core_sealed.a" "$obj"
 }
-prelink aarch64-apple-darwin  macos          14.0
-prelink aarch64-apple-ios     ios            17.0
-prelink aarch64-apple-ios-sim ios-simulator  17.0
+prelink aarch64-apple-darwin  macos          15.0
+prelink aarch64-apple-ios     ios            18.0
+prelink aarch64-apple-ios-sim ios-simulator  18.0
 
 # The generator reads a cdylib, which only the host target can produce here.
 HOST_DYLIB="$CORE/target/aarch64-apple-darwin/release/libanicat_core.dylib"

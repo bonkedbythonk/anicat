@@ -46,7 +46,7 @@ The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping p
 
 ## Install
 
-Apple silicon, macOS 14 or later. Download
+Apple silicon, macOS 15 or later. Download
 `Anicat-<version>-macos-arm64.zip` from the
 [Releases page](https://github.com/bonkedbythonk/anicat/releases), unzip it
 and move `Anicat.app` to `/Applications`. Or let the installer do it:
@@ -120,7 +120,7 @@ watch history.
 
 **Prerequisites:**
 
-- macOS 14 or later on Apple silicon, with Xcode's command line tools (Swift 6)
+- macOS 15 or later on Apple silicon, with Xcode's command line tools (Swift 6)
 - [Rust](https://rustup.rs/) stable, with the Apple targets: `rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim`
 - No mpv install needed: libmpv and FFmpeg come from [MPVKit](https://github.com/mpvkit/MPVKit) as SwiftPM binary dependencies (about 1.7 GB of xcframeworks on first resolve)
 

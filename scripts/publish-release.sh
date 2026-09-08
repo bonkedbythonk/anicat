@@ -42,7 +42,7 @@ else
     {
         echo "## Anicat $VERSION"
         echo
-        echo "Native macOS build (Apple silicon, macOS 14 or later)."
+        echo "Native macOS build (Apple silicon, macOS 15 or later)."
         echo
         echo "### Changes"
         echo

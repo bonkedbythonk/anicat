@@ -47,7 +47,7 @@ Full feature list in the [README](https://github.com/bonkedbythonk/anicat#featur
 
 ### Known limits
 
-- Apple silicon only, macOS 14 or later. There is no Intel build.
+- Apple silicon only, macOS 15 or later. There is no Intel build.
 - Film and TV are catalog-only: TMDB browsing works, playback is not wired up.
 - Light novels are Syosetu only.
 - No iPhone release. An iPhone target builds and runs on the simulator, but

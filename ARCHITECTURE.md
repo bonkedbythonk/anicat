@@ -10,10 +10,11 @@ inside the process.
 The Tauri/React app that preceded it, and the Python scraper that served it,
 were removed in September 2026; the `legacy/tauri` tag marks their last commit.
 
-Today only the macOS product builds. `Package.swift` declares iOS 17 and the
-xcframework carries iOS slices, but `AnicatUI` depends on AppKit directly (13
-unguarded imports, an `NSOpenGLView` player), so the iPhone build is future
-work rather than a second target.
+`Package.swift` declares macOS 15 and iOS 18. Both products build: the macOS
+app through SwiftPM plus `scripts/package-anicat-macos-app.sh`, and the iPhone
+app through the `AnicatApple/project.yml` target that `xcodegen` generates.
+AppKit and UIKit differences live in `DesignSystem/Platform.swift` and a few
+`#if os` islands.
 
 ## Layers
 

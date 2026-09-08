@@ -82,7 +82,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>ANICATTMDBKey</key>
     <string>${ANICAT_TMDB_KEY:-}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>15.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>ATSApplicationFontsPath</key>

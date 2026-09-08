@@ -699,11 +699,6 @@ public struct MediaDetailView: View {
     private var scrollBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
-                if #available(macOS 15.0, iOS 18.0, *) {
-                    EmptyView()
-                } else {
-                    ScrollThresholdProbe(threshold: Self.compactHeaderThreshold, passed: $isHeaderCompact)
-                }
                 banner
                 content
                 tabsSection

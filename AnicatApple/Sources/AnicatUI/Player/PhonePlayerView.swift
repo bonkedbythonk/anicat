@@ -26,6 +26,7 @@ struct PhonePlayerView: View {
     @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
+    @State private var showReleases = false
     @State private var flash: (symbol: String, trailing: Bool)?
 
     var body: some View {
@@ -61,6 +62,7 @@ struct PhonePlayerView: View {
             }
         }
         .statusBarHidden(!controller.areControlsVisible)
+        .sheet(isPresented: $showReleases) { releaseSheet }
         .task {
             controller.showControlsBriefly()
             fetchTracks()
@@ -115,7 +117,7 @@ struct PhonePlayerView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.35), in: Circle())
+                    .playerGlass(in: Circle())
             }
 
             VStack(alignment: .leading, spacing: 1) {
@@ -139,12 +141,6 @@ struct PhonePlayerView: View {
     @ViewBuilder
     private var tracksMenu: some View {
         Menu {
-            // Same reason as the release submenu: the autohide timer is held
-            // off from the content, never with a gesture on the label.
-            Color.clear
-                .frame(height: 0)
-                .onAppear { controller.cancelAutohide() }
-
             if !audioTracks.isEmpty {
                 Picker("Audio", selection: audioSelection) {
                     ForEach(audioTracks) { track in
@@ -160,7 +156,11 @@ struct PhonePlayerView: View {
                     }
                 }
             }
-            releaseSection
+            Button {
+                showReleases = true
+            } label: {
+                Label("Release", systemImage: "square.stack.3d.up")
+            }
 
             if controller.hasNextEpisode {
                 Button("Next episode") { controller.nextEpisode() }
@@ -182,61 +182,68 @@ struct PhonePlayerView: View {
     /// picks one; this is how a viewer overrides that — a different group, a
     /// dub, a better-seeded copy.
     ///
-    /// A submenu rather than inline items: `onListReleases` goes back out to
-    /// the indexers, so it has a loading state and a failure state, and
-    /// hanging those off the top-level menu would put a spinner next to
-    /// "Next episode".
+    /// A sheet, not a submenu. `Menu` content is built eagerly, so anything
+    /// hung off its `onAppear` runs at first render: the fetch fired on every
+    /// play, and the autohide cancel that sat beside it killed the timer once
+    /// and left the controls up for the whole episode. A sheet's `task` runs
+    /// when it is actually presented, and release names need the width.
     @ViewBuilder
-    private var releaseSection: some View {
-        Menu {
-            // `.onTapGesture` on the `Menu` itself was the first attempt and
-            // it stopped the menu opening at all: the gesture consumed the
-            // tap the menu needed. Menu content is built when it opens, so
-            // the fetch hangs off the content appearing instead.
-            Color.clear
-                .frame(height: 0)
-                .onAppear {
-                    controller.cancelAutohide()
-                    loadReleases()
-                }
-
-            if isLoadingReleases {
-                Text("Searching…")
-            } else if let releaseFailure {
-                Text(releaseFailure)
-            } else if releases.isEmpty {
-                Text("No other releases found")
-            } else {
-                Picker("Release", selection: Binding(
-                    get: { controller.currentReleaseName ?? "" },
-                    set: { name in
-                        guard !name.isEmpty else { return }
-                        // Re-resolves and swaps the stream. `MpvSurface` is
-                        // mounted once above and only its `streamURL` changes,
-                        // so this does not go through the dismantle path.
-                        controller.onSelectRelease?(name)
-                    }
-                )) {
-                    ForEach(releases) { release in
-                        Text(Self.releaseLabel(release)).tag(release.name)
+    private var releaseSheet: some View {
+        NavigationStack {
+            Group {
+                if isLoadingReleases {
+                    ProgressView("Searching indexers")
+                } else if let releaseFailure {
+                    ContentUnavailableView("Could not list releases", systemImage: "exclamationmark.triangle", description: Text(releaseFailure))
+                } else if releases.isEmpty {
+                    ContentUnavailableView("No other releases", systemImage: "square.stack.3d.up.slash")
+                } else {
+                    List(releases) { release in
+                        Button {
+                            controller.onSelectRelease?(release.name)
+                            showReleases = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(release.name)
+                                        .font(.system(size: 13))
+                                        .lineLimit(2)
+                                    Text(Self.releaseDetail(release))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                if release.name == controller.currentReleaseName {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
                     }
                 }
             }
-        } label: {
-            Label("Release", systemImage: "square.stack.3d.up")
+            .navigationTitle("Release")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showReleases = false }
+                }
+            }
         }
+        .task { loadReleases() }
     }
 
-    private static func releaseLabel(_ release: MediaDetailView.ReleaseCandidateItem) -> String {
-        let seeds = release.seeders > 0 ? " · \(release.seeders) seeds" : ""
-        return (release.isDub ? "[DUB] " : "") + release.name + seeds
+    private static func releaseDetail(_ release: MediaDetailView.ReleaseCandidateItem) -> String {
+        var parts: [String] = []
+        if release.isDub { parts.append("DUB") }
+        if release.seeders > 0 { parts.append("\(release.seeders) SEEDS") }
+        return parts.joined(separator: " \u{00B7} ")
     }
 
     private func loadReleases() {
         guard !isLoadingReleases else { return }
         isLoadingReleases = true
         releaseFailure = nil
-        controller.cancelAutohide()
         controller.onListReleases? { candidates, failure in
             isLoadingReleases = false
             releases = candidates
@@ -356,6 +363,7 @@ struct PhonePlayerView: View {
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
                             .background(.white.opacity(0.92), in: Capsule())
+                            .compositingGroup()
                     }
                 }
             }
@@ -415,7 +423,7 @@ struct PhonePlayerView: View {
                 .font(.system(size: 34, weight: .regular))
                 .foregroundStyle(.white)
                 .padding(26)
-                .background(.black.opacity(0.35), in: Circle())
+                .playerGlass(in: Circle())
             if !trailing { Spacer() }
         }
         .padding(.horizontal, 40)
@@ -490,6 +498,20 @@ private struct Scrubber: View {
                         onCommit(min(max(drag.location.x / width, 0), 1) * duration)
                     }
             )
+        }
+    }
+}
+
+/// iOS 26 draws system player chrome on Liquid Glass. `glassEffect` only
+/// exists there, and the deployment target is 17, so the pre-26 fallback is
+/// the flat scrim these controls used to carry.
+private extension View {
+    @ViewBuilder
+    func playerGlass(in shape: some Shape) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            self.background(.black.opacity(0.35), in: shape)
         }
     }
 }

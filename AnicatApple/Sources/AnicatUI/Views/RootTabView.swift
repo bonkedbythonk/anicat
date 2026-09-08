@@ -309,7 +309,7 @@ private struct ContinueWatchingCard: View {
                 } placeholder: {
                     SumiTheme.card
                 }
-                .frame(width: Self.cardWidth, height: Self.cardWidth * 9 / 16)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .clipped()
 
                 GeometryReader { geo in
@@ -331,13 +331,11 @@ private struct ContinueWatchingCard: View {
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
-        .frame(width: Self.cardWidth, alignment: .leading)
+        // Three across whatever the screen is. This was a constant derived
+        // from a 402pt iPhone 17 Pro, so on a 393pt 15 Pro the third card was
+        // clipped and on a 440pt Max there was a dead gutter.
+        .containerRelativeFrame(.horizontal, count: 3, span: 1, spacing: 12)
     }
-
-    /// Three across, as the design sheet draws them. At 172pt only 2.3 fitted
-    /// and the third card was a sliver at the edge, which read as the shelf
-    /// being cut off rather than scrollable.
-    static let cardWidth: CGFloat = (402 - 32 - 24) / 3
 }
 
 private struct NewEpisodeRow: View {

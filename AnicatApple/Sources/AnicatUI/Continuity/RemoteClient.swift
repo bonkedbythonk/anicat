@@ -218,6 +218,17 @@ public final class RemoteClient {
             throw RemoteStreamError.notConnected
         }
         let id = UUID().uuidString
+        // A Mac too old to know this frame drops it on the floor -- the
+        // framer skips anything it cannot decode, by design, so there is no
+        // error to wait for and no reply coming. Without a deadline the
+        // continuation is never resumed and the play hangs forever behind a
+        // spinner instead of falling back to resolving here.
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(for: Self.resolveTimeout)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.failResolve(id, with: RemoteStreamError.notConnected) }
+        }
+        defer { deadline.cancel() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pendingResolves[id] = continuation
@@ -227,6 +238,12 @@ public final class RemoteClient {
             Task { @MainActor in self.failResolve(id, with: CancellationError()) }
         }
     }
+
+    /// Long enough for a real resolve on the Mac -- a cold indexer wave with
+    /// several dead candidates behind it is minutes, and `resolveAndPlay`'s
+    /// own ceiling for the same work is 120s -- but bounded, so a Mac that
+    /// will never answer is not mistaken for one that is still working.
+    private static let resolveTimeout = Duration.seconds(130)
 
     func releaseStream(token: String) {
         connection?.sendFrame(.streamRelease(token: token))

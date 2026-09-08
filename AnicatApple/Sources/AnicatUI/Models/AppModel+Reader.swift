@@ -63,6 +63,30 @@ extension AppModel {
         guard let engine else { return }
         syosetuSession?.isLoading = true
         syosetuSession?.errorMessage = nil
+        // The stored table of contents first. Reading a chapter offline is no
+        // use if listing the volume's chapters still needs the network -- the
+        // chapter list is fetched before any chapter is, so a downloaded book
+        // would have failed here and never reached the stored text.
+        if let anilistId = selectedMediaDetails?.id {
+            let stored = engine.offlineLightNovelVolume(
+                catalog: .anilist,
+                catalogId: anilistId,
+                bookUrl: bookURL
+            )
+            if !stored.isEmpty {
+                syosetuSession?.info = NovelInfo(
+                    title: title,
+                    author: "",
+                    description: "",
+                    chapters: stored
+                )
+                syosetuSession?.isLoading = false
+                if let first = stored.first {
+                    await loadSyosetuChapter(url: first.url, index: 0)
+                }
+                return
+            }
+        }
         do {
             let chapters = try await engine.lightNovelChapters(bookUrl: bookURL)
             guard syosetuSession?.sourceURL == bookURL else { return }
@@ -81,6 +105,93 @@ extension AppModel {
             syosetuSession?.isLoading = false
             syosetuSession?.errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Keeping a volume
+
+    /// What the volume rows on a detail page show. Derived from the registry
+    /// rather than kept alongside it, so a download made on another page is
+    /// already reflected when this one opens.
+    public var novelVolumeStates: [String: MediaDetailView.ChapterOfflineState] {
+        var states = novelVolumeWork
+        for row in offlineChapters where row.kind == .novel {
+            if states[row.chapterId] == nil { states[row.chapterId] = .stored }
+        }
+        return states
+    }
+
+    /// Fetches a whole volume and keeps it.
+    public func downloadNovelVolume(_ volume: NovelChapterRef) {
+        guard let engine, let anilistId = selectedMediaDetails?.id else { return }
+        // AniList fills this from the staff credit for a novel; empty is
+        // fine, the engine writes "Unknown" rather than an empty creator.
+        let author = selectedMediaDetails?.studio ?? ""
+        novelVolumeWork[volume.url] = .downloading
+        Task { @MainActor in
+            do {
+                _ = try await engine.downloadLightNovelVolume(
+                    catalog: .anilist,
+                    catalogId: anilistId,
+                    bookUrl: volume.url,
+                    seriesTitle: selectedMediaDetails?.title ?? "",
+                    volumeTitle: volume.title,
+                    author: author
+                )
+                novelVolumeWork[volume.url] = nil
+                loadOfflineChapters()
+            } catch {
+                novelVolumeWork[volume.url] = .failed
+                errorMessage = "Could not download \(volume.title): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    public func deleteNovelVolumeDownload(_ volume: NovelChapterRef) {
+        guard let engine, let anilistId = selectedMediaDetails?.id else { return }
+        try? engine.removeLightNovelDownload(
+            catalog: .anilist,
+            catalogId: anilistId,
+            bookUrl: volume.url
+        )
+        novelVolumeWork[volume.url] = nil
+        loadOfflineChapters()
+    }
+
+    /// Writes the volume out as an EPUB and reveals it.
+    ///
+    /// Revealed rather than reported: the file's whole purpose is to be
+    /// dragged onto a device, and a path in a message is something the user
+    /// then has to go and find.
+    public func exportNovelVolume(_ volume: NovelChapterRef) {
+        guard let engine, let anilistId = selectedMediaDetails?.id else { return }
+        // AniList fills this from the staff credit for a novel; empty is
+        // fine, the engine writes "Unknown" rather than an empty creator.
+        let author = selectedMediaDetails?.studio ?? ""
+        novelVolumeWork[volume.url] = .exporting
+        Task { @MainActor in
+            do {
+                let path = try await engine.exportLightNovelEpub(
+                    catalog: .anilist,
+                    catalogId: anilistId,
+                    bookUrl: volume.url,
+                    seriesTitle: selectedMediaDetails?.title ?? "",
+                    volumeTitle: volume.title,
+                    author: author
+                )
+                novelVolumeWork[volume.url] = nil
+                loadOfflineChapters()
+                revealInFinder(path)
+            } catch {
+                novelVolumeWork[volume.url] = .failed
+                errorMessage = "Could not export \(volume.title): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func revealInFinder(_ path: String) {
+        #if os(macOS)
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        #endif
     }
 
     /// Opens the reader with no source yet, for the "Open a Syosetu URL"
@@ -139,10 +250,24 @@ extension AppModel {
             let chapter: NovelChapterContent
             if session.source == .lnori {
                 let parts = url.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
-                chapter = try await engine.lightNovelChapter(
-                    bookUrl: String(parts[0]),
-                    anchor: parts.count > 1 ? String(parts[1]) : ""
-                )
+                let bookURL = String(parts[0])
+                // The downloaded copy first, and without announcing itself:
+                // the point of downloading a volume is that reading it later
+                // is the same act, on a train with no signal included.
+                if let anilistId = selectedMediaDetails?.id,
+                   let stored = engine.offlineLightNovelChapter(
+                       catalog: .anilist,
+                       catalogId: anilistId,
+                       bookUrl: bookURL,
+                       chapterUrl: url
+                   ) {
+                    chapter = stored
+                } else {
+                    chapter = try await engine.lightNovelChapter(
+                        bookUrl: bookURL,
+                        anchor: parts.count > 1 ? String(parts[1]) : ""
+                    )
+                }
             } else {
                 chapter = try await engine.novelChapter(url: url)
             }

@@ -1112,6 +1112,10 @@ public final class AppModel {
 
     /// Volumes of the open light novel, once a source has been found.
     public var novelVolumes: [NovelChapterRef] = []
+    /// Volumes with something happening to them right now, keyed by volume
+    /// URL. Only the in-flight half: what is already downloaded comes from
+    /// the registry, so a state kept here cannot disagree with the disk.
+    var novelVolumeWork: [String: MediaDetailView.ChapterOfflineState] = [:]
     /// Which title the volumes above belong to, so a page restored from the
     /// detail cache and then refreshed from the network does not look the
     /// same novel up twice.

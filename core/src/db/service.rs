@@ -67,6 +67,29 @@ pub struct NewOfflineChapter<'a> {
     pub title: Option<&'a str>,
     pub page_count: i64,
     pub bytes: i64,
+    pub kind: OfflineKind,
+}
+
+/// What a downloaded row holds. A manga chapter is a directory of page images;
+/// a novel volume is prose in one file, and the two are read back by different
+/// calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfflineKind {
+    Manga,
+    Novel,
+}
+
+impl OfflineKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OfflineKind::Manga => "manga",
+            OfflineKind::Novel => "novel",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        if s == "novel" { OfflineKind::Novel } else { OfflineKind::Manga }
+    }
 }
 
 /// One episode copied into the Downloads folder.
@@ -96,6 +119,7 @@ pub struct OfflineChapter {
     /// `downloaded_at`: a chapter grabbed for a trip and never read should go
     /// before one read yesterday.
     pub last_used_at: String,
+    pub kind: OfflineKind,
 }
 
 /// One chapter, as far as it was read.
@@ -433,19 +457,21 @@ impl Registry {
             title,
             page_count,
             bytes,
+            kind,
         } = row;
         let conn = self.lock()?;
         conn.execute(
             "INSERT INTO offline_chapters
-                (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at, last_used_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))
+                (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at, last_used_at, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'), ?8)
              ON CONFLICT(catalog, catalog_id, chapter_id) DO UPDATE SET
                chapter_number = excluded.chapter_number,
                title = excluded.title,
                page_count = excluded.page_count,
                bytes = excluded.bytes,
                downloaded_at = excluded.downloaded_at,
-               last_used_at = excluded.downloaded_at",
+               last_used_at = excluded.downloaded_at,
+               kind = excluded.kind",
             params![
                 catalog.as_str(),
                 catalog_id,
@@ -453,7 +479,8 @@ impl Registry {
                 chapter_number,
                 title,
                 page_count,
-                bytes
+                bytes,
+                kind.as_str()
             ],
         )
         .map(|_| ())
@@ -588,7 +615,7 @@ impl Registry {
         let mut stmt = conn
             .prepare(
                 "SELECT catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes,
-                        downloaded_at, COALESCE(last_used_at, downloaded_at)
+                        downloaded_at, COALESCE(last_used_at, downloaded_at), kind
                  FROM offline_chapters ORDER BY downloaded_at DESC",
             )
             .map_err(|e| e.to_string())?;
@@ -604,12 +631,13 @@ impl Registry {
                     r.get::<_, i64>(6)?,
                     r.get::<_, String>(7)?,
                     r.get::<_, String>(8)?,
+                    r.get::<_, String>(9)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
         let mut out = vec![];
         for row in rows {
-            let (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, at, used) =
+            let (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, at, used, kind) =
                 row.map_err(|e| e.to_string())?;
             let Some(catalog) = Catalog::parse(&catalog) else { continue };
             out.push(OfflineChapter {
@@ -622,6 +650,7 @@ impl Registry {
                 bytes,
                 downloaded_at: at,
                 last_used_at: used,
+                kind: OfflineKind::from_str(&kind),
             });
         }
         Ok(out)
@@ -1297,7 +1326,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
     }
 
     /// A database stamped 5, 6 or 7 by a build that numbered the `completed`
@@ -1312,7 +1341,13 @@ mod tests {
         for stamped in [6, 7] {
             let conn = Connection::open_in_memory().unwrap();
             migrate(&conn).unwrap();
-            conn.execute_batch("ALTER TABLE watch_history DROP COLUMN completed").unwrap();
+            // Every column a migration after `stamped` adds, so the rolled
+            // back database is the shape that version actually had.
+            conn.execute_batch(
+                "ALTER TABLE watch_history DROP COLUMN completed;
+                 ALTER TABLE offline_chapters DROP COLUMN kind;",
+            )
+            .unwrap();
             conn.pragma_update(None, "user_version", stamped).unwrap();
 
             migrate(&conn).unwrap();

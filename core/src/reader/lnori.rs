@@ -690,10 +690,24 @@ fn html_to_text(html: &str) -> String {
 
     let script_re = Regex::new(r"(?is)<(script|style)[^>]*>.*?</(script|style)>").unwrap();
     let br_re = Regex::new(r"(?i)<br\s*/?>").unwrap();
+    // An empty inline element is a word boundary, and the only record of one
+    // the source leaves. A drop cap is typeset as its own span, and where the
+    // letter is a word by itself the volume writes
+    // `<span>I</span><span></span><span>was ...` -- with no space anywhere,
+    // because the gap on the page comes from the 3em glyph's side bearing.
+    // Stripped naively that reads "Iwas". Where the drop cap does continue its
+    // word ("W" then "hen") there is no empty span between them, so this
+    // separates the two cases without having to guess at the words.
+    // Spelled as an alternation rather than a backreference: regex-lite has
+    // no backreferences, and an inline element closed by a different one is
+    // not markup this has to be careful about.
+    let empty_re =
+        Regex::new(r"(?is)<(?:span|b|i|em|strong|a)[^>]*>\s*</(?:span|b|i|em|strong|a)>").unwrap();
     let block_re = Regex::new(r"(?i)</(?:p|h[1-6]|div|section|li|blockquote|figcaption)>").unwrap();
 
     let cleaned = script_re.replace_all(html, "");
-    let with_breaks = br_re.replace_all(&cleaned, LINE_BREAK.to_string().as_str());
+    let spaced = empty_re.replace_all(&cleaned, " ");
+    let with_breaks = br_re.replace_all(&spaced, LINE_BREAK.to_string().as_str());
     let with_blocks = block_re.replace_all(&with_breaks, PARAGRAPH_BREAK.to_string().as_str());
 
     strip_tags(&with_blocks)

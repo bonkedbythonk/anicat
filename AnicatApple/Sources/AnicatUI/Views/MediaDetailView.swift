@@ -276,6 +276,12 @@ public struct MediaDetailView: View {
     public var chapterOfflineStates: [String: ChapterOfflineState] = [:]
     public var onDownloadChapter: ((MangaChapterItem) -> Void)?
     public var onDeleteChapterDownload: ((MangaChapterItem) -> Void)?
+    /// Keyed by volume URL, which is what the registry stores a downloaded
+    /// volume under.
+    public var novelVolumeStates: [String: ChapterOfflineState] = [:]
+    public var onDownloadVolume: ((NovelChapterRef) -> Void)?
+    public var onDeleteVolumeDownload: ((NovelChapterRef) -> Void)?
+    public var onExportVolume: ((NovelChapterRef) -> Void)?
     public var onSetCinemaListStatus: (String?) -> Void = { _ in }
     
     public let onPlayEpisode: (EpisodeItem) -> Void
@@ -286,7 +292,6 @@ public struct MediaDetailView: View {
     public let onReadChapter: (MangaChapterItem) -> Void
     public let onSelectRelation: ((HeroBanner.Details.Relation) -> Void)?
     public let onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)?
-    public let onExportAppleBooks: () -> Void
     /// A character card in the Cast & Staff tab. Passed as a closure rather
     /// than reaching for `AppModel` inside the private tab sections, which
     /// know nothing about the model and are cheaper to re-evaluate for it.
@@ -405,13 +410,16 @@ public struct MediaDetailView: View {
         chapterOfflineStates: [String: ChapterOfflineState] = [:],
         onDownloadChapter: ((MangaChapterItem) -> Void)? = nil,
         onDeleteChapterDownload: ((MangaChapterItem) -> Void)? = nil,
+        novelVolumeStates: [String: ChapterOfflineState] = [:],
+        onDownloadVolume: ((NovelChapterRef) -> Void)? = nil,
+        onDeleteVolumeDownload: ((NovelChapterRef) -> Void)? = nil,
+        onExportVolume: ((NovelChapterRef) -> Void)? = nil,
         onSetCinemaListStatus: @escaping (String?) -> Void = { _ in },
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
         onSelectRelation: ((HeroBanner.Details.Relation) -> Void)? = nil,
         onSelectMediaId: ((Int64, String, URL?, Bool) -> Void)? = nil,
-        onExportAppleBooks: @escaping () -> Void = {},
         onSelectCharacter: @escaping (Int64) -> Void = { _ in },
         onSelectThread: @escaping (Int64) -> Void = { _ in },
         onClose: @escaping () -> Void = {},
@@ -452,13 +460,16 @@ public struct MediaDetailView: View {
         self.chapterOfflineStates = chapterOfflineStates
         self.onDownloadChapter = onDownloadChapter
         self.onDeleteChapterDownload = onDeleteChapterDownload
+        self.novelVolumeStates = novelVolumeStates
+        self.onDownloadVolume = onDownloadVolume
+        self.onDeleteVolumeDownload = onDeleteVolumeDownload
+        self.onExportVolume = onExportVolume
         self.onSetCinemaListStatus = onSetCinemaListStatus
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
         self.onReadChapter = onReadChapter
         self.onSelectRelation = onSelectRelation
         self.onSelectMediaId = onSelectMediaId
-        self.onExportAppleBooks = onExportAppleBooks
         self.onSelectCharacter = onSelectCharacter
         self.onSelectThread = onSelectThread
         self.onClose = onClose
@@ -2065,6 +2076,10 @@ public struct MediaDetailView: View {
                 isLoadingNovelVolumes: novel.isLoading,
                 novelSourceMissing: novel.sourceMissing,
                 onReadVolume: onReadVolume,
+                novelVolumeStates: novelVolumeStates,
+                onDownloadVolume: onDownloadVolume,
+                onDeleteVolumeDownload: onDeleteVolumeDownload,
+                onExportVolume: onExportVolume,
                 offlineStates: chapterOfflineStates,
                 onDownloadChapter: onDownloadChapter,
                 onDeleteChapterDownload: onDeleteChapterDownload,
@@ -2097,6 +2112,10 @@ public struct MediaDetailView: View {
         case none
         case downloading
         case stored
+        /// Building and writing an EPUB. Distinct from `downloading` because a
+        /// volume can be stored and exporting at once, and the two controls
+        /// are separate.
+        case exporting
         case failed
     }
 
@@ -2151,6 +2170,13 @@ public struct MediaDetailView: View {
                     .onTapGesture { onDeleteDownload?() }
                     .help("Downloaded — click to remove")
             case .downloading:
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .frame(width: 16, height: 16)
+            case .exporting:
+                // Not reachable for a chapter -- only a volume exports -- but
+                // the state is shared and a switch has to be exhaustive.
                 ProgressView()
                     .controlSize(.small)
                     .scaleEffect(0.7)
@@ -2503,32 +2529,7 @@ private struct MangaTabSection: View {
         } else if !novelVolumes.isEmpty {
             LazyVStack(spacing: 8) {
                 ForEach(novelVolumes, id: \.url) { volume in
-                    Button { onReadVolume?(volume) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "book.closed")
-                                .font(.system(size: 13))
-                                .foregroundColor(SumiTheme.muted)
-                                .frame(width: 20)
-                            Text(volume.title)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(SumiTheme.muted)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.sumiPressable)
+                    volumeRow(volume)
                 }
             }
         } else if novelSourceMissing {
@@ -2544,6 +2545,87 @@ private struct MangaTabSection: View {
         }
     }
 
+    @ViewBuilder
+    private func volumeRow(_ volume: NovelChapterRef) -> some View {
+        let state = novelVolumeStates[volume.url] ?? .none
+        HStack(spacing: 12) {
+            Button { onReadVolume?(volume) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: state == .stored ? "book.closed.fill" : "book.closed")
+                        .font(.system(size: 13))
+                        .foregroundColor(state == .stored ? SumiTheme.indigo : SumiTheme.muted)
+                        .frame(width: 20)
+                    Text(volume.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(SumiTheme.foreground)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+
+            volumeAction(
+                systemImage: state == .stored ? "checkmark.circle.fill" : "arrow.down.circle",
+                help: state == .stored ? "Downloaded. Click to remove." : "Keep this volume for reading offline",
+                busy: state == .downloading,
+                tint: state == .stored ? SumiTheme.indigo : SumiTheme.muted
+            ) {
+                if state == .stored {
+                    onDeleteVolumeDownload?(volume)
+                } else {
+                    onDownloadVolume?(volume)
+                }
+            }
+
+            // Export is offered whether or not the volume is downloaded: it
+            // downloads first when it has to, so sending a book to a reader is
+            // one action rather than two in an order the user has to know.
+            volumeAction(
+                systemImage: "square.and.arrow.up",
+                help: "Save as an EPUB for an e-reader",
+                busy: state == .exporting,
+                tint: SumiTheme.muted
+            ) {
+                onExportVolume?(volume)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(SumiTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        .overlay(
+            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                .stroke(SumiTheme.border, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func volumeAction(
+        systemImage: String,
+        help: String,
+        busy: Bool,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Group {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13))
+                        .foregroundColor(tint)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .disabled(busy)
+        .help(help)
+    }
+
     let chapters: [MediaDetailView.MangaChapterItem]
     let format: String?
     var isLoading: Bool = false
@@ -2551,6 +2633,10 @@ private struct MangaTabSection: View {
     var isLoadingNovelVolumes: Bool = false
     var novelSourceMissing: Bool = false
     var onReadVolume: ((NovelChapterRef) -> Void)?
+    var novelVolumeStates: [String: MediaDetailView.ChapterOfflineState] = [:]
+    var onDownloadVolume: ((NovelChapterRef) -> Void)?
+    var onDeleteVolumeDownload: ((NovelChapterRef) -> Void)?
+    var onExportVolume: ((NovelChapterRef) -> Void)?
     /// Which chapters are on disk, or on their way there. Keyed by chapter
     /// id because that is what the registry and the files are keyed on.
     var offlineStates: [String: MediaDetailView.ChapterOfflineState] = [:]

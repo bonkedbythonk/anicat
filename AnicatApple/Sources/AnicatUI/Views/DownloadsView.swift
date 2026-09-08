@@ -205,22 +205,24 @@ public struct DownloadsView: View {
     private var chapterList: some View {
         if chapters.isEmpty {
             SumiEmptyState(
-                headline: "No chapters downloaded",
-                detail: "Download a chapter from a manga's chapter list to read it with no network."
+                headline: "Nothing kept for reading",
+                detail: "Download a chapter from a manga's chapter list, or a volume from a light novel's, to read it with no network."
             )
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(groupedChapters, id: \.0) { title, rows in
                 VStack(spacing: 8) {
-                groupHeader(title, count: rows.count, unit: "chapter")
+                groupHeader(title, count: rows.count, unit: "item")
                 ForEach(rows, id: \.chapterId) { chapter in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("CH \(chapter.chapterNumber)")
+                            // A novel row's "number" is the volume's name, so
+                            // prefixing it with CH would read "CH Volume 1".
+                            Text(chapter.kind == .novel ? chapter.chapterNumber : "CH \(chapter.chapterNumber)")
                                 .font(.system(size: 13.5, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
-                            Text("\(chapter.pageCount) pages · \(Self.size(chapter.bytes))")
+                            Text("\(chapter.pageCount) \(chapter.kind == .novel ? "chapters" : "pages") · \(Self.size(chapter.bytes))")
                                 .sumiTabularMono(size: 11)
                                 .foregroundColor(SumiTheme.muted)
                         }

@@ -992,6 +992,10 @@ public struct RootView: View {
                             chapterOfflineStates: model.chapterOfflineStates,
                             onDownloadChapter: { model.downloadChapter($0) },
                             onDeleteChapterDownload: { model.deleteChapterDownload($0) },
+                            novelVolumeStates: model.novelVolumeStates,
+                            onDownloadVolume: { model.downloadNovelVolume($0) },
+                            onDeleteVolumeDownload: { model.deleteNovelVolumeDownload($0) },
+                            onExportVolume: { model.exportNovelVolume($0) },
                             onSetCinemaListStatus: { model.setCinemaListStatus($0) },
                             onPlayEpisode: { ep in
                                 playEpisode(
@@ -1057,7 +1061,6 @@ public struct RootView: View {
                                     )
                                 }
                             },
-                            onExportAppleBooks: {},
                             onSelectCharacter: { id in
                                 // A cinema page's cast are TMDB people;
                                 // `openCharacter` is AniList's and would

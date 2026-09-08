@@ -18,3 +18,6 @@ pub mod mangadex;
 pub mod mangakatana;
 pub mod syosetu;
 pub mod lnori;
+pub mod epub;
+pub mod novel_offline;
+pub mod zip;

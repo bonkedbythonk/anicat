@@ -129,6 +129,15 @@ pub struct NovelChapterRef {
     pub volume_name: Option<String>,
 }
 
+/// What a finished volume download came to.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiNovelDownload {
+    /// Sections that carry prose. Lower than the table of contents' length,
+    /// because a volume opens with image-only pages.
+    pub chapters: u32,
+    pub bytes: u64,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct NovelInfo {
     pub title: String,
@@ -424,6 +433,17 @@ pub struct FfiOfflineChapter {
     pub bytes: u64,
     /// `YYYY-MM-DD HH:MM:SS` in UTC, as SQLite writes it.
     pub downloaded_at: String,
+    pub kind: FfiOfflineKind,
+}
+
+/// What a downloaded row holds. The two are read back by different calls -- a
+/// manga chapter is a directory of page images, a novel volume is prose in one
+/// file -- so a caller that ignores this will hand a text file to an image
+/// view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FfiOfflineKind {
+    Manga,
+    Novel,
 }
 
 /// How far into a chapter the viewer got.
@@ -918,6 +938,11 @@ pub struct AnicatEngine {
     /// a download records itself when it lands, whatever the UI is doing.
     registry: Arc<Registry>,
     offline: crate::reader::offline::OfflineLibrary,
+    /// Downloaded light novel volumes. Its own store because a volume is prose
+    /// in one file, not a directory of page images, but it shares
+    /// `offline_chapters` and therefore the one size cap the Storage card
+    /// shows.
+    novels: crate::reader::novel_offline::NovelLibrary,
     /// Bytes the offline library may occupy before the least recently used
     /// chapters are evicted. Settable, because what is a reasonable slice of
     /// a disk is not something this can know.
@@ -997,6 +1022,7 @@ impl AnicatEngine {
                 dir.join("offline-manga"),
                 http.clone(),
             ),
+            novels: crate::reader::novel_offline::NovelLibrary::new(dir.join("offline-novels")),
             offline_cap_bytes: std::sync::atomic::AtomicU64::new(DEFAULT_OFFLINE_CAP_BYTES),
             reading_chapter: std::sync::Mutex::new(None),
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
@@ -1498,6 +1524,7 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Storage { msg })?;
         self.registry
             .record_offline_chapter(crate::db::service::NewOfflineChapter {
+                kind: crate::db::service::OfflineKind::Manga,
                 catalog,
                 catalog_id,
                 chapter_id: &chapter_id,
@@ -1609,9 +1636,20 @@ impl AnicatEngine {
         // Removed back to front so the indices stay valid.
         for index in doomed.into_iter().rev() {
             let row = rows.remove(index);
-            self.offline
-                .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
-                .map_err(|msg| AnicatError::Storage { msg })?;
+            // Whichever store the row lives in. Deleting from the manga
+            // library alone would forget a novel volume and leave its file on
+            // disk, so the cap would keep evicting to reclaim space that never
+            // came back.
+            match row.kind {
+                crate::db::service::OfflineKind::Manga => self
+                    .offline
+                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
+                    .map_err(|msg| AnicatError::Storage { msg })?,
+                crate::db::service::OfflineKind::Novel => self
+                    .novels
+                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
+                    .map_err(|msg| AnicatError::Storage { msg })?,
+            }
             self.registry
                 .forget_offline_chapter(row.catalog, row.catalog_id, &row.chapter_id)
                 .map_err(|msg| AnicatError::Storage { msg })?;
@@ -1646,6 +1684,10 @@ impl AnicatEngine {
                 page_count: r.page_count as u32,
                 bytes: r.bytes as u64,
                 downloaded_at: r.downloaded_at,
+                kind: match r.kind {
+                    crate::db::service::OfflineKind::Manga => FfiOfflineKind::Manga,
+                    crate::db::service::OfflineKind::Novel => FfiOfflineKind::Novel,
+                },
             })
             .collect())
     }
@@ -1662,7 +1704,12 @@ impl AnicatEngine {
         chapter_id: String,
     ) -> FfiResult<()> {
         let catalog: Catalog = catalog.into();
+        // Both stores, because the caller has a row and not necessarily its
+        // kind, and deleting from a store that does not hold it is a no-op.
         self.offline
+            .delete(catalog.as_str(), catalog_id, &chapter_id)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        self.novels
             .delete(catalog.as_str(), catalog_id, &chapter_id)
             .map_err(|msg| AnicatError::Storage { msg })?;
         self.registry
@@ -1670,9 +1717,10 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Storage { msg })
     }
 
-    /// Bytes the offline library occupies.
+    /// Bytes the offline library occupies, chapters and volumes together --
+    /// they share one cap and one line in Settings.
     pub fn offline_size_bytes(&self) -> u64 {
-        self.offline.size_bytes()
+        self.offline.size_bytes() + self.novels.size_bytes()
     }
 
     /// Records where a chapter was left, so reopening it lands on the page
@@ -2753,6 +2801,215 @@ impl AnicatEngine {
             .await
             .map(Into::into)
             .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// Fetches a whole volume and keeps it, for reading with no network and
+    /// for exporting.
+    ///
+    /// The volume, not the chapter, is the unit: a volume page on lnori is one
+    /// HTTP request holding every chapter, so downloading chapter by chapter
+    /// would refetch the same 550KB document sixteen times, and a Downloads
+    /// list would carry sixteen rows for one book.
+    pub async fn download_light_novel_volume(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        book_url: String,
+        series_title: String,
+        volume_title: String,
+        author: String,
+    ) -> FfiResult<FfiNovelDownload> {
+        let refs = self
+            .lnori
+            .volume_chapters(&book_url)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+
+        let mut chapters = Vec::with_capacity(refs.len());
+        for chapter in &refs {
+            let anchor = chapter.url.split('#').nth(1).unwrap_or_default().to_string();
+            // A section that fails is stored empty rather than failing the
+            // download. Every volume opens with image-only pages, and one
+            // section refusing must not cost the reader the other fifteen.
+            let text = match self.lnori.chapter_content(&book_url, &anchor).await {
+                Ok(content) => content.text,
+                Err(msg) => {
+                    log::warn!("[novel] {} section {anchor} skipped: {msg}", book_url);
+                    String::new()
+                }
+            };
+            chapters.push(crate::reader::novel_offline::StoredNovelChapter {
+                title: chapter.title.clone(),
+                url: chapter.url.clone(),
+                text,
+            });
+        }
+
+        let volume = crate::reader::novel_offline::StoredNovelVolume {
+            series: series_title,
+            title: volume_title.clone(),
+            author,
+            source_url: book_url.clone(),
+            chapters,
+        };
+        let readable = volume.readable_chapters() as u32;
+        if readable == 0 {
+            return Err(AnicatError::NotFound {
+                msg: format!("no readable text in {book_url}"),
+            });
+        }
+
+        let catalog_name = Catalog::from(catalog);
+        let bytes = self
+            .novels
+            .store(catalog_name.as_str(), catalog_id, &book_url, &volume)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+
+        self.registry
+            .record_offline_chapter(crate::db::service::NewOfflineChapter {
+                kind: crate::db::service::OfflineKind::Novel,
+                catalog: catalog_name,
+                catalog_id,
+                chapter_id: &book_url,
+                chapter_number: &volume_title,
+                title: Some(&volume_title),
+                page_count: readable as i64,
+                bytes: bytes as i64,
+            })
+            .map_err(|msg| AnicatError::Storage { msg })?;
+
+        log::info!("[novel] {volume_title} stored: {readable} chapters, {} KB", bytes / 1024);
+        let _ = self.enforce_offline_limit();
+
+        Ok(FfiNovelDownload { chapters: readable, bytes })
+    }
+
+    /// The stored chapters of a downloaded volume, or an empty list when it is
+    /// not downloaded. Empty rather than an error: "not downloaded" is the
+    /// ordinary case, and the caller's next step is to fetch it.
+    pub fn offline_light_novel_volume(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        book_url: String,
+    ) -> Vec<NovelChapterRef> {
+        let catalog = Catalog::from(catalog);
+        let Some(volume) = self.novels.load(catalog.as_str(), catalog_id, &book_url) else {
+            return vec![];
+        };
+        let _ = self.registry.touch_offline_chapter(catalog, catalog_id, &book_url);
+        volume
+            .chapters
+            .iter()
+            .enumerate()
+            .map(|(index, chapter)| NovelChapterRef {
+                index: index as i32,
+                title: chapter.title.clone(),
+                url: chapter.url.clone(),
+                volume_name: Some(volume.title.clone()),
+            })
+            .collect()
+    }
+
+    /// One chapter of a downloaded volume, read from disk. `None` when the
+    /// volume is not downloaded or does not hold that section, so the caller
+    /// can fall back to the network without telling the two apart.
+    pub fn offline_light_novel_chapter(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        book_url: String,
+        chapter_url: String,
+    ) -> Option<NovelChapterContent> {
+        let catalog = Catalog::from(catalog);
+        let volume = self.novels.load(catalog.as_str(), catalog_id, &book_url)?;
+        let chapter = volume.chapters.iter().find(|c| c.url == chapter_url)?;
+        if chapter.text.trim().is_empty() {
+            return None;
+        }
+        Some(NovelChapterContent { title: chapter.title.clone(), text: chapter.text.clone() })
+    }
+
+    /// Writes a downloaded volume out as an EPUB and answers where it landed.
+    ///
+    /// Downloads the volume first when it is not already stored, so "send this
+    /// to my e-reader" is one action rather than two the user has to know the
+    /// order of.
+    pub async fn export_light_novel_epub(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        book_url: String,
+        series_title: String,
+        volume_title: String,
+        author: String,
+    ) -> FfiResult<String> {
+        let catalog_name = Catalog::from(catalog);
+        let stored = match self.novels.load(catalog_name.as_str(), catalog_id, &book_url) {
+            Some(volume) => volume,
+            None => {
+                self.download_light_novel_volume(
+                    catalog,
+                    catalog_id,
+                    book_url.clone(),
+                    series_title.clone(),
+                    volume_title.clone(),
+                    author.clone(),
+                )
+                .await?;
+                self.novels
+                    .load(catalog_name.as_str(), catalog_id, &book_url)
+                    .ok_or_else(|| AnicatError::Storage {
+                        msg: "the volume downloaded but could not be read back".to_string(),
+                    })?
+            }
+        };
+
+        let book = crate::reader::epub::EpubBook {
+            title: stored.full_title(),
+            author: if stored.author.is_empty() { "Unknown".to_string() } else { stored.author.clone() },
+            // Stable per volume, so re-exporting after a fix replaces the book
+            // in a library that deduplicates on identifier rather than
+            // stacking a second copy beside it.
+            identifier: format!("anicat:{}:{catalog_id}:{book_url}", catalog_name.as_str()),
+            language: "en".to_string(),
+            chapters: stored
+                .chapters
+                .iter()
+                .map(|c| crate::reader::epub::EpubChapter {
+                    title: c.title.clone(),
+                    text: c.text.clone(),
+                })
+                .collect(),
+        };
+        let bytes = crate::reader::epub::build(&book).map_err(|msg| AnicatError::Storage { msg })?;
+
+        // Beside the downloaded episodes, in the user's own Downloads folder:
+        // the point of an export is that it can be copied onto a device, and
+        // nothing inside the app container can be.
+        let dir = dirs::download_dir().unwrap_or_else(std::env::temp_dir).join("Anicat");
+        std::fs::create_dir_all(&dir).map_err(|e| AnicatError::Storage { msg: e.to_string() })?;
+        let path = dir.join(format!("{}.epub", safe_filename(&stored.full_title())));
+        std::fs::write(&path, &bytes).map_err(|e| AnicatError::Storage { msg: e.to_string() })?;
+
+        log::info!("[novel] exported {} ({} KB)", path.display(), bytes.len() / 1024);
+        Ok(path.to_string_lossy().to_string())
+    }
+
+    /// Forgets a downloaded volume and deletes its file.
+    pub fn remove_light_novel_download(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        book_url: String,
+    ) -> FfiResult<()> {
+        let catalog = Catalog::from(catalog);
+        self.novels
+            .delete(catalog.as_str(), catalog_id, &book_url)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        self.registry
+            .forget_offline_chapter(catalog, catalog_id, &book_url)
+            .map_err(|msg| AnicatError::Storage { msg })
     }
 
     pub async fn novel_info(&self, url: String) -> FfiResult<NovelInfo> {
@@ -5140,3 +5397,15 @@ mod tests {
     }
 }
 
+/// A title as a filename. Path separators and the characters Windows and
+/// exFAT refuse become spaces, because an exported EPUB's whole purpose is to
+/// be copied onto a device whose filesystem is not this one.
+fn safe_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c })
+        .collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim_matches('.').trim();
+    if trimmed.is_empty() { "Volume".to_string() } else { trimmed.chars().take(120).collect() }
+}

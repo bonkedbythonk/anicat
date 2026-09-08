@@ -356,3 +356,18 @@ fn prose_that_merely_starts_with_the_title_word_survives() {
     let body = "Chapter 1 was the part he remembered.\n\nThe rest he did not.";
     assert_eq!(strip_repeated_title(body, "Chapter 1: Is This Another World?"), body);
 }
+
+#[test]
+fn a_drop_cap_that_is_a_word_on_its_own_keeps_its_space() {
+    // The source leaves no space at all here: the gap on the page is the 3em
+    // glyph's side bearing, and the only mark of the word boundary is the
+    // empty span between the two runs.
+    let html = r#"<p><span style="font-size: 3.00em;">I</span><span style="font-size: 1.00em;"></span><span>was a shut-in.</span></p>"#;
+    assert_eq!(html_to_text(html), "I was a shut-in.");
+}
+
+#[test]
+fn a_drop_cap_that_continues_its_word_is_left_joined() {
+    let html = r#"<p><span style="font-size: 3.00em;">W</span><span>hen I opened my eyes.</span></p>"#;
+    assert_eq!(html_to_text(html), "When I opened my eyes.");
+}

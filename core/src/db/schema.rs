@@ -322,6 +322,26 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 9 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- What kind of thing was downloaded. Everything before this was a
+            -- manga chapter -- a directory of page images -- and
+            -- `offline_chapter_pages` answers with file paths the reader hands
+            -- straight to an image view. A downloaded novel volume is prose in
+            -- one JSON file, so without a discriminator here the first novel
+            -- download would come back through that same call and the manga
+            -- reader would try to decode a text file as a page.
+            ALTER TABLE offline_chapters ADD COLUMN kind TEXT NOT NULL DEFAULT 'manga';
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 9)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

@@ -463,6 +463,23 @@ extension AppModel {
         cinemaWatchlist = items
     }
 
+    /// Re-reads the open cinema page after playback, so the episode row that
+    /// was just watched shows its tick and the resume position moves.
+    ///
+    /// Not `openCinemaDetail`: that resets the page, the scroll and the
+    /// season picker, which is the wrong thing to do to a page the viewer is
+    /// already looking at. The TMDB detail is cached, so this is the
+    /// registry's own progress and no request.
+    func refreshCinemaDetailAfterPlayback(id: Int64) async {
+        guard let engine, currentDetailCatalog != .anilist,
+              selectedMediaDetails?.id == id else { return }
+        let catalog: FfiCatalog = currentDetailCatalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        guard let d = try? await engine.cinemaDetail(catalog: catalog, catalogId: id),
+              selectedMediaDetails?.id == id else { return }
+        selectedEpisodes = Self.episodeItems(from: d)
+        selectedMediaDetails = Self.cinemaDetails(from: d)
+    }
+
     /// Plays one episode of the open cinema title, or the film itself.
     public func playCinemaEpisode(_ number: Int) async {
         guard let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }

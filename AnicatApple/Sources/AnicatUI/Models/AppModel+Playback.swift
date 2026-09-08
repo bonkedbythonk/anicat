@@ -806,8 +806,16 @@ extension AppModel {
         activeDetailTask?.cancel()
         let refresh = Task { @MainActor in
             await loadHistory()
-            if let currentDetails = selectedMediaDetails {
+            guard let currentDetails = selectedMediaDetails else { return }
+            // Refreshed through the catalog the page belongs to. `loadDetail`
+            // is AniList's, and a cinema page's id is TMDB's: closing the
+            // player over a film re-fetched that number *from AniList* and
+            // replaced the page with whatever anime happened to carry it --
+            // which is what "leaving a stream lands on a random title" was.
+            if currentDetailCatalog == .anilist {
                 await loadDetail(id: currentDetails.id, isManga: Self.isMangaFormat(currentDetails.format))
+            } else {
+                await refreshCinemaDetailAfterPlayback(id: currentDetails.id)
             }
         }
         activeDetailTask = refresh

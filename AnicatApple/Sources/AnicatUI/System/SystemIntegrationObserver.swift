@@ -17,10 +17,22 @@ public struct SystemIntegrationObserver: View {
         self.model = model
     }
 
+    @State private var reachability = NetworkReachability()
+
     public var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
+            // Mounted in both platform branches of `AnicatApp`, which makes
+            // it the one place a reconnect hook reaches macOS and iOS alike.
+            .task {
+                reachability.start {
+                    // Quietly: this fires while the viewer is looking at
+                    // whatever the failed load left behind, and a loading
+                    // spinner over it would be the second interruption.
+                    Task { await model.refreshAll(showLoading: false) }
+                }
+            }
             .onChange(of: model.systemIntegrationSignature, initial: true) { _, _ in
                 model.refreshSystemIntegrations()
             }

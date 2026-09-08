@@ -35,8 +35,26 @@ public struct SystemIntegrationObserver: View {
             // playing torrent is exempt inside the engine, so backgrounding
             // mid-episode with audio still running keeps what it is reading.
             .onChange(of: scenePhase) { _, phase in
+                // The remote's socket does not survive suspension, and the
+                // cancellation is not delivered until the app is resumed --
+                // so it is hung up on the way out and redialled on the way
+                // back in. Without this the first thing a returning viewer
+                // met was a remote that looked connected and answered
+                // nothing, then a "Disconnected" screen with a retry button
+                // they had to press on every single launch.
+                if phase == .active, let node = BonjourDiscovery.shared.discoveredMacNode {
+                    RemoteClient.shared.ensureConnected(to: node)
+                }
                 guard phase == .background else { return }
+                RemoteClient.shared.disconnect()
                 Task { await model.purgeStreamCache() }
+            }
+            // A Mac that appears *while* the app is in the foreground -- it
+            // was launched, or woke, after this phone did.
+            .onChange(of: BonjourDiscovery.shared.discoveredMacNode?.id) { _, _ in
+                guard scenePhase == .active,
+                      let node = BonjourDiscovery.shared.discoveredMacNode else { return }
+                RemoteClient.shared.ensureConnected(to: node)
             }
             // A Mac coming into range is the whole trigger. `syncQuietly`
             // does nothing unless that Mac has approved this phone before,

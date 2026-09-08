@@ -128,6 +128,23 @@ public final class RemoteClient {
         receive(on: connection)
     }
 
+    /// Dials a Mac this phone is already paired with, unless a live
+    /// connection to it is already up.
+    ///
+    /// `status` alone is not enough to answer that. iOS suspends the process
+    /// in the background and the socket dies with it, but the state handler
+    /// that would move `status` off `.connected` does not run until the app
+    /// is resumed -- so a phone coming back from the lock screen believed it
+    /// was connected, skipped the redial, and drew a transport whose every
+    /// press went nowhere until the cancellation finally landed. The
+    /// connection's own state is the truth.
+    public func ensureConnected(to node: BonjourDiscovery.DiscoveredNode) {
+        guard Self.knownHosts().contains(node.id) else { return }
+        if status == .connected, connection?.state == .ready { return }
+        if case .connecting = status, connection?.state == .preparing { return }
+        connect(to: node)
+    }
+
     /// Exchanges remembered releases with a Mac that has approved this phone
     /// before, then hangs up. Silent by design: no UI, and nothing happens
     /// at all for a Mac this phone has never been paired with.

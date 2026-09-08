@@ -89,7 +89,12 @@ struct PhoneRemoteView: View {
             // approval alert on the Mac, so connecting on discovery would
             // interrupt whoever is sitting at it with nobody having asked
             // for a remote.
-            if client.status != .connected { client.connect(to: node) }
+            // `ensureConnected`, not a bare status check: a socket killed by
+            // suspension leaves `status` reading `.connected` until the
+            // cancellation is delivered, and trusting it drew a transport
+            // that answered nothing.
+            client.ensureConnected(to: node)
+            if !RemoteClient.knownHosts().contains(node.id) { client.connect(to: node) }
         }
     }
 
@@ -248,6 +253,16 @@ struct PhoneRemoteView: View {
                     Label("Tracks", systemImage: "captions.bubble")
                         .font(.system(size: 14))
                         .foregroundStyle(SumiTheme.muted)
+                }
+            }
+
+            if client.hostSupports(RemoteFeature.upscale) {
+                Button {
+                    client.send(.setUpscaling(!state.upscalingEnabled))
+                } label: {
+                    Label("Upscale", systemImage: "sparkles")
+                        .font(.system(size: 14))
+                        .foregroundStyle(state.upscalingEnabled ? SumiTheme.indigo : SumiTheme.muted)
                 }
             }
 

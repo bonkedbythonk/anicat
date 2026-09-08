@@ -198,6 +198,7 @@ public enum RemoteFeature {
     public static let autoNext = "autoNext"
     public static let browse = "browse"
     public static let fling = "fling"
+    public static let upscale = "upscale"
 }
 
 /// What the phone can ask the Mac to do.
@@ -225,6 +226,10 @@ public enum RemoteCommand: Codable, Sendable {
     /// on a flaky Wi-Fi lands where it started, and the phone's switch is
     /// drawn from what the Mac reports.
     case setAutoPlayNext(Bool)
+    /// Anime4K on the Mac. An explicit value for the same reason autoplay
+    /// carries one: the phone's switch is drawn from what the Mac reports,
+    /// and a toggle sent twice lands where it started.
+    case setUpscaling(Bool)
     /// Asks for a `tracks` frame. Sent when the picker opens, not on a timer.
     case requestTracks
     case selectAudioTrack(String)
@@ -258,6 +263,7 @@ public struct RemoteState: Codable, Sendable {
     public var isBuffering: Bool
     public var playbackRate: Double
     public var autoPlayNextEnabled: Bool
+    public var upscalingEnabled: Bool
     /// What the Mac's Skip pill is offering right now ("Opening", "Ending",
     /// or the chapter's own name), nil when it is offering nothing. The
     /// label rather than the window: the phone draws a button, it does not
@@ -284,6 +290,7 @@ public struct RemoteState: Codable, Sendable {
         isBuffering: Bool = false,
         playbackRate: Double = 1,
         autoPlayNextEnabled: Bool = true,
+        upscalingEnabled: Bool = false,
         skipLabel: String? = nil,
         coverUrl: String? = nil
     ) {
@@ -301,6 +308,7 @@ public struct RemoteState: Codable, Sendable {
         self.isBuffering = isBuffering
         self.playbackRate = playbackRate
         self.autoPlayNextEnabled = autoPlayNextEnabled
+        self.upscalingEnabled = upscalingEnabled
         self.skipLabel = skipLabel
         self.coverUrl = coverUrl
     }
@@ -331,6 +339,7 @@ public struct RemoteState: Codable, Sendable {
         isBuffering = try c.decodeIfPresent(Bool.self, forKey: .isBuffering) ?? false
         playbackRate = try c.decodeIfPresent(Double.self, forKey: .playbackRate) ?? 1
         autoPlayNextEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoPlayNextEnabled) ?? true
+        upscalingEnabled = try c.decodeIfPresent(Bool.self, forKey: .upscalingEnabled) ?? false
         skipLabel = try c.decodeIfPresent(String.self, forKey: .skipLabel)
         coverUrl = try c.decodeIfPresent(String.self, forKey: .coverUrl)
     }

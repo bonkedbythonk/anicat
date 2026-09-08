@@ -58,6 +58,7 @@ public final class RemoteHost {
         RemoteFeature.autoNext,
         RemoteFeature.tracks,
         RemoteFeature.fling,
+        RemoteFeature.upscale,
     ]
 
     private init() {}
@@ -336,6 +337,13 @@ public final class RemoteHost {
         case .setAutoPlayNext(let enabled):
             guard controller.autoPlayNextEnabled != enabled else { break }
             controller.toggleAutoPlayNext()
+        case .setUpscaling(let enabled):
+            guard controller.isAnime4KEnabled != enabled else { break }
+            // `toggleAnime4K`, not the stored property: it is what writes
+            // `anicat_gpu_upscaling` and re-applies the shader chain to the
+            // running file. Setting the property alone changes a Bool and
+            // leaves the picture exactly as it was.
+            controller.toggleAnime4K()
         case .requestTracks, .selectAudioTrack, .selectSubtitleTrack:
             // Answered in `handle`, which is the only place that knows which
             // controller asked and therefore where the `tracks` frame goes.
@@ -450,7 +458,8 @@ public final class RemoteHost {
                 isMuted: controller.isMuted,
                 isBuffering: true,
                 playbackRate: controller.playbackRate,
-                autoPlayNextEnabled: controller.autoPlayNextEnabled
+                autoPlayNextEnabled: controller.autoPlayNextEnabled,
+                upscalingEnabled: controller.isAnime4KEnabled
             )
         }
         return RemoteState(
@@ -468,6 +477,7 @@ public final class RemoteHost {
             isBuffering: controller.isBuffering,
             playbackRate: controller.playbackRate,
             autoPlayNextEnabled: controller.autoPlayNextEnabled,
+            upscalingEnabled: controller.isAnime4KEnabled,
             skipLabel: Self.skipLabel(for: controller),
             coverUrl: Self.coverURL(for: model)?.absoluteString
         )

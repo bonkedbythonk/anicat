@@ -65,12 +65,26 @@ public struct RootTabView: View {
                 .ignoresSafeArea()
                 .transition(.opacity)
                 .zIndex(30)
-                // A video is a landscape object on a device that starts
-                // portrait. Rotating the window rather than asking the user
-                // to turn the phone is what every other player on iOS does.
-                .modifier(PlayerOrientation(active: true))
+            }
+
+            // Tapping an episode used to do nothing visible for the seconds a
+            // resolve takes — indexers searched, candidates raced, a swarm
+            // pre-buffered, all before there is a frame to show. The desktop
+            // has raised this card since its play path was written; the phone
+            // never did.
+            if let startedAt = model.resolveStartedAt {
+                ResolvingCard(startedAt: startedAt) {
+                    model.activeResolveTask?.cancel()
+                    model.resolveStartedAt = nil
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 92)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(40)
             }
         }
+        .animation(.snappy, value: model.resolveStartedAt)
         .tint(SumiTheme.indigo)
         // A deep link (`anicat://title/<id>`) and a notification tap both go
         // straight to `openDetail` on the model, with no row tapped to have
@@ -830,41 +844,42 @@ extension FlowChips: View {
     }
 }
 
-// MARK: - Player orientation
 
-/// Turns the window to landscape while a video is on screen, and lets it go
-/// again when the player closes or minimizes.
+/// "Finding a stream", with the seconds counting up and a way out.
 ///
-/// `requestGeometryUpdate` rather than a `supportedInterfaceOrientations`
-/// override: the app is one SwiftUI scene with no view controller of its own
-/// to override, and the Info.plist has to go on listing portrait for the
-/// three tabs. The error handler is required by the API and deliberately
-/// empty — iPad multitasking and Stage Manager refuse the request, and the
-/// right answer there is the player keeping whatever shape the window has.
-private struct PlayerOrientation: ViewModifier {
-    let active: Bool
+/// A card at the bottom rather than a blocking modal: it appears on every
+/// single play, often only for a moment. The desktop's own comment on this
+/// makes the same point — treating it as an alarming dialog was wrong.
+private struct ResolvingCard: View {
+    let startedAt: Date
+    let onCancel: () -> Void
 
-    func body(content: Content) -> some View {
-        content
-            .onAppear { apply(.landscape) }
-            .onDisappear { apply(.portrait) }
-            .onChange(of: active) { _, playing in
-                apply(playing ? .landscape : .portrait)
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .tint(SumiTheme.indigo)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Finding a stream…")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SumiTheme.foreground)
+                TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                    Text("\(max(0, Int(context.date.timeIntervalSince(startedAt))))s")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(SumiTheme.muted)
+                }
             }
-    }
-
-    private func apply(_ mask: UIInterfaceOrientationMask) {
-        // Falls back to any window scene rather than requiring a
-        // foregroundActive one. Launching straight into the player (the
-        // ANICAT_DEBUG_PLAY_FILE path, and a notification tap in the real
-        // app) runs `onAppear` before the scene finishes activating, so the
-        // strict lookup found nothing and the window stayed portrait with
-        // the video letterboxed across the middle.
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
-            ?? scenes.first
-        else { return }
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+            Spacer(minLength: 8)
+            Button("Cancel", action: onCancel)
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(SumiTheme.border, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
     }
 }
 

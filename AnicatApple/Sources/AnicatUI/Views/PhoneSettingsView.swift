@@ -22,7 +22,6 @@ struct PhoneSettingsView: View {
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = false
-    @AppStorage(FeedbackDefaults.hapticsKey) private var haptics: Bool = true
     @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
 
     @State private var tokenInput = ""
@@ -191,7 +190,6 @@ struct PhoneSettingsView: View {
                 Text("24-hour").tag("24-hour")
                 Text("12-hour").tag("12-hour")
             }
-            Toggle("Haptics", isOn: $haptics)
         }
     }
 

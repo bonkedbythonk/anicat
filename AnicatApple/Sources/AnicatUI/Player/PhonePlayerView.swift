@@ -114,8 +114,14 @@ struct PhonePlayerView: View {
                 Spacer()
                 bottomBar
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
+            // The picture is full-bleed; the controls are not. Fixed padding
+            // put the top row under the Dynamic Island and the scrubber under
+            // the home indicator on a real phone — in landscape the notch
+            // inset lands on a *side*, which no horizontal constant can know
+            // about. `safeAreaPadding` is the only thing that does.
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .safeAreaPadding(.all)
         }
     }
 
@@ -379,6 +385,7 @@ struct PhonePlayerView: View {
             }
             .padding(.horizontal, 26)
             .padding(.bottom, controller.areControlsVisible ? 96 : 26)
+            .safeAreaPadding(.all)
         }
     }
 
@@ -389,10 +396,15 @@ struct PhonePlayerView: View {
         GeometryReader { geo in
             Color.clear
                 .contentShape(Rectangle())
-                // Double tap is declared first so SwiftUI waits for it
-                // before resolving the single tap; the other order makes
-                // every double tap fire the single-tap handler as well.
-                .onTapGesture(count: 2) { location in
+                // Simultaneous, not sequential. Declaring the double tap
+                // ahead of the single one makes SwiftUI hold every single tap
+                // for the double-tap timeout before acting on it — which on
+                // a phone reads as the controls being slow, and sometimes as
+                // them not responding at all. Both recognisers now fire
+                // independently: the first tap shows the controls at once and
+                // a second one seeks.
+                .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { event in
+                    let location = event.location
                     let trailing = location.x > geo.size.width / 2
                     seek(by: trailing ? 10 : -10)
                     withAnimation(.easeOut(duration: 0.12)) {
@@ -402,7 +414,7 @@ struct PhonePlayerView: View {
                         try? await Task.sleep(for: .milliseconds(450))
                         withAnimation(.easeIn(duration: 0.2)) { flash = nil }
                     }
-                }
+                })
                 // Tap shows the controls; it does not toggle playback. The
                 // system player behaves the same way, and a tap that pauses
                 // is the thing people hit by accident reaching for a button.

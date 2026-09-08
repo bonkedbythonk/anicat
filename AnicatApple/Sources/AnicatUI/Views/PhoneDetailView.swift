@@ -207,6 +207,59 @@ struct PhoneDetailView: View {
                 }
             }
 
+            if !model.selectedCharacters.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    metaLabel("CAST")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(model.selectedCharacters) { character in
+                                castCard(character)
+                            }
+                        }
+                    }
+                    // The row is inset from the page's own 16pt gutter, so it
+                    // has to bleed back out to the screen edge or the first
+                    // card looks indented against every other row.
+                    .padding(.horizontal, -16)
+                    .safeAreaPadding(.horizontal, 16)
+                }
+            }
+
+            if !model.selectedRecommendations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    metaLabel("MORE LIKE THIS")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(model.selectedRecommendations) { item in
+                                posterCard(id: item.id, title: item.title, cover: item.coverURL)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, -16)
+                    .safeAreaPadding(.horizontal, 16)
+                }
+            }
+
+            if !model.selectedRelations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    metaLabel("RELATED")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(model.selectedRelations) { item in
+                                posterCard(
+                                    id: item.id,
+                                    title: item.title,
+                                    cover: item.coverURL,
+                                    caption: item.relationType.replacingOccurrences(of: "_", with: " ").capitalized
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, -16)
+                    .safeAreaPadding(.horizontal, 16)
+                }
+            }
+
             if details.prequel != nil || details.sequel != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     metaLabel("SEASONS")
@@ -276,6 +329,72 @@ struct PhoneDetailView: View {
                     .foregroundStyle(SumiTheme.muted)
             }
             .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A character and, when AniList has one, the actor who voices them.
+    /// Both faces on one card: the pairing is the information, and two
+    /// separate rows would make the reader match them up by position.
+    @ViewBuilder
+    private func castCard(_ character: MediaDetailView.CharacterItem) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: -10) {
+                circleImage(character.imageURL, size: 46)
+                if let actor = character.voiceActorImageURL {
+                    circleImage(actor, size: 46)
+                        .overlay(Circle().stroke(SumiTheme.background, lineWidth: 2))
+                }
+            }
+            Text(character.name)
+                .font(.system(size: 12))
+                .foregroundStyle(SumiTheme.foreground)
+                .lineLimit(1)
+            Text(character.voiceActorName ?? character.role.capitalized)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(SumiTheme.muted)
+                .lineLimit(1)
+        }
+        .frame(width: 104, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func circleImage(_ url: URL?, size: CGFloat) -> some View {
+        CachedAsyncImage(url: url, maxPixelSize: 160) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: { SumiTheme.card }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    @ViewBuilder
+    private func posterCard(id: Int64, title: String, cover: URL?, caption: String? = nil) -> some View {
+        Button {
+            Task { await model.openDetail(id: id, title: title, coverURL: cover) }
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                Color.clear
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        CachedAsyncImage(url: cover, maxPixelSize: 300) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: { SumiTheme.card }
+                    }
+                    .frame(width: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                if let caption {
+                    Text(caption.uppercased())
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(SumiTheme.indigo)
+                        .lineLimit(1)
+                }
+                Text(title)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(width: 96, alignment: .leading)
         }
         .buttonStyle(.plain)
     }

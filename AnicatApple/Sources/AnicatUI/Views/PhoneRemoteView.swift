@@ -11,6 +11,7 @@ struct PhoneRemoteView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var client: RemoteClient { RemoteClient.shared }
+    @State private var showingTracks = false
 
     var body: some View {
         NavigationStack {
@@ -65,6 +66,9 @@ struct PhoneRemoteView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+        .sheet(isPresented: $showingTracks) {
+            trackPicker
         }
         .task {
             // Dialled from here and nowhere else. The first hello raises an
@@ -205,6 +209,20 @@ struct PhoneRemoteView: View {
                 }
             }
 
+            if client.hostSupports(RemoteFeature.tracks) {
+                Button {
+                    // Asked for on open rather than kept fresh: the Mac has
+                    // to walk mpv's track list to answer, and nothing draws
+                    // them while this sheet is closed.
+                    client.send(.requestTracks)
+                    showingTracks = true
+                } label: {
+                    Label("Tracks", systemImage: "captions.bubble")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SumiTheme.muted)
+                }
+            }
+
             if client.hostSupports(RemoteFeature.autoNext) {
                 Button {
                     client.send(.setAutoPlayNext(!state.autoPlayNextEnabled))
@@ -220,6 +238,83 @@ struct PhoneRemoteView: View {
                 }
             }
         }
+    }
+
+    /// Audio and subtitles for whatever the Mac has open.
+    ///
+    /// "Off" is prepended to the subtitle list here rather than sent by the
+    /// Mac: it is not a track mpv reports, it is the absence of one, and the
+    /// Mac already spells it `nil` on the wire.
+    private var trackPicker: some View {
+        NavigationStack {
+            List {
+                Section("Audio") {
+                    if client.audioTracks.isEmpty {
+                        Text("No audio tracks reported")
+                            .foregroundStyle(SumiTheme.muted)
+                    }
+                    ForEach(client.audioTracks) { track in
+                        trackRow(track, isSelected: track.isSelected) {
+                            client.send(.selectAudioTrack(track.id))
+                        }
+                    }
+                }
+                Section("Subtitles") {
+                    trackRow(
+                        RemoteTrack(id: RemoteTrack.off, lang: nil, title: "Off", isSelected: false, isForced: false),
+                        isSelected: !client.subtitleTracks.contains { $0.isSelected }
+                    ) {
+                        client.send(.selectSubtitleTrack(nil))
+                    }
+                    ForEach(client.subtitleTracks) { track in
+                        trackRow(track, isSelected: track.isSelected) {
+                            client.send(.selectSubtitleTrack(track.id))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Tracks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showingTracks = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func trackRow(
+        _ track: RemoteTrack,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.trackLabel(track))
+                        .foregroundStyle(SumiTheme.foreground)
+                    if track.isForced {
+                        Text("Forced")
+                            .font(.system(size: 12))
+                            .foregroundStyle(SumiTheme.muted)
+                    }
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark").foregroundStyle(SumiTheme.indigo)
+                }
+            }
+        }
+    }
+
+    static func trackLabel(_ track: RemoteTrack) -> String {
+        let title = track.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let lang = track.lang?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty, !lang.isEmpty { return "\(title) (\(lang))" }
+        if !title.isEmpty { return title }
+        if !lang.isEmpty { return lang }
+        return "Track \(track.id)"
     }
 
     static let speeds: [Double] = [0.75, 1, 1.25, 1.5, 2]

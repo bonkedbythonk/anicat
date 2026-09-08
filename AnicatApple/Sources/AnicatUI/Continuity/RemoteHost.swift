@@ -51,6 +51,7 @@ public final class RemoteHost {
         RemoteFeature.speed,
         RemoteFeature.skip,
         RemoteFeature.autoNext,
+        RemoteFeature.tracks,
     ]
 
     private init() {}
@@ -116,7 +117,22 @@ public final class RemoteHost {
             // error: telling an unpaired device that it reached a real
             // Anicat is more than it needs to know.
             guard session.isApproved else { return }
-            apply(command)
+            switch command {
+            case .requestTracks:
+                sendTracks(to: session)
+            case .selectAudioTrack(let id):
+                AppModel.shared?.playerController.onSelectAudioTrack?(id)
+                // mpv applies the change before it reports it, so the answer
+                // is fetched fresh rather than echoed back from here: a list
+                // built from what we just asked for would show a selection
+                // that had not happened if the track failed to load.
+                sendTracks(to: session)
+            case .selectSubtitleTrack(let id):
+                AppModel.shared?.playerController.onSelectSubtitleTrack?(id)
+                sendTracks(to: session)
+            default:
+                apply(command)
+            }
         case .streamResolve(let id, let ask):
             guard session.isApproved else { return }
             Task { await self.grantStream(id: id, ask: ask, to: session) }
@@ -148,7 +164,7 @@ public final class RemoteHost {
             // leaves both sides holding the same set.
             RemoteSync.merge(rows)
             session.connection.sendFrame(.syncReply(RemoteSync.export()))
-        case .helloAck, .hostInfo, .state, .syncReply, .streamResolved, .dataHeader, .dataError:
+        case .helloAck, .hostInfo, .tracks, .state, .syncReply, .streamResolved, .dataHeader, .dataError:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
             break
@@ -314,6 +330,10 @@ public final class RemoteHost {
         case .setAutoPlayNext(let enabled):
             guard controller.autoPlayNextEnabled != enabled else { break }
             controller.toggleAutoPlayNext()
+        case .requestTracks, .selectAudioTrack, .selectSubtitleTrack:
+            // Answered in `handle`, which is the only place that knows which
+            // controller asked and therefore where the `tracks` frame goes.
+            return
         case .open(let link):
             guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
             model.handleDeepLink(deepLink)
@@ -323,6 +343,31 @@ public final class RemoteHost {
         // second of a play button that has not flipped yet reads as a
         // dropped press and gets pressed again.
         pushState()
+    }
+
+    /// Reads the open file's tracks and answers one controller with them.
+    private func sendTracks(to session: Session) {
+        guard let controller = AppModel.shared?.playerController else { return }
+        guard let fetch = controller.onFetchTracks else {
+            session.connection.sendFrame(.tracks(audio: [], subtitle: []))
+            return
+        }
+        fetch { audio, subtitle in
+            session.connection.sendFrame(.tracks(
+                audio: audio.map(Self.wire),
+                subtitle: subtitle.map(Self.wire)
+            ))
+        }
+    }
+
+    private static func wire(_ track: PlayerTrack) -> RemoteTrack {
+        RemoteTrack(
+            id: track.id,
+            lang: track.lang,
+            title: track.title,
+            isSelected: track.isSelected,
+            isForced: track.isForced
+        )
     }
 
     // MARK: - State

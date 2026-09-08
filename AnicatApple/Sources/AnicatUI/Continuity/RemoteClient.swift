@@ -33,6 +33,11 @@ public final class RemoteClient {
     /// a word, so a button for it would be a button that does nothing.
     public private(set) var hostVersion = 0
     private var hostFeatures: Set<String> = []
+    /// What the Mac last reported it has open. Empty until the picker asks:
+    /// nothing on the phone wants them before then, and fetching them costs
+    /// the Mac a round trip to mpv.
+    public private(set) var audioTracks: [RemoteTrack] = []
+    public private(set) var subtitleTracks: [RemoteTrack] = []
 
     /// Whether the attached Mac can serve a named verb.
     public func hostSupports(_ feature: String) -> Bool { hostFeatures.contains(feature) }
@@ -81,6 +86,8 @@ public final class RemoteClient {
         state = RemoteState()
         hostVersion = 0
         hostFeatures = []
+        audioTracks = []
+        subtitleTracks = []
         status = .connecting
         hostName = node.name
 
@@ -309,6 +316,9 @@ public final class RemoteClient {
         case .hostInfo(let version, let features):
             hostVersion = version
             hostFeatures = Set(features)
+        case .tracks(let audio, let subtitle):
+            audioTracks = audio
+            subtitleTracks = subtitle
         case .state(let incoming):
             state = incoming
         case .syncReply(let rows):

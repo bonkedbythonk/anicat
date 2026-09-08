@@ -30,6 +30,15 @@ public enum RemoteFrame: Codable, Sendable {
     /// afford to lose. An older Mac sends no `hostInfo` at all and the phone
     /// reads that as version 0, which is exactly what it is.
     case hostInfo(version: Int, features: [String])
+    /// The audio and subtitle tracks of whatever the Mac has open, answered
+    /// on request and again after a selection.
+    ///
+    /// Pulled rather than pushed on the 1 Hz state tick: the Mac reads them
+    /// through `onFetchTracks`, which is a callback with a completion
+    /// handler and not a stored list, so a tick that had to fetch would ask
+    /// mpv for its whole track list once a second for the length of an
+    /// episode to serve a sheet nobody has open.
+    case tracks(audio: [RemoteTrack], subtitle: [RemoteTrack])
     /// "Here are my remembered releases, send me yours." Sent by whichever
     /// side dialled out.
     case syncOffer([SyncRelease])
@@ -151,6 +160,31 @@ public struct SyncRelease: Codable, Sendable {
     }
 }
 
+/// One selectable track on the wire.
+///
+/// Its own type rather than `PlayerTrack`, for the reason `SyncRelease`
+/// gives: the wire format should not move when a player-side type does.
+public struct RemoteTrack: Codable, Sendable, Identifiable, Hashable {
+    /// mpv's own track id, in the string form `aid` and `sid` take.
+    public var id: String
+    public var lang: String?
+    public var title: String?
+    public var isSelected: Bool
+    public var isForced: Bool
+
+    public init(id: String, lang: String?, title: String?, isSelected: Bool, isForced: Bool) {
+        self.id = id
+        self.lang = lang
+        self.title = title
+        self.isSelected = isSelected
+        self.isForced = isForced
+    }
+
+    /// The `sid` value that turns subtitles off. mpv spells it as a word,
+    /// not an empty string.
+    public static let off = "no"
+}
+
 /// Names for the optional verbs a Mac may or may not serve, as they travel
 /// in `hostInfo`.
 ///
@@ -190,6 +224,11 @@ public enum RemoteCommand: Codable, Sendable {
     /// on a flaky Wi-Fi lands where it started, and the phone's switch is
     /// drawn from what the Mac reports.
     case setAutoPlayNext(Bool)
+    /// Asks for a `tracks` frame. Sent when the picker opens, not on a timer.
+    case requestTracks
+    case selectAudioTrack(String)
+    /// nil turns subtitles off.
+    case selectSubtitleTrack(String?)
     /// An `anicat://` address, so "play this on the Mac" reuses `DeepLink`
     /// and `handleDeepLink` stays the only thing that knows how to reach a
     /// screen.

@@ -37,14 +37,12 @@ public struct UpNextQueueView: View {
 
     public let items: [QueueEntry]
     public let namespace: Namespace.ID?
-    // Which row (if any) is the poster-morph source, as "<shelfKey>:<id>" —
-    // e.g. "upnext:12345". This view is reused for more than one shelf
-    // (Up Next on Home, the resume queue on Manga/Novels), and the same
-    // title can be visible in more than one shelf on the same screen at
-    // once, so a bare id isn't enough to say which row actually triggered
-    // the open — see `AppModel.openingDetailSourceKey`.
-    public let openingSourceKey: String?
-    public let shelfKey: String
+    // No `openingSourceKey`/`shelfKey` here. They used to be stored and
+    // never read: the row below hard-codes `namespace: nil`, so no row in
+    // this view is ever half of a poster morph. Keeping them made the
+    // callers set `AppModel.openingDetailSourceKey` for an open that has
+    // nothing to morph, and everything gated on "is a morph running" —
+    // the page's own scale, the feed push-back — switched itself off.
     /// The second namespace, for the thumbnail-to-video morph a Play press
     /// starts. Distinct from `namespace` above because the two morphs have
     /// different destinations and different lifetimes — see
@@ -64,8 +62,6 @@ public struct UpNextQueueView: View {
     public init(
         items: [QueueEntry],
         namespace: Namespace.ID? = nil,
-        openingSourceKey: String? = nil,
-        shelfKey: String = "upnext",
         playerNamespace: Namespace.ID? = nil,
         playerSourceKey: String? = nil,
         onSelect: @escaping (QueueEntry) -> Void,
@@ -73,8 +69,6 @@ public struct UpNextQueueView: View {
     ) {
         self.items = items
         self.namespace = namespace
-        self.openingSourceKey = openingSourceKey
-        self.shelfKey = shelfKey
         self.playerNamespace = playerNamespace
         self.playerSourceKey = playerSourceKey
         self.onSelect = onSelect
@@ -187,19 +181,26 @@ public struct UpNextQueueView: View {
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
 
+                            // The count is a figure and keeps the mono face;
+                            // the rest is a sentence and does not. One
+                            // modifier on the enclosing stack gave both the
+                            // same treatment, so "New episode out" arrived as
+                            // wide-tracked monospace capitals.
                             HStack(spacing: 16) {
                                 Text("\(entry.unit) \(entry.nextEpisodeOrChapter)\(entry.totalCount > 0 ? " / \(entry.totalCount)" : "")")
+                                    .sumiTabularMono(size: 11.5)
+                                    .foregroundColor(SumiTheme.muted)
 
                                 if entry.hasNewEpisode {
                                     Text(entry.unit == "CH" ? "New chapter out" : "New episode out")
+                                        .font(.system(size: 11.5, weight: .semibold))
                                         .foregroundColor(SumiTheme.indigo)
-                                        .fontWeight(.semibold)
                                 } else if let watched = entry.watchedTimeAgo {
                                     Text("Watched \(watched)")
+                                        .font(.system(size: 11.5))
+                                        .foregroundColor(SumiTheme.muted)
                                 }
                             }
-                            .sumiTabularMono(size: 11.5)
-                            .foregroundColor(SumiTheme.muted)
                             .padding(.top, 6)
 
                             // 2px Progress Bar

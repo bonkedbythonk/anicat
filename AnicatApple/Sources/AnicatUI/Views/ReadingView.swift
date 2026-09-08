@@ -48,8 +48,10 @@ public struct ReadingView: View {
     // 2nd arg is the source key ("reading-queue:<id>", "reading-shelf:<id>",
     // "reading-planning:<id>" or "reading-trending:<id>") — this view knows
     // which shelf a tap came from, the caller doesn't.
-    let onSelect: (MediaCard.Item, String) -> Void
-    let onRead: (MediaCard.Item, String) -> Void
+    /// The source key is optional because the resume queue has none: its
+    /// rows carry no namespace, so there is no morph for one to name.
+    let onSelect: (MediaCard.Item, String?) -> Void
+    let onRead: (MediaCard.Item, String?) -> Void
     let onBrowse: () -> Void
     /// Opens the direct-URL novel reader. Only the novels tab passes one, and
     /// it renders as a footnote under the shelves rather than as a button
@@ -66,8 +68,8 @@ public struct ReadingView: View {
         isSignedIn: Bool,
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
-        onSelect: @escaping (MediaCard.Item, String) -> Void,
-        onRead: @escaping (MediaCard.Item, String) -> Void,
+        onSelect: @escaping (MediaCard.Item, String?) -> Void,
+        onRead: @escaping (MediaCard.Item, String?) -> Void,
         onBrowse: @escaping () -> Void,
         onOpenSyosetu: (() -> Void)? = nil
     ) {
@@ -127,13 +129,11 @@ public struct ReadingView: View {
                 UpNextQueueView(
                     items: queue,
                     namespace: namespace,
-                    openingSourceKey: openingSourceKey,
-                    shelfKey: "reading-queue",
                     onSelect: { entry in
-                        if let item = reading.first(where: { $0.id == entry.id }) { onSelect(item, "reading-queue:\(entry.id)") }
+                        if let item = reading.first(where: { $0.id == entry.id }) { onSelect(item, nil) }
                     },
                     onPlay: { entry in
-                        if let item = reading.first(where: { $0.id == entry.id }) { onRead(item, "reading-queue:\(entry.id)") }
+                        if let item = reading.first(where: { $0.id == entry.id }) { onRead(item, nil) }
                     }
                 )
             }

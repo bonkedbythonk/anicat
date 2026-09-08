@@ -346,11 +346,12 @@ struct CinemaHomeView: View {
             UpNextQueueView(
                 items: model.cinemaUpNext,
                 namespace: namespace,
-                openingSourceKey: model.openingDetailSourceKey,
-                shelfKey: "cinemaUpNext",
                 onSelect: { entry in
                     let catalog = model.cinemaCatalog(forId: entry.id)
-                    model.openingDetailSourceKey = "cinemaUpNext:\(entry.id)"
+                    // No source key: this queue's rows carry no namespace,
+                    // so naming one only tells the rest of the app a morph
+                    // is running when none is.
+                    model.openingDetailSourceKey = nil
                     Task {
                         await model.openCinemaDetail(
                             catalog: catalog,

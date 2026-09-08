@@ -1345,16 +1345,14 @@ private struct HomeSectionView: View {
                         UpNextQueueView(
                             items: upNextExpanded ? model.upNextItems : Array(model.upNextItems.prefix(Self.upNextCollapsedCount)),
                             namespace: namespace,
-                            openingSourceKey: model.openingDetailSourceKey,
-                            shelfKey: "upnext",
                             playerNamespace: playerNamespace,
                             playerSourceKey: model.openingPlayerSourceKey,
                             onSelect: { entry in
-                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", "upnext:\(entry.id)")
+                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", nil)
                             },
                             onPlay: { entry in
                                 if entry.unit == "CH" {
-                                    onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, "upnext:\(entry.id)")
+                                    onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, nil)
                                 } else {
                                     playFromShelf(
                                         model: model,

@@ -714,7 +714,16 @@ impl AnicatEngine {
         .format_timestamp_millis()
         .try_init();
         let dir = PathBuf::from(&data_dir);
+        // Named, not anonymous. TMDB's API terms forbid concealing the
+        // identity of the application making the request, and Anicat asks
+        // with one key shared by every install -- so the request has to say
+        // whose it is. AniList, MangaDex and AniZip see the same string.
         let http = reqwest::Client::builder()
+            .user_agent(concat!(
+                "Anicat/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/bonkedbythonk/anicat)"
+            ))
             .build()
             .map_err(AnicatError::internal)?;
         let registry = Registry::open(&dir.join("registry.sqlite"))

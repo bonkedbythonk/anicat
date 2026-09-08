@@ -397,6 +397,9 @@ extension AppModel {
     /// watch log either way — the registry recorded that without a token.
     public func loadHistory() async {
         guard let engine else { return }
+        // Chapters alongside the watch log: both are this device's registry,
+        // and the History page asks one question of them.
+        loadReadingActivity()
         if ScreenshotFixtures.isEnabled {
             await fetchWatchActivity()
             if viewer == nil {
@@ -405,7 +408,7 @@ extension AppModel {
             isSignedIn = true
             return
         }
-        activity = (try? engine.watchActivity(limit: 500)) ?? []
+        activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
         viewer = try? await engine.viewerProfile()
         isSignedIn = viewer != nil
     }
@@ -422,7 +425,18 @@ extension AppModel {
             activity = ScreenshotFixtures.activity(for: ScreenshotFixtures.watching(from: trending))
             return
         }
-        activity = (try? engine.watchActivity(limit: 500)) ?? []
+        activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
+    }
+
+    /// The registry records every catalog in one table and `watch_activity`
+    /// returns all of it, so the anime History fed on films: two TMDB rows
+    /// rendered as "Media 129552" among the anime, counted toward "21
+    /// watches recorded on this device", and — because `openRegistryTitle`
+    /// routes on the mode rather than on the row — opened AniList 129552,
+    /// an unrelated manga, with a live "Add to List" pointed at it.
+    /// `loadCinemaLibrary` has always filtered the other way.
+    static func anilistActivity(_ rows: [ActivityRow]) -> [ActivityRow] {
+        rows.filter { $0.catalog == .anilist }
     }
 
     /// `loadHistory` under screenshot mode may run before the home load has
@@ -449,10 +463,19 @@ extension AppModel {
     public func quickSearchTitles(_ query: String) async -> [MediaCard.Item] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let engine, !trimmed.isEmpty else { return [] }
-        guard let summaries = try? await engine.searchCatalog(query: trimmed, mediaType: "ANIME", filters: nil, page: 1) else {
-            return []
-        }
-        return summaries.map { Self.card($0) }
+        // Anime and manga, not anime alone. The palette is the one way into
+        // a title from anywhere in the app, and it could not reach half the
+        // catalog: typing a manga's name found the anime adaptation or
+        // nothing. Two calls rather than one because AniList's `type` takes
+        // a single value, and concurrently because they are independent.
+        async let animeTask = engine.searchCatalog(query: trimmed, mediaType: "ANIME", filters: nil, page: 1)
+        async let mangaTask = engine.searchCatalog(query: trimmed, mediaType: "MANGA", filters: nil, page: 1)
+        let anime = (try? await animeTask) ?? []
+        let manga = (try? await mangaTask) ?? []
+        // Interleaved by popularity would put an obscure manga above the
+        // anime everyone means; anime first keeps the common case first and
+        // still makes the manga reachable.
+        return (anime.prefix(6) + manga.prefix(4)).map { Self.card($0) }
     }
 
     /// Search's "Discover" section: an empty-query, trending-sorted browse of

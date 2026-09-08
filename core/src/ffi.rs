@@ -298,6 +298,29 @@ pub struct CinemaCredit {
     pub year: Option<i32>,
 }
 
+/// How far into a chapter the viewer got.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiReadingProgress {
+    /// Zero-based index into the chapter.
+    pub page: i64,
+    /// What it was out of when it was recorded, so a resume can tell a
+    /// half-read chapter from one whose page count has since changed.
+    pub page_count: i64,
+}
+
+/// One chapter, as far as it was read.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiReadingRow {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub chapter_id: String,
+    pub chapter_number: String,
+    pub page: i64,
+    pub page_count: i64,
+    /// `YYYY-MM-DD HH:MM:SS` in UTC, as SQLite writes it.
+    pub read_at: String,
+}
+
 /// One row of the local list.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiLocalEntry {
@@ -1114,6 +1137,69 @@ impl AnicatEngine {
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// Records where a chapter was left, so reopening it lands on the page
+    /// it was closed on rather than on page one.
+    ///
+    /// Called on every page turn: it is an upsert on the chapter, not an
+    /// append, so the cost is one small write and the row always says "where
+    /// you are" rather than everywhere you have been.
+    pub fn record_reading_progress(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: String,
+        chapter_number: String,
+        page: i64,
+        page_count: i64,
+    ) -> FfiResult<()> {
+        self.registry
+            .record_reading_progress(
+                catalog.into(),
+                catalog_id,
+                &chapter_id,
+                &chapter_number,
+                page,
+                page_count,
+            )
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// The page a chapter was left on. `None` for one never opened.
+    pub fn reading_progress(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: String,
+    ) -> FfiResult<Option<FfiReadingProgress>> {
+        let row = self
+            .registry
+            .reading_progress(catalog.into(), catalog_id, &chapter_id)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(row.map(|(page, page_count)| FfiReadingProgress { page, page_count }))
+    }
+
+    /// Chapters read, newest first -- the reading counterpart of
+    /// `watch_activity`, and like it, needing no token: the registry
+    /// recorded it.
+    pub fn reading_activity(&self, limit: i32) -> FfiResult<Vec<FfiReadingRow>> {
+        let rows = self
+            .registry
+            .recent_reading(limit.max(1) as i64)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|r| FfiReadingRow {
+                catalog: r.catalog.into(),
+                catalog_id: r.catalog_id,
+                chapter_id: r.chapter_id,
+                chapter_number: r.chapter_number,
+                page: r.page,
+                page_count: r.page_count,
+                read_at: r.read_at,
+            })
+            .collect())
     }
 
     /// Puts a film or series on the local list, or takes it off.

@@ -98,6 +98,11 @@ public struct KeyboardShortcutsOverlay: View {
             id: "manga_reader",
             title: "Manga reader",
             items: [
+                // The arrows have turned pages since the reader was written
+                // and were listed nowhere, so the only documented thing you
+                // could do in there was leave.
+                ShortcutItem(id: "readerturn", label: "Turn page", keys: ["←", "→"]),
+                ShortcutItem(id: "readerchrome", label: "Show controls", keys: ["Tap", "or edge"]),
                 ShortcutItem(id: "closereader", label: "Exit reader", keys: ["Esc"])
             ]
         )

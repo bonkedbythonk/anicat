@@ -9,6 +9,29 @@ import AnicatCoreKit
 public struct HistoryView: View {
     let viewer: ViewerProfile?
     let activity: [ActivityRow]
+    /// Chapters read, merged into the same log and the same day chart.
+    ///
+    /// A separate list rather than more `ActivityRow`s: that row is keyed by
+    /// an episode number, and a chapter has a provider id and a number that
+    /// can be fractional. Empty for anyone who reads nothing, which is what
+    /// it was for everyone before reading was recorded at all.
+    var reading: [ReadingEntry] = []
+
+    /// One chapter read, as this view draws it.
+    public struct ReadingEntry: Identifiable, Sendable {
+        public var id: String { "\(catalogId):\(chapterId)" }
+        public let catalogId: Int64
+        public let chapterId: String
+        public let chapterNumber: String
+        public let readAt: String
+
+        public init(catalogId: Int64, chapterId: String, chapterNumber: String, readAt: String) {
+            self.catalogId = catalogId
+            self.chapterId = chapterId
+            self.chapterNumber = chapterNumber
+            self.readAt = readAt
+        }
+    }
     /// Titles for the ids in the log, as far as they are known from the lists
     /// already loaded. An id with no title still shows, with the id — losing
     /// the row entirely would misreport how much was watched.
@@ -36,6 +59,7 @@ public struct HistoryView: View {
     public init(
         viewer: ViewerProfile?,
         activity: [ActivityRow],
+        reading: [ReadingEntry] = [],
         titles: [Int64: String],
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
@@ -46,6 +70,7 @@ public struct HistoryView: View {
     ) {
         self.viewer = viewer
         self.activity = activity
+        self.reading = reading
         self.titles = titles
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
@@ -78,6 +103,10 @@ public struct HistoryView: View {
         key.dateFormat = "yyyy-MM-dd"
         for row in activity {
             guard let date = Self.parser.date(from: row.watchedAt) else { continue }
+            counts[key.string(from: date), default: 0] += 1
+        }
+        for row in reading {
+            guard let date = Self.parser.date(from: row.readAt) else { continue }
             counts[key.string(from: date), default: 0] += 1
         }
         let calendar = Calendar.current
@@ -280,11 +309,17 @@ public struct HistoryView: View {
 
     private var log: some View {
         let stamp = SumiTimeFormatter.historyDateFormatter(timeFormat: timeFormat)
+        let entries = mergedLog.prefix(60)
         return VStack(spacing: 0) {
-            ForEach(Array(activity.prefix(60).enumerated()), id: \.offset) { index, row in
-                logRow(row, stamp: stamp)
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                switch entry {
+                case .watched(let row):
+                    logRow(row, stamp: stamp)
+                case .read(let row):
+                    readingRow(row, stamp: stamp)
+                }
 
-                if index < min(activity.count, 60) - 1 {
+                if index < entries.count - 1 {
                     Rectangle().fill(SumiTheme.border).frame(height: 1)
                 }
             }
@@ -294,6 +329,51 @@ public struct HistoryView: View {
             RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
+    }
+
+    /// One log line, whichever kind it is.
+    private enum LogEntry {
+        case watched(ActivityRow)
+        case read(ReadingEntry)
+
+        var timestamp: String {
+            switch self {
+            case .watched(let row): return row.watchedAt
+            case .read(let row): return row.readAt
+            }
+        }
+    }
+
+    /// Episodes and chapters in one list, newest first. Both are "what was
+    /// read or watched on this device", and two separate logs would make
+    /// answering "what was I doing on Tuesday" a comparison between them.
+    private var mergedLog: [LogEntry] {
+        (activity.map(LogEntry.watched) + reading.map(LogEntry.read))
+            .sorted { $0.timestamp > $1.timestamp }
+    }
+
+    /// A chapter's line. `CH` rather than `EP`, and the number as text
+    /// because chapters number fractionally.
+    @ViewBuilder
+    private func readingRow(_ row: ReadingEntry, stamp: DateFormatter) -> some View {
+        let title = titles[row.catalogId]
+        HStack(spacing: 12) {
+            Text(title ?? "Media \(row.catalogId)")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundColor(SumiTheme.foreground)
+                .lineLimit(1)
+            Text("— CH \(row.chapterNumber)")
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+            Spacer()
+            Text(Self.parser.date(from: row.readAt).map { stamp.string(from: $0) } ?? "")
+                .sumiTabularMono(size: 11)
+                .foregroundColor(SumiTheme.muted)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenTitle?(row.catalogId, title) }
     }
 
     @ViewBuilder

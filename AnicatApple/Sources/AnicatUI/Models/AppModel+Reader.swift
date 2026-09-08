@@ -143,6 +143,18 @@ extension AppModel {
                     chapterNumber: chapter.number
                 )
             }
+            // Where this chapter was left. A chapter finished to its last
+            // page opens at the start again rather than on the final page,
+            // which is a reread, not a resume.
+            var startPage = 0
+            if let anilistId,
+               let progress = try? engine.readingProgress(
+                   catalog: .anilist, catalogId: anilistId, chapterId: chapter.id
+               ),
+               progress.page > 0,
+               progress.page < Int64(urls.count) - 1 {
+                startPage = Int(progress.page)
+            }
             self.activeReadingSession = MangaReadingSession(
                 title: title,
                 chapterTitle: displayTitle,
@@ -150,19 +162,69 @@ extension AppModel {
                 pageURLs: urls,
                 chapterIndex: index,
                 chapters: allChapters,
-                anilistId: anilistId
+                anilistId: anilistId,
+                startPage: startPage
             )
             ContinuityManager.shared.advertiseReading(
                 mangaId: chapter.id,
                 anilistId: anilistId,
                 title: title,
                 chapter: chapter.number,
-                pageIndex: 0
+                pageIndex: startPage
             )
         } catch {
             errorMessage = "Could not load chapter pages: \(error.localizedDescription)"
             print("Manga pages load failed: \(error)")
         }
+    }
+
+    /// Picks up a chapter handed off from another device: the title's page,
+    /// then the chapter, at the page it was left on there.
+    ///
+    /// The detail page is opened first because that is where the chapter
+    /// list comes from -- the activity carries a chapter id and a number,
+    /// and the reader needs the chapter itself and its neighbours to offer
+    /// next and previous.
+    public func openReadingHandoff(anilistId: Int64, chapterId: String, page: Int) async {
+        await openDetail(id: anilistId, isManga: true)
+        guard let chapter = selectedMangaChapters.first(where: { $0.id == chapterId }) else { return }
+        // Written before the reader opens, so the resume the reader already
+        // does picks it up. The other device's page wins: it is where the
+        // reading actually got to.
+        if page > 0, let engine {
+            try? engine.recordReadingProgress(
+                catalog: .anilist,
+                catalogId: anilistId,
+                chapterId: chapterId,
+                chapterNumber: chapter.number,
+                page: Int64(page),
+                pageCount: 0
+            )
+        }
+        await openReader(
+            title: selectedMediaDetails?.title ?? "",
+            chapter: chapter,
+            allChapters: selectedMangaChapters,
+            anilistId: anilistId
+        )
+    }
+
+    /// Records the page a chapter is on, so reopening it resumes there.
+    ///
+    /// Local only, like an episode's stop position: AniList tracks whole
+    /// chapters and knows nothing about a page inside one.
+    public func recordReadingPage(chapterId: String, page: Int, pageCount: Int) {
+        guard let engine, let session = activeReadingSession,
+              let anilistId = session.anilistId else { return }
+        let number = session.chapters.first { $0.id == chapterId }?.number ?? ""
+        try? engine.recordReadingProgress(
+            catalog: .anilist,
+            catalogId: anilistId,
+            chapterId: chapterId,
+            chapterNumber: number,
+            page: Int64(page),
+            pageCount: Int64(pageCount)
+        )
     }
 
     /// What finishing a chapter did to the AniList entry.

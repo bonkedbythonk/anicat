@@ -81,6 +81,28 @@ extension AppModel {
     /// Fetches the title and cover of a registry row no shelf has loaded, so
     /// the Stats page can name it instead of printing "AniList #177552".
     /// One lookup per id per session; the detail call is cached by core.
+    /// Chapters read, for the History log. Local like the watch log, and
+    /// like it needing no token: the registry recorded it.
+    @MainActor
+    public func loadReadingActivity() {
+        guard let engine else { return }
+        let rows = (try? engine.readingActivity(limit: 120)) ?? []
+        readingActivity = rows.map {
+            HistoryView.ReadingEntry(
+                catalogId: $0.catalogId,
+                chapterId: $0.chapterId,
+                chapterNumber: $0.chapterNumber,
+                readAt: $0.readAt
+            )
+        }
+        // The log names titles out of `knownTitles`, which is filled from
+        // whatever shelves have loaded -- a manga read months ago may be on
+        // none of them.
+        for row in readingActivity where knownTitles[row.catalogId] == nil {
+            ensureKnownTitle(row.catalogId)
+        }
+    }
+
     @MainActor
     public func ensureKnownTitle(_ id: Int64) {
         guard let engine, knownTitles[id] == nil, !pendingTitleLookups.contains(id) else { return }

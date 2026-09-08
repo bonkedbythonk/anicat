@@ -332,6 +332,10 @@ public final class AppModel {
         public let chapterIndex: Int
         public let chapters: [MediaDetailView.MangaChapterItem]
         public let anilistId: Int64?
+        /// Where this chapter was left, from the registry. A chapter never
+        /// opened starts at 0, which is also what every chapter did before
+        /// there was anywhere to record it.
+        public var startPage: Int = 0
 
         public init(
             title: String,
@@ -340,7 +344,8 @@ public final class AppModel {
             pageURLs: [URL],
             chapterIndex: Int,
             chapters: [MediaDetailView.MangaChapterItem],
-            anilistId: Int64?
+            anilistId: Int64?,
+            startPage: Int = 0
         ) {
             self.title = title
             self.chapterTitle = chapterTitle
@@ -349,6 +354,7 @@ public final class AppModel {
             self.chapterIndex = chapterIndex
             self.chapters = chapters
             self.anilistId = anilistId
+            self.startPage = startPage
         }
     }
 
@@ -567,6 +573,8 @@ public final class AppModel {
     public var novelPlanning: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
     public var viewer: ViewerProfile?
     public var activity: [ActivityRow] = []
+    /// Chapters read on this device, for the History log and its day chart.
+    public var readingActivity: [HistoryView.ReadingEntry] = []
 
     /// Titles for ids the History log has rows for, gathered from every list
     /// already loaded. The registry stores a `catalog_id` and nothing else —

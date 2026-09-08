@@ -459,7 +459,16 @@ public struct RootView: View {
                     title: session.title,
                     chapterTitle: session.chapterTitle,
                     pageURLs: session.pageURLs,
+                    initialPage: session.startPage,
                     onPageChanged: { page in
+                        // Recorded as well as advertised: Handoff hands the
+                        // page to another device, the registry hands it back
+                        // to this one the next time the chapter opens.
+                        model.recordReadingPage(
+                            chapterId: session.chapterId,
+                            page: page,
+                            pageCount: session.pageURLs.count
+                        )
                         ContinuityManager.shared.advertiseReading(
                             mangaId: session.chapterId,
                             anilistId: session.anilistId,
@@ -630,9 +639,14 @@ public struct RootView: View {
             }
         }
         .onContinueUserActivity(ContinuityManager.readingActivityType) { activity in
-            guard case .reading(_, let anilistId, _, _, _) = ContinuityManager.shared.parseIncomingActivity(activity),
+            guard case .reading(let chapterId, let anilistId, _, _, let pageIndex) =
+                    ContinuityManager.shared.parseIncomingActivity(activity),
                   let anilistId else { return }
-            Task { await model.openDetail(id: anilistId, isManga: true) }
+            // Into the chapter and the page, not just the title. The payload
+            // has carried both since it was written; this end dropped them
+            // and opened the detail page, which is where the reading was
+            // *before* the other device started.
+            Task { await model.openReadingHandoff(anilistId: anilistId, chapterId: chapterId, page: pageIndex) }
         }
         #if os(macOS)
         // Driven off activeStreamURL's nil<->value edge rather than
@@ -911,6 +925,9 @@ public struct RootView: View {
                 // somebody's anime statistics over a page of films.
                 viewer: model.appMode == .cinema ? nil : model.viewer,
                 activity: model.appMode == .cinema ? model.cinemaActivity : model.activity,
+                // Chapters belong in the anime-mode log: they are the same
+                // registry and the same question, "what did I read or watch".
+                reading: model.appMode == .cinema ? [] : model.readingActivity,
                 titles: model.appMode == .cinema ? model.cinemaKnownTitles : model.knownTitles,
                 namespace: cardNamespace,
                 openingSourceKey: model.openingDetailSourceKey,

@@ -1232,6 +1232,15 @@ impl AnicatEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        // Talk-show and awards-show appearances, where the credit is the
+        // person themselves. TMDB files them as ordinary cast credits, so a
+        // filmography led by popularity opens on The Tonight Show rather
+        // than on anything they acted in. Dropped unless that leaves
+        // nothing -- a presenter whose whole career is credited "Self" gets
+        // their real list back rather than an empty page.
+        let acted: Vec<_> = credits.iter().filter(|c| !is_self_credit(c.character.as_deref())).copied().collect();
+        let credits = if acted.is_empty() { credits } else { acted };
+
         Ok(CinemaPerson {
             id: person.id,
             name: person.name.clone().unwrap_or_default(),
@@ -3470,6 +3479,23 @@ struct CinemaSearchInputs {
     is_series: bool,
 }
 
+/// Whether a credit is someone appearing as themselves.
+///
+/// TMDB writes these as the character: "Self", "Self - Guest",
+/// "Himself", "Herself - Host". Matched on the first word so the variants do
+/// not each need listing, and a real character called "Selfridge" is not one
+/// of them.
+fn is_self_credit(character: Option<&str>) -> bool {
+    let Some(character) = character else { return false };
+    let first = character
+        .split([' ', '-', '(', ','])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    matches!(first.as_str(), "self" | "himself" | "herself" | "themself" | "themselves")
+}
+
 /// Adds a title to the search list when it has one and it is not already
 /// there. TMDB repeats the same string in `title` and `original_title` for
 /// any english-language film, and a duplicated title is a duplicated search.
@@ -3627,6 +3653,22 @@ mod cinema_live_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_appearance_as_oneself_is_not_a_role() {
+        // The forms TMDB actually writes for a talk-show booking.
+        assert!(is_self_credit(Some("Self")));
+        assert!(is_self_credit(Some("Self - Guest")));
+        assert!(is_self_credit(Some("Himself")));
+        assert!(is_self_credit(Some("Herself - Host")));
+        assert!(is_self_credit(Some("self (archive footage)")));
+
+        // Real parts, including one that starts with the same letters.
+        assert!(!is_self_credit(Some("Juliette Nichols")));
+        assert!(!is_self_credit(Some("Selfridge")));
+        assert!(!is_self_credit(Some("Lady Jessica")));
+        assert!(!is_self_credit(None));
+    }
 
     #[test]
     fn studio_refs_lead_with_the_animation_studio() {

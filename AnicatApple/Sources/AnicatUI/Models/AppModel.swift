@@ -747,6 +747,9 @@ public final class AppModel {
             // The offline cap the engine holds is in memory, so it has to be
             // told what Settings says on every launch.
             applyOfflineLimit()
+            // What is already on disk, from downloads made in earlier
+            // sessions -- the engine's own map does not survive a relaunch.
+            loadDownloadedEpisodes()
 
             let port = try await coreEngine.streamPort()
             print("Anicat Rust Engine ready! Dynamic stream server on port: \(port)")

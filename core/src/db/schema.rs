@@ -279,6 +279,40 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 7 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- Episodes downloaded to the Downloads folder.
+            --
+            -- The engine's own download map is session-only, and the file it
+            -- copies out lives in ~/Downloads/Anicat and outlives every
+            -- process: without this the app forgot, on every relaunch, that
+            -- it had the episode -- the Downloads page came back empty and
+            -- pressing Play re-fetched a file already on the disk.
+            --
+            -- `path` is where the copy landed. It is checked before use: a
+            -- file the viewer has since moved or deleted has to read as not
+            -- downloaded, which is why this table is an index and not the
+            -- truth.
+            CREATE TABLE IF NOT EXISTS downloaded_episodes (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                title TEXT,
+                path TEXT NOT NULL,
+                bytes INTEGER NOT NULL DEFAULT 0,
+                downloaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id, episode_number)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 7)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

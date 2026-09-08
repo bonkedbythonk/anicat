@@ -18,7 +18,7 @@ struct PhoneSettingsView: View {
     @Bindable var model: AppModel
 
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subbed"
-    @AppStorage("anicat_autoskip") private var autoSkip: Bool = true
+    @AppStorage("anicat_autoskip") private var autoSkip: Bool = false
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = false
@@ -164,7 +164,12 @@ struct PhoneSettingsView: View {
             // A dub preference is a preference, not a filter — the engine
             // penalises non-dub releases and refunds the penalty when a show
             // has no dub at all.
-            Toggle("Skip intros", isOn: $autoSkip)
+            Toggle("Skip intros automatically", isOn: $autoSkip)
+            Text(autoSkip
+                 ? "Intros are skipped without asking."
+                 : "A Skip Intro button appears instead.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
             Toggle("Play next episode", isOn: $autoPlayNext)
         }
     }

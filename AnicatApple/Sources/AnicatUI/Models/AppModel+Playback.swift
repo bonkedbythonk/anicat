@@ -267,6 +267,13 @@ extension AppModel {
     public func playSelectedEpisode(_ number: Int) async {
         guard let catalogId = currentPlaybackCatalogId else { return }
         guard playbackEpisodes.contains(where: { $0.number == number }) else { return }
+        // Same rule as everywhere else: the copy on disk, if there is one.
+        if let download = finishedDownload(
+            catalog: currentDetailCatalog, catalogId: catalogId, episode: number
+        ) {
+            await playDownloadedFile(download)
+            return
+        }
         do {
             _ = try await resolveAndPlay(
                 catalog: currentPlaybackCatalog,

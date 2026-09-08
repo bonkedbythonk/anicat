@@ -689,7 +689,20 @@ public final class PlayerController {
     /// `UserDefaults` on every check — Settings' own toggle still writes the
     /// same key, but the player's own toggle button (there wasn't one before)
     /// needs something it can bind to and flip directly.
-    public var autoSkipEnabled: Bool = true {
+    /// Off by default on iPhone, on by default on the Mac.
+    ///
+    /// Not a whim: on a phone the intro is the one moment the viewer already
+    /// has a thumb near the screen, and skipping it silently reads as the
+    /// app having lost its place. On a desktop, where nobody is holding the
+    /// machine, the silent skip is the point. Either default is overridden
+    /// the moment `anicat_autoskip` exists.
+    public var autoSkipEnabled: Bool = {
+        #if os(iOS)
+        return false
+        #else
+        return true
+        #endif
+    }() {
         didSet { UserDefaults.standard.set(autoSkipEnabled, forKey: "anicat_autoskip") }
     }
 
@@ -793,6 +806,7 @@ public final class PlayerController {
     }
 
     public func showControlsBriefly() {
+        print("[taps] showControlsBriefly called")
         if !areControlsVisible {
             areControlsVisible = true
         }
@@ -801,7 +815,14 @@ public final class PlayerController {
         #endif
         autohideTask?.cancel()
         autohideTask = Task {
+            // Longer on a phone: 3.5s is comfortable with a pointer already
+            // on the controls, but a thumb has to travel, and the controls
+            // vanishing mid-reach reads as the tap not having worked.
+            #if os(iOS)
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
+            #else
             try? await Task.sleep(nanoseconds: 3_500_000_000) // 3.5s
+            #endif
             if !Task.isCancelled && isPlaying && !isScrubbing && !isMenuOpen {
                 await MainActor.run {
                     withAnimation(.smooth) {

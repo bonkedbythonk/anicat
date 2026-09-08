@@ -1133,6 +1133,18 @@ private func playEpisode(
 ) {
     model.openingPlayerSourceKey = morphKey
     model.openingPlayerThumbnailURL = morphThumbnailURL
+    // A file already on the disk beats the swarm. Without this the only
+    // place a download was ever used was next/prev inside the player: every
+    // press of Play on the page re-resolved and re-fetched an episode the
+    // viewer had explicitly downloaded.
+    if let download = model.finishedDownload(
+        catalog: catalog == .anilist ? .anilist : (catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv),
+        catalogId: catalogId,
+        episode: episode
+    ) {
+        model.activeResolveTask = Task { await model.playDownloadedFile(download) }
+        return
+    }
     model.activeResolveTask = Task {
         do {
             _ = try await model.resolveAndPlay(

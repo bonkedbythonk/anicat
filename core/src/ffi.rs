@@ -298,6 +298,18 @@ pub struct CinemaCredit {
     pub year: Option<i32>,
 }
 
+/// One episode copied into the Downloads folder.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDownloadedEpisode {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    pub title: Option<String>,
+    pub path: String,
+    pub bytes: u64,
+    pub downloaded_at: String,
+}
+
 /// One chapter kept on disk.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiOfflineChapter {
@@ -800,7 +812,9 @@ pub struct SearchFilters {
 pub struct AnicatEngine {
     http: reqwest::Client,
     catalogs: Catalogs,
-    registry: Registry,
+    /// Shared so a background watcher can outlive the call that started it:
+    /// a download records itself when it lands, whatever the UI is doing.
+    registry: Arc<Registry>,
     offline: crate::reader::offline::OfflineLibrary,
     /// Bytes the offline library may occupy before the least recently used
     /// chapters are evicted. Settable, because what is a reasonable slice of
@@ -872,7 +886,7 @@ impl AnicatEngine {
                 tmdb_proxy,
                 AniListCache::persistent(&dir.join("catalog-cache.sqlite")),
             ),
-            registry,
+            registry: Arc::new(registry),
             // Chapters kept for offline reading. Application Support rather
             // than Caches: this is what the viewer asked to keep, and the
             // system empties Caches whenever it likes.
@@ -1160,6 +1174,68 @@ impl AnicatEngine {
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// Every episode downloaded to the Downloads folder, newest first.
+    ///
+    /// Rows whose file has since been moved or deleted are dropped on the way
+    /// out, and forgotten: the table is an index, the file is the truth, and
+    /// offering to play something that is not there is worse than forgetting
+    /// it was ever fetched.
+    pub fn downloaded_episodes(&self) -> FfiResult<Vec<FfiDownloadedEpisode>> {
+        let rows = self
+            .registry
+            .downloaded_episodes()
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        let mut out = vec![];
+        for row in rows {
+            if !std::path::Path::new(&row.path).exists() {
+                let _ = self.registry.forget_downloaded_episode(
+                    row.catalog,
+                    row.catalog_id,
+                    row.episode_number,
+                );
+                continue;
+            }
+            out.push(FfiDownloadedEpisode {
+                catalog: row.catalog.into(),
+                catalog_id: row.catalog_id,
+                episode_number: row.episode_number,
+                title: row.title,
+                path: row.path,
+                bytes: row.bytes as u64,
+                downloaded_at: row.downloaded_at,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Forgets a downloaded episode, and deletes the file when asked to.
+    ///
+    /// The file is in the viewer's own Downloads folder, which is theirs --
+    /// so removing the row and deleting the copy are separate decisions and
+    /// the caller makes both.
+    pub fn remove_downloaded_episode(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        delete_file: bool,
+    ) -> FfiResult<()> {
+        if delete_file {
+            if let Ok(rows) = self.registry.downloaded_episodes() {
+                if let Some(row) = rows.iter().find(|r| {
+                    r.catalog == catalog.into()
+                        && r.catalog_id == catalog_id
+                        && r.episode_number == episode
+                }) {
+                    let _ = std::fs::remove_file(&row.path);
+                }
+            }
+        }
+        self.registry
+            .forget_downloaded_episode(catalog.into(), catalog_id, episode)
+            .map_err(|msg| AnicatError::Storage { msg })
     }
 
     /// Downloads a chapter's pages for reading with no network.
@@ -1860,7 +1936,14 @@ impl AnicatEngine {
             Some(c) => c.titles[0].clone(),
             None => info.titles[0].clone(),
         });
-        self.torrents.spawn_episode_download(&session, torrent_id, file_id, display_title);
+        self.torrents
+            .spawn_episode_download(&session, torrent_id, file_id, display_title.clone());
+        // Watched here as well as by whatever UI is open: the engine's own
+        // download map is session-only, and the copy it leaves in the
+        // Downloads folder outlives every process. Without a row written when
+        // it finishes, the app forgets on the next launch that it has the
+        // episode -- and re-fetches a file already on the disk.
+        self.watch_download(catalog, catalog_id, episode, display_title);
         Ok(())
     }
 
@@ -1876,9 +1959,8 @@ impl AnicatEngine {
         catalog_id: i64,
         episode: i64,
     ) -> FfiDownloadStatus {
-        if catalog != FfiCatalog::Anilist {
-            return FfiDownloadStatus::NotStarted;
-        }
+        // Every catalog: films and series download through the same path
+        // now, and answering NotStarted for them left their rows spinning.
         let media = MediaKey::new(catalog.into(), catalog_id);
         let Some((torrent_id, file_id)) = self.torrents.resolved_ids(media, episode).await else {
             return FfiDownloadStatus::NotStarted;
@@ -3011,6 +3093,44 @@ fn push_child_comments(
 }
 
 impl AnicatEngine {
+    /// Records a download once it lands, whatever the UI is doing.
+    ///
+    /// Polls the same status the episode row polls, at the same interval, and
+    /// stops on the first terminal state. Bounded by the download's own
+    /// ceiling rather than a timer of its own: a stalled download reports
+    /// `Failed` and this ends with it.
+    fn watch_download(&self, catalog: FfiCatalog, catalog_id: i64, episode: i64, title: String) {
+        let registry = self.registry.clone();
+        let torrents = self.torrents.clone();
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let Some((torrent_id, file_id)) = torrents.resolved_ids(media, episode).await else {
+                    return;
+                };
+                match torrents.download_status(torrent_id, file_id).await.into() {
+                    FfiDownloadStatus::Done { path } => {
+                        let bytes = std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0);
+                        if let Err(e) = registry.record_downloaded_episode(
+                            catalog.into(),
+                            catalog_id,
+                            episode,
+                            Some(&title),
+                            &path,
+                            bytes,
+                        ) {
+                            log::warn!("registry: could not record download: {e}");
+                        }
+                        return;
+                    }
+                    FfiDownloadStatus::Failed { .. } | FfiDownloadStatus::NotStarted => return,
+                    FfiDownloadStatus::Downloading { .. } => {}
+                }
+            }
+        });
+    }
+
     /// The cinema counterpart of `resolve_stream`.
     ///
     /// A separate path rather than another branch inside it: everything
@@ -3939,6 +4059,105 @@ fn summarize_cinema(m: &anilist::types::MediaItem) -> MediaSummary {
         FfiCatalog::TmdbTv
     };
     MediaSummary { catalog, ..summarize(m) }
+}
+
+#[cfg(test)]
+mod offline_live_tests {
+    use super::*;
+
+    /// Live. `cargo test --lib offline_live -- --ignored --nocapture`
+    ///
+    /// Downloads two real chapters under a cap that fits only one, and
+    /// asserts the older one left and the newer one stayed -- files and
+    /// registry row both. The arithmetic has unit tests; this is the part
+    /// they cannot check, that the deleting actually follows them.
+    #[tokio::test]
+    #[ignore]
+    async fn live_a_download_over_the_cap_evicts_the_oldest() {
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
+        let dir = std::env::temp_dir().join("anicat-offline-cap-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = AnicatEngine::new(dir.to_string_lossy().to_string(), None, None, None)
+            .expect("engine");
+
+        // Tomodachi Game, the title the reader tests already use.
+        // MangaDex first, MangaKatana behind it -- the same order the reader
+        // uses, and necessary here: this title is one of the ones MangaDex
+        // has matched and has nothing readable under.
+        let mut chapters = vec![];
+        if let Some(manga) = engine
+            .search_manga("Tomodachi Game".to_string(), Some(85911))
+            .await
+            .ok()
+            .and_then(|m| m.into_iter().next())
+        {
+            chapters = engine.get_manga_chapters(manga.id).await.unwrap_or_default();
+        }
+        if chapters.len() < 2 {
+            let fallback = engine
+                .search_manga_katana("Tomodachi Game".to_string())
+                .await
+                .expect("katana search");
+            let manga = fallback.first().expect("no match on either source");
+            chapters = engine.get_manga_chapters(manga.id.clone()).await.expect("chapters");
+        }
+        assert!(chapters.len() >= 2, "need two chapters to evict between");
+        let first = &chapters[0];
+        let second = &chapters[1];
+
+        let pages = engine
+            .download_chapter(
+                FfiCatalog::Anilist,
+                85911,
+                first.id.clone(),
+                first.number.clone(),
+                Some("Tomodachi Game".to_string()),
+            )
+            .await
+            .expect("first download");
+        println!("first chapter: {pages} pages");
+
+        // A cap that the two together cannot fit under, taken from what the
+        // first one actually cost -- chapter sizes vary and a fixed number
+        // would make this test about the guess rather than the eviction.
+        let after_first = engine.offline_size_bytes();
+        engine.set_offline_limit_bytes(after_first + 1);
+
+        let pages = engine
+            .download_chapter(
+                FfiCatalog::Anilist,
+                85911,
+                second.id.clone(),
+                second.number.clone(),
+                Some("Tomodachi Game".to_string()),
+            )
+            .await
+            .expect("second download");
+        println!("second chapter: {pages} pages, cap {} bytes", after_first + 1);
+
+        let rows = engine.offline_chapters().expect("rows");
+        println!(
+            "kept: {:?}",
+            rows.iter().map(|r| r.chapter_number.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1, "the cap should have left exactly one chapter");
+        assert_eq!(rows[0].chapter_id, second.id, "the newest is the one kept");
+        assert!(
+            engine
+                .offline_chapter_pages(FfiCatalog::Anilist, 85911, first.id.clone())
+                .is_empty(),
+            "the evicted chapter's files should be gone"
+        );
+        assert!(
+            !engine
+                .offline_chapter_pages(FfiCatalog::Anilist, 85911, second.id.clone())
+                .is_empty(),
+            "the kept chapter's files should still be there"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

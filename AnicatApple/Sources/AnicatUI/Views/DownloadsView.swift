@@ -94,6 +94,57 @@ public struct DownloadsView: View {
         }
     }
 
+    /// Rows grouped under the title they belong to, titles in the order
+    /// their newest row appears.
+    ///
+    /// A flat list was fine with three downloads and unreadable with thirty:
+    /// four episodes of one show and two of another interleaved by whenever
+    /// each happened to finish. The files have always been grouped this way
+    /// on disk (`Downloads/Anicat/<title>/`); this is the page catching up.
+    private func grouped(_ rows: [AppModel.LibraryDownload]) -> [(String, [AppModel.LibraryDownload])] {
+        var order: [String] = []
+        var byTitle: [String: [AppModel.LibraryDownload]] = [:]
+        for row in rows {
+            if byTitle[row.title] == nil { order.append(row.title) }
+            byTitle[row.title, default: []].append(row)
+        }
+        return order.map { title in
+            // Episodes in their own order inside a show, whatever order they
+            // were fetched in.
+            (title, (byTitle[title] ?? []).sorted { $0.episode < $1.episode })
+        }
+    }
+
+    /// Chapters grouped the same way.
+    private var groupedChapters: [(String, [FfiOfflineChapter])] {
+        var order: [String] = []
+        var byTitle: [String: [FfiOfflineChapter]] = [:]
+        for row in chapters {
+            let title = titles[row.catalogId] ?? row.title ?? "Media \(row.catalogId)"
+            if byTitle[title] == nil { order.append(title) }
+            byTitle[title, default: []].append(row)
+        }
+        return order.map { title in
+            (title, byTitle[title] ?? [])
+        }
+    }
+
+    /// One group's heading: the title, and what it holds.
+    @ViewBuilder
+    private func groupHeader(_ title: String, count: Int, unit: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(SumiTheme.foreground)
+                .lineLimit(1)
+            Spacer()
+            Text("\(count) \(unit)\(count == 1 ? "" : "s")")
+                .sumiTabularMono(size: 10.5)
+                .foregroundColor(SumiTheme.muted)
+        }
+        .padding(.top, 4)
+    }
+
     /// What the list's `.animation(value:)` watches. `LibraryDownload` is
     /// not `Equatable` (see `AppModel.downloadSignature`), and a change that
     /// keeps a row where it is (a percentage tick) must not re-run the row
@@ -128,13 +179,18 @@ public struct DownloadsView: View {
                         detail: "Episodes queued from a show's episode list will appear here."
                     )
                 } else {
-                    VStack(spacing: 8) {
-                        ForEach(shown) { item in
-                            DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
-                                .transition(.asymmetric(
-                                    insertion: .opacity,
-                                    removal: .scale(scale: 0.96).combined(with: .opacity)
-                                ))
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(grouped(shown), id: \.0) { title, rows in
+                            VStack(spacing: 8) {
+                                groupHeader(title, count: rows.count, unit: "episode")
+                                ForEach(rows) { item in
+                                    DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
+                                        .transition(.asymmetric(
+                                            insertion: .opacity,
+                                            removal: .scale(scale: 0.96).combined(with: .opacity)
+                                        ))
+                                }
+                            }
                         }
                     }
                 }
@@ -158,15 +214,18 @@ public struct DownloadsView: View {
                 detail: "Download a chapter from a manga's chapter list to read it with no network."
             )
         } else {
-            VStack(spacing: 8) {
-                ForEach(chapters, id: \.chapterId) { chapter in
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(groupedChapters, id: \.0) { title, rows in
+                VStack(spacing: 8) {
+                groupHeader(title, count: rows.count, unit: "chapter")
+                ForEach(rows, id: \.chapterId) { chapter in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(titles[chapter.catalogId] ?? chapter.title ?? "Media \(chapter.catalogId)")
+                            Text("CH \(chapter.chapterNumber)")
                                 .font(.system(size: 13.5, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
-                            Text("CH \(chapter.chapterNumber) · \(chapter.pageCount) pages · \(Self.size(chapter.bytes))")
+                            Text("\(chapter.pageCount) pages · \(Self.size(chapter.bytes))")
                                 .sumiTabularMono(size: 11)
                                 .foregroundColor(SumiTheme.muted)
                         }
@@ -190,6 +249,8 @@ public struct DownloadsView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+                }
+                }
                 }
             }
         }

@@ -11,6 +11,38 @@ extension AppModel {
     /// where the copy landed, not that it is still there: the folder is the
     /// user's own Downloads, and a file moved or deleted from it would
     /// otherwise reach mpv as a path that opens nothing.
+    /// Restores what is already on disk, so the Downloads page and the
+    /// episode rows know about downloads made in earlier sessions.
+    ///
+    /// The engine's own download map is session-only and the files are not:
+    /// without this the app forgot every relaunch that it had an episode,
+    /// and pressing Play fetched a file already on the disk.
+    @MainActor
+    public func loadDownloadedEpisodes() {
+        guard let engine else { return }
+        let rows = (try? engine.downloadedEpisodes()) ?? []
+        // Rows for episodes the app is downloading right now win: they carry
+        // live progress, and the stored row only knows about finished ones.
+        var restored: [LibraryDownload] = []
+        for row in rows where !libraryDownloads.contains(where: {
+            $0.catalogId == row.catalogId && $0.episode == Int(row.episodeNumber)
+        }) {
+            restored.append(
+                LibraryDownload(
+                    catalogId: row.catalogId,
+                    episode: Int(row.episodeNumber),
+                    title: row.title ?? "Media \(row.catalogId)",
+                    coverURL: knownCovers[row.catalogId],
+                    state: .done(path: row.path),
+                    catalog: row.catalog == .tmdbMovie
+                        ? .tmdbMovie
+                        : (row.catalog == .tmdbTv ? .tmdbTv : .anilist)
+                )
+            )
+        }
+        libraryDownloads.append(contentsOf: restored)
+    }
+
     public func finishedDownload(
         catalog: MediaCard.CardCatalog,
         catalogId: Int64,

@@ -50,6 +50,18 @@ pub struct NewOfflineChapter<'a> {
     pub bytes: i64,
 }
 
+/// One episode copied into the Downloads folder.
+#[derive(Debug, Clone)]
+pub struct DownloadedEpisode {
+    pub catalog: Catalog,
+    pub catalog_id: i64,
+    pub episode_number: i64,
+    pub title: Option<String>,
+    pub path: String,
+    pub bytes: i64,
+    pub downloaded_at: String,
+}
+
 /// One chapter kept on disk.
 #[derive(Debug, Clone)]
 pub struct OfflineChapter {
@@ -427,6 +439,88 @@ impl Registry {
         )
         .map(|_| ())
         .map_err(|e| e.to_string())
+    }
+
+    /// Notes an episode as downloaded, with where the file landed.
+    pub fn record_downloaded_episode(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode: i64,
+        title: Option<&str>,
+        path: &str,
+        bytes: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO downloaded_episodes
+                (catalog, catalog_id, episode_number, title, path, bytes, downloaded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+             ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
+               title = excluded.title,
+               path = excluded.path,
+               bytes = excluded.bytes,
+               downloaded_at = excluded.downloaded_at",
+            params![catalog.as_str(), catalog_id, episode, title, path, bytes],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn forget_downloaded_episode(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "DELETE FROM downloaded_episodes
+             WHERE catalog = ?1 AND catalog_id = ?2 AND episode_number = ?3",
+            params![catalog.as_str(), catalog_id, episode],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Every downloaded episode, newest first.
+    pub fn downloaded_episodes(&self) -> Result<Vec<DownloadedEpisode>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, episode_number, title, path, bytes, downloaded_at
+                 FROM downloaded_episodes ORDER BY downloaded_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = vec![];
+        for row in rows {
+            let (catalog, catalog_id, episode, title, path, bytes, at) =
+                row.map_err(|e| e.to_string())?;
+            let Some(catalog) = Catalog::parse(&catalog) else { continue };
+            out.push(DownloadedEpisode {
+                catalog,
+                catalog_id,
+                episode_number: episode,
+                title,
+                path,
+                bytes,
+                downloaded_at: at,
+            });
+        }
+        Ok(out)
     }
 
     /// Marks a downloaded chapter as just used, so the size cap evicts it
@@ -997,7 +1091,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
     }
 
     #[test]

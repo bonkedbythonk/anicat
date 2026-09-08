@@ -67,9 +67,12 @@ struct PhonePlayerView: View {
         // stack moves with the finger and fades as it goes, so the gesture
         // reads as dragging the player off rather than as a scroll that
         // happens to close something.
+        // Offset only. `scaleEffect` on this stack resizes the CAMetalLayer
+        // mpv draws into, and a resize is what `nudgeVideoReconfig` exists to
+        // handle — so every frame of the drag asked mpv to reconfigure the
+        // video output. That is where the judder came from, not the spring.
         .offset(y: dismissOffset)
-        .scaleEffect(1 - min(dismissOffset / 2400, 0.08))
-        .opacity(1 - min(dismissOffset / 700, 0.55))
+        .opacity(1 - min(dismissOffset / 900, 0.4))
         // Always hidden, not just while the controls are up: the system
         // player hides it for the whole session, and leaving it on put the
         // clock in the same strip as the title.
@@ -91,9 +94,32 @@ struct PhonePlayerView: View {
 
     // MARK: Controls
 
+    private func toggleControls() {
+        print("[taps] toggleControls visible=\(controller.areControlsVisible)")
+        withAnimation(.easeOut(duration: 0.2)) {
+            if controller.areControlsVisible {
+                controller.areControlsVisible = false
+                controller.cancelAutohide()
+            } else {
+                controller.showControlsBriefly()
+            }
+        }
+    }
+
     @ViewBuilder
     private var controls: some View {
         ZStack {
+            // The chrome needs its own dismiss tap. While it is up it covers
+            // the gesture layer underneath, so a tap on the scrim never
+            // reached that layer: the controls could be summoned but not
+            // dismissed, and only the 3.5s timer ever put them away.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    print("[taps] chrome layer tapped")
+                    toggleControls()
+                }
+
             // Scrims rather than a flat dim: white glyphs over a bright frame
             // are unreadable without one, and dimming the whole picture to
             // fix that is what the system player pointedly does not do.
@@ -425,15 +451,13 @@ struct PhonePlayerView: View {
                 // Tap shows the controls; it does not toggle playback. The
                 // system player behaves the same way, and a tap that pauses
                 // is the thing people hit by accident reaching for a button.
+                // Only while the chrome is down. When it is up it has its
+                // own dismiss layer, and both firing on one tap toggled
+                // twice — hidden, then shown again, which looked exactly
+                // like the tap doing nothing.
                 .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        if controller.areControlsVisible {
-                            controller.areControlsVisible = false
-                            controller.cancelAutohide()
-                        } else {
-                            controller.showControlsBriefly()
-                        }
-                    }
+                    guard !controller.areControlsVisible else { return }
+                    toggleControls()
                 }
         }
         .ignoresSafeArea()
@@ -457,9 +481,11 @@ struct PhonePlayerView: View {
                 let far = drag.translation.height > 140
                 let fast = drag.predictedEndTranslation.height > 420
                 if far || fast {
-                    withAnimation(.easeIn(duration: 0.18)) {
-                        dismissOffset = 1200
-                    }
+                    // No exit animation on the offset: the player is being
+                    // torn down, and animating a Metal layer off screen while
+                    // its host view is dismantled is the same reconfigure
+                    // storm by another route. The close transition handles
+                    // the fade.
                     onClose()
                 } else {
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
@@ -470,6 +496,7 @@ struct PhonePlayerView: View {
     }
 
     private func seek(by delta: Double) {
+        print("[taps] seek \(delta)")
         controller.seekRelative(by: delta)
         controller.showControlsBriefly()
     }

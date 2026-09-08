@@ -221,6 +221,8 @@ public enum NovelPreferences {
     static let lastNovelURLKey = "anicat_novel_last_url"
     static let lastNovelTitleKey = "anicat_novel_last_title"
     static let lastNovelChapterKey = "anicat_novel_last_chapter"
+    static let lastNovelSourceKey = "anicat_novel_last_source"
+    static let lastNovelCatalogIdKey = "anicat_novel_last_catalog_id"
 
     public static func typography(defaults: UserDefaults = .standard) -> NovelTypography {
         var settings = NovelTypography()
@@ -317,21 +319,47 @@ public enum NovelPreferences {
         public let url: String
         public let title: String
         public let chapter: Int
+        /// `"lnori"` or `"syosetu"`. Without it the resume button handed an
+        /// lnori book URL to `novelInfo`, which refuses anything that is not
+        /// a syosetu.com URL -- so "Continue chapter 4 of Volume 1" opened
+        /// an error, with or without a network.
+        public let source: String
+        /// The AniList entry, for an lnori volume. Nil for a pasted Syosetu
+        /// link, which has no catalogue entry behind it.
+        public let catalogId: Int64?
     }
 
     public static func lastNovel(defaults: UserDefaults = .standard) -> LastNovel? {
         guard let url = defaults.string(forKey: lastNovelURLKey), !url.isEmpty else { return nil }
+        let storedId = defaults.object(forKey: lastNovelCatalogIdKey) as? Int64
         return LastNovel(
             url: url,
             title: defaults.string(forKey: lastNovelTitleKey) ?? url,
-            chapter: defaults.integer(forKey: lastNovelChapterKey)
+            chapter: defaults.integer(forKey: lastNovelChapterKey),
+            // A row written before the key existed is a Syosetu one: that was
+            // the only source at the time.
+            source: defaults.string(forKey: lastNovelSourceKey) ?? "syosetu",
+            catalogId: storedId
         )
     }
 
-    public static func setLastNovel(url: String, title: String, chapter: Int, defaults: UserDefaults = .standard) {
+    public static func setLastNovel(
+        url: String,
+        title: String,
+        chapter: Int,
+        source: String,
+        catalogId: Int64?,
+        defaults: UserDefaults = .standard
+    ) {
         defaults.set(url, forKey: lastNovelURLKey)
         defaults.set(title, forKey: lastNovelTitleKey)
         defaults.set(chapter, forKey: lastNovelChapterKey)
+        defaults.set(source, forKey: lastNovelSourceKey)
+        if let catalogId {
+            defaults.set(catalogId, forKey: lastNovelCatalogIdKey)
+        } else {
+            defaults.removeObject(forKey: lastNovelCatalogIdKey)
+        }
     }
 }
 

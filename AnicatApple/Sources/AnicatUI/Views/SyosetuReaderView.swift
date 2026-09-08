@@ -66,7 +66,19 @@ public struct SyosetuReaderView: View {
                 }
                 if let last = NovelPreferences.lastNovel() {
                     SumiOutlineButton("Continue chapter \(last.chapter + 1) of \(last.title)", systemImage: "arrow.right") {
-                        model.openSyosetuReader(url: last.url)
+                        // By source, not by URL alone. `openSyosetuReader`
+                        // goes to `novelInfo`, which refuses anything that is
+                        // not a syosetu.com URL, so an lnori volume resumed
+                        // into an error rather than into the book.
+                        if last.source == AppModel.NovelSource.lnori.rawValue {
+                            model.openLightNovelVolume(
+                                bookURL: last.url,
+                                title: last.title,
+                                catalogId: last.catalogId
+                            )
+                        } else {
+                            model.openSyosetuReader(url: last.url)
+                        }
                     }
                     .padding(.top, 4)
                 }

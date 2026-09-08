@@ -1081,11 +1081,17 @@ public final class AppModel {
     /// Which reader a session is driving. A chapter is a whole page on
     /// Syosetu and an anchor into one big page on lnori, so the fetch
     /// differs even though everything the reader draws is the same.
-    public enum NovelSource: Sendable, Equatable { case syosetu, lnori }
+    public enum NovelSource: String, Sendable, Equatable { case syosetu, lnori }
 
     public struct SyosetuSession {
         public var source: NovelSource = .syosetu
         public var sourceURL: String
+        /// The AniList entry this volume belongs to, where it came from a
+        /// catalogue page. Carried on the session rather than read off the
+        /// open detail page: the reader outlives that page (it is reached
+        /// from the novels page and from a resume button too), and the
+        /// offline lookups are keyed on this id.
+        public var catalogId: Int64?
         public var info: NovelInfo?
         public var currentChapterIndex: Int = 0
         public var chapterTitle: String = ""

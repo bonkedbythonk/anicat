@@ -53,9 +53,13 @@ extension AppModel {
 
     /// Opens one volume in the novel reader. The volume is a single page, so
     /// its table of contents becomes the reader's chapter list.
-    public func openLightNovelVolume(bookURL: String, title: String) {
+    public func openLightNovelVolume(bookURL: String, title: String, catalogId: Int64? = nil) {
         novelReaderOpen = true
-        syosetuSession = SyosetuSession(source: .lnori, sourceURL: bookURL)
+        syosetuSession = SyosetuSession(
+            source: .lnori,
+            sourceURL: bookURL,
+            catalogId: catalogId ?? selectedMediaDetails?.id
+        )
         Task { await loadLightNovelVolume(bookURL: bookURL, title: title) }
     }
 
@@ -67,7 +71,7 @@ extension AppModel {
         // use if listing the volume's chapters still needs the network -- the
         // chapter list is fetched before any chapter is, so a downloaded book
         // would have failed here and never reached the stored text.
-        if let anilistId = selectedMediaDetails?.id {
+        if let anilistId = syosetuSession?.catalogId {
             let stored = engine.offlineLightNovelVolume(
                 catalog: .anilist,
                 catalogId: anilistId,
@@ -81,9 +85,8 @@ extension AppModel {
                     chapters: stored
                 )
                 syosetuSession?.isLoading = false
-                if let first = stored.first {
-                    await loadSyosetuChapter(url: first.url, index: 0)
-                }
+                let start = resumeChapter(in: stored, bookURL: bookURL)
+                await loadSyosetuChapter(url: stored[start].url, index: start)
                 return
             }
         }
@@ -97,14 +100,28 @@ extension AppModel {
                 chapters: chapters
             )
             syosetuSession?.isLoading = false
-            if let first = chapters.first {
-                await loadSyosetuChapter(url: first.url, index: 0)
-            }
+            let start = resumeChapter(in: chapters, bookURL: bookURL)
+            await loadSyosetuChapter(url: chapters[start].url, index: start)
         } catch {
             guard syosetuSession?.sourceURL == bookURL else { return }
             syosetuSession?.isLoading = false
             syosetuSession?.errorMessage = error.localizedDescription
         }
+    }
+
+    /// Where to open a volume. The resume button says "Continue chapter 4",
+    /// so opening at chapter one would contradict the thing that was pressed;
+    /// the Syosetu path has resumed like this since it existed.
+    ///
+    /// Matched on the book URL rather than through `ncode`, which is a
+    /// Syosetu id and is nil for every lnori URL.
+    private func resumeChapter(in chapters: [NovelChapterRef], bookURL: String) -> Int {
+        guard !chapters.isEmpty else { return 0 }
+        guard let last = NovelPreferences.lastNovel(),
+              last.url == bookURL,
+              chapters.indices.contains(last.chapter)
+        else { return 0 }
+        return last.chapter
     }
 
     // MARK: - Keeping a volume
@@ -254,7 +271,7 @@ extension AppModel {
                 // The downloaded copy first, and without announcing itself:
                 // the point of downloading a volume is that reading it later
                 // is the same act, on a train with no signal included.
-                if let anilistId = selectedMediaDetails?.id,
+                if let anilistId = session.catalogId,
                    let stored = engine.offlineLightNovelChapter(
                        catalog: .anilist,
                        catalogId: anilistId,
@@ -279,7 +296,9 @@ extension AppModel {
             NovelPreferences.setLastNovel(
                 url: sourceURL,
                 title: syosetuSession?.info?.title ?? chapter.title,
-                chapter: index
+                chapter: index,
+                source: session.source.rawValue,
+                catalogId: session.catalogId
             )
         } catch {
             guard syosetuSession?.sourceURL == sourceURL else { return }

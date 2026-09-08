@@ -67,12 +67,19 @@ extension AppModel {
             // home is the root feed, not a detail page, so forward gestures
             // must never hijack home-screen shelf scrolling or reopen details.
             detailForwardStack = []
-            // Animate `selectedMediaDetails = nil` alongside `openingDetailSourceKey = nil`
-            // in the same transaction so MediaDetailView dissolves away smoothly over
-            // the persistent sectionContent underneath, avoiding an un-animated layout pass or hard cut.
+            // The poster flies back into the card it came from, so closing
+            // reverses the open rather than dissolving over the shelf.
+            //
+            // `openingDetailSourceKey` is what gives that card its half of
+            // the `matchedGeometryEffect` pair (see `HomeShelf`), so clearing
+            // it in the same transaction as `selectedMediaDetails` left the
+            // leaving poster with nothing to interpolate towards and it
+            // simply faded. It is cleared after the animation instead, which
+            // is the whole difference between a morph and a cross-fade.
             withAnimation(.easeInOut(duration: 0.32)) {
-                openingDetailSourceKey = nil
                 selectedMediaDetails = nil
+            } completion: { [weak self] in
+                self?.openingDetailSourceKey = nil
             }
             return
         }
@@ -143,9 +150,12 @@ extension AppModel {
     public func clearDetail() {
         activeDetailTask?.cancel()
         activeDetailExtrasTask?.cancel()
+        // Same reason as `closeDetail`: the source card has to keep its half
+        // of the morph pair until the transition finishes.
         withAnimation(.easeInOut(duration: 0.32)) {
-            openingDetailSourceKey = nil
             selectedMediaDetails = nil
+        } completion: { [weak self] in
+            self?.openingDetailSourceKey = nil
         }
         detailHistory = []
         detailForwardStack = []

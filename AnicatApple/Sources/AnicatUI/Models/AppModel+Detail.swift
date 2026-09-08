@@ -76,6 +76,11 @@ extension AppModel {
             // leaving poster with nothing to interpolate towards and it
             // simply faded. It is cleared after the animation instead, which
             // is the whole difference between a morph and a cross-fade.
+            // Nothing under the pointer should light up because the page
+            // above it went away. See `suppressHoverUntilPointerMoves`.
+            #if os(macOS)
+            HoverActivityMonitor.shared.suppressHoverUntilPointerMoves()
+            #endif
             withAnimation(.sumi(.morph)) {
                 selectedMediaDetails = nil
             } completion: { [weak self] in
@@ -165,6 +170,9 @@ extension AppModel {
     public func clearDetail() {
         activeDetailTask?.cancel()
         activeDetailExtrasTask?.cancel()
+        #if os(macOS)
+        HoverActivityMonitor.shared.suppressHoverUntilPointerMoves()
+        #endif
         // Same reason as `closeDetail`: the source card has to keep its half
         // of the morph pair until the transition finishes.
         withAnimation(.sumi(.morph)) {

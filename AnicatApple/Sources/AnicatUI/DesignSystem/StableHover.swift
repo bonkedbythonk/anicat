@@ -17,9 +17,41 @@ final class HoverActivityMonitor {
 
     private var lastScrollTime: Double = 0
     private var monitor: Any?
+    private var suppressOrigin: CGPoint?
 
     var isScrollActive: Bool {
         CACurrentMediaTime() - lastScrollTime < 0.15
+    }
+
+    /// Ignore hover *activation* until the pointer actually moves.
+    ///
+    /// Closing a page re-enables hit testing on the feed underneath, and the
+    /// card the pointer happens to be resting over then lights up on its own
+    /// -- a 3% scale and a 2pt lift, arriving as its own animation a beat
+    /// after the transition has finished. Measured on a recording of the
+    /// close: the transition settled after 183ms, then 750ms later the poster
+    /// under the cursor grew. It reads as the page tweaking back into place,
+    /// which is what it was mistaken for.
+    ///
+    /// Hover is meant to answer "the pointer is on this"; nothing moved, so
+    /// nothing should light up until something does.
+    func suppressHoverUntilPointerMoves() {
+        suppressOrigin = NSEvent.mouseLocation
+    }
+
+    /// Clears itself on the first check made after a real move, so a pointer
+    /// that never moves again stays suppressed and one that twitches once is
+    /// released immediately.
+    var shouldIgnoreHoverActivation: Bool {
+        guard let origin = suppressOrigin else { return false }
+        let now = NSEvent.mouseLocation
+        // Two points, not zero: a stationary mouse still reports sub-pixel
+        // jitter on some devices, which would release this at once.
+        if hypot(now.x - origin.x, now.y - origin.y) > 2 {
+            suppressOrigin = nil
+            return false
+        }
+        return true
     }
 
     private init() {
@@ -56,7 +88,9 @@ private struct StableHoverModifier: ViewModifier {
         content.onContinuousHover { phase in
             switch phase {
             case .active:
-                guard !HoverActivityMonitor.shared.isScrollActive, !isHovering else { return }
+                guard !HoverActivityMonitor.shared.isScrollActive,
+                      !HoverActivityMonitor.shared.shouldIgnoreHoverActivation,
+                      !isHovering else { return }
                 isHovering = true
                 perform(true)
             case .ended:

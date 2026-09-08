@@ -298,6 +298,81 @@ pub struct CinemaCredit {
     pub year: Option<i32>,
 }
 
+/// One file the scan is prepared to adopt.
+struct AdoptableDownload {
+    hint_index: usize,
+    episode: i64,
+    path: String,
+    bytes: i64,
+}
+
+/// Which files under `root` can be identified, given what the app knows.
+///
+/// Separate from the recording so it can be tested against a directory tree
+/// rather than against the viewer's own Downloads folder -- and because the
+/// interesting part is entirely this: a folder name matched back to a title,
+/// and a release name that does or does not yield an episode number.
+fn adoptable_downloads(
+    root: &std::path::Path,
+    hints: &[FfiTitleHint],
+    known: &[(i64, i64)],
+) -> Vec<AdoptableDownload> {
+    let Ok(entries) = std::fs::read_dir(root) else { return vec![] };
+    let mut out = vec![];
+    for entry in entries.filter_map(|e| e.ok()) {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let folder = entry.file_name().to_string_lossy().to_string();
+        // The folder is named after the title the download started with,
+        // sanitised for the filesystem. Matched through the same
+        // normalisation the indexer search uses, so punctuation and case
+        // cannot be what decides it.
+        let Some(hint_index) = hints.iter().position(|hint| {
+            hint.titles.iter().any(|title| {
+                crate::torrent::search::normalize(title)
+                    == crate::torrent::search::normalize(&folder)
+            })
+        }) else {
+            continue;
+        };
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for file in files.filter_map(|f| f.ok()) {
+            let path = file.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = file.file_name().to_string_lossy().to_string();
+            // A name the indexer's own parser cannot read is skipped rather
+            // than guessed at: adopting a file as the wrong episode is worse
+            // than not adopting it, because it then plays instead of one.
+            let Some(episode) = crate::torrent::search::filename_episode(&name) else {
+                continue;
+            };
+            if known.contains(&(hints[hint_index].catalog_id, episode)) {
+                continue;
+            }
+            out.push(AdoptableDownload {
+                hint_index,
+                episode,
+                path: path.to_string_lossy().to_string(),
+                bytes: std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0),
+            });
+        }
+    }
+    out
+}
+
+/// What the app knows about one title, for matching a folder name to an id.
+/// `titles` is every name it goes by -- the folder was named after whichever
+/// one the download happened to start with.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTitleHint {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub titles: Vec<String>,
+}
+
 /// One episode copied into the Downloads folder.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiDownloadedEpisode {
@@ -1208,6 +1283,58 @@ impl AnicatEngine {
             });
         }
         Ok(out)
+    }
+
+    /// Adopts files already sitting in the Downloads folder.
+    ///
+    /// Downloads made before there was a table to record them -- and any a
+    /// crash lost -- are on disk under `Downloads/Anicat/<title>/`, invisible
+    /// to an app that only knows what it wrote down. This walks that folder
+    /// once and indexes what it can identify.
+    ///
+    /// Identification is the whole difficulty: a directory name is a title
+    /// the app has to match back to a catalog id, and a filename is a release
+    /// name that has to yield an episode number. `hints` is what the caller
+    /// knows -- its own lists -- because nothing on disk carries an id, and
+    /// the release-name parsing is the indexer's own, so a name it cannot
+    /// read is skipped rather than guessed at.
+    ///
+    /// Returns how many were adopted. Idempotent: an episode already indexed
+    /// is left alone, so running it every launch costs a directory walk.
+    pub fn scan_downloads_folder(&self, hints: Vec<FfiTitleHint>) -> FfiResult<u32> {
+        let root = dirs::download_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Anicat");
+        let known: Vec<(i64, i64)> = self
+            .registry
+            .downloaded_episodes()
+            .map_err(|msg| AnicatError::Storage { msg })?
+            .into_iter()
+            .map(|row| (row.catalog_id, row.episode_number))
+            .collect();
+
+        let mut adopted = 0;
+        for found in adoptable_downloads(&root, &hints, &known) {
+            let hint = &hints[found.hint_index];
+            if self
+                .registry
+                .record_downloaded_episode(
+                    hint.catalog.into(),
+                    hint.catalog_id,
+                    found.episode,
+                    hint.titles.first().map(|t| t.as_str()),
+                    &found.path,
+                    found.bytes,
+                )
+                .is_ok()
+            {
+                adopted += 1;
+            }
+        }
+        if adopted > 0 {
+            log::info!("[downloads] adopted {adopted} file(s) already in the Downloads folder");
+        }
+        Ok(adopted)
     }
 
     /// Forgets a downloaded episode, and deletes the file when asked to.
@@ -4270,6 +4397,45 @@ mod cinema_live_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_downloads_scan_adopts_what_it_can_identify_and_skips_the_rest() {
+        let root = std::env::temp_dir().join("anicat-adopt-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let show = root.join("An Archdemon's Dilemma - How to Love Your Elf Bride");
+        std::fs::create_dir_all(&show).unwrap();
+        std::fs::write(show.join("[Group] Archdemon - 03 [1080p].mkv"), b"x").unwrap();
+        std::fs::write(show.join("[Group] Archdemon - 04 [1080p].mkv"), b"xx").unwrap();
+        // No episode number anywhere in it.
+        std::fs::write(show.join("cover art.jpg"), b"x").unwrap();
+        // A folder for a title the app has never heard of.
+        let stranger = root.join("Some Show Nobody Listed");
+        std::fs::create_dir_all(&stranger).unwrap();
+        std::fs::write(stranger.join("Some Show - 01.mkv"), b"x").unwrap();
+
+        let hints = vec![FfiTitleHint {
+            catalog: FfiCatalog::Anilist,
+            catalog_id: 12345,
+            // The punctuation differs from the folder, which is the point:
+            // matching goes through the indexer's own normalisation.
+            titles: vec!["An Archdemon's Dilemma: How to Love Your Elf Bride".to_string()],
+        }];
+
+        // Episode 3 is already indexed, so only 4 is new.
+        let found = adoptable_downloads(&root, &hints, &[(12345, 3)]);
+        assert_eq!(found.len(), 1, "one new episode, and nothing else");
+        assert_eq!(found[0].episode, 4);
+        assert_eq!(found[0].bytes, 2);
+
+        // With nothing indexed, both episodes come back -- and still neither
+        // the cover art nor the unknown title.
+        let fresh = adoptable_downloads(&root, &hints, &[]);
+        let mut episodes: Vec<i64> = fresh.iter().map(|f| f.episode).collect();
+        episodes.sort();
+        assert_eq!(episodes, vec![3, 4]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn eviction_takes_the_oldest_until_it_is_under_the_cap() {

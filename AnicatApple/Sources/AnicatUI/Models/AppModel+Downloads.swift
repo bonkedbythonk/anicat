@@ -20,6 +20,17 @@ extension AppModel {
     @MainActor
     public func loadDownloadedEpisodes() {
         guard let engine else { return }
+        // Files from before there was a table, and any a crash lost: the
+        // engine walks the Downloads folder and indexes what it can identify
+        // from the lists this side already has. Idempotent, so this runs at
+        // every launch and costs a directory walk.
+        let hints = Self.titleHints(
+            from: watchingItems + libraryItems + mangaReading,
+            knownTitles: knownTitles
+        )
+        if !hints.isEmpty {
+            _ = try? engine.scanDownloadsFolder(hints: hints)
+        }
         let rows = (try? engine.downloadedEpisodes()) ?? []
         // Rows for episodes the app is downloading right now win: they carry
         // live progress, and the stored row only knows about finished ones.
@@ -41,6 +52,25 @@ extension AppModel {
             )
         }
         libraryDownloads.append(contentsOf: restored)
+    }
+
+    /// What the app can tell the engine about its own titles, for matching a
+    /// folder name back to a catalog id. Every name a title goes by, because
+    /// the folder was named after whichever one the download started with.
+    nonisolated static func titleHints(
+        from items: [MediaCard.Item],
+        knownTitles: [Int64: String]
+    ) -> [FfiTitleHint] {
+        var byId: [Int64: Set<String>] = [:]
+        for item in items where !item.title.isEmpty {
+            byId[item.id, default: []].insert(item.title)
+        }
+        for (id, title) in knownTitles where !title.isEmpty {
+            byId[id, default: []].insert(title)
+        }
+        return byId.map { id, titles in
+            FfiTitleHint(catalog: .anilist, catalogId: id, titles: Array(titles))
+        }
     }
 
     public func finishedDownload(

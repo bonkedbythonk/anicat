@@ -27,6 +27,8 @@ struct PhonePlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
+    /// How far the sheet has been dragged down, and the drag's own state.
+    @State private var dismissOffset: CGFloat = 0
     @State private var flash: (symbol: String, trailing: Bool)?
 
     var body: some View {
@@ -61,6 +63,14 @@ struct PhonePlayerView: View {
                 seekFlash(symbol: flash.symbol, trailing: flash.trailing)
             }
         }
+        // Swipe down to dismiss, the way the system player does. The whole
+        // stack moves with the finger and fades as it goes, so the gesture
+        // reads as dragging the player off rather than as a scroll that
+        // happens to close something.
+        .offset(y: dismissOffset)
+        .scaleEffect(1 - min(dismissOffset / 2400, 0.08))
+        .opacity(1 - min(dismissOffset / 700, 0.55))
+        .gesture(dismissDrag)
         .statusBarHidden(!controller.areControlsVisible)
         .sheet(isPresented: $showReleases) { releaseSheet }
         .task {
@@ -408,6 +418,36 @@ struct PhonePlayerView: View {
                 }
         }
         .ignoresSafeArea()
+    }
+
+    /// Downward drags only, and only from a real vertical intent: a
+    /// `minimumDistance` of 0 here would steal the scrubber's own drag and
+    /// the double-tap, and an unclamped translation would let the player be
+    /// thrown upward off the top of the screen.
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { drag in
+                guard drag.translation.height > 0,
+                      abs(drag.translation.height) > abs(drag.translation.width)
+                else { return }
+                dismissOffset = drag.translation.height
+            }
+            .onEnded { drag in
+                // Distance or throw: a short flick dismisses as readily as a
+                // long slow drag, which is what the system player does.
+                let far = drag.translation.height > 140
+                let fast = drag.predictedEndTranslation.height > 420
+                if far || fast {
+                    withAnimation(.easeIn(duration: 0.18)) {
+                        dismissOffset = 1200
+                    }
+                    onClose()
+                } else {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        dismissOffset = 0
+                    }
+                }
+            }
     }
 
     private func seek(by delta: Double) {

@@ -99,6 +99,33 @@ public struct RootTabView: View {
     }
 }
 
+
+/// The title row the three tabs draw for themselves.
+///
+/// `navigationTitle` with the large display mode puts a 44pt bar above the
+/// title whether or not anything is in it, so the first row of content began
+/// 185pt down a 874pt screen — a fifth of the phone spent on chrome, and not
+/// what the design sheet draws. Hiding the bar on the tab roots and drawing
+/// the title here starts the content about 60pt higher. Pushed pages keep
+/// the real navigation bar, so Back is untouched.
+private struct TabHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(SumiTheme.foreground)
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+    }
+}
+
 // MARK: - Detail push
 
 /// Pushes `PhoneDetailView` when this tab asks for a title.
@@ -135,6 +162,8 @@ private struct UpNextTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
+                    TabHeader(title: "Up Next") { profileButton }
+
                     if !model.upNextItems.isEmpty {
                         ContinueWatchingRow(model: model, onOpen: open)
                     }
@@ -172,36 +201,37 @@ private struct UpNextTab: View {
                 .padding(.vertical, 8)
             }
             .background(SumiTheme.background)
-            .navigationTitle("Up Next")
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refreshAll() }
-            // Settings lives behind this button rather than in a fourth tab:
-            // it is opened once to sign in and then rarely, which is not what
-            // a tab slot is for. It is also the only route back to
-            // "Connect AniList" once onboarding has been dismissed.
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        PhoneSettingsView(model: model)
-                    } label: {
-                        // The signed-in avatar, not a generic person glyph.
-                        // A placeholder symbol in the bar reads as an
-                        // unfinished control floating over the large title;
-                        // the account's own picture reads as the account.
-                        if let avatar = model.viewer?.avatarUrl.flatMap(URL.init(string:)) {
-                            CachedAsyncImage(url: avatar, maxPixelSize: 96) { image in
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                SumiTheme.card
-                            }
-                            .frame(width: 26, height: 26)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.crop.circle")
-                        }
-                    }
-                }
-            }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
+        }
+    }
+
+    /// Settings lives behind this button rather than in a fourth tab: it is
+    /// opened once to sign in and then rarely, which is not what a tab slot
+    /// is for. It is also the only route back to "Connect AniList" once
+    /// onboarding has been dismissed.
+    @ViewBuilder
+    private var profileButton: some View {
+        NavigationLink {
+            PhoneSettingsView(model: model)
+        } label: {
+            // The signed-in avatar, not a generic person glyph: a
+            // placeholder symbol reads as an unfinished control, the
+            // account's own picture reads as the account.
+            if let avatar = model.viewer?.avatarUrl.flatMap(URL.init(string:)) {
+                CachedAsyncImage(url: avatar, maxPixelSize: 96) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+                .frame(width: 30, height: 30)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 27))
+                    .foregroundStyle(SumiTheme.muted)
+            }
         }
     }
 
@@ -412,6 +442,8 @@ private struct LibraryTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
+                    TabHeader(title: "Library") { statusMenu }
+
                     if !model.isSignedIn {
                         EmptyHint(
                             title: "No lists yet",
@@ -437,13 +469,23 @@ private struct LibraryTab: View {
                 .padding(.vertical, 8)
             }
             .background(SumiTheme.background)
-            .navigationTitle("Library")
-            // A `Menu` in the bar, not a segmented control: six statuses in a
-            // segmented control on a 402pt screen truncate to two letters
-            // each. This is the same shape Mail uses for its filter.
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
+            .toolbar(.hidden, for: .navigationBar)
+            .refreshable { await model.loadLibrary() }
+            .modifier(DetailPush(model: model, isPresented: $showDetail))
+        }
+        .task {
+            guard model.isSignedIn else { return }
+            if model.libraryStatus != storedStatus || model.libraryItems.isEmpty {
+                await model.loadLibrary(status: storedStatus)
+            }
+        }
+    }
+
+    /// A menu, not a segmented control: six statuses across 402pt truncate to
+    /// about two letters each. Same shape Mail uses for its filter.
+    @ViewBuilder
+    private var statusMenu: some View {
+        Menu {
                         Picker("Status", selection: Binding(
                             get: { storedStatus },
                             set: { next in
@@ -455,28 +497,12 @@ private struct LibraryTab: View {
                                 Text(status.label).tag(status.raw)
                             }
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(currentLabel)
-                                .font(.system(size: 15))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                    }
-                }
-            }
-            .refreshable { await model.loadLibrary() }
-            .modifier(DetailPush(model: model, isPresented: $showDetail))
-        }
-        // Two jobs. `refreshAll` only ever fetches whatever `libraryStatus`
-        // already held and the tab is built before that first fetch lands,
-        // so without this the grid stayed empty until the filter was
-        // touched; and the model starts every launch on CURRENT, so the
-        // remembered status has to be pushed into it here.
-        .task {
-            guard model.isSignedIn else { return }
-            if model.libraryStatus != storedStatus || model.libraryItems.isEmpty {
-                await model.loadLibrary(status: storedStatus)
+        } label: {
+            HStack(spacing: 4) {
+                Text(currentLabel)
+                    .font(.system(size: 15))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
             }
         }
     }
@@ -507,6 +533,8 @@ private struct SearchTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
+                    TabHeader(title: "Search") { EmptyView() }
+
                     if model.searchResults.isEmpty {
                         if !recents.isEmpty {
                             recentChips
@@ -519,7 +547,7 @@ private struct SearchTab: View {
                 .padding(.vertical, 8)
             }
             .background(SumiTheme.background)
-            .navigationTitle("Search")
+            .toolbar(.hidden, for: .navigationBar)
             // `.searchable` gives the system field, Cancel button and the
             // scroll-to-reveal behaviour for free. The desktop's command
             // palette has no iOS counterpart and is not reproduced.

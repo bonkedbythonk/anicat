@@ -171,6 +171,29 @@ struct PhonePlayerView: View {
         }
     }
 
+    /// Hands this episode to the Mac at the second the phone is on, and
+    /// stops here. Absent unless a Mac that has already been paired is
+    /// advertising: an unpaired one would raise an approval alert on a
+    /// machine nobody is standing at, and the episode would stop on the
+    /// phone for a handover that never lands.
+    @ViewBuilder
+    private var continueOnMac: some View {
+        if let node = BonjourDiscovery.shared.discoveredMacNode,
+           RemoteClient.knownHosts().contains(node.id),
+           let catalogId = AppModel.shared?.currentPlaybackCatalogId {
+            Button {
+                let link = DeepLink.play(id: catalogId, episode: controller.episodeNumber)
+                RemoteClient.shared.send(
+                    .openAt(link: link.url.absoluteString, seconds: controller.currentTime),
+                    to: node
+                )
+                AppModel.shared?.stopPlayback()
+            } label: {
+                Label("Continue on \(node.name)", systemImage: "macbook.and.iphone")
+            }
+        }
+    }
+
     @ViewBuilder
     private var tracksMenu: some View {
         Menu {
@@ -194,6 +217,8 @@ struct PhonePlayerView: View {
             } label: {
                 Label("Release", systemImage: "square.stack.3d.up")
             }
+
+            continueOnMac
 
             if controller.hasNextEpisode {
                 Button("Next episode") { controller.nextEpisode() }

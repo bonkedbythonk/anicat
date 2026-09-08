@@ -197,6 +197,7 @@ public enum RemoteFeature {
     public static let skip = "skip"
     public static let autoNext = "autoNext"
     public static let browse = "browse"
+    public static let fling = "fling"
 }
 
 /// What the phone can ask the Mac to do.
@@ -233,6 +234,12 @@ public enum RemoteCommand: Codable, Sendable {
     /// and `handleDeepLink` stays the only thing that knows how to reach a
     /// screen.
     case open(link: String)
+    /// The same address, plus where the phone had got to. Handing an episode
+    /// over mid-play: the Mac opens it through `handleDeepLink` like any
+    /// other link and then lands on this second rather than on whatever its
+    /// own registry remembers, which is where *it* last stopped watching and
+    /// not where the person carrying the phone is now.
+    case openAt(link: String, seconds: Double)
 }
 
 /// What the Mac tells the phone it is doing.

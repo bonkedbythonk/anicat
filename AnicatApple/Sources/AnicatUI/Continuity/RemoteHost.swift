@@ -40,6 +40,11 @@ public final class RemoteHost {
     /// that watched one episode would hold a handle to that file for the
     /// life of the process.
     private var streamGrants: [String: URL] = [:]
+    /// Where a flung episode should land, held until the file is actually
+    /// open. Seeking straight after `handleDeepLink` seeks the *outgoing*
+    /// file -- the link only starts a resolve, and mpv is still on whatever
+    /// was playing (or on nothing) for as long as that takes.
+    private var pendingSeek: Double?
     private var relays: [ObjectIdentifier: StreamRelay] = [:]
 
     static let pairedDevicesKey = "anicat_remote_paired_devices"
@@ -52,6 +57,7 @@ public final class RemoteHost {
         RemoteFeature.skip,
         RemoteFeature.autoNext,
         RemoteFeature.tracks,
+        RemoteFeature.fling,
     ]
 
     private init() {}
@@ -337,6 +343,10 @@ public final class RemoteHost {
         case .open(let link):
             guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
             model.handleDeepLink(deepLink)
+        case .openAt(let link, let seconds):
+            guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
+            model.handleDeepLink(deepLink)
+            pendingSeek = seconds
         }
         // Straight back rather than waiting for the next tick: the phone's
         // own button state is driven by what the Mac reports, so a full
@@ -391,10 +401,29 @@ public final class RemoteHost {
     /// Sends the current state to every approved controller. Called on the
     /// tick and straight after any command.
     public func pushState() {
+        applyPendingSeekIfReady()
         let state = snapshot()
         for session in sessions.values where session.isApproved {
             session.connection.sendFrame(.state(state))
         }
+    }
+
+    /// Lands a flung episode once the new file is open.
+    ///
+    /// Driven off the 1 Hz push rather than a callback because
+    /// `awaitingNewFile` -- which `resolveAndPlay` holds until
+    /// MPV_EVENT_FILE_LOADED -- is exactly the flag that says the seek would
+    /// otherwise hit the outgoing file, and nothing here is notified when it
+    /// clears. A second of latency on a handover that already took a resolve
+    /// is not worth a second notification path.
+    private func applyPendingSeekIfReady() {
+        guard let seconds = pendingSeek,
+              let model = AppModel.shared,
+              model.activeStreamURL != nil else { return }
+        let controller = model.playerController
+        guard !controller.awaitingNewFile, controller.duration > 0 else { return }
+        pendingSeek = nil
+        controller.seek(to: min(seconds, controller.duration))
     }
 
     private func snapshot() -> RemoteState {

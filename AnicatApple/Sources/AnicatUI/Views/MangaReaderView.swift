@@ -59,7 +59,23 @@ public struct MangaReaderView: View {
     @State private var readingMode: ReadingMode
     @State private var readingDirection: ReadingDirection
     @State private var offsetCover: Bool
+    /// Chrome pinned by a tap. Cleared by scrolling: reading is the reason
+    /// the reader is open, and a bar with a gradient under it sitting over
+    /// the page is the app talking over the thing being read.
     @State private var showControls: Bool = true
+    /// Chrome asked for by putting the pointer at the top or bottom edge --
+    /// the same gesture a video player's controls answer to. Kept apart from
+    /// the pinned flag so a tap in the middle of the page is not undone by
+    /// the next hover event.
+    @State private var hoverChrome: Bool = false
+    @State private var readerHeight: CGFloat = 0
+
+    /// How close to an edge the pointer has to be. Deep enough that the bar
+    /// it summons is already under the pointer, shallow enough that reading
+    /// with the pointer resting mid-page never triggers it.
+    private static let edgeReveal: CGFloat = 96
+
+    private var chromeVisible: Bool { showControls || hoverChrome }
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
     @State private var wasFullScreenBeforeOpen: Bool = false
@@ -474,7 +490,7 @@ public struct MangaReaderView: View {
             }
 
             // Top Controls Bar
-            if showControls {
+            if chromeVisible {
                 VStack {
                     topBar
                     Spacer()
@@ -487,11 +503,40 @@ public struct MangaReaderView: View {
                 VStack {
                     Spacer()
                     syncedBadge
-                        .padding(.bottom, showControls ? 72 : 24)
+                        .padding(.bottom, chromeVisible ? 72 : 24)
                 }
                 .transition(.opacity)
                 .allowsHitTesting(false)
             }
+        }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.onAppear { readerHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, height in readerHeight = height }
+            }
+        )
+        #if os(macOS)
+        // Hover rather than a hit-testing strip: an overlay that could be
+        // hovered would also swallow the trackpad over the top and bottom of
+        // the page, which is the bug the tap handler on the row exists to
+        // avoid. `onContinuousHover` reports the pointer without taking any
+        // event away from the scroll view under it.
+        .onContinuousHover { phase in
+            guard case .active(let point) = phase, readerHeight > 0 else {
+                if hoverChrome { withAnimation(.smooth) { hoverChrome = false } }
+                return
+            }
+            let near = point.y < Self.edgeReveal || point.y > readerHeight - Self.edgeReveal
+            if near != hoverChrome {
+                withAnimation(.smooth) { hoverChrome = near }
+            }
+        }
+        #endif
+        // Scrolling puts the chrome away. In webtoon mode every row reports
+        // itself as it appears, so this fires on the first page that scrolls
+        // past -- which is exactly the moment the bars stop being wanted.
+        .onChange(of: currentPageIndex) { _, _ in
+            if showControls { withAnimation(.smooth) { showControls = false } }
         }
         .focusable()
         .focused($isFocused)

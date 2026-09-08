@@ -161,6 +161,41 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 4 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- Where a chapter was left, and that a chapter was read at all.
+            --
+            -- Not rows in `watch_history`: that table is keyed by
+            -- `episode_number`, and a manga entry shares its AniList id with
+            -- nothing but itself -- chapter 3 and episode 3 of the same id
+            -- would be one row overwriting the other. Chapters also number
+            -- fractionally (10.5 is a real chapter) and are identified by a
+            -- provider id, neither of which an integer episode column can
+            -- carry.
+            --
+            -- `page` is a zero-based index into the chapter and `page_count`
+            -- what it was out of, so a resume can tell 'page 4 of 20' from a
+            -- chapter whose page count has since changed.
+            CREATE TABLE IF NOT EXISTS reading_history (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                chapter_id TEXT NOT NULL,
+                chapter_number TEXT NOT NULL,
+                page INTEGER NOT NULL DEFAULT 0,
+                page_count INTEGER NOT NULL DEFAULT 0,
+                read_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id, chapter_id)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 4)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

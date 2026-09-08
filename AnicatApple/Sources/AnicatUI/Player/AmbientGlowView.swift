@@ -120,12 +120,33 @@ final class AmbientGlowHostView: AmbientGlowPlatformView {
         let topPixel = ((layerHeight - pictureHeight) / 2).rounded(.down)
         let topEdge = topPixel / scale, bottomEdge = (topPixel + pictureHeight) / scale
         let leftEdge = leftPixel / scale, rightEdge = (leftPixel + pictureWidth) / scale
+        // One device pixel of overlap into the picture, and exactly one.
+        //
+        // Matching mpv's arithmetic puts the band edge on the same pixel the
+        // picture starts on, and a seam still showed there: the two surfaces
+        // are composited separately, so the boundary row blends against the
+        // black behind rather than against the picture. Overlapping by a
+        // *point* was the earlier attempt and read as a bright line -- at 2x
+        // that is two pixels of glow over the picture. One pixel is covered
+        // by the band whose colour was sampled from that very row, so there
+        // is nothing to see either way.
+        let bleed = 1 / scale
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        top.frame = CGRect(x: 0, y: 0, width: windowSize.width, height: max(0, topEdge))
-        bottom.frame = CGRect(x: 0, y: bottomEdge, width: windowSize.width, height: max(0, windowSize.height - bottomEdge))
-        left.frame = CGRect(x: 0, y: topEdge, width: max(0, leftEdge), height: bottomEdge - topEdge)
-        right.frame = CGRect(x: rightEdge, y: topEdge, width: max(0, windowSize.width - rightEdge), height: bottomEdge - topEdge)
+        top.frame = CGRect(x: 0, y: 0, width: windowSize.width, height: max(0, topEdge + bleed))
+        bottom.frame = CGRect(
+            x: 0,
+            y: bottomEdge - bleed,
+            width: windowSize.width,
+            height: max(0, windowSize.height - bottomEdge + bleed)
+        )
+        left.frame = CGRect(x: 0, y: topEdge, width: max(0, leftEdge + bleed), height: bottomEdge - topEdge)
+        right.frame = CGRect(
+            x: rightEdge - bleed,
+            y: topEdge,
+            width: max(0, windowSize.width - rightEdge + bleed),
+            height: bottomEdge - topEdge
+        )
         top.isHidden = video.minY < 0.5
         bottom.isHidden = windowSize.height - video.maxY < 0.5
         left.isHidden = video.minX < 0.5

@@ -33,6 +33,19 @@ pub struct WatchEntry {
     pub duration: i64,
 }
 
+/// One chapter, as far as it was read.
+#[derive(Debug, Clone)]
+pub struct ReadingEntry {
+    pub catalog: Catalog,
+    pub catalog_id: i64,
+    pub chapter_id: String,
+    pub chapter_number: String,
+    pub page: i64,
+    pub page_count: i64,
+    /// `YYYY-MM-DD HH:MM:SS` in UTC, as SQLite writes it.
+    pub read_at: String,
+}
+
 /// One watch, as the History view's activity chart reads them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityEntry {
@@ -328,6 +341,95 @@ impl Registry {
         Ok(())
     }
 
+    /// Records where a chapter was left.
+    ///
+    /// Written on every page turn, so it is an upsert on the chapter rather
+    /// than an append: the row is "where you are", and a history of every
+    /// page you passed through is not something anything reads.
+    pub fn record_reading_progress(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        chapter_id: &str,
+        chapter_number: &str,
+        page: i64,
+        page_count: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO reading_history
+                (catalog, catalog_id, chapter_id, chapter_number, page, page_count, read_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+             ON CONFLICT(catalog, catalog_id, chapter_id) DO UPDATE SET
+               page = excluded.page,
+               page_count = excluded.page_count,
+               chapter_number = excluded.chapter_number,
+               read_at = excluded.read_at",
+            params![catalog.as_str(), catalog_id, chapter_id, chapter_number, page, page_count],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    /// The page a chapter was left on, and what it was out of.
+    pub fn reading_progress(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        chapter_id: &str,
+    ) -> Result<Option<(i64, i64)>, String> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT page, page_count FROM reading_history
+             WHERE catalog = ?1 AND catalog_id = ?2 AND chapter_id = ?3",
+            params![catalog.as_str(), catalog_id, chapter_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    /// Chapters read, newest first -- the reading counterpart of
+    /// `recent_activity`.
+    pub fn recent_reading(&self, limit: i64) -> Result<Vec<ReadingEntry>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, chapter_id, chapter_number, page, page_count, read_at
+                 FROM reading_history ORDER BY read_at DESC LIMIT ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![limit], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = vec![];
+        for row in rows {
+            let (catalog, catalog_id, chapter_id, chapter_number, page, page_count, read_at) =
+                row.map_err(|e| e.to_string())?;
+            let Some(catalog) = Catalog::parse(&catalog) else { continue };
+            out.push(ReadingEntry {
+                catalog,
+                catalog_id,
+                chapter_id,
+                chapter_number,
+                page,
+                page_count,
+                read_at,
+            });
+        }
+        Ok(out)
+    }
+
     /// The viewer's own list for a catalog AniList does not track.
     ///
     /// `local_library` has been in the schema since migration 1 and unused
@@ -520,6 +622,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_chapter_and_an_episode_of_one_title_do_not_overwrite_each_other() {
+        let db = Registry::open_in_memory().unwrap();
+        // The reason this is its own table: both are AniList id 21 here.
+        db.record_progress(Catalog::Anilist, 21, 3, 600, 1400).unwrap();
+        db.record_reading_progress(Catalog::Anilist, 21, "ch-3", "3", 4, 20).unwrap();
+
+        assert_eq!(db.reading_progress(Catalog::Anilist, 21, "ch-3").unwrap(), Some((4, 20)));
+        let watched = db.history_for(Catalog::Anilist, 21).unwrap();
+        assert_eq!(watched.len(), 1);
+        assert_eq!(watched[0].stop_time, 600);
+    }
+
+    #[test]
+    fn a_page_turn_moves_the_chapter_rather_than_adding_a_row() {
+        let db = Registry::open_in_memory().unwrap();
+        for page in 0..5 {
+            db.record_reading_progress(Catalog::Anilist, 21, "ch-10.5", "10.5", page, 18).unwrap();
+        }
+        let rows = db.recent_reading(10).unwrap();
+        assert_eq!(rows.len(), 1, "the row is where you are, not every page you passed");
+        assert_eq!(rows[0].page, 4);
+        // Fractional chapters are real, which is why the number is text.
+        assert_eq!(rows[0].chapter_number, "10.5");
+    }
+
+    #[test]
     fn the_local_list_keeps_catalogs_apart_and_clears_by_deleting() {
         let db = Registry::open_in_memory().unwrap();
         db.set_local_status(Catalog::TmdbMovie, 550, Some("PLANNING")).unwrap();
@@ -640,7 +768,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
     }
 
     #[test]

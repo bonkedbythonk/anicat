@@ -351,3 +351,92 @@ mod episode_tests {
         assert_eq!(locate_episode(&map, 7), Some((3, 1)));
     }
 }
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use crate::catalog::Catalogs;
+
+    /// Live. Run against a deployed proxy:
+    ///
+    /// ```text
+    /// ANICAT_TMDB_PROXY=https://... cargo test --lib cinema::live -- --ignored --nocapture
+    /// ```
+    ///
+    /// or against a key directly with `ANICAT_TMDB_KEY`. These are the only
+    /// way to see whether cinema mode actually works without opening the app:
+    /// everything else in this module is shape and arithmetic, and none of it
+    /// proves TMDB answers.
+    fn catalogs() -> Option<Catalogs> {
+        let key = std::env::var("ANICAT_TMDB_KEY").ok().filter(|k| !k.is_empty());
+        let proxy = std::env::var("ANICAT_TMDB_PROXY").ok().filter(|p| !p.is_empty());
+        if key.is_none() && proxy.is_none() {
+            eprintln!("set ANICAT_TMDB_PROXY or ANICAT_TMDB_KEY to run this");
+            return None;
+        }
+        Some(Catalogs::new(reqwest::Client::new(), None, key, proxy))
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_every_home_row_answers() {
+        let Some(catalogs) = catalogs() else { return };
+        for kind in CINEMA_ROWS {
+            let started = std::time::Instant::now();
+            let items = catalogs.cinema_row(kind, 1).await.expect(kind);
+            println!("{kind}: {} titles in {:?}", items.len(), started.elapsed());
+            assert!(!items.is_empty(), "{kind} came back empty");
+            let first = &items[0];
+            assert!(first.id > 0);
+            assert!(first.title.is_some(), "{kind}'s first title has no name");
+            assert!(
+                first.cover_image.is_some(),
+                "{kind}'s first title has no poster -- a shelf of blanks"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_search_finds_films_and_series() {
+        let Some(catalogs) = catalogs() else { return };
+        let items = catalogs.cinema_search("dune", 20).await.expect("search");
+        println!("dune: {} results", items.len());
+        assert!(!items.is_empty());
+        // The 2021 film is the one anybody searching this means; if it is not
+        // in the first twenty by popularity, the merge or the sort is wrong.
+        assert!(
+            items.iter().any(|i| i.season_year == Some(2021)),
+            "no 2021 title among the results"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_a_film_and_a_series_both_come_back_whole() {
+        let Some(catalogs) = catalogs() else { return };
+        // Fight Club (1999) and Silo, the two the resolve tests already use.
+        let film = catalogs.cinema_detail(550, false).await.expect("film detail");
+        let movie = film.movie.expect("a film detail with no film in it");
+        println!("film: {:?} ({:?})", movie.title, movie.release_date);
+        assert!(movie.release_date.is_some(), "no year -- the film search cannot run without one");
+        assert!(film.episodes.is_empty(), "a film has no episode list");
+
+        let series = catalogs.cinema_detail(125988, true).await.expect("series detail");
+        let show = series.series.expect("a series detail with no series in it");
+        println!(
+            "series: {:?}, {} seasons, {} episodes flattened",
+            show.name,
+            show.season_map().len(),
+            series.episodes.len()
+        );
+        assert!(!series.episodes.is_empty());
+        // Absolute numbering has to be contiguous from 1, or every remembered
+        // release and resume position points at the wrong episode.
+        for (index, episode) in series.episodes.iter().enumerate() {
+            assert_eq!(episode.absolute as usize, index + 1);
+        }
+        let first = &series.episodes[0];
+        assert_eq!((first.season, first.episode), (1, 1));
+    }
+}

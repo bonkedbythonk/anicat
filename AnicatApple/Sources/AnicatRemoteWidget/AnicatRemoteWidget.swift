@@ -31,84 +31,41 @@ struct RemoteLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             let theme = context.attributes
             let state = context.state
+            // As little as ActivityKit permits. `ActivityConfiguration`
+            // requires a `dynamicIsland:` closure -- there is no way to run a
+            // Live Activity without one -- so this says what is playing and
+            // stops. No transport: the Island is glanced at over a keyboard
+            // or in a pocket, and a row of buttons there was a second, worse
+            // copy of the lock screen's.
             return DynamicIsland {
-                // The expanded Island's leading and trailing regions are
-                // narrow columns beside the camera, not halves of a row: the
-                // full index card was squeezed to a sliver there and the
-                // countdown wrapped onto two lines. Only the two short
-                // stamps go in them, and everything with a width goes in
-                // `.center` and `.bottom`.
-                // Both columns are given the full width of their region and
-                // told which edge to sit on. Left to itself a `VStack` centres
-                // in the space it is handed, which is what had the episode
-                // stamp and the clock floating somewhere inboard of the
-                // corners instead of squared up with them.
                 DynamicIslandExpandedRegion(.leading) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("EP")
-                            .font(SumiWidget.mono(8, weight: .medium))
-                            .tracking(1.4)
-                            .foregroundStyle(theme.muted)
-                        Text(String(format: "%02d", state.episodeNumber))
-                            .font(SumiWidget.mono(17, weight: .semibold))
-                            .foregroundStyle(theme.accent)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 4)
+                    Text("EP \(String(format: "%02d", state.episodeNumber))")
+                        .font(SumiWidget.mono(12, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text("LEFT")
-                            .font(SumiWidget.mono(8, weight: .medium))
-                            .tracking(1.4)
-                            .foregroundStyle(theme.muted)
-                        Text(state.remainingStamp)
-                            .font(SumiWidget.mono(15, weight: .semibold))
-                            .foregroundStyle(theme.foreground)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 4)
+                    Text(state.remainingStamp)
+                        .font(SumiWidget.mono(12, weight: .medium))
+                        .foregroundStyle(theme.muted)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(spacing: 1) {
-                        Text(state.title)
-                            .font(SumiWidget.heading(14, serif: theme.usesSerifHeadings))
-                            .foregroundStyle(theme.foreground)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Text(state.subtitle)
-                            .font(SumiWidget.mono(10))
-                            .foregroundStyle(theme.muted)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 10) {
-                        ProgressRule(theme: theme, state: state, showsStamps: false)
-                        HStack {
-                            Spacer(minLength: 0)
-                            Transport(theme: theme, state: state, compact: true)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .padding(.top, 4)
+                    Text(state.title)
+                        .font(SumiWidget.heading(14, serif: theme.usesSerifHeadings))
+                        .foregroundStyle(theme.foreground)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity)
                 }
             } compactLeading: {
-                // The accent tick, not a play glyph: the compact Island is
-                // a few characters wide and the clock beside it already says
-                // whether anything is moving.
-                HStack(spacing: 3) {
-                    Circle()
-                        .fill(state.isPlaying ? theme.accent : theme.muted)
-                        .frame(width: 6, height: 6)
-                    Text("\(state.episodeNumber)")
-                        .font(SumiWidget.mono(12, weight: .medium))
-                        .foregroundStyle(theme.foreground)
-                }
+                Circle()
+                    .fill(state.isPlaying ? theme.accent : theme.muted)
+                    .frame(width: 6, height: 6)
             } compactTrailing: {
                 Text(state.remainingStamp)
                     .font(SumiWidget.mono(12))
@@ -120,6 +77,7 @@ struct RemoteLiveActivityWidget: Widget {
                     .frame(width: 8, height: 8)
             }
             .keylineTint(theme.accent)
+            .widgetURL(URL(string: "anicat://remote"))
         }
     }
 }
@@ -164,16 +122,20 @@ private struct ProgressRule: View {
     var showsStamps = true
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 7) {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule().fill(theme.wash)
                     Capsule()
                         .fill(theme.accent)
-                        .frame(width: max(geometry.size.width * state.fraction, 2))
+                        // No minimum width. A 2pt stub at the start of an
+                        // episode read as a dot someone had spilled on the
+                        // rule rather than as progress; an empty rule says
+                        // "just started" correctly.
+                        .frame(width: geometry.size.width * state.fraction)
                 }
             }
-            .frame(height: 3)
+            .frame(height: 5)
 
             if showsStamps {
                 HStack {
@@ -181,7 +143,7 @@ private struct ProgressRule: View {
                     Spacer()
                     Text(state.remainingStamp)
                 }
-                .font(SumiWidget.mono(10))
+                .font(SumiWidget.mono(11))
                 .foregroundStyle(theme.muted)
             }
         }
@@ -250,22 +212,22 @@ private struct LockScreenView: View {
     let state: RemoteActivityAttributes.ContentState
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 11) {
             HStack(alignment: .top, spacing: 12) {
                 EpisodeStamp(theme: attributes, number: state.episodeNumber)
 
-                // The title takes the whole width it can. A right-hand
-                // "ON <MAC>" column used to sit here and it lost twice: it
-                // truncated the title to about half the card and then
-                // truncated its own machine name anyway. The host is filed
-                // under the clocks instead, where a long name has the room
-                // to be read.
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Two lines. Anime titles are long -- the one this was
+                    // built against is "Love, Chunibyo & Other Delusions" --
+                    // and a single line spent most of its width on an
+                    // ellipsis where a second line would have finished the
+                    // sentence.
                     Text(state.title)
                         .font(SumiWidget.heading(17, serif: attributes.usesSerifHeadings))
                         .foregroundStyle(attributes.foreground)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(state.subtitle)
                         .font(SumiWidget.mono(11))
                         .foregroundStyle(attributes.muted)
@@ -273,26 +235,23 @@ private struct LockScreenView: View {
                         .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                Spacer(minLength: 0)
             }
 
             ProgressRule(theme: attributes, state: state)
 
-            // Centred on its own row: the keys are the reason this card is
-            // on the lock screen, and sharing the row with the host label
-            // pushed them off-centre against a Dynamic Island that centres
-            // its own.
-            // Spacers rather than `frame(maxWidth:)`: an `HStack` given a
-            // wide frame still lays its children out from the leading edge,
-            // so the keys sat left of centre while looking like they had
-            // been centred.
             HStack {
                 Spacer(minLength: 0)
                 Transport(theme: attributes, state: state)
                 Spacer(minLength: 0)
             }
+            // The keys sat in a pocket of dead space under the clocks
+            // because the card's own padding was under them as well. They
+            // ride up against the rule instead; the padding below is theirs
+            // alone.
+            .padding(.top, -2)
         }
-        .padding(14)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
     }
 }

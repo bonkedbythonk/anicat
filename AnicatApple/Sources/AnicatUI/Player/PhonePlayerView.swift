@@ -27,8 +27,6 @@ struct PhonePlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
-    /// How far the sheet has been dragged down, and the drag's own state.
-    @State private var dismissOffset: CGFloat = 0
     @State private var flash: (symbol: String, trailing: Bool)?
 
     var body: some View {
@@ -63,16 +61,6 @@ struct PhonePlayerView: View {
                 seekFlash(symbol: flash.symbol, trailing: flash.trailing)
             }
         }
-        // Swipe down to dismiss, the way the system player does. The whole
-        // stack moves with the finger and fades as it goes, so the gesture
-        // reads as dragging the player off rather than as a scroll that
-        // happens to close something.
-        // Offset only. `scaleEffect` on this stack resizes the CAMetalLayer
-        // mpv draws into, and a resize is what `nudgeVideoReconfig` exists to
-        // handle — so every frame of the drag asked mpv to reconfigure the
-        // video output. That is where the judder came from, not the spring.
-        .offset(y: dismissOffset)
-        .opacity(1 - min(dismissOffset / 900, 0.4))
         // Always hidden, not just while the controls are up: the system
         // player hides it for the whole session, and leaving it on put the
         // clock in the same strip as the title.
@@ -424,13 +412,6 @@ struct PhonePlayerView: View {
         GeometryReader { geo in
             Color.clear
                 .contentShape(Rectangle())
-                // The dismiss drag lives here, beside the taps, and not on
-                // the player's root. On the root it was a competing gesture
-                // in a different arena: it claimed each touch down, failed
-                // its 18pt threshold, and the tap never reached the child —
-                // which is why tapping stopped showing the controls at all
-                // the moment swipe-to-dismiss was added.
-                .simultaneousGesture(dismissDrag)
                 // Simultaneous, not sequential. Declaring the double tap
                 // ahead of the single one makes SwiftUI hold every single tap
                 // for the double-tap timeout before acting on it — which on
@@ -463,38 +444,6 @@ struct PhonePlayerView: View {
                 }
         }
         .ignoresSafeArea()
-    }
-
-    /// Downward drags only, and only from a real vertical intent: a
-    /// `minimumDistance` of 0 here would steal the scrubber's own drag and
-    /// the double-tap, and an unclamped translation would let the player be
-    /// thrown upward off the top of the screen.
-    private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 18)
-            .onChanged { drag in
-                guard drag.translation.height > 0,
-                      abs(drag.translation.height) > abs(drag.translation.width)
-                else { return }
-                dismissOffset = drag.translation.height
-            }
-            .onEnded { drag in
-                // Distance or throw: a short flick dismisses as readily as a
-                // long slow drag, which is what the system player does.
-                let far = drag.translation.height > 140
-                let fast = drag.predictedEndTranslation.height > 420
-                if far || fast {
-                    // No exit animation on the offset: the player is being
-                    // torn down, and animating a Metal layer off screen while
-                    // its host view is dismantled is the same reconfigure
-                    // storm by another route. The close transition handles
-                    // the fade.
-                    onClose()
-                } else {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                        dismissOffset = 0
-                    }
-                }
-            }
     }
 
     private func seek(by delta: Double) {

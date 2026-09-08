@@ -130,6 +130,13 @@ targets:
     platform: iOS
     sources:
       - path: Sources/AnicatRemoteWidget
+      # The app's faces, carried again. A font registered by the app is
+      # registered in the app's process; the widget is a different one, and
+      # without its own copies the lock screen falls back to the system
+      # sans-serif -- which is exactly the "doesn't look like Anicat" the
+      # stamped mono register exists to avoid.
+      - path: Sources/AnicatUI/Resources/Fonts
+        buildPhase: resources
     dependencies:
       # Only the shared attribute types, never AnicatUI: linking that would
       # pull mpv, FFmpeg and their whole xcframework closure into a process
@@ -140,6 +147,13 @@ targets:
       path: Generated/WidgetInfo.plist
       properties:
         CFBundleDisplayName: Anicat Remote
+        # Declared as well as registered at runtime: `UIAppFonts` is what
+        # makes the files visible to `Bundle.main` inside an extension.
+        UIAppFonts:
+          - Geist.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
+          - IBMPlexMono-SemiBold.ttf
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

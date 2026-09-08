@@ -53,6 +53,7 @@ public final class RemoteLiveActivity {
             subtitle: state.episodeTitle.isEmpty
                 ? "Episode \(state.episodeNumber)"
                 : "Episode \(state.episodeNumber) - \(state.episodeTitle)",
+            episodeNumber: state.episodeNumber,
             isPlaying: state.isPlaying,
             currentTime: state.currentTime,
             duration: state.duration,
@@ -78,11 +79,26 @@ public final class RemoteLiveActivity {
             await handle.update(ActivityContent(state: content, staleDate: nil))
         } else {
             activity = try? Activity.request(
-                attributes: RemoteActivityAttributes(hostName: pendingHostName),
+                attributes: Self.attributes(hostName: pendingHostName),
                 content: ActivityContent(state: content, staleDate: nil),
                 pushType: nil
             )
         }
+    }
+
+    /// The activity's fixed half: which Mac, and the skin to draw it in.
+    private static func attributes(hostName: String) -> RemoteActivityAttributes {
+        let palette = ThemeStore.shared.palette
+        return RemoteActivityAttributes(
+            hostName: hostName,
+            backgroundHex: palette.backgroundHex,
+            cardHex: palette.cardHex,
+            foregroundHex: palette.foregroundHex,
+            accentHex: palette.indigoHex,
+            mutedAlpha: palette.mutedAlpha,
+            borderAlpha: palette.borderAlpha,
+            usesSerifHeadings: palette.usesSerifHeadings
+        )
     }
 
     public func end() {

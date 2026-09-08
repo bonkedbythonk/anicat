@@ -238,6 +238,12 @@ public struct MediaDetailView: View {
     public let recommendations: [RecommendationItem]
     public let discussions: [DiscussionItem]
     public let isLoading: Bool
+    /// False for a cinema page. AniList is where the list status, the score
+    /// and the favourite heart live, and a TMDB id sent to it would land on
+    /// whatever anime happens to carry the same number -- so those controls
+    /// are absent here rather than disabled. Sub/Dub goes too: it is a
+    /// fansub-era distinction that says nothing about a western release.
+    public var tracksOnAniList: Bool = true
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     /// Same episode as `onPlayEpisode`, ignoring the recorded resume
@@ -353,6 +359,7 @@ public struct MediaDetailView: View {
         recommendations: [RecommendationItem] = [],
         discussions: [DiscussionItem] = [],
         isLoading: Bool = false,
+        tracksOnAniList: Bool = true,
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
@@ -391,6 +398,7 @@ public struct MediaDetailView: View {
         self.recommendations = recommendations
         self.discussions = discussions
         self.isLoading = isLoading
+        self.tracksOnAniList = tracksOnAniList
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
         self.onReadChapter = onReadChapter
@@ -1299,6 +1307,10 @@ public struct MediaDetailView: View {
                 .buttonStyle(.sumiPressable)
             }
 
+            // AniList owns the list status, the score and the heart. A cinema
+            // page has no entry to write to -- and its id is TMDB's, which
+            // AniList would read as whatever anime carries the same number.
+            if tracksOnAniList {
             Menu {
                 ForEach(Self.listStatusOptions, id: \.self) { status in
                     Button(Self.statusLabel(status)) { onSetListStatus(status) }
@@ -1340,6 +1352,7 @@ public struct MediaDetailView: View {
             }
             .buttonStyle(.sumiPressable)
             .animation(.bouncy, value: details.isFavourite)
+            }
 
             Menu {
                 Button(role: .destructive, action: onRemoveFromList) {
@@ -1415,10 +1428,22 @@ public struct MediaDetailView: View {
         return seconds
     }
 
+    /// A film: one sitting, numbered 1 only because the registry, the resume
+    /// position and the remembered release all key on an episode number.
+    /// Nothing on the page should say "Episode 1" about it.
+    private var isSingleSitting: Bool {
+        details.format?.uppercased() == "MOVIE" && episodes.count <= 1
+    }
+
     private var primaryActionLabel: String {
         guard let target = resumeTarget else { return "Nothing to play" }
         if let seconds = resumeSecondsForTarget {
-            return "Resume Episode \(target.number) · \(Self.clock(seconds))"
+            return isSingleSitting
+                ? "Resume · \(Self.clock(seconds))"
+                : "Resume Episode \(target.number) · \(Self.clock(seconds))"
+        }
+        if isSingleSitting {
+            return target.isWatched ? "Watch again" : "Play"
         }
         return target.isWatched ? "Rewatch Episode \(target.number)" : "Play Episode \(target.number)"
     }
@@ -1592,7 +1617,9 @@ public struct MediaDetailView: View {
 
     private func tabLabel(_ tab: DetailTab) -> String {
         switch tab {
-        case .episodes: return episodes.isEmpty ? "EPISODES" : "EPISODES (\(episodes.count))"
+        case .episodes:
+            if episodes.isEmpty { return "EPISODES" }
+            return isSingleSitting ? "FILM" : "EPISODES (\(episodes.count))"
         case .manga: return mangaChapters.isEmpty ? "CHAPTERS" : "CHAPTERS (\(mangaChapters.count))"
         case .characters: return characters.isEmpty ? "CAST & STAFF" : "CAST & STAFF (\(characters.count))"
         case .related:
@@ -1663,6 +1690,7 @@ public struct MediaDetailView: View {
             if activeTab == .episodes && !episodes.isEmpty {
                 HStack(spacing: 10) {
                     // Audio toggle
+                    if tracksOnAniList {
                     HStack(spacing: 6) {
                         Text("AUDIO:")
                             .sumiTabularMono(size: 10.5, weight: .bold)
@@ -1705,6 +1733,7 @@ public struct MediaDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
                     }
                     .fixedSize(horizontal: true, vertical: false)
+                }
 
                     // View Mode toggle: Cards | Compact
                     HStack(spacing: 2) {

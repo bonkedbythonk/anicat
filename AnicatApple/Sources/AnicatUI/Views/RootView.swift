@@ -147,6 +147,7 @@ public struct RootView: View {
                                 recommendations: model.selectedRecommendations,
                                 discussions: model.selectedDiscussions,
                                 isLoading: model.isDetailLoading,
+                                tracksOnAniList: model.currentDetailCatalog == .anilist,
                                 onPlayEpisode: { ep in
                                     playEpisode(
                                         model: model, catalogId: details.id, episode: ep.number, title: details.title,

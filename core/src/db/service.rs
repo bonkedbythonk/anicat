@@ -1297,7 +1297,31 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
+    }
+
+    /// A database stamped 5, 6 or 7 by a build that numbered the `completed`
+    /// migration 5 -- beside the one that creates `offline_chapters`, so it
+    /// was skipped outright on anything already at 5 and every later query
+    /// naming the column failed there.
+    #[test]
+    fn a_database_stamped_past_the_completed_migration_still_gets_the_column() {
+        // 6 and 7, not 5: rolling the stamp back to 5 on an
+        // already-migrated database would re-run migration 6 against a column
+        // it has, which is not a state any real database is in.
+        for stamped in [6, 7] {
+            let conn = Connection::open_in_memory().unwrap();
+            migrate(&conn).unwrap();
+            conn.execute_batch("ALTER TABLE watch_history DROP COLUMN completed").unwrap();
+            conn.pragma_update(None, "user_version", stamped).unwrap();
+
+            migrate(&conn).unwrap();
+
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM watch_history WHERE completed = 0", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "column missing after migrating from {stamped}");
+        }
     }
 
     #[test]

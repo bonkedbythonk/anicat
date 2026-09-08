@@ -23,6 +23,7 @@ struct PhoneSettingsView: View {
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = false
     @AppStorage(FeedbackDefaults.hapticsKey) private var haptics: Bool = true
+    @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
 
     @State private var tokenInput = ""
     @State private var isConnecting = false
@@ -39,6 +40,7 @@ struct PhoneSettingsView: View {
             playback
             appearance
             notifications
+            cinema
         }
         .scrollContentBackground(.hidden)
         .background(SumiTheme.background)
@@ -194,6 +196,41 @@ struct PhoneSettingsView: View {
     }
 
     // MARK: Notifications
+
+    /// Cinema needs a TMDB credential the anime side does not. A build can
+    /// ship a proxy in its Info.plist; this is the other route, and the only
+    /// one a sideloaded build can take without being rebuilt.
+    @ViewBuilder
+    private var cinema: some View {
+        Section("Films & TV") {
+            if model.cinemaAvailable {
+                Label("TMDB connected", systemImage: "checkmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SumiTheme.muted)
+            } else {
+                Text("Add a TMDB API key to browse films and series. Free from themoviedb.org.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            HStack(spacing: 10) {
+                TextField("TMDB API key", text: $tmdbKey)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(size: 13, design: .monospaced))
+                PasteButton(payloadType: String.self) { strings in
+                    guard let pasted = strings.first else { return }
+                    tmdbKey = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.capsule)
+            }
+            // The engine reads the key once, when it is constructed, so a key
+            // added here does not reach it until the app is started again.
+            Text("Restart Anicat after changing this.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+        }
+    }
 
     @ViewBuilder
     private var notifications: some View {

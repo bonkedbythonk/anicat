@@ -74,6 +74,13 @@ targets:
         # pre-iPhone-X app and letterboxes it inside black bars.
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
+        # How cinema mode reaches TMDB, taken from the environment at
+        # generate time exactly as scripts/package-anicat-macos-app.sh takes
+        # it at package time. Neither is ever committed — the repo is public.
+        # Both empty reads as "no TMDB", and the mode toggle stays hidden
+        # rather than offering a switch that cannot load anything.
+        ANICATTMDBProxy: ${ANICAT_TMDB_PROXY}
+        ANICATTMDBKey: ${ANICAT_TMDB_KEY}
         # Without these the phone build is unreachable from outside itself:
         # `anicat://title/<id>` is refused by LaunchServices, and Handoff
         # from the Mac arrives as an activity type the app never claimed.

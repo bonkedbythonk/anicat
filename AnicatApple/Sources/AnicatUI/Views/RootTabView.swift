@@ -100,6 +100,31 @@ public struct RootTabView: View {
 }
 
 
+/// Anime or cinema, in the header of all three tabs.
+///
+/// A two-segment control rather than a fourth tab or a sidebar item: the
+/// mode changes what every tab means, so it has to be visible from all of
+/// them, and switching it from inside Library should leave you in Library.
+/// Hidden entirely when the engine reports no TMDB access — a dead segment
+/// that silently refuses to switch is worse than no segment.
+private struct ModeToggle: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        if model.cinemaAvailable {
+            Picker("", selection: Binding(
+                get: { model.appMode },
+                set: { model.setAppMode($0) }
+            )) {
+                Text("Anime").tag(AppModel.AppMode.anime)
+                Text("Films & TV").tag(AppModel.AppMode.cinema)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 210)
+        }
+    }
+}
+
 /// The title row the three tabs draw for themselves.
 ///
 /// `navigationTitle` with the large display mode puts a 44pt bar above the
@@ -110,15 +135,21 @@ public struct RootTabView: View {
 /// the real navigation bar, so Back is untouched.
 private struct TabHeader<Trailing: View>: View {
     let title: String
+    var model: AppModel?
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(SumiTheme.foreground)
-            Spacer(minLength: 8)
-            trailing
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(SumiTheme.foreground)
+                Spacer(minLength: 8)
+                trailing
+            }
+            if let model {
+                ModeToggle(model: model)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 2)
@@ -162,8 +193,11 @@ private struct UpNextTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    TabHeader(title: "Up Next") { profileButton }
+                    TabHeader(title: "Up Next", model: model) { profileButton }
 
+                    if model.appMode == .cinema {
+                        cinemaBody
+                    } else {
                     if !model.upNextItems.isEmpty {
                         ContinueWatchingRow(model: model, onOpen: open)
                     }
@@ -197,6 +231,7 @@ private struct UpNextTab: View {
                             detail: "Titles you are watching on AniList show up here."
                         )
                     }
+                    }
                 }
                 .padding(.vertical, 8)
             }
@@ -205,6 +240,39 @@ private struct UpNextTab: View {
             .refreshable { await model.refreshAll() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
+    }
+
+    /// The same page for films and series. `cinemaShelves` is whatever TMDB
+    /// rows the engine returned, so this does not hard-code a row list the
+    /// way the anime side does — a row TMDB retires simply stops arriving.
+    @ViewBuilder
+    private var cinemaBody: some View {
+        if !model.cinemaContinueWatching.isEmpty {
+            PosterShelf(title: "Continue Watching", items: model.cinemaContinueWatching, onOpen: openCinema)
+        }
+        ForEach(model.cinemaShelves) { shelf in
+            PosterShelf(title: shelf.title, items: shelf.items, onOpen: openCinema)
+        }
+        if let error = model.cinemaError, model.cinemaShelves.isEmpty {
+            EmptyHint(title: "Films and TV unavailable", detail: Self.cinemaMessage(error))
+        } else if model.cinemaShelves.isEmpty {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 48)
+        }
+    }
+
+    /// The engine's errors are Rust enum descriptions —
+    /// `Network(msg: "tmdb_unauthorized")` is what reached the screen — and
+    /// the two a viewer can actually act on are worth saying plainly.
+    static func cinemaMessage(_ raw: String) -> String {
+        if raw.contains("tmdb_unauthorized") {
+            return "TMDB rejected the API key. Check it in Settings."
+        }
+        if raw.contains("tmdb_rate_limited") {
+            return "TMDB is rate limiting this key. Try again shortly."
+        }
+        return raw
     }
 
     /// Settings lives behind this button rather than in a fourth tab: it is
@@ -232,6 +300,22 @@ private struct UpNextTab: View {
                     .font(.system(size: 27))
                     .foregroundStyle(SumiTheme.muted)
             }
+        }
+    }
+
+
+    /// TMDB ids are not AniList ids and the detail fetch is a different call,
+    /// so cinema rows cannot go through `openDetail`. `cinemaCatalog(forId:)`
+    /// is what knows whether an id is a film or a series.
+    private func openCinema(_ item: MediaCard.Item) {
+        showDetail = true
+        Task {
+            await model.openCinemaDetail(
+                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
+                id: item.id,
+                title: item.title,
+                coverURL: item.coverImageURL
+            )
         }
     }
 
@@ -442,9 +526,22 @@ private struct LibraryTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    TabHeader(title: "Library") { statusMenu }
+                    TabHeader(title: "Library", model: model) { statusMenu }
 
-                    if !model.isSignedIn {
+                    if model.appMode == .cinema {
+                        if model.cinemaWatchlist.isEmpty {
+                            EmptyHint(
+                                title: "Nothing saved",
+                                detail: "Films and series you add to your watchlist show up here."
+                            )
+                        } else {
+                            Text("\(model.cinemaWatchlist.count) TITLES")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(SumiTheme.muted)
+                                .padding(.horizontal, 16)
+                            PosterGrid(items: model.cinemaWatchlist, onOpen: openCinema)
+                        }
+                    } else if !model.isSignedIn {
                         EmptyHint(
                             title: "No lists yet",
                             detail: "Connect AniList in Settings to see your library."
@@ -482,9 +579,13 @@ private struct LibraryTab: View {
     }
 
     /// A menu, not a segmented control: six statuses across 402pt truncate to
-    /// about two letters each. Same shape Mail uses for its filter.
+    /// about two letters each. Same shape Mail uses for its filter. Cinema
+    /// has its own watchlist statuses and does not use this one.
     @ViewBuilder
     private var statusMenu: some View {
+        if model.appMode == .cinema {
+            EmptyView()
+        } else {
         Menu {
                         Picker("Status", selection: Binding(
                             get: { storedStatus },
@@ -504,6 +605,21 @@ private struct LibraryTab: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
             }
+        }
+        }
+    }
+
+    /// TMDB ids are not AniList ids and the detail fetch is a different call,
+    /// so cinema rows cannot go through `openDetail`.
+    private func openCinema(_ item: MediaCard.Item) {
+        showDetail = true
+        Task {
+            await model.openCinemaDetail(
+                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
+                id: item.id,
+                title: item.title,
+                coverURL: item.coverImageURL
+            )
         }
     }
 
@@ -533,9 +649,18 @@ private struct SearchTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    TabHeader(title: "Search") { EmptyView() }
+                    TabHeader(title: "Search", model: model) { EmptyView() }
 
-                    if model.searchResults.isEmpty {
+                    if model.appMode == .cinema {
+                        if model.cinemaSearchResults.isEmpty {
+                            if !recents.isEmpty { recentChips }
+                            ForEach(model.cinemaShelves.prefix(2)) { shelf in
+                                PosterSection(title: shelf.title, items: shelf.items, onOpen: openCinema)
+                            }
+                        } else {
+                            PosterGrid(items: model.cinemaSearchResults, onOpen: openCinema)
+                        }
+                    } else if model.searchResults.isEmpty {
                         if !recents.isEmpty {
                             recentChips
                         }
@@ -557,14 +682,40 @@ private struct SearchTab: View {
             // budget on prefixes nobody asked for.
             .onSubmit(of: .search) {
                 remember(query)
-                Task { await model.search(query: query) }
+                Task {
+                    if model.appMode == .cinema {
+                        await model.searchCinema(query)
+                    } else {
+                        await model.search(query: query)
+                    }
+                }
             }
             .onChange(of: query) { _, new in
                 if new.isEmpty {
-                    Task { await model.search(query: "") }
+                    Task {
+                        if model.appMode == .cinema {
+                            await model.searchCinema("")
+                        } else {
+                            await model.search(query: "")
+                        }
+                    }
                 }
             }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
+        }
+    }
+
+    /// TMDB ids are not AniList ids and the detail fetch is a different call,
+    /// so cinema rows cannot go through `openDetail`.
+    private func openCinema(_ item: MediaCard.Item) {
+        showDetail = true
+        Task {
+            await model.openCinemaDetail(
+                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
+                id: item.id,
+                title: item.title,
+                coverURL: item.coverImageURL
+            )
         }
     }
 

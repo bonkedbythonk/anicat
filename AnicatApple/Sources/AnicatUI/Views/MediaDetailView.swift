@@ -1,4 +1,5 @@
 import SwiftUI
+import AnicatCoreKit
 
 public struct MediaDetailView: View {
     public enum DetailTab: String, CaseIterable, Identifiable {
@@ -7,6 +8,7 @@ public struct MediaDetailView: View {
         case characters = "Cast & Staff"
         case related = "Related"
         case discussions = "Discussions"
+        case details = "Details"
         case more = "More"
 
         public var id: String { rawValue }
@@ -244,6 +246,10 @@ public struct MediaDetailView: View {
     /// are absent here rather than disabled. Sub/Dub goes too: it is a
     /// fansub-era distinction that says nothing about a western release.
     public var tracksOnAniList: Bool = true
+    /// TMDB's own facts about a film or series: box office, networks, the
+    /// season breakdown, the stills. Nil on an AniList page, which is what
+    /// keeps the Details tab out of the bar there.
+    public var cinemaExtras: CinemaExtras?
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     /// Same episode as `onPlayEpisode`, ignoring the recorded resume
@@ -360,6 +366,7 @@ public struct MediaDetailView: View {
         discussions: [DiscussionItem] = [],
         isLoading: Bool = false,
         tracksOnAniList: Bool = true,
+        cinemaExtras: CinemaExtras? = nil,
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
@@ -399,6 +406,7 @@ public struct MediaDetailView: View {
         self.discussions = discussions
         self.isLoading = isLoading
         self.tracksOnAniList = tracksOnAniList
+        self.cinemaExtras = cinemaExtras
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
         self.onReadChapter = onReadChapter
@@ -1609,8 +1617,14 @@ public struct MediaDetailView: View {
             }
         }
         tabs.append(.characters)
-        tabs.append(.related)
-        tabs.append(.discussions)
+        if cinemaExtras != nil { tabs.append(.details) }
+        // Relations and discussions are AniList's: a TMDB title has neither a
+        // franchise graph nor a forum thread, so the two tabs would open on
+        // an empty page saying nothing about why.
+        if tracksOnAniList {
+            tabs.append(.related)
+            tabs.append(.discussions)
+        }
         tabs.append(.more)
         return tabs
     }
@@ -1626,6 +1640,7 @@ public struct MediaDetailView: View {
             let count = relations.isEmpty ? ((details.prequel != nil ? 1 : 0) + (details.sequel != nil ? 1 : 0)) : relations.count
             return count > 0 ? "RELATED (\(count))" : "RELATED"
         case .discussions: return discussions.isEmpty ? "DISCUSSIONS" : "DISCUSSIONS (\(discussions.count))"
+        case .details: return "DETAILS"
         case .more: return recommendations.isEmpty ? "MORE" : "MORE (\(recommendations.count))"
         }
     }
@@ -1838,6 +1853,10 @@ public struct MediaDetailView: View {
             )
         case .discussions:
             DiscussionsTabSection(discussions: discussions, onSelectThread: onSelectThread)
+        case .details:
+            if let cinemaExtras {
+                CinemaDetailsTabSection(extras: cinemaExtras, genres: details.genres)
+            }
         case .more:
             RecommendationsTabSection(recommendations: recommendations, onSelectMediaId: onSelectMediaId)
         }

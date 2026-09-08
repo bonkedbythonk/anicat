@@ -110,6 +110,14 @@ public final class AppModel {
                 isAniListDown = true
                 return
             }
+            // A 429 is our own request budget, not AniList's health, and the
+            // client already knows the cooldown and waits it out. Counting it
+            // here let a burst of throttled writes cross the failure
+            // threshold and raise the "AniList is down" banner over a service
+            // that was answering everyone else fine.
+            if msg.contains("HTTP 429") {
+                return
+            }
         }
 
         aniListFailureTimestamps.append(date)
@@ -484,6 +492,23 @@ public final class AppModel {
     public var cinemaError: String?
     public var cinemaSearchResults: [MediaCard.Item] = []
 
+    /// Watch history for TMDB titles, and the names to draw it with.
+    ///
+    /// The registry records `(catalog, id, episode)` and no title -- it has
+    /// no idea what anything is called -- and `knownTitles` is filled from
+    /// AniList shelves, so a film would have shown as a bare number. These
+    /// are filled from the cinema shelves and the detail snapshots instead.
+    public var cinemaActivity: [ActivityRow] = []
+    public var cinemaKnownTitles: [Int64: String] = [:]
+    public var cinemaKnownCovers: [Int64: URL] = [:]
+    /// Films and episodes with a stored position, most recent first.
+    public var cinemaContinueWatching: [MediaCard.Item] = []
+
+    /// The facts TMDB carries that `MediaDetail` has no field for, for the
+    /// open cinema page. Nil on an AniList page, which is what hides the
+    /// Details tab there.
+    public var cinemaExtras: CinemaExtras?
+
     /// The catalog the open detail page belongs to. Every refresh path on
     /// that page reads AniList, so it has to know when not to run.
     public var currentDetailCatalog: MediaCard.CardCatalog = .anilist
@@ -601,6 +626,7 @@ public final class AppModel {
     /// Initializes the headless Rust engine and opens the SQLite registry.
     public func initialize(anilistToken: String? = nil, tmdbKey: String? = nil) async {
         guard engine == nil else { return }
+        purgeStaleSpotlightIndexOnce()
 
         // Paints last-known home state before the engine has even finished
         // constructing, and skips the launch spinner entirely for a relaunch

@@ -346,6 +346,16 @@ struct AnicatApp: App {
                     // uncovers Settings.
                     // Same as above: the curve lives in `PlayerView`.
                     model.isPlayerMinimized = true
+                    // `RootView`'s detail page renders whenever
+                    // `selectedMediaDetails` is set, regardless of
+                    // `currentNavSection` -- the sidebar's own click handler
+                    // already clears it for exactly this reason. This entry
+                    // point skipped that, so opening Settings from the menu
+                    // bar while a title's detail page was open silently did
+                    // nothing: the section changed underneath, but the
+                    // detail page kept rendering over it.
+                    model.clearPersonPages()
+                    model.clearDetail()
                     model.currentNavSection = .settings
                     AppWindow.main?.makeKeyAndOrderFront(nil)
                 },

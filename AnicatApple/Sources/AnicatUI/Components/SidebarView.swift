@@ -15,18 +15,27 @@ public struct SidebarView: View {
 
         public var id: String { rawValue }
 
-        public var label: String {
-            switch self {
-            case .upNext: return "Up Next"
-            case .schedule: return "Schedule"
-            case .library: return "Library"
-            case .manga: return "Manga"
-            case .novels: return "Light Novels"
-            case .search: return "Search"
-            case .history: return "History"
-            case .stats: return "Stats"
-            case .downloads: return "Downloads"
-            case .settings: return "Settings"
+        public var label: String { label(for: .anime) }
+
+        /// The rail's wording per mode. Cinema renames rather than adds: a
+        /// new case would renumber the 1-9 shortcuts (see
+        /// `numberedSections`) and leave `displayOrder` wrong for whichever
+        /// mode was not listed, for three headings that mean the same thing.
+        public func label(for mode: AppModel.AppMode) -> String {
+            switch (self, mode) {
+            case (.upNext, .cinema): return "Home"
+            case (.schedule, .cinema): return "Coming Soon"
+            case (.library, .cinema): return "Watching"
+            case (.upNext, _): return "Up Next"
+            case (.schedule, _): return "Schedule"
+            case (.library, _): return "Library"
+            case (.manga, _): return "Manga"
+            case (.novels, _): return "Light Novels"
+            case (.search, _): return "Search"
+            case (.history, _): return "History"
+            case (.stats, _): return "Stats"
+            case (.downloads, _): return "Downloads"
+            case (.settings, _): return "Settings"
             }
         }
 
@@ -54,6 +63,46 @@ public struct SidebarView: View {
         public static let browseItems: [NavSection] = [
             .upNext, .schedule, .library, .manga, .novels, .search, .history, .stats
         ]
+
+        /// Manga and light novels are AniList's and have no cinema
+        /// counterpart -- they are absent there rather than empty.
+        public static func browseItems(for mode: AppModel.AppMode) -> [NavSection] {
+            switch mode {
+            case .anime: return browseItems
+            case .cinema: return [.upNext, .schedule, .library, .search, .history, .stats]
+            }
+        }
+
+        public static func displayOrder(for mode: AppModel.AppMode) -> [NavSection] {
+            browseItems(for: mode) + systemItems
+        }
+
+        /// Where this section sits in the mode's own rail, which is what the
+        /// entrance slide reads to decide its direction. Against the anime
+        /// order it would jump backwards on every section cinema skips.
+        public func displayIndex(in mode: AppModel.AppMode) -> Int {
+            Self.displayOrder(for: mode).firstIndex(of: self) ?? 0
+        }
+
+        /// The digit keys, for the mode showing. Against the shared list,
+        /// pressing 4 in cinema would open Manga -- a section not in the rail
+        /// and with nothing in it here.
+        public static func fromNumberKey(_ num: Int, mode: AppModel.AppMode) -> NavSection? {
+            switch mode {
+            case .anime: return fromNumberKey(num)
+            case .cinema:
+                let sections = displayOrder(for: mode)
+                guard num >= 1, num <= 9, num <= sections.count else { return nil }
+                return sections[num - 1]
+            }
+        }
+
+        public static func fromLetterKey(_ char: Character, mode: AppModel.AppMode) -> NavSection? {
+            guard let section = fromLetterKey(char) else { return nil }
+            return browseItems(for: mode).contains(section) || systemItems.contains(section)
+                ? section
+                : nil
+        }
 
         public static let systemItems: [NavSection] = [.downloads, .settings]
 
@@ -92,6 +141,7 @@ public struct SidebarView: View {
     }
 
     @Binding public var currentView: NavSection
+    public let mode: AppModel.AppMode
     public let onOpenSearchPalette: () -> Void
     /// What the mark at the foot of the rail is showing right now, and what
     /// pressing it switches to. Passed in rather than read from `AppModel`
@@ -104,12 +154,14 @@ public struct SidebarView: View {
 
     public init(
         currentView: Binding<NavSection>,
+        mode: AppModel.AppMode = .anime,
         modeCaption: String = "Anime and manga",
         switchModeCaption: String? = nil,
         onSwitchMode: @escaping () -> Void = {},
         onOpenSearchPalette: @escaping () -> Void
     ) {
         self._currentView = currentView
+        self.mode = mode
         self.modeCaption = modeCaption
         self.switchModeCaption = switchModeCaption
         self.onSwitchMode = onSwitchMode
@@ -126,7 +178,7 @@ public struct SidebarView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     // Group: Browse
-                    navGroup(title: "Browse", items: NavSection.browseItems)
+                    navGroup(title: "Browse", items: NavSection.browseItems(for: mode))
 
                     // Group: System
                     navGroup(title: "System", items: NavSection.systemItems)
@@ -210,7 +262,7 @@ public struct SidebarView: View {
     }
 
     private func navItemButton(_ item: NavSection) -> some View {
-        NavItemButton(item: item, isActive: currentView == item, namespace: sidebarNavNamespace) {
+        NavItemButton(item: item, mode: mode, isActive: currentView == item, namespace: sidebarNavNamespace) {
             if currentView != item {
                 SumiHaptics.selection()
                 AppSounds.tabChange.play()
@@ -228,6 +280,7 @@ public struct SidebarView: View {
 
     private struct NavItemButton: View {
         let item: NavSection
+        let mode: AppModel.AppMode
         let isActive: Bool
         let namespace: Namespace.ID
         let onSelect: () -> Void
@@ -237,7 +290,7 @@ public struct SidebarView: View {
         var body: some View {
             Button(action: onSelect) {
                 HStack {
-                    Text(item.label)
+                    Text(item.label(for: mode))
                         .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                         .foregroundColor(isActive ? SumiTheme.foreground : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
 

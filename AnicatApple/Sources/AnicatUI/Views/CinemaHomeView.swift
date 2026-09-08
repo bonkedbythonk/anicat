@@ -8,11 +8,36 @@ import SwiftUI
 /// two search endpoints take; here a query is a query, so a second screen
 /// would be the same field twice.
 struct CinemaHomeView: View {
+    /// Which of cinema mode's sections this is drawing.
+    ///
+    /// One view for four rail entries because they differ only in which
+    /// shelves they show: the search field, the cards, the morph and the
+    /// empty states are the same, and four files would be four copies of
+    /// them drifting apart.
+    enum Page {
+        case home
+        case comingSoon
+        case watching
+        case search
+    }
+
     let model: AppModel
+    let namespace: Namespace.ID
+    var page: Page = .home
     /// Focused on arrival when the viewer got here by pressing Search rather
     /// than Home -- the section is otherwise identical, and landing on it
     /// with the caret nowhere would read as the wrong page having opened.
     let focusSearchOnAppear: Bool
+
+    /// The shelves this page draws, by the engine's own row names.
+    private var shelves: [AppModel.CinemaShelf] {
+        switch page {
+        case .comingSoon:
+            return model.cinemaShelves.filter { $0.id == "upcoming_movies" || $0.id == "airing_series" }
+        case .home, .search, .watching:
+            return model.cinemaShelves
+        }
+    }
 
     @FocusState private var searchFocused: Bool
 
@@ -28,7 +53,9 @@ struct CinemaHomeView: View {
 
                 if isSearching {
                     resultsGrid
-                } else if model.cinemaShelves.isEmpty {
+                } else if page == .watching {
+                    watching
+                } else if shelves.isEmpty {
                     if model.isCinemaLoading {
                         MediaRowSkeleton(title: "Trending Films")
                         MediaRowSkeleton(title: "Trending Series")
@@ -36,7 +63,7 @@ struct CinemaHomeView: View {
                         emptyState
                     }
                 } else {
-                    ForEach(model.cinemaShelves) { shelf in
+                    ForEach(shelves) { shelf in
                         shelfRow(shelf)
                     }
                 }
@@ -53,6 +80,7 @@ struct CinemaHomeView: View {
         }
         .task {
             if model.cinemaShelves.isEmpty { await model.loadCinemaHome() }
+            if page == .watching { await model.loadCinemaLibrary() }
             if focusSearchOnAppear { searchFocused = true }
         }
     }
@@ -108,7 +136,7 @@ struct CinemaHomeView: View {
                 spacing: 20
             ) {
                 ForEach(results) { item in
-                    card(item)
+                    card(item, shelf: "cinemaSearch")
                 }
             }
         }
@@ -132,7 +160,7 @@ struct CinemaHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(shelf.items) { item in
-                        card(item).frame(width: 180)
+                        card(item, shelf: shelf.id).frame(width: 180)
                     }
                 }
                 .padding(.vertical, 4)
@@ -140,16 +168,22 @@ struct CinemaHomeView: View {
         }
     }
 
-    /// No `matchedGeometryEffect` namespace on a cinema card, unlike the
-    /// anime shelves: the same film appears in Trending and in Popular at
-    /// once, and two morph sources for one id is undefined behaviour -- the
-    /// bug that lost posters and made the detail page open crookedly on the
-    /// anime side. The page opens with its own fade instead.
-    private func card(_ item: MediaCard.Item) -> some View {
-        MediaCard(item: item) {
+    /// The poster that grows into the detail page, keyed by shelf *and*
+    /// catalog. The same film sits in Trending and in Popular at once, and
+    /// two morph sources for one key is undefined behaviour -- the bug that
+    /// lost posters on the anime side -- so the key names the shelf, and the
+    /// catalog is in it because a TMDB id and an AniList id collide.
+    private func card(_ item: MediaCard.Item, shelf: String) -> some View {
+        let catalog = item.catalog ?? .tmdbMovie
+        let key = "cinema:\(catalog.rawValue):\(shelf):\(item.id)"
+        return MediaCard(
+            item: item,
+            namespace: model.openingDetailSourceKey == key ? namespace : nil
+        ) {
+            model.openingDetailSourceKey = key
             Task {
                 await model.openCinemaDetail(
-                    catalog: item.catalog ?? .tmdbMovie,
+                    catalog: catalog,
                     id: item.id,
                     title: item.title,
                     coverURL: item.coverImageURL
@@ -157,6 +191,40 @@ struct CinemaHomeView: View {
             }
         }
         .equatable()
+    }
+
+    /// Everything with a stored position, newest first. Local only: a film
+    /// has no list entry anywhere, so this is the registry and nothing else.
+    @ViewBuilder
+    private var watching: some View {
+        if model.cinemaContinueWatching.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Nothing started yet")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                Text("Films and series you play show up here, with the position they stopped at. It is kept on this device -- nothing is sent anywhere.")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 40)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("CONTINUE WATCHING")
+                    .sumiTabularMono(size: 9.5, weight: .bold)
+                    .foregroundColor(SumiTheme.muted)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)],
+                    alignment: .leading,
+                    spacing: 20
+                ) {
+                    ForEach(model.cinemaContinueWatching) { item in
+                        card(item, shelf: "cinemaWatching")
+                    }
+                }
+            }
+        }
     }
 
     /// TMDB refused the key rather than failing to answer. Worth its own

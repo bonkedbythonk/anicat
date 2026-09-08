@@ -237,6 +237,42 @@ pub struct EpisodeRow {
     pub air_date: Option<String>,
 }
 
+/// The facts a cinema page shows that `MediaDetail` has no field for.
+///
+/// A separate record rather than more optional fields on `MediaDetail`: none
+/// of this exists on an AniList title, and half of it (box office, networks,
+/// season counts) has no anime counterpart at all. Fetched from the same
+/// cached TMDB detail the page already loaded, so asking for it costs no
+/// request.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CinemaExtras {
+    pub tagline: Option<String>,
+    /// ISO 639-1, as TMDB reports it. The client names it.
+    pub original_language: Option<String>,
+    pub release_date: Option<String>,
+    pub last_air_date: Option<String>,
+    pub runtime_minutes: Option<i32>,
+    /// Zero means TMDB does not know, not that the film cost nothing -- most
+    /// films outside the studio system report 0 -- so both are `None` here.
+    pub budget: Option<i64>,
+    pub revenue: Option<i64>,
+    pub season_count: Option<i32>,
+    pub episode_count: Option<i32>,
+    /// Studios for a film, networks for a series.
+    pub companies: Vec<String>,
+    /// Backdrops then posters, capped -- the stills strip.
+    pub gallery: Vec<String>,
+    pub homepage: Option<String>,
+    /// `(season number, episode count)`, specials excluded, in order.
+    pub seasons: Vec<CinemaSeason>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CinemaSeason {
+    pub number: i32,
+    pub episode_count: i32,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiCharacter {
     pub id: i64,
@@ -994,6 +1030,113 @@ impl AnicatEngine {
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// The cast, top-billed first. Answered from the same cached TMDB detail
+    /// the page already loaded, so this is a second call and not a second
+    /// request.
+    ///
+    /// `id` is TMDB's person id, which is not AniList's character id and
+    /// opens no page here -- the client shows these as faces and names only.
+    pub async fn cinema_cast(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<Vec<FfiCharacter>> {
+        let is_series = catalog == FfiCatalog::TmdbTv;
+        let detail = self
+            .catalogs
+            .cinema_detail(catalog_id, is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        let credits = detail
+            .movie
+            .as_ref()
+            .and_then(|m| m.credits.as_ref())
+            .or_else(|| detail.series.as_ref().and_then(|s| s.credits.as_ref()));
+        let mut cast: Vec<_> = credits
+            .and_then(|c| c.cast.as_ref())
+            .map(|rows| rows.iter().collect())
+            .unwrap_or_default();
+        cast.sort_by_key(|m| m.order.unwrap_or(i64::MAX));
+        Ok(cast
+            .into_iter()
+            .take(30)
+            .map(|m| FfiCharacter {
+                id: m.id.unwrap_or_default(),
+                name: m.name.clone().unwrap_or_default(),
+                role: m.character.clone().unwrap_or_default(),
+                image_url: m.photo_url(),
+                voice_actor_name: None,
+                voice_actor_image_url: None,
+            })
+            .collect())
+    }
+
+    /// The facts a cinema page shows that `MediaDetail` has no field for.
+    pub async fn cinema_extras(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<CinemaExtras> {
+        let is_series = catalog == FfiCatalog::TmdbTv;
+        let detail = self
+            .catalogs
+            .cinema_detail(catalog_id, is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+
+        // TMDB reports 0 for a budget or a gross it has no figure for, which
+        // is a different claim from "cost nothing" and must not be rendered
+        // as one.
+        let money = |v: Option<i64>| v.filter(|n| *n > 0);
+        if let Some(m) = &detail.movie {
+            return Ok(CinemaExtras {
+                tagline: m.tagline.clone().filter(|t| !t.is_empty()),
+                original_language: m.original_language.clone(),
+                release_date: m.release_date.clone(),
+                last_air_date: None,
+                runtime_minutes: m.runtime,
+                budget: money(m.budget),
+                revenue: money(m.revenue),
+                season_count: None,
+                episode_count: None,
+                companies: m
+                    .production_companies
+                    .iter()
+                    .flatten()
+                    .filter_map(|c| c.name.clone())
+                    .collect(),
+                gallery: crate::catalog::tmdb::types::gallery_urls(m.images.as_ref()),
+                homepage: m.homepage.clone().filter(|h| !h.is_empty()),
+                seasons: vec![],
+            });
+        }
+        let s = detail.series.ok_or_else(|| AnicatError::NotFound {
+            msg: format!("TMDB has no {catalog:?} {catalog_id}"),
+        })?;
+        Ok(CinemaExtras {
+            tagline: s.tagline.clone().filter(|t| !t.is_empty()),
+            original_language: s.original_language.clone(),
+            release_date: s.first_air_date.clone(),
+            last_air_date: s.last_air_date.clone(),
+            runtime_minutes: s.episode_run_time.as_ref().and_then(|r| r.first().copied()),
+            budget: None,
+            revenue: None,
+            season_count: s.number_of_seasons,
+            episode_count: s.number_of_episodes,
+            companies: s.networks.iter().flatten().filter_map(|c| c.name.clone()).collect(),
+            gallery: crate::catalog::tmdb::types::gallery_urls(s.images.as_ref()),
+            homepage: s.homepage.clone().filter(|h| !h.is_empty()),
+            seasons: s
+                .season_map()
+                .into_iter()
+                .map(|(number, count)| CinemaSeason {
+                    number: number as i32,
+                    episode_count: count as i32,
+                })
+                .collect(),
+        })
     }
 
     /// One film or series, in the same `MediaDetail` the anime path answers
@@ -2006,11 +2149,22 @@ impl AnicatEngine {
     /// What this device's watch history adds up to: lifetime totals, plus a
     /// `days`-long calendar strip. Local registry only, so it answers signed
     /// out and during an AniList outage.
-    pub fn watch_stats(&self, days: i32) -> FfiResult<FfiWatchStats> {
-        let rows = self
+    /// Watch statistics over the last `days`.
+    ///
+    /// `catalogs` narrows which of them count; empty means all. Cinema mode
+    /// asks for TMDB's alone, because a Stats page that answers about anime
+    /// while the app is showing films is not a mixed view, it is a wrong one.
+    pub fn watch_stats(&self, days: i32, catalogs: Vec<FfiCatalog>) -> FfiResult<FfiWatchStats> {
+        let mut rows = self
             .registry
             .progress_rows()
             .map_err(|msg| AnicatError::Storage { msg })?;
+        if !catalogs.is_empty() {
+            let wanted: Vec<Catalog> = catalogs.into_iter().map(Catalog::from).collect();
+            rows.retain(|r| {
+                Catalog::parse(&r.catalog).map(|c| wanted.contains(&c)).unwrap_or(false)
+            });
+        }
         // `chrono::Local` is read here, at the edge, and handed to an
         // aggregation that takes any timezone — the day boundaries that
         // decide every streak in there would otherwise be untestable off the

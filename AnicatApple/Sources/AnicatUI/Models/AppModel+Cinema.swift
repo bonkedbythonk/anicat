@@ -68,11 +68,21 @@ extension AppModel {
         guard mode != appMode else { return }
         guard mode == .anime || cinemaAvailable else { return }
         appMode = mode
-        currentNavSection = .upNext
-        closeDetail()
-        if mode == .cinema, cinemaShelves.isEmpty {
-            Task { await loadCinemaHome() }
+        // A section the new mode does not have would leave the rail with
+        // nothing highlighted and the content column on a page that mode
+        // cannot fill -- Manga in cinema, Coming Soon's cinema rows in anime.
+        if !SidebarView.NavSection.browseItems(for: mode).contains(currentNavSection),
+           !SidebarView.NavSection.systemItems.contains(currentNavSection) {
+            currentNavSection = .upNext
         }
+        closeDetail()
+        if mode == .cinema {
+            Task {
+                if cinemaShelves.isEmpty { await loadCinemaHome() }
+                await loadCinemaLibrary()
+            }
+        }
+        loadWatchStats()
     }
 
     /// Fills the cinema home rows.
@@ -159,26 +169,48 @@ extension AppModel {
         activeDetailExtrasTask?.cancel()
         currentDetailCatalog = catalog
         loadingCatalogId = id
-        isDetailLoading = true
-        withAnimation(.easeInOut(duration: 0.32)) {
-            selectedEpisodes = []
-            selectedMangaChapters = []
-            selectedRelations = []
-            selectedRecommendations = []
-            selectedCharacters = []
-            selectedDiscussions = []
-            selectedMediaDetails = HeroBanner.Details(
-                id: id,
-                title: title ?? "Loading...",
-                coverURL: coverURL,
-                format: catalog == .tmdbMovie ? "MOVIE" : "TV"
-            )
+
+        // Render the last snapshot before the fetch, exactly as the AniList
+        // path does. Without it every open of a title already seen was a
+        // spinner for as long as TMDB took, which is what made cinema feel
+        // slower than anime rather than any difference in the animations.
+        cinemaExtras = nil
+        let cached = DetailCache.load(id: id, isManga: false, catalog: catalog)
+        if let cached {
+            isDetailLoading = false
+            withAnimation(.easeInOut(duration: 0.32)) {
+                selectedEpisodes = cached.episodes
+                selectedMangaChapters = []
+                selectedRelations = cached.relations
+                selectedRecommendations = cached.recommendations
+                selectedCharacters = cached.characters
+                selectedDiscussions = []
+                selectedMediaDetails = cached.details
+            }
+        } else {
+            isDetailLoading = true
+            withAnimation(.easeInOut(duration: 0.32)) {
+                selectedEpisodes = []
+                selectedMangaChapters = []
+                selectedRelations = []
+                selectedRecommendations = []
+                selectedCharacters = []
+                selectedDiscussions = []
+                selectedMediaDetails = HeroBanner.Details(
+                    id: id,
+                    title: title ?? "Loading...",
+                    coverURL: coverURL,
+                    format: catalog == .tmdbMovie ? "MOVIE" : "TV"
+                )
+            }
         }
 
         defer { loadingCatalogId = nil }
         guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else {
             isDetailLoading = false
-            errorMessage = "Could not load this title from TMDB."
+            // A snapshot on screen is better than an error over it: the page
+            // is already readable and the fetch was only a refresh.
+            if cached == nil { errorMessage = "Could not load this title from TMDB." }
             return
         }
         guard currentDetailCatalog == catalog, selectedMediaDetails?.id == id else { return }
@@ -231,6 +263,49 @@ extension AppModel {
             }
             isDetailLoading = false
         }
+
+        // The cast and the facts panel come from the same cached TMDB detail
+        // the page just loaded, so these are two more calls and no more
+        // requests. Fetched after the page is on screen rather than before:
+        // nothing above the tabs waits on them.
+        activeDetailExtrasTask = Task { [weak self] in
+            guard let self else { return }
+            async let castTask = engine.cinemaCast(catalog: ffiCatalog, catalogId: id)
+            async let extrasTask = engine.cinemaExtras(catalog: ffiCatalog, catalogId: id)
+            let cast = (try? await castTask) ?? []
+            let extras = try? await extrasTask
+            guard !Task.isCancelled,
+                  self.currentDetailCatalog == catalog,
+                  self.selectedMediaDetails?.id == id else { return }
+            withAnimation(.smooth(duration: 0.25)) {
+                self.selectedCharacters = cast.map {
+                    MediaDetailView.CharacterItem(
+                        id: $0.id,
+                        name: $0.name,
+                        imageURL: $0.imageUrl.flatMap(URL.init(string:)),
+                        role: $0.role,
+                        voiceActorName: nil,
+                        voiceActorImageURL: nil
+                    )
+                }
+                self.cinemaExtras = extras
+            }
+        }
+
+        DetailCache.save(
+            DetailCache.Snapshot(
+                details: details,
+                episodes: selectedEpisodes,
+                mangaChapters: [],
+                relations: [],
+                recommendations: selectedRecommendations,
+                characters: selectedCharacters,
+                discussions: []
+            ),
+            id: id,
+            isManga: false,
+            catalog: catalog
+        )
     }
 
     /// Plays one episode of the open cinema title, or the film itself.
@@ -263,5 +338,68 @@ extension AppModel {
         case .tmdbTv: return .tmdbTv
         case .anilist: return .anilist
         }
+    }
+}
+
+extension AppModel {
+    /// Continue-watching and history for cinema mode, out of the local
+    /// registry.
+    ///
+    /// Nothing here is AniList's: a film has no list entry and no progress
+    /// anywhere but this device, so the registry is the only source and the
+    /// titles have to be found separately. A title already opened has a
+    /// detail snapshot on disk and costs nothing; anything else is one
+    /// TMDB detail, cached for a day, and only for rows actually shown.
+    public func loadCinemaLibrary() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = ((try? engine.watchActivity(limit: 200)) ?? [])
+            .filter { $0.catalog != .anilist }
+        cinemaActivity = rows
+
+        // Newest first, one entry per title: a binge leaves ten rows for one
+        // show and the shelf wants the show, not the episodes.
+        var seen = Set<Int64>()
+        var ordered: [ActivityRow] = []
+        for row in rows.sorted(by: { $0.watchedAt > $1.watchedAt }) where seen.insert(row.catalogId).inserted {
+            ordered.append(row)
+        }
+
+        var items: [MediaCard.Item] = []
+        for row in ordered.prefix(24) {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
+            cinemaKnownTitles[row.catalogId] = known.title
+            cinemaKnownCovers[row.catalogId] = known.coverURL
+            items.append(
+                MediaCard.Item(
+                    id: row.catalogId,
+                    title: known.title,
+                    coverImageURL: known.coverURL,
+                    progress: Int(row.episodeNumber),
+                    catalog: catalog
+                )
+            )
+        }
+        cinemaContinueWatching = items
+    }
+
+    /// A cinema title's name and poster: from the detail snapshot if this
+    /// device has one, otherwise from TMDB.
+    private func cinemaTitle(
+        catalog: MediaCard.CardCatalog,
+        id: Int64
+    ) async -> (title: String, coverURL: URL?)? {
+        if let snapshot = DetailCache.load(id: id, isManga: false, catalog: catalog) {
+            return (snapshot.details.title, snapshot.details.coverURL)
+        }
+        if let cached = cinemaKnownTitles[id] {
+            return (cached, cinemaKnownCovers[id])
+        }
+        guard let engine else { return nil }
+        let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        guard let detail = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else {
+            return nil
+        }
+        return (detail.title, URL(string: detail.coverImage))
     }
 }

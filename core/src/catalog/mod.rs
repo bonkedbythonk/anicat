@@ -779,13 +779,43 @@ impl Catalogs {
         if let Some(p) = progress {
             vars.insert("progress".to_string(), serde_json::json!(p));
         }
-        let _: serde_json::Value =
-            self.anilist.execute(anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars).await?;
-        // `media_detail` caches the mediaListEntry alongside everything else,
-        // so a status/score/progress edit that isn't invalidated here reads
-        // back as unchanged the moment the detail page reopens.
-        self.cache.invalidate("media_detail");
-        self.cache.invalidate("get_user_list");
+        // One retry, and only for a 429. This mutation is a viewer's own
+        // click (mark watched, rate, drop) rather than a background read a
+        // cache miss can paper over, so failing it outright on a throttle
+        // the client-side budget was already tracking loses the edit and
+        // makes the viewer notice and redo it by hand. `execute`'s own
+        // pre-wait sleeps out the cooldown it just recorded before the retry
+        // sends, so this costs nothing beyond that wait.
+        let mut result = self
+            .anilist
+            .execute::<serde_json::Value>(anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars.clone())
+            .await;
+        if let Err(ref e) = result {
+            if e.starts_with("AniList HTTP 429") {
+                result = self
+                    .anilist
+                    .execute::<serde_json::Value>(anilist::queries::SAVE_MEDIA_LIST_ENTRY_MUTATION, vars)
+                    .await;
+            }
+        }
+        result?;
+        // Patch the cached copies rather than dropping them. Invalidating
+        // both made one mark-watched click cost six AniList requests: the
+        // mutation, the detail page's forced refetch, and the four
+        // `user_list` misses that the home shelves, the library and the two
+        // reading shelves then took. Five clicks inside a minute was enough
+        // for a 429 against AniList's degraded 30/min cap, and the viewer's
+        // edit failed with "cooling down 19s". The patch writes the values
+        // the mutation just sent into every cached shape that carries them,
+        // so those re-reads are hits and the click costs one request.
+        self.cache.update_user_list_progress(media_id, progress, status, score);
+        // The one edit a patch cannot finish. The entry's own row is
+        // rewritten wherever it appears, but it stays filed under the status
+        // bucket it just left, so Watching would keep listing a title that
+        // completed. Rare enough (once per finished series) to pay for.
+        if status.is_some() {
+            self.cache.invalidate("get_user_list");
+        }
         Ok(())
     }
 

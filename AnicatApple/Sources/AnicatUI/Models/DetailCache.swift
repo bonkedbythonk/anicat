@@ -43,15 +43,27 @@ enum DetailCache {
     /// Maximum age (14 days) before a cached detail snapshot is automatically evicted.
     static let maxAge: TimeInterval = 14 * 24 * 60 * 60
 
-    static func fileURL(id: Int64, isManga: Bool) -> URL {
-        directory.appendingPathComponent("\(isManga ? "manga" : "anime")-\(id).json")
+    /// The filename's kind prefix. TMDB numbers films and series in two
+    /// spaces of its own and neither is AniList's, so id 550 names three
+    /// different titles across the three catalogs -- one prefix per catalog
+    /// is what keeps a film's snapshot from being served for an anime.
+    private static func kind(isManga: Bool, catalog: MediaCard.CardCatalog) -> String {
+        switch catalog {
+        case .tmdbMovie: return "film"
+        case .tmdbTv: return "series"
+        case .anilist: return isManga ? "manga" : "anime"
+        }
+    }
+
+    static func fileURL(id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist) -> URL {
+        directory.appendingPathComponent("\(kind(isManga: isManga, catalog: catalog))-\(id).json")
     }
 
     /// Never throws — a missing, corrupt, or unreadable cache file just
     /// means "nothing to show yet", not a load failure. The real fetch runs
     /// regardless of what this returns.
-    static func load(id: Int64, isManga: Bool) -> Snapshot? {
-        let url = fileURL(id: id, isManga: isManga)
+    static func load(id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist) -> Snapshot? {
+        let url = fileURL(id: id, isManga: isManga, catalog: catalog)
         guard let data = try? Data(contentsOf: url) else { return nil }
         // Touch modification date on access to keep recently-viewed items fresh for LRU
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
@@ -84,16 +96,16 @@ enum DetailCache {
 
     /// Seconds since this snapshot was written, read *before* `load()` touches
     /// the mtime for LRU purposes — call this first if both are needed.
-    static func ageInSeconds(id: Int64, isManga: Bool) -> TimeInterval? {
-        let url = fileURL(id: id, isManga: isManga)
+    static func ageInSeconds(id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist) -> TimeInterval? {
+        let url = fileURL(id: id, isManga: isManga, catalog: catalog)
         guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
               let modDate = values.contentModificationDate else { return nil }
         return Date().timeIntervalSince(modDate)
     }
 
-    static func save(_ snapshot: Snapshot, id: Int64, isManga: Bool) {
+    static func save(_ snapshot: Snapshot, id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        try? data.write(to: fileURL(id: id, isManga: isManga), options: .atomic)
+        try? data.write(to: fileURL(id: id, isManga: isManga, catalog: catalog), options: .atomic)
         Task.detached(priority: .background) {
             pruneCacheIfNeeded()
         }

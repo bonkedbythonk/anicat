@@ -218,6 +218,12 @@ pub struct TmdbMovie {
     pub poster_path: Option<String>,
     pub backdrop_path: Option<String>,
     pub release_date: Option<String>,
+    pub original_language: Option<String>,
+    /// Detail-only, and zero when TMDB simply does not know -- which is most
+    /// films outside the studio system, so a zero is rendered as unknown
+    /// rather than as a budget of nothing.
+    pub budget: Option<i64>,
+    pub revenue: Option<i64>,
     pub vote_average: Option<f64>,
     pub popularity: Option<f64>,
     /// Lists carry genre ids; details carry the named genres.
@@ -246,6 +252,7 @@ pub struct TmdbSeries {
     pub backdrop_path: Option<String>,
     pub first_air_date: Option<String>,
     pub last_air_date: Option<String>,
+    pub original_language: Option<String>,
     pub vote_average: Option<f64>,
     pub popularity: Option<f64>,
     pub genres: Option<Vec<TmdbGenre>>,

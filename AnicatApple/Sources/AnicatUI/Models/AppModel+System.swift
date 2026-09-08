@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CoreSpotlight
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -17,6 +18,24 @@ extension AppModel {
     public func registerAsShared() {
         AppModel.shared = self
         SystemNotifications.shared.activate()
+    }
+
+    /// One-shot cleanup for rows the now-deleted `SpotlightIndexer` wrote
+    /// under its `"library"` domain before it was removed — deleting that
+    /// file took its own `clear()` call with it, so without this those show
+    /// titles stay searchable forever with no code path left that knows
+    /// about them. `UserDefaults` guards it to one run per install; safe to
+    /// delete this method entirely once every machine that ever ran the
+    /// indexer has launched a build past this one.
+    @MainActor
+    public func purgeStaleSpotlightIndexOnce() {
+        let key = "anicat_spotlight_purged_2026_09_08"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        Task.detached(priority: .background) {
+            guard CSSearchableIndex.isIndexingAvailable() else { return }
+            try? await CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: ["library"])
+        }
     }
 
     // MARK: - Deep links

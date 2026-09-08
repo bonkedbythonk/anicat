@@ -62,6 +62,7 @@ public struct RootView: View {
                             model.currentNavSection = section
                         }
                     ),
+                    mode: model.appMode,
                     modeCaption: model.appMode == .cinema ? "Films and series" : "Anime and manga",
                     // nil hides the switch entirely: with no TMDB key there is
                     // no second world to move to.
@@ -148,6 +149,7 @@ public struct RootView: View {
                                 discussions: model.selectedDiscussions,
                                 isLoading: model.isDetailLoading,
                                 tracksOnAniList: model.currentDetailCatalog == .anilist,
+                                cinemaExtras: model.cinemaExtras,
                                 onPlayEpisode: { ep in
                                     playEpisode(
                                         model: model, catalogId: details.id, episode: ep.number, title: details.title,
@@ -633,7 +635,7 @@ public struct RootView: View {
         // above: an `AnyTransition` declared here would lose to the one the
         // identified view already carries, and a wrapper placed outside the
         // `.id` is not what this property returns.
-        SectionSlide(index: model.currentNavSection.displayIndex) {
+        SectionSlide(index: model.currentNavSection.displayIndex(in: model.appMode)) {
             sectionBody
         }
     }
@@ -647,7 +649,7 @@ public struct RootView: View {
             // different titles, and a shelf holding both could not say which
             // detail page a card opens.
             if model.appMode == .cinema {
-                CinemaHomeView(model: model, focusSearchOnAppear: false)
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .home, focusSearchOnAppear: false)
             } else {
                 // Its own View struct, not a computed property here: `homeView`
                 // used to inline into this 1198-line body, so any one shelf's
@@ -662,6 +664,12 @@ public struct RootView: View {
                 )
             }
         case .schedule:
+            if model.appMode == .cinema {
+                // "Coming Soon": the two rows that are about what has not
+                // aired yet. AniList's airing calendar has no TMDB
+                // counterpart -- TMDB dates a season, not an episode.
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .comingSoon, focusSearchOnAppear: false)
+            } else {
             ScheduleView(
                 items: model.scheduleItems,
                 calendarSlots: model.calendarMonths[AppModel.calendarMonthKey(model.calendarVisibleMonth)] ?? [],
@@ -676,13 +684,14 @@ public struct RootView: View {
             ) { item in
                 openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
             }
+            }
         case .search:
             if model.appMode == .cinema {
                 // The same page as Home, with the field focused: TMDB's
                 // search takes a query and nothing else, so the formats,
                 // genres, sorts and discover grid `SearchView` is built
                 // around have nothing to drive here.
-                CinemaHomeView(model: model, focusSearchOnAppear: true)
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .search, focusSearchOnAppear: true)
             } else {
             SearchView(
                 searchText: $model.searchQuery,
@@ -752,6 +761,9 @@ public struct RootView: View {
                 }
             )
         case .library:
+            if model.appMode == .cinema {
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .watching, focusSearchOnAppear: false)
+            } else {
             LibraryView(
                 items: model.libraryItems,
                 isLoading: model.isLoading,
@@ -774,6 +786,7 @@ public struct RootView: View {
                     )
                 }
             )
+            }
         case .manga:
             ReadingView(
                 config: .manga,
@@ -810,9 +823,11 @@ public struct RootView: View {
             }
         case .history:
             HistoryView(
-                viewer: model.viewer,
-                activity: model.activity,
-                titles: model.knownTitles,
+                // No AniList profile on a cinema page: the header would be
+                // somebody's anime statistics over a page of films.
+                viewer: model.appMode == .cinema ? nil : model.viewer,
+                activity: model.appMode == .cinema ? model.cinemaActivity : model.activity,
+                titles: model.appMode == .cinema ? model.cinemaKnownTitles : model.knownTitles,
                 namespace: cardNamespace,
                 openingSourceKey: model.openingDetailSourceKey,
                 onSelectFavourite: { item in
@@ -826,8 +841,8 @@ public struct RootView: View {
             StatsView(
                 stats: model.watchStatsSnapshot,
                 recentStats: model.watchStatsRecentSnapshot,
-                knownTitles: model.knownTitles,
-                knownCovers: model.knownCovers,
+                knownTitles: model.appMode == .cinema ? model.cinemaKnownTitles : model.knownTitles,
+                knownCovers: model.appMode == .cinema ? model.cinemaKnownCovers : model.knownCovers,
                 // Reloaded on every entry into the section and nowhere else.
                 // The other obvious trigger is "after progress is recorded",
                 // which lives in the playback path; every panel here but the
@@ -1644,7 +1659,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
 
             // Numbers 1-9: Switch views
-            if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num) {
+            if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num, mode: model.appMode) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }
@@ -1652,7 +1667,7 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
 
             // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), T (Stats), D (Downloads)
-            if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar) {
+            if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar, mode: model.appMode) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }

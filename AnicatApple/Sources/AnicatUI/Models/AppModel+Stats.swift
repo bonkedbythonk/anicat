@@ -70,8 +70,12 @@ extension AppModel {
             watchStatsRecentSnapshot = ScreenshotFixtures.watchStats(days: 30, topTitleIDs: Array(ids.dropFirst(2)) + Array(ids.prefix(2)))
             return
         }
-        watchStatsSnapshot = try? engine.watchStats(days: 365)
-        watchStatsRecentSnapshot = try? engine.watchStats(days: 30)
+        // Cinema mode asks about films and series alone. A Stats page
+        // answering about anime while the app is showing films is not a
+        // mixed view, it is a wrong one -- the registry holds both.
+        let catalogs: [FfiCatalog] = appMode == .cinema ? [.tmdbMovie, .tmdbTv] : [.anilist]
+        watchStatsSnapshot = try? engine.watchStats(days: 365, catalogs: catalogs)
+        watchStatsRecentSnapshot = try? engine.watchStats(days: 30, catalogs: catalogs)
     }
 
     /// Fetches the title and cover of a registry row no shelf has loaded, so

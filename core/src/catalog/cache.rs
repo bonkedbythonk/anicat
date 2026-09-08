@@ -293,10 +293,18 @@ impl AniListCache {
         self.disk_delete_prefix(cmd_prefix);
     }
 
+    /// Rewrites one title's own list entry (progress, status, score) in every
+    /// cached shape that carries it, in memory and on disk.
+    ///
+    /// `media_detail` is in the list because dropping it instead was one of
+    /// the six AniList requests a single mark-watched click used to cost: the
+    /// detail page is always the page the click came from, so it was refetched
+    /// every time. See `Catalogs::save_media_list_entry`.
     pub fn update_user_list_progress(&self, media_id: i64, new_progress: Option<i64>, new_status: Option<&str>, new_score: Option<f64>) {
         let mut entries = self.entries.lock().unwrap();
         let relevant_prefixes = [
             "get_user_list",
+            "media_detail",
             "get_trending",
             "get_seasonal",
             "get_upcoming",
@@ -647,6 +655,33 @@ mod tests {
         assert!(AniListCache::ttl("thread_comments") >= Duration::from_secs(5 * 60));
         // Unknown commands still fall back to the short default.
         assert_eq!(AniListCache::ttl("something_else"), Duration::from_secs(60));
+    }
+
+    /// The whole point of patching instead of invalidating: after a
+    /// progress write, the detail page and the shelves must both read back
+    /// the new number without a refetch. `media_detail` was missing from the
+    /// patched prefixes, so the detail page — the page every mark-watched
+    /// click is made from — refetched every time.
+    #[test]
+    fn progress_patch_reaches_media_detail_and_user_list() {
+        let cache = AniListCache::new();
+        let detail = AniListCache::key("media_detail", &[("id", "1535"), ("type", "ANIME")]);
+        cache.set(
+            detail.clone(),
+            serde_json::json!({"Media": {"id": 1535, "mediaListEntry": {"progress": 3, "status": "CURRENT"}}}),
+            "media_detail",
+        );
+        let list = AniListCache::key("get_user_list", &[("user", "me"), ("type", "ANIME"), ("status", "CURRENT")]);
+        cache.set(
+            list.clone(),
+            serde_json::json!([{"id": 1535, "mediaListEntry": {"progress": 3, "status": "CURRENT"}}]),
+            "get_user_list",
+        );
+
+        cache.update_user_list_progress(1535, Some(4), None, None);
+
+        assert_eq!(cache.get(&detail).unwrap()["Media"]["mediaListEntry"]["progress"], 4);
+        assert_eq!(cache.get(&list).unwrap()[0]["mediaListEntry"]["progress"], 4);
     }
 
     #[test]

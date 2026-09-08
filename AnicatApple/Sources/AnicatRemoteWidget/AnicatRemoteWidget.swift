@@ -250,8 +250,17 @@ private struct LockScreenView: View {
             // alone.
             .padding(.top, -2)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+        // The card is drawn edge to edge by the system, so every inset here
+        // is ours to give. 20 rather than 16: at 16 the episode stamp and
+        // the ends of the rule sat right on the rounded corner and read as
+        // running off it.
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
+        // Nothing inside may push past that inset. Without the clamp a long
+        // title or a wide transport row grows the card's content instead of
+        // wrapping or compressing, and the padding it grows through is the
+        // padding that was supposed to hold it in.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

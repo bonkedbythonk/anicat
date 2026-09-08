@@ -520,7 +520,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[test]
     fn the_local_list_keeps_catalogs_apart_and_clears_by_deleting() {
         let db = Registry::open_in_memory().unwrap();
         db.set_local_status(Catalog::TmdbMovie, 550, Some("PLANNING")).unwrap();
@@ -547,6 +546,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn anilist_and_tmdb_ids_do_not_collide() {
         // The whole point of the composite key: the same integer under two
         // catalogs is two different shows. Under the old banding scheme this

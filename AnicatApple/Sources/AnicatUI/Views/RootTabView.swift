@@ -101,6 +101,30 @@ public struct RootTabView: View {
         .onChange(of: model.selectedMediaDetails?.id) { _, id in
             if id != nil, detailOwner == nil { detailOwner = tab }
         }
+        // Handoff, Mac to phone. Both platforms have always *advertised*
+        // playback through `ContinuityManager`; only `RootView` ever
+        // received, so picking the phone up from the Mac's Handoff banner
+        // opened Up Next with no idea what the Mac was playing.
+        //
+        // To the detail page, not into playback, matching macOS: a system
+        // callback carries no user gesture, and forcing a resolve from one
+        // races `resolveAndPlay`'s own resume logic. The reading activity is
+        // deliberately not handled here -- the phone has no reader UI to
+        // hand off into.
+        .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
+            guard case .playback(let catalogId, let catalog, let title, _, _) =
+                    ContinuityManager.shared.parseIncomingActivity(activity) else { return }
+            Task {
+                switch catalog {
+                case "tmdb_movie":
+                    await model.openCinemaDetail(catalog: .tmdbMovie, id: catalogId, title: title)
+                case "tmdb_tv":
+                    await model.openCinemaDetail(catalog: .tmdbTv, id: catalogId, title: title)
+                default:
+                    await model.openDetail(id: catalogId, isManga: false)
+                }
+            }
+        }
     }
 
     private func scoped(to owner: Tab) -> Binding<Bool> {

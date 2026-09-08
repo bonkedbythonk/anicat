@@ -176,11 +176,16 @@ public struct RootView: View {
                         }
                     }
                     .animation(.smooth(duration: 0.2), value: model.currentNavSection)
-                    // The morph spring, not a plain ease: this transaction
-                    // carries the poster hand-off as well as the page, and
-                    // the curve it had was slower and flatter than the one
-                    // `SumiMotion.morph` exists to name.
-                    .animation(.sumi(.morph), value: model.selectedMediaDetails != nil)
+                    // No `.animation(value: selectedMediaDetails != nil)` here.
+                    // It covered the whole stack, so the feed's push-back was
+                    // animated twice over -- once by its own curve and once by
+                    // this one, both firing on the same update. Two animations
+                    // re-targeting the same property mid-flight is a small
+                    // correction right at the end, which is what a close
+                    // "tweaking back into place" over a short distance was.
+                    // The curve is named where the state changes instead:
+                    // `closeDetail`, `clearDetail` and `loadDetail` each wrap
+                    // their own mutation, and the transitions carry theirs.
                     .animation(.easeInOut(duration: 0.32), value: model.personPageStack)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -1688,6 +1693,11 @@ private final class SwipeGestureTracker {
     var isCooling = false
     var gestureDisqualified = false
     var lastSwipeEventAt: Date = .distantPast
+    /// Whether this gesture started over something that scrolls sideways.
+    /// Decided once, when the gesture begins, and held for its whole length:
+    /// a strip that has run out of travel stops looking scrollable halfway
+    /// through, and the back-swipe would take over mid-flick.
+    var startedOverHorizontalScroller = false
 
     func reset() {
         accumulatedDeltaX = 0
@@ -1695,6 +1705,34 @@ private final class SwipeGestureTracker {
         gestureDisqualified = false
     }
 }
+
+#if os(macOS)
+/// Whether the pointer is over a scroll view that has somewhere left to go
+/// sideways.
+///
+/// The back-swipe is a listen-only CGEvent tap, so it cannot know whether a
+/// scroll view consumed the gesture -- it only sees the deltas. That was fine
+/// when nothing on a detail page scrolled sideways, and stopped being fine
+/// when the page grew a horizontal tab strip and horizontal shelves: scrolling
+/// the tabs out to "More" and back again accumulated enough rightward travel
+/// to read as a back-swipe, and the page closed.
+///
+/// The vertical page scroller does not match: its document is exactly as wide
+/// as its clip view.
+@MainActor
+private func pointerIsOverHorizontalScroller() -> Bool {
+    guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+          let contentView = window.contentView else { return false }
+    let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    guard let hit = contentView.hitTest(point) else { return false }
+    return sequence(first: hit, next: { $0.superview }).contains { view in
+        guard let scroll = view as? NSScrollView, let document = scroll.documentView else {
+            return false
+        }
+        return document.frame.width > scroll.contentView.bounds.width + 1
+    }
+}
+#endif
 
 private struct GlobalKeyboardShortcutsModifier: ViewModifier {
     @Bindable var model: AppModel
@@ -1776,7 +1814,11 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             // Fresh gesture start on began phase or after an idle pause
             if event.phase == .began || now.timeIntervalSince(tracker.lastSwipeEventAt) > 0.15 {
                 tracker.reset()
+                tracker.startedOverHorizontalScroller = pointerIsOverHorizontalScroller()
             }
+            // A sideways scroll belongs to whatever is under the pointer, not
+            // to navigation.
+            if tracker.startedOverHorizontalScroller { return }
             tracker.lastSwipeEventAt = now
 
             // Normalize deltaX so physical swipe right (back) is positive, swipe left (forward) is negative.

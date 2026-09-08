@@ -209,7 +209,9 @@ extension AppModel {
             // Explicit for the same reason as `closeDetail()`: an
             // `.animation(value:)` modifier watching this `@Observable`
             // property doesn't reliably animate its insertion transition.
-            withAnimation(.easeInOut(duration: 0.32)) {
+            // The morph spring, because this transaction carries the poster
+            // hand-off; the container no longer supplies one.
+            withAnimation(.sumi(.morph)) {
                 selectedEpisodes = cached.episodes
                 selectedMangaChapters = cached.mangaChapters
                 selectedRelations = cached.relations
@@ -228,7 +230,7 @@ extension AppModel {
                 format: isManga ? "MANGA" : "ANIME"
             )
             isDetailLoading = true
-            withAnimation(.easeInOut(duration: 0.32)) {
+            withAnimation(.sumi(.morph)) {
                 selectedEpisodes = []
                 selectedMangaChapters = []
                 selectedRelations = []

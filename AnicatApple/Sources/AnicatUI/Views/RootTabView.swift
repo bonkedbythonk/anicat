@@ -152,7 +152,17 @@ private struct UpNextTab: View {
                         }
                     }
 
-                    if model.upNextItems.isEmpty {
+                    // The page used to end after New Episodes and left two
+                    // thirds of the screen black, which read as "nothing
+                    // here" rather than "you are up to date". These rows are
+                    // already fetched by `refreshAll` — only the rendering
+                    // was missing.
+                    PosterShelf(title: "Because You Watched", items: model.becauseYouWatched, onOpen: open)
+                    PosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open)
+                    PosterShelf(title: "Trending", items: model.trendingItems, onOpen: open)
+                    PosterShelf(title: "Planning", items: model.planningItems, onOpen: open)
+
+                    if model.upNextItems.isEmpty && model.trendingItems.isEmpty {
                         EmptyHint(
                             title: "Nothing in progress",
                             detail: "Titles you are watching on AniList show up here."
@@ -184,6 +194,57 @@ private struct UpNextTab: View {
     private func open(_ id: Int64, _ title: String, _ cover: URL?, _ isManga: Bool) {
         showDetail = true
         Task { await model.openDetail(id: id, title: title, coverURL: cover, isManga: isManga) }
+    }
+
+    private func open(_ item: MediaCard.Item) {
+        open(item.id, item.title, item.coverImageURL, item.isManga)
+    }
+}
+
+/// A horizontal row of posters. The grid is for a page whose whole job is
+/// one list; a shelf is for a page carrying several, where each row has to
+/// stay one screen-height tall so the next row is visible under it.
+private struct PosterShelf: View {
+    let title: String
+    let items: [MediaCard.Item]
+    let onOpen: (MediaCard.Item) -> Void
+
+    var body: some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(items) { item in
+                            Button { onOpen(item) } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Color.clear
+                                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                                        .overlay {
+                                            CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 300) { image in
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                SumiTheme.card
+                                            }
+                                        }
+                                        .frame(width: 104)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                                    Text(item.title)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(SumiTheme.foreground)
+                                        .lineLimit(2, reservesSpace: true)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(width: 104, alignment: .leading)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
     }
 }
 
@@ -234,7 +295,7 @@ private struct ContinueWatchingCard: View {
                 } placeholder: {
                     SumiTheme.card
                 }
-                .frame(width: 172, height: 97)
+                .frame(width: Self.cardWidth, height: Self.cardWidth * 9 / 16)
                 .clipped()
 
                 GeometryReader { geo in
@@ -256,8 +317,13 @@ private struct ContinueWatchingCard: View {
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
-        .frame(width: 172, alignment: .leading)
+        .frame(width: Self.cardWidth, alignment: .leading)
     }
+
+    /// Three across, as the design sheet draws them. At 172pt only 2.3 fitted
+    /// and the third card was a sliver at the edge, which read as the shelf
+    /// being cut off rather than scrollable.
+    static let cardWidth: CGFloat = (402 - 32 - 24) / 3
 }
 
 private struct NewEpisodeRow: View {
@@ -347,12 +413,19 @@ private struct SearchTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
     @State private var query = ""
+    /// Kept here rather than in the engine: a search someone typed on this
+    /// phone is not catalog data and has no business in the registry that
+    /// syncs a watch history.
+    @AppStorage("anicat_recent_searches") private var recentsRaw = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
                     if model.searchResults.isEmpty {
+                        if !recents.isEmpty {
+                            recentChips
+                        }
                         PosterSection(title: "Trending", items: model.trendingItems, onOpen: open)
                     } else {
                         PosterGrid(items: model.searchResults, onOpen: open)
@@ -370,6 +443,7 @@ private struct SearchTab: View {
             // rate-limited per minute and a per-character search burns the
             // budget on prefixes nobody asked for.
             .onSubmit(of: .search) {
+                remember(query)
                 Task { await model.search(query: query) }
             }
             .onChange(of: query) { _, new in
@@ -388,6 +462,106 @@ private struct SearchTab: View {
                 id: item.id, title: item.title,
                 coverURL: item.coverImageURL, isManga: item.isManga
             )
+        }
+    }
+
+    // MARK: Recent searches
+
+    private var recents: [String] {
+        recentsRaw.split(separator: "\n").map(String.init)
+    }
+
+    @ViewBuilder
+    private var recentChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("RECENT")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(SumiTheme.muted)
+                Spacer()
+                Button("Clear") { recentsRaw = "" }
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 16)
+
+            FlowChips(items: recents) { term in
+                query = term
+                Task { await model.search(query: term) }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func remember(_ term: String) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Case-insensitive dedupe, most recent first, eight kept: the sheet
+        // draws two rows of chips and more than that wraps into the grid.
+        var list = recents.filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+        list.insert(trimmed, at: 0)
+        recentsRaw = list.prefix(8).joined(separator: "\n")
+    }
+}
+
+/// Chips that wrap onto as many rows as they need. SwiftUI has no flow
+/// layout before iOS 16's `Layout`, and a `LazyVGrid` cannot do it either:
+/// its columns are fixed widths, so short and long terms would sit in the
+/// same column width and the row would read as a table.
+private struct FlowChips: Layout {
+    let items: [String]
+    let onTap: (String) -> Void
+
+    init(items: [String], onTap: @escaping (String) -> Void) {
+        self.items = items
+        self.onTap = onTap
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 0
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > width, x > 0 {
+                x = 0
+                y += rowHeight + 8
+                rowHeight = 0
+            }
+            x += size.width + 8
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                x = bounds.minX
+                y += rowHeight + 8
+                rowHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + 8
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+extension FlowChips: View {
+    var body: some View {
+        FlowChips(items: items, onTap: onTap) {
+            ForEach(items, id: \.self) { term in
+                Button { onTap(term) } label: {
+                    Text(term)
+                        .font(.system(size: 13))
+                        .foregroundStyle(SumiTheme.foreground)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(SumiTheme.card, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
@@ -453,6 +627,18 @@ private struct PosterGrid: View {
 
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 12)]
 
+    /// AniList scores are 0-100; the sheet shows them out of ten.
+    static func meta(for item: MediaCard.Item) -> String? {
+        var parts: [String] = []
+        if let score = item.score, score > 0 {
+            parts.append(String(format: "* %.1f", Double(score) / 10))
+        }
+        if let total = item.totalEpisodesOrChapters, total > 0 {
+            parts.append("\(total) \(item.isManga ? "CH" : "EPS")")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
             ForEach(items) { item in
@@ -460,19 +646,37 @@ private struct PosterGrid: View {
                     onOpen(item)
                 } label: {
                     VStack(alignment: .leading, spacing: 6) {
-                        CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 360) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            SumiTheme.card
-                        }
-                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        // `aspectRatio` on the image itself *fits* the poster
+                        // inside the cell, so a cover that is not exactly 2:3
+                        // (ONE PIECE) came back shorter than its neighbours and
+                        // the row lost its baseline. The box owns the ratio and
+                        // the artwork fills it.
+                        Color.clear
+                            .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                            .overlay {
+                                CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 360) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    SumiTheme.card
+                                }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+                        // Two lines are reserved whether or not the title needs
+                        // them: the second independent cause of the ragged rows
+                        // was a one-line title sitting beside a two-line one.
                         Text(item.title)
                             .font(.system(size: 12.5))
                             .foregroundStyle(SumiTheme.foreground)
-                            .lineLimit(2)
+                            .lineLimit(2, reservesSpace: true)
                             .multilineTextAlignment(.leading)
+
+                        if let meta = Self.meta(for: item) {
+                            Text(meta)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(SumiTheme.muted)
+                                .lineLimit(1)
+                        }
                     }
                 }
                 .buttonStyle(.plain)

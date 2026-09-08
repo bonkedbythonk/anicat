@@ -35,19 +35,29 @@ extension AppModel {
         // Rows for episodes the app is downloading right now win: they carry
         // live progress, and the stored row only knows about finished ones.
         var restored: [LibraryDownload] = []
-        for row in rows where !libraryDownloads.contains(where: {
-            $0.catalogId == row.catalogId && $0.episode == Int(row.episodeNumber)
-        }) {
+        for row in rows {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie
+                ? .tmdbMovie
+                : (row.catalog == .tmdbTv ? .tmdbTv : .anilist)
+            // Matched on the catalog too: episode 1 of a film and episode 1
+            // of the anime sharing its number are two downloads, and without
+            // this the one already in flight suppressed the other's row.
+            let alreadyListed = libraryDownloads.contains {
+                $0.catalog == catalog
+                    && $0.catalogId == row.catalogId
+                    && $0.episode == Int(row.episodeNumber)
+            }
+            guard !alreadyListed else { continue }
             restored.append(
                 LibraryDownload(
                     catalogId: row.catalogId,
                     episode: Int(row.episodeNumber),
                     title: row.title ?? "Media \(row.catalogId)",
-                    coverURL: knownCovers[row.catalogId],
+                    // `knownCovers` is AniList's map alone; a film asked of it
+                    // by bare id answers with whatever anime shares the number.
+                    coverURL: registryCover(catalog: row.catalog, id: row.catalogId),
                     state: .done(path: row.path),
-                    catalog: row.catalog == .tmdbMovie
-                        ? .tmdbMovie
-                        : (row.catalog == .tmdbTv ? .tmdbTv : .anilist)
+                    catalog: catalog
                 )
             )
         }

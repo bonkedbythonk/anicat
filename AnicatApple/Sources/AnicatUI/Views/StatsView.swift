@@ -205,7 +205,7 @@ public struct StatsView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Stats")
-                .font(.system(size: 28, weight: .bold))
+                .font(.sumiHeading(size: 28, weight: .bold))
                 .foregroundColor(SumiTheme.foreground)
             Text("The last 365 days, from this device's own watch log.")
                 .font(.system(size: 14))
@@ -400,7 +400,7 @@ public struct StatsView: View {
                 // session shows its id: the alternative is a blank row, and
                 // the id is at least the thing the log actually stores.
                 Text(title ?? "AniList #\(row.catalogId)")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.sumiHeading(size: 13, weight: .medium))
                     .foregroundColor(title == nil ? SumiTheme.muted : SumiTheme.foreground)
                     .lineLimit(1)
 
@@ -442,7 +442,7 @@ public struct StatsView: View {
     private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.sumiHeading(size: 15, weight: .semibold))
                 .tracking(-0.2)
                 .foregroundColor(SumiTheme.foreground)
             content()

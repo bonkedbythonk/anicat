@@ -231,7 +231,7 @@ struct PersonMediaPoster: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.sumiHeading(size: 12, weight: .semibold))
                         .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -282,7 +282,7 @@ struct PersonAvatarChip: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.sumiHeading(size: 12, weight: .medium))
                         .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
                         .lineLimit(1)
                     if let caption, !caption.isEmpty {

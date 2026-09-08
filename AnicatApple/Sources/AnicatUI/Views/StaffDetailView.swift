@@ -84,7 +84,7 @@ struct StaffDetailView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(staff.name)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.sumiHeading(size: 26, weight: .semibold))
                     .tracking(-0.5)
                     .foregroundColor(SumiTheme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,7 +171,7 @@ private struct StaffCharacterCreditRow: View {
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(credit.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.sumiHeading(size: 13, weight: .semibold))
                             .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)

@@ -63,6 +63,9 @@ struct CinemaHomeView: View {
     }
 
     var body: some View {
+        // See RootView: measured outside the scroll view, because a reader
+        // inside one reports the content width rather than the viewport.
+        GeometryReader { viewport in
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 searchField
@@ -107,7 +110,7 @@ struct CinemaHomeView: View {
             }
             .padding(.horizontal, SumiTheme.spaceLg)
             .padding(.vertical, 24)
-            .frame(maxWidth: 1280, alignment: .leading)
+            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .task {
@@ -124,6 +127,7 @@ struct CinemaHomeView: View {
                 if model.cinemaSearchResults.isEmpty { await model.searchCinema("") }
             }
             if focusSearchOnAppear { searchFocused = true }
+        }
         }
     }
 
@@ -277,7 +281,7 @@ struct CinemaHomeView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 Text(shelf.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.sumiHeading(size: 15, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
 

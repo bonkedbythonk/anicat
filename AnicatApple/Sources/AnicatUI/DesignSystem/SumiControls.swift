@@ -20,7 +20,7 @@ public struct SumiPageHeader<Trailing: View>: View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.sumiHeading(size: 19, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(SumiTheme.foreground)
                 if let subtitle {
@@ -284,7 +284,7 @@ public struct SumiSectionHeader: View {
     public var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.sumiHeading(size: 15, weight: .semibold))
                 .tracking(-0.2)
                 .foregroundColor(SumiTheme.foreground)
             Spacer()

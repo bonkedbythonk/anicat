@@ -197,7 +197,11 @@ public struct PickerSheet: View {
     }
 
     private var filterChipsRow: some View {
-        HStack(spacing: 6) {
+        // Wraps rather than compresses. In an `HStack` the five chips were
+        // squeezed at a 1080pt window until their labels broke mid-word --
+        // "Continu e", "Somethi ng new", "Intens e" -- because a `Text` with
+        // no line limit gives up its width before its line count.
+        SumiWrapHStack(spacing: 6, lineSpacing: 6) {
             PickerChip(title: "Continue", isActive: mood == .continue) {
                 withAnimation(.smooth) {
                     mood = .continue
@@ -441,7 +445,12 @@ private struct PickerChip: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .sumiTabularMono(size: 10.5, weight: .medium)
+                // Sans, not the tabular-mono face: these are words, and mono
+                // is for figures. Fixed so the label sets the chip's width
+                // rather than the other way round.
+                .font(.sumiSans(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundColor(isActive ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.55))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)

@@ -654,6 +654,25 @@ public struct RootView: View {
         // other entry point into a title goes through it too, and forcing
         // playback from a system callback races `resolveAndPlay`'s own resume
         // logic with no user gesture behind it.
+        // Once a day at most, and only for a version that has not already
+        // been declined -- see `UpdateChecker`. Fired here rather than in
+        // `initialize` so a failed or throttled check costs a launch nothing.
+        .task { await model.checkForUpdates(force: false) }
+        .alert(
+            "Anicat \(model.availableUpdate?.version ?? "") is available",
+            isPresented: Binding(
+                get: { model.updatePromptOpen },
+                set: { if !$0 { model.dismissUpdatePrompt() } }
+            )
+        ) {
+            Button("Open release page") {
+                if let url = model.availableUpdate?.pageURL { Platform.openExternal(url) }
+                model.dismissUpdatePrompt()
+            }
+            Button("Not now", role: .cancel) { model.dismissUpdatePrompt() }
+        } message: {
+            Text("You are on \(UpdateChecker.currentVersion). Anicat does not replace itself -- the page has the zip to drop into Applications.")
+        }
         .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
             guard case .playback(let catalogId, let catalog, let title, _, _) =
                     ContinuityManager.shared.parseIncomingActivity(activity) else { return }
@@ -1274,6 +1293,9 @@ private struct HomeSectionView: View {
     }
 
     var body: some View {
+        // Measured out here, not inside: a reader within the scroll view
+        // reports the content's width, which is the thing being sized.
+        GeometryReader { viewport in
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 40) {
                 // Up Next Section Header
@@ -1426,7 +1448,7 @@ private struct HomeSectionView: View {
             .padding(.horizontal, 40)
             .padding(.top, 40)
             .padding(.bottom, 32)
-            .frame(maxWidth: 1280, alignment: .leading)
+            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(SumiTheme.background)
@@ -1444,6 +1466,7 @@ private struct HomeSectionView: View {
                     onOpenDetail(item.id, item.title, item.coverImageURL, item.isManga, nil)
                 }
             )
+        }
         }
     }
 
@@ -1525,7 +1548,7 @@ private struct HomeShelf: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.sumiHeading(size: 15, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
 

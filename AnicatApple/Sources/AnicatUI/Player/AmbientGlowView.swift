@@ -23,7 +23,15 @@ import UIKit
 /// than a 36 pt blur of a 64 px strip.
 struct AmbientGlowView {
     let frame: AmbientFrame
+    /// Where mpv puts the picture, letterboxed into the window. Handed over
+    /// whole rather than pre-inset: the band edges are derived from it with
+    /// mpv's own integer arithmetic (see `AmbientGlowHostView.apply`), and a
+    /// rect that had already had the encoded bars taken off would be run
+    /// through that centring and come back mispositioned.
     let video: CGRect
+    /// Black bars encoded into the frame itself, applied to `video` in
+    /// pixels after the centring.
+    let contentInset: AmbientContentInset
     let windowSize: CGSize
     let reduceMotion: Bool
 
@@ -35,9 +43,58 @@ struct AmbientGlowView {
     /// The layer's opacity; the same 0.6 the blurred version used.
     static let opacity: Float = 0.6
 
+    /// Where each band stops, in points from the window's top-left: the
+    /// picture's own edges once mpv has letterboxed it and once the bars
+    /// encoded into the frame have been taken off.
+    ///
+    /// Pure so the two cases that broke can be checked without a running
+    /// player — an asymmetric encoded inset, and the fractional-rect seam.
+    ///
+    /// Band edges land on the device pixels mpv puts the picture on.
+    /// SwiftUI's rect is fractional (top 58.875 pt on a 732 pt window,
+    /// 117.75 px) while mpv truncates the picture height to whole pixels
+    /// and centres it with integer division: 1228 px tall, top margin
+    /// (1464 - 1228) / 2 = 118. A band cut at the fractional rect left a
+    /// row neither drew, a black hairline under the picture (8.6 against
+    /// 38 either side in a capture); one overlapping by a point was a
+    /// bright hairline instead; flooring both edges put the black row
+    /// above the picture. So the same arithmetic as mpv, in pixels.
+    nonisolated static func bandEdges(
+        video: CGRect,
+        contentInset: AmbientContentInset,
+        windowSize: CGSize,
+        scale: CGFloat
+    ) -> (top: CGFloat, bottom: CGFloat, left: CGFloat, right: CGFloat) {
+        let layerWidth = (windowSize.width * scale).rounded(), layerHeight = (windowSize.height * scale).rounded()
+        let pictureWidth = min(layerWidth, (video.width * scale).rounded(.down))
+        let pictureHeight = min(layerHeight, (video.height * scale).rounded(.down))
+        let leftPixel = ((layerWidth - pictureWidth) / 2).rounded(.down)
+        let topPixel = ((layerHeight - pictureHeight) / 2).rounded(.down)
+        // The encoded bars come off here, and never through the centring
+        // above: they are not symmetric (the Grisaia cold open is 130 rows
+        // over the picture and 131 under it), and a detector that finds a
+        // bar on one edge only — a scene whose other edge happens to be
+        // bright — would have had its one bar split in half by the centring
+        // and half the glow drawn over the picture.
+        let barTop = (pictureHeight * contentInset.top).rounded()
+        let barBottom = (pictureHeight * contentInset.bottom).rounded()
+        let barLeft = (pictureWidth * contentInset.left).rounded()
+        let barRight = (pictureWidth * contentInset.right).rounded()
+        let contentTop = topPixel + barTop
+        let contentHeight = max(0, pictureHeight - barTop - barBottom)
+        let contentLeft = leftPixel + barLeft
+        let contentWidth = max(0, pictureWidth - barLeft - barRight)
+        return (
+            top: contentTop / scale,
+            bottom: (contentTop + contentHeight) / scale,
+            left: contentLeft / scale,
+            right: (contentLeft + contentWidth) / scale
+        )
+    }
+
     @MainActor
     func apply(to host: AmbientGlowHostView) {
-        host.apply(frame: frame, video: video, windowSize: windowSize, animated: !reduceMotion)
+        host.apply(frame: frame, video: video, contentInset: contentInset, windowSize: windowSize, animated: !reduceMotion)
     }
 }
 
@@ -100,26 +157,19 @@ final class AmbientGlowHostView: AmbientGlowPlatformView {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
     #endif
 
-    func apply(frame: AmbientFrame, video: CGRect, windowSize: CGSize, animated: Bool) {
+    func apply(
+        frame: AmbientFrame,
+        video: CGRect,
+        contentInset: AmbientContentInset,
+        windowSize: CGSize,
+        animated: Bool
+    ) {
         // Geometry never animates: a band that eased into a new window size
         // would spend 100 ms over the picture or short of the edge.
-        // Band edges land on the device pixels mpv puts the picture on.
-        // SwiftUI's rect is fractional (top 58.875 pt on a 732 pt window,
-        // 117.75 px) while mpv truncates the picture height to whole pixels
-        // and centres it with integer division: 1228 px tall, top margin
-        // (1464 - 1228) / 2 = 118. A band cut at the fractional rect left a
-        // row neither drew, a black hairline under the picture (8.6 against
-        // 38 either side in a capture); one overlapping by a point was a
-        // bright hairline instead; flooring both edges put the black row
-        // above the picture. So the same arithmetic as mpv, in pixels.
         let scale = pixelScale
-        let layerWidth = (windowSize.width * scale).rounded(), layerHeight = (windowSize.height * scale).rounded()
-        let pictureWidth = min(layerWidth, (video.width * scale).rounded(.down))
-        let pictureHeight = min(layerHeight, (video.height * scale).rounded(.down))
-        let leftPixel = ((layerWidth - pictureWidth) / 2).rounded(.down)
-        let topPixel = ((layerHeight - pictureHeight) / 2).rounded(.down)
-        let topEdge = topPixel / scale, bottomEdge = (topPixel + pictureHeight) / scale
-        let leftEdge = leftPixel / scale, rightEdge = (leftPixel + pictureWidth) / scale
+        let edges = AmbientGlowView.bandEdges(video: video, contentInset: contentInset, windowSize: windowSize, scale: scale)
+        let topEdge = edges.top, bottomEdge = edges.bottom
+        let leftEdge = edges.left, rightEdge = edges.right
         // One device pixel of overlap into the picture, and exactly one.
         //
         // Matching mpv's arithmetic puts the band edge on the same pixel the
@@ -147,10 +197,12 @@ final class AmbientGlowHostView: AmbientGlowPlatformView {
             width: max(0, windowSize.width - rightEdge + bleed),
             height: bottomEdge - topEdge
         )
-        top.isHidden = video.minY < 0.5
-        bottom.isHidden = windowSize.height - video.maxY < 0.5
-        left.isHidden = video.minX < 0.5
-        right.isHidden = windowSize.width - video.maxX < 0.5
+        // Against the computed edges, not the passed rect: with the bars
+        // encoded into the frame there is nothing in `video` to hide on.
+        top.isHidden = topEdge < 0.5
+        bottom.isHidden = windowSize.height - bottomEdge < 0.5
+        left.isHidden = leftEdge < 0.5
+        right.isHidden = windowSize.width - rightEdge < 0.5
         for band in [top, bottom, left, right] {
             band.layoutMask()
         }

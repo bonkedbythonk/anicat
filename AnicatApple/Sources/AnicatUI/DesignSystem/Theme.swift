@@ -186,6 +186,33 @@ public extension Font {
         return .system(size: size, weight: weight)
     }
 
+    /// Titles — page and section headers, and every title that names a thing:
+    /// a poster card, an episode row, a chapter, a relation, a character, a
+    /// shelf. The one call that varies with the palette:
+    /// Sakura Zen sets them in a serif face (`Noto Serif JP` in the web
+    /// build, New York here), every other skin gets the same system sans it
+    /// always had, so this is a no-op everywhere but Sakura.
+    ///
+    /// Reading the palette here rather than at the call sites is what keeps a
+    /// theme switch landing: this is called from inside a `body`, so
+    /// Observation registers it exactly as a colour token read would. A
+    /// heading font hoisted into a `static let` or a struct-scope constant
+    /// would not come back — the same trap `ThemedRoot` documents for colours.
+    ///
+    /// What stays on `.system` is the line: body prose (synopses,
+    /// descriptions, settings copy), every button and control label, empty
+    /// states and error text, author names, technical strings (release
+    /// candidates, downloaded filenames), and the player's own chrome, which
+    /// is pinned to the Ink palette whatever the app is set to. The metadata
+    /// register stays IBM Plex Mono in every skin — the stamped index-card
+    /// line is the app's signature, not Ink & Index's alone.
+    static func sumiHeading(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        if ThemeStore.shared.palette.usesSerifHeadings {
+            return .system(size: size, weight: weight, design: .serif)
+        }
+        return .system(size: size, weight: weight)
+    }
+
     static func sumiMono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         if SumiFontManager.isIBMPlexMonoAvailable {
             let fontName: String
@@ -203,6 +230,72 @@ public extension Font {
     }
 }
 
+/// Mono and tabular figures, for content that is actually figures: a
+/// timecode, `EP 10 / 12`, a countdown, a byte size, a version.
+///
+/// It used to force `.textCase(.uppercase)` as well, which fused two
+/// unrelated jobs into one modifier -- so anything that wanted digits not to
+/// jitter also got shouted in wide-tracked capitals, prose included.
+/// "Watched 3h ago" and "Episode 10" rendered as WATCHED 3H AGO and
+/// EPISODE 10. Monospace plus forced caps plus letterspacing on running
+/// words is the house style of a generic dashboard, and it read as one.
+///
+/// Strings written in capitals at the call site still render in capitals, so
+/// deliberate headings are unaffected; only sentence case is left alone now.
+/// For a heading, reach for `sumiLabelCaps` instead -- caps belong to a label
+/// style, not to a numeric one.
+public struct SumiLabelCaps: ViewModifier {
+    var size: CGFloat = 10
+    var weight: Font.Weight = .semibold
+
+    public func body(content: Content) -> some View {
+        content
+            .font(.sumiSans(size: size, weight: weight))
+            .textCase(.uppercase)
+            .tracking(size * 0.09)
+    }
+}
+
+/// How wide the shelf column is allowed to be, given the space it has.
+///
+/// A flat 1280pt cap was right for a laptop and wrong for anything much
+/// wider: on a 3440pt ultrawide it left ~400pt of empty band on *each* side
+/// of a marooned column, and -- worse than the emptiness -- truncated titles
+/// and squeezed the week strip while the screen sat unused. Simulated at
+/// matching proportions before changing it, which is how the truncation
+/// showed up at all.
+///
+/// The shelves are horizontal scrollers, so width spent here buys more
+/// posters per row and untruncated titles rather than stretched ones. Still
+/// bounded at both ends: below 1280 the rows lose their measure, and past
+/// 2200 a shelf becomes a row nobody can scan in one look.
+///
+/// Detail pages keep their own narrower cap on purpose -- that one is a
+/// reading measure for prose, and prose does not want the extra width.
+public enum SumiContentWidth {
+    public static let floor: CGFloat = 1280
+    public static let ceiling: CGFloat = 2200
+    /// Leaves a margin either side rather than filling edge to edge, so the
+    /// column still reads as a column.
+    public static let share: CGFloat = 0.72
+
+    /// Never wider than what it was given. The floor is a preference, not a
+    /// demand: the window minimum is 1080pt, and a floor of 1280 applied
+    /// unconditionally would have made the column wider than the window and
+    /// clipped it -- the previous `maxWidth` shrank to fit instead, so this
+    /// would have been a regression on every narrow window.
+    public static func forAvailable(_ width: CGFloat) -> CGFloat {
+        min(min(max(floor, width * share), ceiling), width)
+    }
+}
+
+// Applied as `.frame(maxWidth:)` against a width measured *outside* the
+// scroll view, never as `containerRelativeFrame`. That set an exact width,
+// and an exact width can exceed the viewport: measured inside the scroll
+// view the container came back as the greedy content rather than the
+// viewport, so shrinking the window pushed the whole page -- sidebar
+// included -- off the left edge. A `maxWidth` can only ever shrink.
+
 public struct SumiTabularMono: ViewModifier {
     var size: CGFloat = 11.5
     var weight: Font.Weight = .regular
@@ -211,7 +304,6 @@ public struct SumiTabularMono: ViewModifier {
         content
             .font(.sumiMono(size: size, weight: weight))
             .monospacedDigit()
-            .textCase(.uppercase)
             .tracking(size * 0.08)
     }
 }
@@ -291,6 +383,13 @@ public extension View {
 }
 
 public extension View {
+    /// A small capitalised heading in the sans face. The caps and the
+    /// tracking are the point here; the monospace face is not, and using the
+    /// numeric modifier for headings is what made them look machine-set.
+    func sumiLabelCaps(size: CGFloat = 10, weight: Font.Weight = .semibold) -> some View {
+        modifier(SumiLabelCaps(size: size, weight: weight))
+    }
+
     func sumiTabularMono(size: CGFloat = 11.5, weight: Font.Weight = .regular) -> some View {
         modifier(SumiTabularMono(size: size, weight: weight))
     }

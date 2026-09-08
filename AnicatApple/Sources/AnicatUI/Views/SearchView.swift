@@ -283,7 +283,7 @@ public struct SearchView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .center) {
                         Text("Search & Browse")
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.sumiHeading(size: 19, weight: .semibold))
                             .tracking(-0.3)
                             .foregroundColor(SumiTheme.foreground)
 
@@ -441,7 +441,7 @@ public struct SearchView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Text("Discover")
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .font(.sumiHeading(size: 17, weight: .semibold))
                                     .foregroundColor(SumiTheme.foreground)
                                 Spacer()
                                 Text("TRENDING")
@@ -493,7 +493,7 @@ public struct SearchView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Text("Discover")
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .font(.sumiHeading(size: 17, weight: .semibold))
                                     .foregroundColor(SumiTheme.foreground)
                                 Spacer()
                                 Text("TRENDING")

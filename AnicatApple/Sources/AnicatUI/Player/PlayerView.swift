@@ -407,7 +407,9 @@ public struct PlayerView: View {
                     Group {
                         if controller.areControlsVisible {
                             topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                .chromeLegibility()
                                 .transition(barTransition(from: .top))
+                                .chromeHoverPin(isOver: $controller.isPointerOverTopBar, controller: controller)
                         }
                     }
                     .frame(height: topGap)
@@ -437,7 +439,9 @@ public struct PlayerView: View {
                     Group {
                         if controller.areControlsVisible {
                             PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                                .chromeLegibility()
                                 .transition(barTransition(from: .bottom))
+                                .chromeHoverPin(isOver: $controller.isPointerOverBottomBar, controller: controller)
                         }
                     }
                     .frame(height: bottomGap)
@@ -653,9 +657,15 @@ public struct PlayerView: View {
     }
 
     /// What the chrome bars sit on. See the top bar's comment.
+    ///
+    /// Nothing, once there is a glow to sit on. This was 72% black while
+    /// the controls were up, which is readable over anything and also
+    /// paints out the light it is drawn on: the letterbox went flat grey
+    /// every time the transport appeared, which is the one moment the glow
+    /// is being looked at. `chromeLegibility` carries the contrast on the
+    /// glyphs instead, so it holds over a white glow as well as a black one.
     private var chromeGround: Color {
-        if glowFrame == nil { return .black }
-        return controller.areControlsVisible ? Color.black.opacity(0.72) : .clear
+        glowFrame == nil ? .black : .clear
     }
 
     private var glowFrame: AmbientFrame? {
@@ -681,10 +691,22 @@ public struct PlayerView: View {
     /// by Core Animation. See `AmbientGlowView` for why it is not a blurred
     /// image any more. Confined to the bars by geometry, so nothing is
     /// composited over the picture.
+    ///
+    /// The inset rides alongside the video rect rather than being folded
+    /// into it: a 2.35:1 scene inside a 16:9 file puts its bars inside mpv's
+    /// picture, where the window geometry cannot see them, and bands drawn
+    /// at `geometry.videoRect` alone left 130 rows of the frame's own black
+    /// unlit.
     @ViewBuilder
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
         if let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
-            AmbientGlowView(frame: frame, video: geometry.videoRect, windowSize: windowSize, reduceMotion: reduceMotion)
+            AmbientGlowView(
+                frame: frame,
+                video: geometry.videoRect,
+                contentInset: controller.ambientContentInset,
+                windowSize: windowSize,
+                reduceMotion: reduceMotion
+            )
                 .frame(width: windowSize.width, height: windowSize.height, alignment: .topLeading)
                 .allowsHitTesting(false)
         }
@@ -1772,3 +1794,39 @@ enum PlayerChrome {
     static var muted: Color { SumiPalette.ink.muted }
 }
 
+
+extension View {
+    /// Contrast for a bar with nothing painted behind it.
+    ///
+    /// Two shadows, not one: the tight pass darkens the pixel a glyph's
+    /// edge lands on, which is what keeps 13pt text off a bright glow, and
+    /// the wide pass lifts the whole bar off a busy one. A single wide
+    /// shadow left the small labels smeared rather than legible, and a
+    /// single tight one did nothing at all against a pale letterbox.
+    /// `PlayerChrome` pins the chrome's foreground to the ink palette, so
+    /// the halo is always dark under light content, never dark on dark.
+    func chromeLegibility() -> some View {
+        shadow(color: Color.black.opacity(0.75), radius: 2)
+            .shadow(color: Color.black.opacity(0.45), radius: 10, y: 1)
+    }
+
+    /// Holds the chrome up while the pointer rests on a bar, and restarts
+    /// the autohide countdown when it leaves.
+    ///
+    /// Only the bar's own rect, not the letterbox gap it sits in: pinning
+    /// the whole gap meant a pointer parked anywhere along a 1512 pt strip
+    /// of black kept the transport on screen for the rest of the episode.
+    @ViewBuilder
+    func chromeHoverPin(isOver: Binding<Bool>, controller: PlayerController) -> some View {
+        #if os(macOS)
+        onHover { hovering in
+            isOver.wrappedValue = hovering
+            if !hovering {
+                controller.showControlsBriefly()
+            }
+        }
+        #else
+        self
+        #endif
+    }
+}

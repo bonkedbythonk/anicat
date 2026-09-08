@@ -535,7 +535,7 @@ private struct ContinueWatchingCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             Text(entry.title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.sumiHeading(size: 13, weight: .medium))
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
             Text("\(entry.unit) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% LEFT")

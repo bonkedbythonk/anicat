@@ -53,7 +53,7 @@ struct StudioDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(studio.name)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.sumiHeading(size: 26, weight: .semibold))
                 .tracking(-0.5)
                 .foregroundColor(SumiTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)

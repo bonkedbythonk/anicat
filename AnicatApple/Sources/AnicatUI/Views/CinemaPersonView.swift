@@ -80,7 +80,7 @@ struct CinemaPersonView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(person?.name ?? fallbackName)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.sumiHeading(size: 20, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
 
                 if let known = person?.knownFor {
@@ -155,7 +155,7 @@ struct CinemaPersonView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
 
                             Text(credit.title)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.sumiHeading(size: 12, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)

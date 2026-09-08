@@ -17,8 +17,11 @@ import QuartzCore
 /// handed back to the pool, so the copy is race-free without a fence.
 @MainActor
 final class AmbientMetalSampler {
-    /// Delivered on the main actor with the finished thumbnail.
-    var onThumbnail: ((CGImage) -> Void)?
+    /// Delivered on the main actor with the finished thumbnail and the bars
+    /// found burned into it, the latter as fractions of mpv's video rect so
+    /// the view can place the bands without knowing anything about drawable
+    /// pixels.
+    var onThumbnail: ((CGImage, AmbientContentInset) -> Void)?
     /// The playing video's display aspect, read at sample time. The
     /// drawable is the whole window, letterbox bars included; scaling all
     /// of it gave a thumbnail whose top and bottom fifths were the black
@@ -29,16 +32,45 @@ final class AmbientMetalSampler {
     /// every frame at 24, and about a fifth of the presents on a 120 Hz
     /// panel; the fade in the view is 80 ms, so anything tighter is unseen.
     var interval: CFTimeInterval = 0.033
+    /// Spacing while nothing is lit — no window letterbox and no bars found
+    /// burned into the last sample. This used to be an outright `return`,
+    /// which is why baked-in bars were never noticed at all: a 16:9 file on
+    /// a 16:9 screen is exactly the case a 2.35:1 scene inside a 16:9 file
+    /// presents, and the sample that would have shown the bars was the one
+    /// being skipped. Half a second is two scale-and-read-backs a second of
+    /// a 64x36 texture, which does not register next to decoding, and it
+    /// bounds how long a scene can be letterboxed before the glow catches
+    /// up.
+    var idleInterval: CFTimeInterval = 0.5
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let scale: MPSImageBilinearScale
     private var target: MTLTexture?
+    /// A second, much taller scale of the same video rect, used only to
+    /// place the encoded bars' edges.
+    ///
+    /// The colour thumbnail is 64x36, so one of its rows is 47 px of a
+    /// 1701 px picture, and `MPSImageBilinearScale` samples rather than
+    /// averages under that much minification — a row is bar or picture,
+    /// never a blend, so the edge could only ever be placed to the nearest
+    /// row. Measured on the Grisaia cold open: the band stopped 16 px short
+    /// and left exactly the black strip between the glow and the frame this
+    /// probe exists to remove. At 256 rows one row is 6.6 px. Width stays
+    /// at 64 because a bar spans the full width either way, so the
+    /// horizontal (pillarbox) resolution is unchanged.
+    private var probe: MTLTexture?
+    static let probeHeight = 256
     private var lastSampleAt: CFTimeInterval = 0
     private var inFlight = false
     private var failures = 0
     private var delivered = 0
     private var smoothed: [UInt8] = []
+    /// The bars found in the last sample that could tell, held across the
+    /// ones that could not: a fade to black reads as bar on every side, and
+    /// recomputing from it collapsed the rect and snapped it open again on
+    /// the next shot.
+    private var contentInset: AmbientContentInset = .zero
     /// 0.45 of the new sample per step. Heavier smoothing lived here while
     /// the view hard-cut between images; now that `AmbientGlowView` eases
     /// every colour stop over 100 ms on the render server, this only has
@@ -71,14 +103,17 @@ final class AmbientMetalSampler {
 
     private func sample(_ source: MTLTexture) {
         let now = CACurrentMediaTime()
-        guard !inFlight, now - lastSampleAt >= interval, failures < 5 else { return }
+        guard !inFlight, failures < 5 else { return }
         let full = CGSize(width: source.width, height: source.height)
         let video = Self.aspectFit(full, aspect: videoAspect?() ?? nil)
-        // No bars, nothing to light. A 16:9 picture on a 16:9 screen (or the
-        // 320x180 mini-player) fills the drawable and every band is hidden,
-        // yet the scale, the readback and the colour stops still ran thirty
-        // times a second for a glow nobody could see.
-        guard video.width < full.width - 1 || video.height < full.height - 1 else { return }
+        // Nothing to light: a 16:9 picture on a 16:9 screen (or the 320x180
+        // mini-player) fills the drawable, and the last sample found no bars
+        // burned into the frame either, so every band is hidden and the
+        // scale, the readback and the colour stops would run thirty times a
+        // second for a glow nobody could see. Slowed rather than stopped —
+        // see `idleInterval` for why stopping hid the baked-in case.
+        let lit = video.width < full.width - 1 || video.height < full.height - 1 || !contentInset.isZero
+        guard now - lastSampleAt >= (lit ? interval : idleInterval) else { return }
         guard let size = AmbientGlow.thumbnailSize(width: Int(video.width), height: Int(video.height)) else { return }
         if target == nil || target?.width != size.width || target?.height != size.height {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -87,23 +122,47 @@ final class AmbientMetalSampler {
             descriptor.storageMode = .shared
             target = device.makeTexture(descriptor: descriptor)
         }
-        guard let target, let buffer = queue.makeCommandBuffer() else { return }
+        if probe == nil || probe?.width != size.width || probe?.height != Self.probeHeight {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm, width: size.width, height: Self.probeHeight, mipmapped: false)
+            descriptor.usage = [.shaderWrite, .shaderRead]
+            descriptor.storageMode = .shared
+            probe = device.makeTexture(descriptor: descriptor)
+        }
+        guard let target, let probe, let buffer = queue.makeCommandBuffer() else { return }
         lastSampleAt = now
         inFlight = true
-        var transform = MPSScaleTransform(
-            scaleX: Double(target.width) / Double(video.width),
-            scaleY: Double(target.height) / Double(video.height),
-            translateX: -Double(video.minX) * Double(target.width) / Double(video.width),
-            translateY: -Double(video.minY) * Double(target.height) / Double(video.height)
-        )
-        withUnsafePointer(to: &transform) { scale.scaleTransform = $0 }
-        scale.encode(commandBuffer: buffer, sourceTexture: source, destinationTexture: target)
-        scale.scaleTransform = nil
+        func encode(into destination: MTLTexture) {
+            var transform = MPSScaleTransform(
+                scaleX: Double(destination.width) / Double(video.width),
+                scaleY: Double(destination.height) / Double(video.height),
+                translateX: -Double(video.minX) * Double(destination.width) / Double(video.width),
+                translateY: -Double(video.minY) * Double(destination.height) / Double(video.height)
+            )
+            withUnsafePointer(to: &transform) { scale.scaleTransform = $0 }
+            scale.encode(commandBuffer: buffer, sourceTexture: source, destinationTexture: destination)
+            scale.scaleTransform = nil
+        }
+        encode(into: target)
+        encode(into: probe)
         buffer.addCompletedHandler { [weak self] finished in
             let ok = finished.error == nil
             Task { @MainActor in self?.finish(ok: ok) }
         }
         buffer.commit()
+    }
+
+    /// The bars as the tall probe sees them. Its own left/right are
+    /// meaningless — the probe is only 64 wide — and are discarded by the
+    /// caller.
+    private func probeContentInset() -> AmbientContentInset? {
+        guard let probe else { return nil }
+        let width = probe.width, height = probe.height, stride = width * 4
+        var bytes = [UInt8](repeating: 0, count: stride * height)
+        bytes.withUnsafeMutableBytes { raw in
+            probe.getBytes(raw.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        return AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride)
     }
 
     /// Where mpv puts the picture inside the drawable: aspect-fit, centred,
@@ -149,16 +208,33 @@ final class AmbientMetalSampler {
             smoothed = bytes
         }
         bytes = smoothed
+        // Top and bottom come off the tall probe, left and right off the
+        // thumbnail: see `probe` for why the thumbnail cannot place a
+        // horizontal edge closer than half of one of its rows. Detected on
+        // the smoothed thumbnail pixels, so the inset it does contribute
+        // and the picture handed over describe the same frame.
+        let sides = AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride)
+        if let rows = probeContentInset(), let sides {
+            contentInset = AmbientContentInset(
+                top: rows.top, bottom: rows.bottom, left: sides.left, right: sides.right
+            )
+        }
         // BGRA8 in memory is an ARGB word read little-endian, the same
         // layout mpv's bgr0 screenshots use.
         guard let provider = CGDataProvider(data: Data(bytes) as CFData),
-              let image = CGImage(
+              let full = CGImage(
                 width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: stride,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
                 provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
               ) else { return }
-        onThumbnail?(image)
+        // The bars are cropped off before `AmbientFrame` takes its bands.
+        // It reads the outer fifth of each edge, so on the Grisaia cold open
+        // — 130 black rows of 1080 — the top band was two thirds black and
+        // the light it cast was the bar's own colour.
+        let crop = contentInset.apply(to: CGRect(x: 0, y: 0, width: width, height: height))
+        let image = crop.width >= 1 && crop.height >= 1 ? (full.cropping(to: crop) ?? full) : full
+        onThumbnail?(image, contentInset)
     }
 }
 

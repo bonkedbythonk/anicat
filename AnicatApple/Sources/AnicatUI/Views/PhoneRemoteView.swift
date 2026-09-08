@@ -114,7 +114,11 @@ struct PhoneRemoteView: View {
                 }
             }
 
+            skipButton
+
             volume
+
+            options
 
             Button("Stop on \(client.hostName ?? node.name)", role: .destructive) {
                 client.send(.stop)
@@ -152,6 +156,76 @@ struct PhoneRemoteView: View {
             .font(.system(size: 12).monospacedDigit())
             .foregroundStyle(SumiTheme.muted)
         }
+    }
+
+    /// The Skip pill, mirrored. Present only while the Mac is showing its
+    /// own -- pressing it takes that exact offer, so a button here that
+    /// outlived the Mac's would seek into a window nobody is in any more.
+    @ViewBuilder
+    private var skipButton: some View {
+        if client.hostSupports(RemoteFeature.skip), let label = state.skipLabel {
+            Button {
+                client.send(.skipPendingWindow)
+            } label: {
+                Label("Skip \(label)", systemImage: "forward.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(SumiTheme.card))
+            }
+            .foregroundStyle(SumiTheme.foreground)
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    /// Speed and autoplay, each drawn only when the attached Mac announced
+    /// it can serve them. An older Mac drops a verb it has never heard of
+    /// without answering, so an ungated control would be a control that
+    /// silently does nothing.
+    @ViewBuilder
+    private var options: some View {
+        HStack(spacing: 20) {
+            if client.hostSupports(RemoteFeature.speed) {
+                Menu {
+                    ForEach(Self.speeds, id: \.self) { rate in
+                        Button {
+                            client.send(.setPlaybackRate(rate))
+                        } label: {
+                            if abs(state.playbackRate - rate) < 0.01 {
+                                Label(Self.speedLabel(rate), systemImage: "checkmark")
+                            } else {
+                                Text(Self.speedLabel(rate))
+                            }
+                        }
+                    }
+                } label: {
+                    Label(Self.speedLabel(state.playbackRate), systemImage: "speedometer")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SumiTheme.muted)
+                }
+            }
+
+            if client.hostSupports(RemoteFeature.autoNext) {
+                Button {
+                    client.send(.setAutoPlayNext(!state.autoPlayNextEnabled))
+                } label: {
+                    Label(
+                        "Autoplay",
+                        systemImage: state.autoPlayNextEnabled
+                            ? "play.square.stack.fill"
+                            : "play.square.stack"
+                    )
+                    .font(.system(size: 14))
+                    .foregroundStyle(state.autoPlayNextEnabled ? SumiTheme.indigo : SumiTheme.muted)
+                }
+            }
+        }
+    }
+
+    static let speeds: [Double] = [0.75, 1, 1.25, 1.5, 2]
+
+    static func speedLabel(_ rate: Double) -> String {
+        rate == rate.rounded() ? "\(Int(rate))x" : String(format: "%gx", rate)
     }
 
     private var volume: some View {

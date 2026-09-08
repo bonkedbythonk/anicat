@@ -966,11 +966,11 @@ public struct MpvSurface {
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
                         sampler.videoAspect = { [weak self] in self?.controller.videoAspectRatio }
-                        sampler.onThumbnail = { [weak self] image in
+                        sampler.onThumbnail = { [weak self] image, inset in
                             guard let self else { return }
                             guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true,
                                   !self.controller.awaitingNewFile else { return }
-                            self.controller.setAmbientFrame(image)
+                            self.controller.setAmbientFrame(image, inset: inset)
                         }
                         layer.ambientSampler = sampler
                         self.usesMetalAmbientSampler = true
@@ -1681,8 +1681,14 @@ public struct MpvSurface {
                 }
                 return
             }
+            // Same bar detection the Metal sampler does, so the escape
+            // hatch does not quietly lose the encoded-letterbox case that
+            // `AmbientContentInset` exists for.
+            let inset = AmbientGlow.contentInset(of: frame) ?? .zero
+            let crop = inset.apply(to: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
+            let cropped = crop.width >= 1 && crop.height >= 1 ? (frame.cropping(to: crop) ?? frame) : frame
             await MainActor.run {
-                self.controller.setAmbientFrame(frame)
+                self.controller.setAmbientFrame(cropped, inset: inset)
             }
         }
 

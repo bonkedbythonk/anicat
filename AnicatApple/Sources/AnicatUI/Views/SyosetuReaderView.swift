@@ -236,7 +236,7 @@ public struct SyosetuReaderView: View {
             Spacer()
             VStack(spacing: 2) {
                 Text(session.info?.title ?? "")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.sumiHeading(size: 13, weight: .medium))
                     .foregroundColor(typography.theme.foreground)
                     .lineLimit(1)
                 if let author = session.info?.author {

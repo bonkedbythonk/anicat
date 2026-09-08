@@ -226,7 +226,7 @@ public struct HistoryView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(viewer.name)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.sumiHeading(size: 19, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(SumiTheme.foreground)
                 Text(statsLine(viewer))
@@ -364,7 +364,7 @@ public struct HistoryView: View {
         let title = titleFor(.anilist, row.catalogId)
         HStack(spacing: 12) {
             Text(title ?? "Media \(row.catalogId)")
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.sumiHeading(size: 13.5, weight: .medium))
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
             Text("— CH \(row.chapterNumber)")
@@ -389,7 +389,7 @@ public struct HistoryView: View {
         let title = titleFor(row.catalog, row.catalogId)
         let content = HStack(spacing: 12) {
             Text(title ?? "Media \(row.catalogId)")
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.sumiHeading(size: 13.5, weight: .medium))
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
             Text("— EP \(row.episodeNumber)")

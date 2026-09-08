@@ -102,7 +102,7 @@ public struct ScheduleView: View {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Airing Schedule")
-                            .font(.system(size: 28, weight: .bold))
+                            .font(.sumiHeading(size: 28, weight: .bold))
                             .foregroundColor(SumiTheme.foreground)
                         Text(watchingOnly ? "\(groupedItems.reduce(0) { $0 + $1.items.count }) shows in your watchlist" : "Keep track of the latest releases and upcoming episodes")
                             .font(.system(size: 14))
@@ -279,7 +279,7 @@ private struct ScheduleItemCard: View {
                 // Meta
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.sumiHeading(size: 13.5, weight: .semibold))
                         .foregroundColor(SumiTheme.foreground)
                         .lineLimit(2)
 

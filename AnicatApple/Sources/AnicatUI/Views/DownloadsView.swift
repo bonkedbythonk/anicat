@@ -134,7 +134,7 @@ public struct DownloadsView: View {
     private func groupHeader(_ title: String, count: Int, unit: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.sumiHeading(size: 13, weight: .semibold))
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
             Spacer()
@@ -311,7 +311,7 @@ private struct DownloadRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.sumiHeading(size: 13, weight: .medium))
                     .foregroundColor(SumiTheme.foreground)
                     .lineLimit(1)
                 Text("Episode \(item.episode)")

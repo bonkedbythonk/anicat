@@ -206,7 +206,7 @@ public struct MediaCard: View, Equatable {
                     // one-line title made its card shorter than its neighbours
                     // and the metadata rows across a shelf never lined up.
                     Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.sumiHeading(size: 14, weight: .semibold))
                         .foregroundColor(SumiTheme.foreground)
                         .lineLimit(2)
                         .lineSpacing(1.5)

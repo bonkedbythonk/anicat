@@ -47,7 +47,11 @@ public final class RemoteHost {
     /// The optional verbs this build serves, announced in `hostInfo`. A verb
     /// goes in here in the same commit that teaches `apply` to honour it, so
     /// the two cannot drift.
-    static let features: Set<String> = []
+    static let features: Set<String> = [
+        RemoteFeature.speed,
+        RemoteFeature.skip,
+        RemoteFeature.autoNext,
+    ]
 
     private init() {}
 
@@ -305,6 +309,11 @@ public final class RemoteHost {
         case .setVolume(let volume): controller.setVolume(volume)
         case .toggleMute: controller.toggleMute()
         case .stop: model.stopPlayback()
+        case .setPlaybackRate(let rate): controller.setPlaybackRate(rate)
+        case .skipPendingWindow: controller.skipPendingWindow()
+        case .setAutoPlayNext(let enabled):
+            guard controller.autoPlayNextEnabled != enabled else { break }
+            controller.toggleAutoPlayNext()
         case .open(let link):
             guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
             model.handleDeepLink(deepLink)
@@ -365,7 +374,9 @@ public final class RemoteHost {
                 hasPrevious: controller.hasPreviousEpisode,
                 volume: controller.volume,
                 isMuted: controller.isMuted,
-                isBuffering: true
+                isBuffering: true,
+                playbackRate: controller.playbackRate,
+                autoPlayNextEnabled: controller.autoPlayNextEnabled
             )
         }
         return RemoteState(
@@ -380,8 +391,23 @@ public final class RemoteHost {
             hasPrevious: controller.hasPreviousEpisode,
             volume: controller.volume,
             isMuted: controller.isMuted,
-            isBuffering: controller.isBuffering
+            isBuffering: controller.isBuffering,
+            playbackRate: controller.playbackRate,
+            autoPlayNextEnabled: controller.autoPlayNextEnabled,
+            skipLabel: Self.skipLabel(for: controller)
         )
+    }
+
+    /// The offer the Mac's own Skip pill is making, or nil.
+    ///
+    /// Gated exactly like `PlayerView.skipPillWindow`: with auto-skip on the
+    /// jump has already happened by the time a phone could press anything,
+    /// and during the next-episode countdown the pill is not on screen. A
+    /// remote button that outlived the Mac's own would seek into the middle
+    /// of a window nobody is in any more.
+    private static func skipLabel(for controller: PlayerController) -> String? {
+        guard !controller.autoSkipEnabled, !controller.nextEpisodeCountdown.isVisible else { return nil }
+        return controller.pendingSkipWindow?.flashLabel
     }
 
     /// One controller's connection and the parser state that belongs to it.

@@ -262,6 +262,11 @@ public final class PlayerController {
     }
     public private(set) var ambientFrame: AmbientFrame?
     public private(set) var ambientSource: AmbientSource = .none
+    /// Black bars burned into the frame itself, which the container never
+    /// reports — see `AmbientContentInset`. The glow rect is the video rect
+    /// with this taken off, so the bands light the encoded bars too instead
+    /// of stopping at the window's own letterbox.
+    public private(set) var ambientContentInset: AmbientContentInset = .zero
     /// Monotonic, never reset: it is the cross-fade's identity, and a
     /// counter that restarted per episode would make the first frame of a
     /// new episode compare equal to the last of the old one and swap with no
@@ -272,9 +277,10 @@ public final class PlayerController {
     private var ambientStill: CGImage?
 
     /// A frame the sampler just took. Always wins: it is the live picture.
-    public func setAmbientFrame(_ image: CGImage) {
+    public func setAmbientFrame(_ image: CGImage, inset: AmbientContentInset = .zero) {
         ambientFrameCount += 1
         ambientFrame = AmbientFrame(id: ambientFrameCount, image: image)
+        ambientContentInset = inset
         ambientSource = .frame
     }
 
@@ -293,6 +299,11 @@ public final class PlayerController {
     }
 
     private func showAmbientStill() {
+        // The still is the episode's poster frame, not the picture on
+        // screen: whatever bars the last sampled frame had say nothing
+        // about it, and left in place they held the bands off the window's
+        // own letterbox edge.
+        ambientContentInset = .zero
         guard let ambientStill else {
             ambientFrame = nil
             ambientSource = .none
@@ -439,6 +450,20 @@ public final class PlayerController {
     // Autohide controls timer & state
     public var areControlsVisible: Bool = true
     public var isMenuOpen: Bool = false
+    /// Whether the pointer is resting on the top or the bottom bar. Tracked
+    /// as two flags rather than one: SwiftUI can deliver the new bar's
+    /// `onHover(true)` before the old bar's `onHover(false)`, and a single
+    /// Bool written by both then ends up false with the pointer still on
+    /// chrome.
+    ///
+    /// The player-wide `onContinuousHover` restarts the timer on every mouse
+    /// move, so travelling towards a control already keeps the chrome up; a
+    /// pointer that has *arrived* and stopped generates nothing, and at the
+    /// 2s timeout the bar faded out from under a stationary cursor while the
+    /// viewer was reading the button they were about to press.
+    var isPointerOverTopBar: Bool = false
+    var isPointerOverBottomBar: Bool = false
+    var isPointerOverChrome: Bool { isPointerOverTopBar || isPointerOverBottomBar }
     private var autohideTask: Task<Void, Never>?
 
     public init(title: String = "", episodeNumber: Int = 1) {
@@ -814,15 +839,23 @@ public final class PlayerController {
         #endif
         autohideTask?.cancel()
         autohideTask = Task {
-            // Longer on a phone: 3.5s is comfortable with a pointer already
+            // Longer on a phone: 2s is comfortable with a pointer already
             // on the controls, but a thumb has to travel, and the controls
             // vanishing mid-reach reads as the tap not having worked.
+            //
+            // 2s on the desktop, not the 3.5s this shipped with: a mouse
+            // that has stopped moving over a playing picture is not reaching
+            // for anything, and the chrome plus the dimming scrim sat over
+            // the frame for a beat and a half after every seek and every
+            // volume nudge. Moving the pointer brings it straight back, so
+            // the cost of being too eager is one mouse twitch; the cost of
+            // being too slow is chrome over the picture on every interaction.
             #if os(iOS)
             try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
             #else
-            try? await Task.sleep(nanoseconds: 3_500_000_000) // 3.5s
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
             #endif
-            if !Task.isCancelled && isPlaying && !isScrubbing && !isMenuOpen {
+            if !Task.isCancelled && isPlaying && !isScrubbing && !isMenuOpen && !isPointerOverChrome {
                 await MainActor.run {
                     withAnimation(.smooth) {
                         self.areControlsVisible = false

@@ -296,6 +296,17 @@ extension AppModel {
         let targetIndex = index + offset
         guard sorted.indices.contains(targetIndex) else { return }
         let target = sorted[targetIndex]
+        // Leaving an episode forwards is the viewer saying they are done
+        // with it. Nothing else ever said so: the 85% rule fires only from a
+        // playback tick, so pressing Next part-way through left the episode
+        // unmarked both locally and on AniList, while auto-play-next -- which
+        // fires seconds from the end, long past the line -- always marked it.
+        // The same button behaved differently depending on who pressed it.
+        //
+        // Backwards is not a claim about anything, so Previous marks nothing.
+        if offset > 0 {
+            markEpisodeFinished(catalogId: catalogId, episode: episode)
+        }
         // Next out of a downloaded episode into another downloaded one used
         // to resolve the swarm for a file already on disk; the Downloads
         // page's own Play opens it from there, so this does too.
@@ -321,6 +332,29 @@ extension AppModel {
         } catch {
             errorMessage = "Failed to load episode \(target.number): \(error.localizedDescription)"
             playFeedback(.error)
+        }
+    }
+
+    /// Records an episode as finished when the viewer leaves it forwards.
+    ///
+    /// Two writes, deliberately: the local flag is what `Stats` counts and
+    /// what survives with no token, and the AniList progress is what the
+    /// episode list's checkbox reads on every other device. Marking only
+    /// AniList left the episode ticked in the list but absent from the
+    /// statistics, which is the seam this closes.
+    public func markEpisodeFinished(catalogId: Int64, episode: Int64) {
+        guard let engine else { return }
+        let catalog = currentPlaybackCatalog
+        engineIOQueue.async {
+            try? engine.markEpisodeCompleted(
+                catalog: catalog, catalogId: catalogId, episodeNumber: episode
+            )
+        }
+        guard catalog == .anilist else { return }
+        Task {
+            await self.advanceAniListProgress(
+                catalogId: catalogId, episode: Int(episode), contiguousOnly: true
+            )
         }
     }
 
@@ -632,6 +666,20 @@ extension AppModel {
         // either would advance an episode the viewer had just said no to.
         // An idle countdown means no card ever came up (minimized player,
         // card turned off) and this behaves exactly as it always did.
+        // "Stop after this episode" lands on the same near-the-end mark
+        // auto-next uses, and is checked first: let auto-next go and the next
+        // episode is already loading, so the timer never gets its moment.
+        // Claiming `hasAutoAdvancedEpisode` is what stops it below. Not
+        // gated on `autoPlayNextEnabled` -- the episode ends either way, and
+        // this is about the machine going to sleep, not about advancing.
+        if sleepTimer == .afterEpisode, !hasAutoAdvancedEpisode, dur > 0,
+           Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds {
+            hasAutoAdvancedEpisode = true
+            sleepTimer = .off
+            stopPlayback()
+            return
+        }
+
         if !hasAutoAdvancedEpisode, !playerController.nextEpisodeCountdown.isResolved,
            dur > 0, Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds,
            playerController.autoPlayNextEnabled, playerController.hasNextEpisode {

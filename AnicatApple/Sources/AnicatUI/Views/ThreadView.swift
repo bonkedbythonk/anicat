@@ -53,7 +53,7 @@ struct ThreadView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(thread.title)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.sumiHeading(size: 22, weight: .semibold))
                 .tracking(-0.4)
                 .foregroundColor(SumiTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)

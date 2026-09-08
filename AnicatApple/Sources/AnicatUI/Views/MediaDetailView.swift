@@ -538,7 +538,7 @@ public struct MediaDetailView: View {
                         .shadow(color: .black.opacity(0.6), radius: 40, y: 16)
                     HStack(spacing: 12) {
                         Text(details.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.sumiHeading(size: 13, weight: .semibold))
                             .foregroundColor(SumiTheme.foreground)
                             .lineLimit(1)
                         Text("Trailer")
@@ -869,7 +869,7 @@ public struct MediaDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 3))
 
                 Text(details.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.sumiHeading(size: 13, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                     .lineLimit(1)
             }
@@ -975,7 +975,7 @@ public struct MediaDetailView: View {
                 .padding(.top, 24)
 
             Text(details.title)
-                .font(.system(size: 36, weight: .bold))
+                .font(.sumiHeading(size: 36, weight: .bold))
                 .tracking(-0.8)
                 .lineSpacing(3)
                 .foregroundColor(SumiTheme.foreground)
@@ -1715,7 +1715,7 @@ public struct MediaDetailView: View {
                                 .sumiTabularMono(size: 9.5, weight: .bold)
                                 .foregroundColor(SumiTheme.indigo)
                             Text(relation.title)
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.sumiHeading(size: 13, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
                             if let format = relation.format {
@@ -1731,7 +1731,7 @@ public struct MediaDetailView: View {
                                 .sumiTabularMono(size: 9.5, weight: .bold)
                                 .foregroundColor(SumiTheme.indigo)
                             Text(relation.title)
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.sumiHeading(size: 13, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
                             if let format = relation.format {
@@ -2090,7 +2090,7 @@ public struct MediaDetailView: View {
                         .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.indigo)
                     Text(chapter.title)
-                        .font(.system(size: 13.5, weight: .medium))
+                        .font(.sumiHeading(size: 13.5, weight: .medium))
                         .foregroundColor(SumiTheme.foreground)
                         .lineLimit(1)
                     Spacer()
@@ -2174,7 +2174,7 @@ public struct MediaDetailView: View {
                             .foregroundColor(SumiTheme.indigo)
 
                         Text(relation.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.sumiHeading(size: 13, weight: .semibold))
                             .foregroundColor(SumiTheme.foreground)
                             .lineLimit(1)
 
@@ -2239,7 +2239,7 @@ public struct MediaDetailView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(thread.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.sumiHeading(size: 13, weight: .medium))
                         .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
                         .lineLimit(1)
 
@@ -2309,7 +2309,7 @@ public struct MediaDetailView: View {
                         )
 
                     Text(rec.title)
-                        .font(.system(size: 11.5, weight: .bold))
+                        .font(.sumiHeading(size: 11.5, weight: .bold))
                         .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.foreground)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2544,7 +2544,7 @@ private struct CharactersTabSection: View {
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(char.name)
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.sumiHeading(size: 12, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
                             if let va = char.voiceActorName, !va.isEmpty {
@@ -2901,7 +2901,7 @@ private struct CompactEpisodeRow: View, Equatable {
 
                     // Title
                     Text(episode.title)
-                        .font(.system(size: 13, weight: isResumeTarget ? .bold : .medium))
+                        .font(.sumiHeading(size: 13, weight: isResumeTarget ? .bold : .medium))
                         .foregroundColor(episode.isWatched ? SumiTheme.muted.opacity(0.6) : SumiTheme.foreground)
                         .lineLimit(1)
 
@@ -3051,7 +3051,7 @@ private struct EpisodeRow: View, Equatable {
                     VStack(alignment: .leading, spacing: 3) {
                         metaLine
                         Text(episode.title)
-                            .font(.system(size: 13.5, weight: isResumeTarget ? .bold : .semibold))
+                            .font(.sumiHeading(size: 13.5, weight: isResumeTarget ? .bold : .semibold))
                             .foregroundColor(episode.isWatched ? SumiTheme.muted : SumiTheme.foreground)
                             .lineLimit(1)
                         if let synopsis = episode.synopsis, !synopsis.isEmpty {

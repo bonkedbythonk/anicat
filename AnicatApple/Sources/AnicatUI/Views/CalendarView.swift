@@ -146,7 +146,7 @@ public struct CalendarView: View {
     private var monthHeader: some View {
         HStack(spacing: 8) {
             Text(Self.monthTitleFormatter.string(from: month))
-                .font(.system(size: 17, weight: .semibold))
+                .font(.sumiHeading(size: 17, weight: .semibold))
                 .foregroundColor(SumiTheme.foreground)
                 .contentTransition(.numericText())
 
@@ -297,7 +297,7 @@ public struct CalendarView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(Self.dayTitleFormatter.string(from: date))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.sumiHeading(size: 13, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                 Spacer()
                 Button {
@@ -346,7 +346,7 @@ public struct CalendarView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(slot.title)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.sumiHeading(size: 12.5, weight: .medium))
                         .foregroundColor(SumiTheme.foreground)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)

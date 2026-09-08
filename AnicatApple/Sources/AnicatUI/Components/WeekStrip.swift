@@ -77,7 +77,7 @@ public struct WeekStrip: View {
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 Text("This week")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.sumiHeading(size: 15, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
 

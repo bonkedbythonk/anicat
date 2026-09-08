@@ -260,6 +260,95 @@ public final class AppModel {
     /// Keeps the display (and so the system) from idling out while an
     /// episode plays. See `SleepBlocker` for what a laptop does without it.
     let sleepBlocker = SleepBlocker.system()
+
+    /// When to stop playing by itself.
+    ///
+    /// `SleepBlocker` holds a power assertion for as long as anything is
+    /// playing, so falling asleep mid-episode kept the machine awake all
+    /// night playing to nobody -- the assertion is doing exactly its job and
+    /// there was nothing to tell it the viewer had gone. This is that
+    /// something: stopping playback releases the assertion through
+    /// `syncPlaybackSession` on the way out.
+    public enum SleepTimer: Equatable, Sendable {
+        case off
+        /// Stop when the current episode reaches its end, instead of
+        /// advancing.
+        case afterEpisode
+        /// Stop at a wall-clock moment. Stored as a date rather than a
+        /// duration so it survives a pause: "in 30 minutes" means half an
+        /// hour from when it was set, not half an hour of playback.
+        case at(Date)
+    }
+
+    /// A published release newer than this build, once a check has found
+    /// one. Drives both the launch prompt and the Settings card.
+    public var availableUpdate: UpdateChecker.Release?
+    public var isCheckingForUpdate = false
+    /// Set when the launch prompt has been answered for this version, so it
+    /// asks once per release rather than once per launch.
+    public var updatePromptOpen = false
+
+    /// `force` is the Settings button; the launch call is throttled to once
+    /// a day inside `UpdateChecker`.
+    public func checkForUpdates(force: Bool) async {
+        if force { isCheckingForUpdate = true }
+        let found = await UpdateChecker.check(force: force)
+        isCheckingForUpdate = false
+        guard let found else { return }
+        availableUpdate = found
+        // Only interrupt for a version they have not already said no to.
+        let dismissed = UserDefaults.standard.string(forKey: UpdateChecker.dismissedVersionKey)
+        if !force, dismissed != found.version { updatePromptOpen = true }
+    }
+
+    public func dismissUpdatePrompt() {
+        if let version = availableUpdate?.version {
+            UserDefaults.standard.set(version, forKey: UpdateChecker.dismissedVersionKey)
+        }
+        updatePromptOpen = false
+    }
+
+    public var sleepTimer: SleepTimer = .off {
+        didSet {
+            guard sleepTimer != oldValue else { return }
+            rescheduleSleepTimer()
+        }
+    }
+
+    /// Cancelled and replaced whenever the timer changes; a stale one firing
+    /// would stop an episode the viewer started after changing their mind.
+    var sleepTimerTask: Task<Void, Never>?
+
+    func rescheduleSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        guard case .at(let fireDate) = sleepTimer else { return }
+        let seconds = fireDate.timeIntervalSinceNow
+        guard seconds > 0 else {
+            sleepTimer = .off
+            return
+        }
+        sleepTimerTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.sleepTimer = .off
+                self.stopPlayback()
+            }
+        }
+    }
+
+    /// What the menu bar shows next to the timer once it is armed.
+    public var sleepTimerCaption: String? {
+        switch sleepTimer {
+        case .off: return nil
+        case .afterEpisode: return "After this episode"
+        case .at(let date):
+            let minutes = max(0, Int(date.timeIntervalSinceNow / 60).advanced(by: 1))
+            return "In \(minutes) min"
+        }
+    }
     /// Cover of the playing title when it came from the detail fetch in
     /// `ensurePlaybackEpisodes` rather than an open page or a loaded shelf:
     /// a play from the Up Next shelf opens no page, and the shelf's

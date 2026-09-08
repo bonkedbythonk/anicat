@@ -180,6 +180,16 @@ public enum RemoteCommand: Codable, Sendable {
     case setVolume(Double)
     case toggleMute
     case stop
+    case setPlaybackRate(Double)
+    /// Takes the offer the Mac's own Skip pill is making, which is why it
+    /// carries no window of its own: the phone can only skip what the Mac is
+    /// already showing a pill for, and a window sent from here would race
+    /// the position the Mac has since moved to.
+    case skipPendingWindow
+    /// Explicit value rather than a toggle. A toggle sent twice by a phone
+    /// on a flaky Wi-Fi lands where it started, and the phone's switch is
+    /// drawn from what the Mac reports.
+    case setAutoPlayNext(Bool)
     /// An `anicat://` address, so "play this on the Mac" reuses `DeepLink`
     /// and `handleDeepLink` stays the only thing that knows how to reach a
     /// screen.
@@ -200,6 +210,13 @@ public struct RemoteState: Codable, Sendable {
     public var volume: Double
     public var isMuted: Bool
     public var isBuffering: Bool
+    public var playbackRate: Double
+    public var autoPlayNextEnabled: Bool
+    /// What the Mac's Skip pill is offering right now ("Opening", "Ending",
+    /// or the chapter's own name), nil when it is offering nothing. The
+    /// label rather than the window: the phone draws a button, it does not
+    /// need to know where the jump lands.
+    public var skipLabel: String?
 
     public init(
         hasPlayback: Bool = false,
@@ -213,7 +230,10 @@ public struct RemoteState: Codable, Sendable {
         hasPrevious: Bool = false,
         volume: Double = 1,
         isMuted: Bool = false,
-        isBuffering: Bool = false
+        isBuffering: Bool = false,
+        playbackRate: Double = 1,
+        autoPlayNextEnabled: Bool = true,
+        skipLabel: String? = nil
     ) {
         self.hasPlayback = hasPlayback
         self.isPlaying = isPlaying
@@ -227,6 +247,9 @@ public struct RemoteState: Codable, Sendable {
         self.volume = volume
         self.isMuted = isMuted
         self.isBuffering = isBuffering
+        self.playbackRate = playbackRate
+        self.autoPlayNextEnabled = autoPlayNextEnabled
+        self.skipLabel = skipLabel
     }
 
     /// Decoded field by field with a default for every one, rather than
@@ -253,6 +276,9 @@ public struct RemoteState: Codable, Sendable {
         volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
         isMuted = try c.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         isBuffering = try c.decodeIfPresent(Bool.self, forKey: .isBuffering) ?? false
+        playbackRate = try c.decodeIfPresent(Double.self, forKey: .playbackRate) ?? 1
+        autoPlayNextEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoPlayNextEnabled) ?? true
+        skipLabel = try c.decodeIfPresent(String.self, forKey: .skipLabel)
     }
 }
 

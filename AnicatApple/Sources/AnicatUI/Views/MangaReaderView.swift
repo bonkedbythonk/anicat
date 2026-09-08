@@ -766,7 +766,7 @@ public struct MangaReaderView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.sumiHeading(size: 14, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                 Text(chapterTitle)
                     .sumiTabularMono(size: 11)

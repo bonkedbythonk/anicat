@@ -3,24 +3,27 @@ import SwiftUI
 public struct SettingsView: View {
     public enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
-        case player = "Player"
-        case account = "Account"
-        case maintenance = "Maintenance"
+        case playback = "Playback"
+        case sharing = "Sharing"
+        case accounts = "Accounts"
+        case advanced = "Advanced"
 
         public var id: String { rawValue }
 
         public var iconName: String {
             switch self {
             case .general: return "gearshape.fill"
-            case .player: return "play.circle.fill"
-            case .account: return "globe"
-            case .maintenance: return "arrow.triangle.2.circlepath"
+            case .playback: return "play.circle.fill"
+            case .sharing: return "antenna.radiowaves.left.and.right"
+            case .accounts: return "person.crop.circle"
+            case .advanced: return "wrench.and.screwdriver.fill"
             }
         }
     }
 
     // Tab Navigation
     @State private var selectedTab: SettingsTab = .general
+    @State private var searchQuery = ""
     @Namespace private var settingsNavNamespace
 
     // Maintenance card's "Copy Debug Report" feedback also renders in
@@ -90,12 +93,17 @@ public struct SettingsView: View {
                     // all four tabs' worth of layout, not just the one
                     // showing.
                     VStack(alignment: .leading, spacing: 20) {
+                        if !searchQuery.isEmpty {
+                            searchResults
+                        } else {
                         switch selectedTab {
                         case .general:
-                            GeneralTabSection()
-                        case .player:
-                            PlayerTabSection(onOpenShortcuts: onOpenShortcuts)
-                        case .account:
+                            GeneralTabSection(onOpenShortcuts: onOpenShortcuts)
+                        case .playback:
+                            PlaybackTabSection()
+                        case .sharing:
+                            SharingTabSection()
+                        case .accounts:
                             AccountTabSection(
                                 isSignedIn: isSignedIn,
                                 username: username,
@@ -103,7 +111,7 @@ public struct SettingsView: View {
                                 onSaveToken: onSaveToken,
                                 onDisconnectAniList: onDisconnectAniList
                             )
-                        case .maintenance:
+                        case .advanced:
                             MaintenanceTabSection(
                                 isSignedIn: isSignedIn,
                                 username: username,
@@ -111,6 +119,7 @@ public struct SettingsView: View {
                                 onResetOnboarding: onResetOnboarding,
                                 copyFeedback: $copyFeedback
                             )
+                        }
                         }
                     }
                     .animation(.smooth, value: selectedTab)
@@ -123,12 +132,109 @@ public struct SettingsView: View {
         .background(SumiTheme.background)
     }
 
+    /// Where each control lives, for the search field.
+    ///
+    /// Hand-kept rather than derived: the controls are `SettingField`s built
+    /// inside `@ViewBuilder` bodies, so there is no list of them to read at
+    /// runtime without inventing one and threading it through five tab
+    /// structs. **Add a row here when you add a control**, or search will
+    /// quietly fail to find it -- the one real cost of doing it this way.
+    struct IndexEntry: Identifiable {
+        let label: String
+        let card: String
+        let tab: SettingsTab
+        var id: String { "\(tab.rawValue)/\(card)/\(label)" }
+    }
+
+    static let searchIndex: [IndexEntry] = [
+        .init(label: "Theme", card: "Appearance", tab: .general),
+        .init(label: "Follow System Appearance", card: "Appearance", tab: .general),
+        .init(label: "Appearance", card: "Appearance", tab: .general),
+        .init(label: "Time Format", card: "Appearance", tab: .general),
+        .init(label: "Keyboard shortcuts cheat sheet", card: "Keyboard Shortcuts", tab: .general),
+
+        .init(label: "Sub/Dub", card: "What plays", tab: .playback),
+        .init(label: "Auto-Skip Intros", card: "What plays", tab: .playback),
+        .init(label: "Play the next episode", card: "What plays", tab: .playback),
+        .init(label: "Next episode card", card: "What plays", tab: .playback),
+        .init(label: "GPU Upscaling", card: "Video", tab: .playback),
+        .init(label: "Hardware Decoding", card: "Video", tab: .playback),
+        .init(label: "Ambient Glow", card: "Video", tab: .playback),
+        .init(label: "Glow in windowed mode", card: "Video", tab: .playback),
+        .init(label: "Dim keyboard backlight", card: "While watching", tab: .playback),
+        .init(label: "Night Hours", card: "While watching", tab: .playback),
+        .init(label: "Interface Sounds", card: "Sound & haptics", tab: .playback),
+        .init(label: "Sound Volume", card: "Sound & haptics", tab: .playback),
+        .init(label: "Haptic Feedback", card: "Sound & haptics", tab: .playback),
+
+        .init(label: "New Episode Alerts", card: "Notifications", tab: .sharing),
+        .init(label: "Discord Rich Presence", card: "Presence", tab: .sharing),
+        .init(label: "Paired iPhones", card: "Devices", tab: .sharing),
+
+        .init(label: "AniList account", card: "AniList", tab: .accounts),
+        .init(label: "API Token", card: "AniList", tab: .accounts),
+        .init(label: "Your own TMDB key", card: "Cinema (TMDB)", tab: .accounts),
+
+        .init(label: "Offline manga limit", card: "Storage", tab: .advanced),
+        .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
+        .init(label: "Current version", card: "Updates", tab: .advanced),
+        .init(label: "Copy Debug Report", card: "Logs & Debugging", tab: .advanced),
+        .init(label: "Clear Local Registry", card: "System Maintenance", tab: .advanced),
+        .init(label: "Reset Onboarding", card: "System Maintenance", tab: .advanced),
+    ]
+
+    private var searchResults: some View {
+        let needle = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let hits = Self.searchIndex.filter {
+            $0.label.lowercased().contains(needle) || $0.card.lowercased().contains(needle)
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            if hits.isEmpty {
+                Text("Nothing matches \"\(searchQuery)\".")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(hits) { hit in
+                    Button {
+                        selectedTab = hit.tab
+                        searchQuery = ""
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: hit.tab.iconName)
+                                .font(.system(size: 11))
+                                .foregroundColor(SumiTheme.muted)
+                                .frame(width: 16)
+                            Text(hit.label)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                            Spacer(minLength: 12)
+                            Text("\(hit.tab.rawValue) › \(hit.card)")
+                                .font(.system(size: 11.5))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
+            }
+        }
+    }
+
     // MARK: - Header
     private var headerSection: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Settings")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.sumiHeading(size: 22, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(SumiTheme.foreground)
 
@@ -138,6 +244,30 @@ public struct SettingsView: View {
             }
 
             Spacer()
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
+                TextField("Search settings", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.foreground)
+                    .frame(width: 150)
+                if !searchQuery.isEmpty {
+                    Button { searchQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(SumiTheme.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(SumiTheme.card)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
 
             if let copyFeedback {
                 HStack(spacing: 6) {
@@ -199,37 +329,71 @@ public struct SettingsView: View {
 // MARK: - Settings Tabs
 
 private struct GeneralTabSection: View {
+    let onOpenShortcuts: (() -> Void)?
+
     // Only keys something reads belong here. This tab used to carry nine
     // more (a three-way style picker, provider and API dropdowns, a cinema
     // toggle with a TMDB token, an e-reader card) that no code outside
     // Settings ever looked up, so every one of them was a control that
     // changed nothing. They come back with the feature that reads them.
     @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
-    // `SystemNotifications` owns the reader and the default; `@AppStorage`
-    // needs a literal here, so the two spellings and the two defaults must
-    // agree.
-    @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
-    // Read once into state rather than off `UserDefaults` in the body: the
-    // paired list is written by `RemoteHost` from a socket callback, which
-    // no `@AppStorage` array binding observes.
-    @State private var pairedCount = RemoteHost.pairedDevices().count
+    // The appearance controls gate view *structure* on `skin.hasLight` and on
+    // `appearance`, so both reads have to be observed ones.
+    @State private var themeStore = ThemeStore.shared
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
-        // Appearance Card
         SettingsCard(title: "Appearance") {
             SettingField(
                 label: "Theme",
-                description: "Ink & Index is the original warm dark skin. Paper is its light counterpart, OLED a true black for panels that switch pixels off. Follow system uses Paper by day and Ink by night.",
+                description: "Ink & Index is the original warm sumi-ink skin, Sakura Zen a cherry-dark one with serif titles; both have a light half. OLED is a true black for panels that switch pixels off, and is dark only.",
                 isStacked: true
             ) {
                 ThemePicker()
             }
 
+            // OLED has no light half, so it gets no appearance control at all
+            // rather than one whose Light quietly stays dark.
+            if themeStore.skin.hasLight {
+                Divider()
+                    .background(SumiTheme.border)
+
+                SettingField(
+                    label: "Follow System Appearance",
+                    description: "Light or dark to match macOS. Turning this off lands on whichever side the system was already showing, so nothing changes colour until you pick."
+                ) {
+                    SumiSwitch(isOn: Binding(
+                        get: { themeStore.appearance == .system },
+                        set: { follows in
+                            themeStore.select(follows
+                                ? .system
+                                : (ThemeStore.systemPrefersDark ? .dark : .light))
+                        }
+                    ))
+                }
+
+                if themeStore.appearance != .system {
+                    Divider()
+                        .background(SumiTheme.border)
+
+                    SettingField(
+                        label: "Appearance",
+                        description: "Which half of the skin to draw, regardless of macOS."
+                    ) {
+                        SumiSegmentedControl(
+                            options: [("light", "Light"), ("dark", "Dark")],
+                            selection: Binding(
+                                get: { themeStore.appearance == .light ? "light" : "dark" },
+                                set: { themeStore.select($0 == "light" ? .light : .dark) }
+                            )
+                        )
+                    }
+                }
+            }
+
             Divider()
                 .background(SumiTheme.border)
 
-            // Time Format
             SettingField(
                 label: "Time Format",
                 description: "How dates and times should be displayed."
@@ -240,43 +404,73 @@ private struct GeneralTabSection: View {
                     minWidth: 160
                 )
             }
-
         }
 
-        SettingsCard(title: "Notifications") {
-            SettingField(
-                label: "New Episode Alerts",
-                description: "A local notification when an episode of something you are watching airs. Each episode is announced once, whether or not the app was running when it aired."
-            ) {
-                SumiSwitch(isOn: $notifyNewEpisodes)
-            }
-        }
+        // Moved off the player tab: the shortcuts are the whole app's, not
+        // playback's, and they were the only reference card sitting in a
+        // list of switches.
+        SettingsCard(title: "Keyboard Shortcuts") {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cheat Sheet")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(SumiTheme.foreground)
 
-        SettingsCard(title: "Remote") {
-            SettingField(
-                label: "Paired iPhones",
-                badge: RemoteHost.shared.attachedRemoteName.map { "\($0) connected" },
-                description: pairedCount == 0
-                    ? "Anicat on an iPhone on this Wi-Fi can control playback here. The first time one asks, this Mac asks you first."
-                    : "\(pairedCount) iPhone\(pairedCount == 1 ? "" : "s") may control playback on this Mac. Forgetting them means being asked again next time."
-            ) {
-                Button("Forget All") {
-                    RemoteHost.shared.unpairAll()
-                    pairedCount = 0
+                    Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.muted)
                 }
-                .disabled(pairedCount == 0)
+
+                Spacer()
+
+                if let onOpenShortcuts {
+                    Button(action: onOpenShortcuts) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "keyboard")
+                                .font(.system(size: 11))
+                            Text("View Shortcuts")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.sumiPressable)
+                } else {
+                    Text("?")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                }
             }
         }
     }
-    .onAppear { pairedCount = RemoteHost.pairedDevices().count }
     }
 }
 
-private struct PlayerTabSection: View {
-    let onOpenShortcuts: (() -> Void)?
-
+/// Playback, split by what each control actually affects.
+///
+/// This was one "Playback" card holding eleven switches across four
+/// unrelated concerns -- what plays, what gets skipped, how the picture is
+/// drawn, and what the laptop's keyboard does -- with Discord presence on
+/// the end of it. Nothing was findable because nothing was grouped.
+private struct PlaybackTabSection: View {
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
+    @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
@@ -284,16 +478,12 @@ private struct PlayerTabSection: View {
     // `PlayerController.isNextEpisodeCardEnabled` owns the reader and the
     // default; the literal here and the one there must agree.
     @AppStorage("anicat_next_up_card") private var nextUpCard: Bool = true
-    // Same literal-key constraint as Discord below; `KeyboardDimSchedule`
-    // owns the readers and the defaults, and the two must agree.
+    // `KeyboardDimSchedule` owns the readers and the defaults, and the
+    // literals must agree with them.
     @AppStorage("anicat_keyboard_dim") private var keyboardDim: Bool = false
     @AppStorage("anicat_keyboard_dim_mode") private var keyboardDimMode: String = "night"
     @AppStorage("anicat_keyboard_dim_from") private var keyboardDimFrom: Int = 20
     @AppStorage("anicat_keyboard_dim_until") private var keyboardDimUntil: Int = 7
-    // Key spelled out rather than `AppModel.discordPresenceKey`:
-    // `@AppStorage` needs a literal at the property wrapper. `AppModel` owns
-    // the reader and the default; the two must agree.
-    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
     // `FeedbackDefaults` owns the readers and the defaults; the literals here
     // and the ones there must agree.
     @AppStorage("anicat_sounds") private var interfaceSounds: Bool = false
@@ -316,12 +506,13 @@ private struct PlayerTabSection: View {
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
-        // Playback Card
-        SettingsCard(title: "Playback") {
-            // Sub/Dub
+        SettingsCard(
+            title: "What plays",
+            description: "Which track is chosen, and what happens at the edges of an episode."
+        ) {
             SettingField(
                 label: "Sub/Dub",
-                description: "Preferred audio language for streaming."
+                description: "Preferred audio language for streaming. A preference, not a filter: a dub wins where one exists, and nothing is hidden where one does not."
             ) {
                 SumiDropdown(
                     options: ["Subtitled", "Dubbed"],
@@ -333,7 +524,6 @@ private struct PlayerTabSection: View {
             Divider()
                 .background(SumiTheme.border)
 
-            // Auto-Skip Intros
             SettingField(
                 label: "Auto-Skip Intros",
                 description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
@@ -344,23 +534,11 @@ private struct PlayerTabSection: View {
             Divider()
                 .background(SumiTheme.border)
 
-            // GPU Upscaling
             SettingField(
-                label: "GPU Upscaling",
-                description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
+                label: "Play the next episode",
+                description: "Starts the next episode as the current one ends. The player's own button toggles this too."
             ) {
-                SumiSwitch(isOn: $gpuUpscaling)
-            }
-
-            Divider()
-                .background(SumiTheme.border)
-
-            // Hardware Decoding
-            SettingField(
-                label: "Hardware Decoding",
-                description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
-            ) {
-                SumiSwitch(isOn: $hardwareDecoding)
+                SumiSwitch(isOn: $autoPlayNext)
             }
 
             Divider()
@@ -371,6 +549,28 @@ private struct PlayerTabSection: View {
                 description: "Counts down to the next episode over the ending, with the option to start it now or stay where you are. Turning it off does not turn off auto-play; the next episode simply arrives without asking."
             ) {
                 SumiSwitch(isOn: $nextUpCard)
+            }
+        }
+
+        SettingsCard(
+            title: "Video",
+            description: "How the picture is decoded and drawn. Both of the first two cost GPU time."
+        ) {
+            SettingField(
+                label: "GPU Upscaling",
+                description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
+            ) {
+                SumiSwitch(isOn: $gpuUpscaling)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Hardware Decoding",
+                description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
+            ) {
+                SumiSwitch(isOn: $hardwareDecoding)
             }
 
             Divider()
@@ -394,14 +594,18 @@ private struct PlayerTabSection: View {
                     SumiSwitch(isOn: $ambientGlowWindowed)
                 }
             }
+        }
 
-            #if os(macOS)
-            Divider()
-                .background(SumiTheme.border)
-
-            // Keyboard Backlight
+        #if os(macOS)
+        // Its own card rather than four rows on the end of the playback
+        // list: this is the machine's behaviour while an episode runs, not
+        // the episode's.
+        SettingsCard(
+            title: "While watching",
+            description: "What this Mac does with itself during playback."
+        ) {
             SettingField(
-                label: "Dim keyboard backlight while watching",
+                label: "Dim keyboard backlight",
                 description: "Fades the keyboard backlight out after a few idle seconds during playback, and brings it straight back on the first key press, scroll or click."
             ) {
                 SumiSwitch(isOn: $keyboardDim)
@@ -443,22 +647,10 @@ private struct PlayerTabSection: View {
                     }
                 }
             }
-            #endif
-
-            Divider()
-                .background(SumiTheme.border)
-
-            // Discord Rich Presence
-            SettingField(
-                label: "Discord Rich Presence",
-                description: "Show the title, episode and position you are watching on your Discord profile. Has no effect when Discord is not running."
-            ) {
-                SumiSwitch(isOn: $discordPresence)
-            }
         }
+        #endif
 
-        // Feedback Card
-        SettingsCard(title: "Feedback") {
+        SettingsCard(title: "Sound & haptics") {
             SettingField(
                 label: "Interface Sounds",
                 description: "Short synthesised blips when a tab changes, the player opens or closes, a back swipe lands and an episode is marked watched. Off by default, because every one of them fires during ordinary navigation."
@@ -514,59 +706,64 @@ private struct PlayerTabSection: View {
                 SumiSwitch(isOn: $haptics)
             }
         }
-
-        // Keyboard Shortcuts Card
-        SettingsCard(title: "Keyboard Shortcuts") {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Cheat Sheet")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-
-                    Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
-                        .font(.system(size: 12))
-                        .foregroundColor(SumiTheme.muted)
-                }
-
-                Spacer()
-
-                if let onOpenShortcuts {
-                    Button(action: onOpenShortcuts) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "keyboard")
-                                .font(.system(size: 11))
-                            Text("View Shortcuts")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.sumiPressable)
-                } else {
-                    Text("?")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                }
-            }
-        }
+    }
     }
 }
 
+/// Everything Anicat tells something outside itself.
+///
+/// New-episode alerts sat in General and Discord presence on the end of the
+/// playback list, two tabs apart, though they answer the same question.
+private struct SharingTabSection: View {
+    // `SystemNotifications` owns the reader and the default; `@AppStorage`
+    // needs a literal here, so the two spellings and the two defaults must
+    // agree.
+    @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
+    // Same literal-key constraint. `AppModel` owns the reader and default.
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+    // Read once into state rather than off `UserDefaults` in the body: the
+    // paired list is written by `RemoteHost` from a socket callback, which
+    // no `@AppStorage` array binding observes.
+    @State private var pairedCount = RemoteHost.pairedDevices().count
+
+    var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+        SettingsCard(title: "Notifications") {
+            SettingField(
+                label: "New Episode Alerts",
+                description: "A local notification when an episode of something you are watching airs. Each episode is announced once, whether or not the app was running when it aired."
+            ) {
+                SumiSwitch(isOn: $notifyNewEpisodes)
+            }
+        }
+
+        SettingsCard(title: "Presence") {
+            SettingField(
+                label: "Discord Rich Presence",
+                description: "Show the title, episode and position you are watching on your Discord profile. Has no effect when Discord is not running."
+            ) {
+                SumiSwitch(isOn: $discordPresence)
+            }
+        }
+
+        SettingsCard(title: "Devices") {
+            SettingField(
+                label: "Paired iPhones",
+                badge: RemoteHost.shared.attachedRemoteName.map { "\($0) connected" },
+                description: pairedCount == 0
+                    ? "Anicat on an iPhone on this Wi-Fi can control playback here. The first time one asks, this Mac asks you first."
+                    : "\(pairedCount) iPhone\(pairedCount == 1 ? "" : "s") may control playback on this Mac. Forgetting them means being asked again next time."
+            ) {
+                Button("Forget All") {
+                    RemoteHost.shared.unpairAll()
+                    pairedCount = 0
+                }
+                .disabled(pairedCount == 0)
+            }
+        }
+    }
+    .onAppear { pairedCount = RemoteHost.pairedDevices().count }
+    }
 }
 
 private struct AccountTabSection: View {
@@ -584,7 +781,6 @@ private struct AccountTabSection: View {
     @AppStorage("anicat_tmdb_key") private var tmdbKeyInput: String = ""
     /// `AppModel.offlineCapDefaultsKey`; `@AppStorage` needs a literal, so
     /// the two spellings and the two defaults have to agree.
-    @AppStorage("anicat_offline_cap_gb") private var offlineCapGb: Int = 2
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -790,26 +986,6 @@ private struct AccountTabSection: View {
             // an empty credential box otherwise reads as a thing to go and
             // fill in before films will work. Takes effect on the next
             // launch: the engine is handed its key when it is constructed.
-            SettingsCard(title: "Offline manga") {
-                SettingField(
-                    label: "Keep at most",
-                    description: "Downloaded chapters above this are removed, least recently read first. The chapter open in the reader is never removed."
-                ) {
-                    Picker("", selection: $offlineCapGb) {
-                        Text("1 GB").tag(1)
-                        Text("2 GB").tag(2)
-                        Text("5 GB").tag(5)
-                        Text("10 GB").tag(10)
-                        Text("No limit").tag(0)
-                    }
-                    .frame(maxWidth: 140)
-                    .font(.system(size: 12))
-                }
-            }
-            // The engine holds the cap in memory, so a change has to be
-            // handed over rather than waiting for the next launch.
-            .onChange(of: offlineCapGb) { _, _ in AppModel.shared?.applyOfflineLimit() }
-
             SettingsCard(title: "Cinema (TMDB)") {
                 SettingField(
                     label: "Your own TMDB key",
@@ -836,38 +1012,7 @@ private struct AccountTabSection: View {
                 TMDBAttribution()
                     .padding(.top, 4)
             }
-
-            // Status Diagnostics Box
-            VStack(spacing: 7) {
-                diagnosticRow(label: "Token saved", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
-                diagnosticRow(label: "Backend connected", value: "yes", isGood: true)
-                diagnosticRow(label: "AniList validated", value: isSignedIn ? "yes" : "no", isGood: isSignedIn)
-                if let username, !username.isEmpty {
-                    diagnosticRow(label: "Signed in as", value: username, isGood: true, highlightColor: SumiTheme.indigo)
-                }
-            }
-            .padding(14)
-            .background(Color.white.opacity(0.02))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
         }
-    }
-}
-
-private func diagnosticRow(label: String, value: String, isGood: Bool, highlightColor: Color? = nil) -> some View {
-    HStack {
-        Text(label)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(SumiTheme.muted)
-
-        Spacer()
-
-        Text(value)
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
-            .foregroundColor(highlightColor ?? (isGood ? SumiTheme.successLight : SumiTheme.muted.opacity(0.6)))
     }
 }
 
@@ -885,6 +1030,13 @@ private struct MaintenanceTabSection: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Nil while the first read is in flight, which is a different thing
+    /// from an empty cache and must not read as "0 bytes".
+    private var cacheLabel: String {
+        guard let cacheBytes else { return "Checking…" }
+        return ByteCountFormatter.string(fromByteCount: Int64(cacheBytes), countStyle: .file)
+    }
+
     let isSignedIn: Bool
     let username: String?
     let onClearRegistry: () async -> Bool
@@ -892,11 +1044,69 @@ private struct MaintenanceTabSection: View {
     @Binding var copyFeedback: String?
 
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
+    @AppStorage("anicat_offline_cap_gb") private var offlineCapGb: Int = 2
+    @State private var cacheBytes: UInt64?
+    /// Nil until a check has run; "Up to date" afterwards. A blank row would
+    /// leave the button looking like it had done nothing.
+    @State private var updateResult: String?
+    @State private var isPurging = false
     @State private var registryState: SettingsView.MaintenanceActionState = .idle
     @State private var onboardingResetState: SettingsView.MaintenanceActionState = .idle
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
+        // Storage, which had no home at all: the offline-manga cap was filed
+        // under Account because the engine happens to own both, and the
+        // torrent stream cache -- easily the largest thing the app writes,
+        // gigabytes of it -- was not shown anywhere on macOS.
+        SettingsCard(
+            title: "Storage",
+            description: "What Anicat keeps on this Mac, and how much of it."
+        ) {
+            SettingField(
+                label: "Keep at most",
+                description: "Downloaded chapters above this are removed, least recently read first. The chapter open in the reader is never removed."
+            ) {
+                Picker("", selection: $offlineCapGb) {
+                    Text("1 GB").tag(1)
+                    Text("2 GB").tag(2)
+                    Text("5 GB").tag(5)
+                    Text("10 GB").tag(10)
+                    Text("No limit").tag(0)
+                }
+                .frame(maxWidth: 140)
+                .font(.system(size: 12))
+            }
+            // The engine holds the cap in memory, so a change has to be
+            // handed over rather than waiting for the next launch.
+            .onChange(of: offlineCapGb) { _, _ in AppModel.shared?.applyOfflineLimit() }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Streamed video",
+                description: "Episodes are streamed from a torrent and the pieces stay on disk so a rewatch or a seek backwards costs nothing. Emptying it frees the space; anything still playing is re-fetched."
+            ) {
+                HStack(spacing: 12) {
+                    Text(cacheLabel)
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.muted)
+
+                    Button(isPurging ? "Emptying…" : "Empty") {
+                        isPurging = true
+                        Task {
+                            await AppModel.shared?.purgeStreamCache()
+                            cacheBytes = await AppModel.shared?.streamCacheBytes()
+                            isPurging = false
+                        }
+                    }
+                    .disabled(isPurging || (cacheBytes ?? 0) == 0)
+                }
+            }
+        }
+        .task { cacheBytes = await AppModel.shared?.streamCacheBytes() }
+
         // Updates Card
         SettingsCard(title: "Updates", description: "Keep the app up to date.") {
             HStack {
@@ -913,16 +1123,36 @@ private struct MaintenanceTabSection: View {
                     .textSelection(.enabled)
             }
 
-            // No update mechanism exists in the native build yet — a
-            // fake "checking" spinner that always reports up to date is
-            // worse than no button, since it reads as a real check.
-            HStack(spacing: 8) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 12))
-                    .foregroundColor(SumiTheme.muted)
-                Text("Update checking isn't available yet in the native build.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SumiTheme.muted)
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Check for updates",
+                description: "Asks GitHub for the latest published release. Anicat does not update itself: the button opens the release page so you can replace the app yourself."
+            ) {
+                HStack(spacing: 10) {
+                    if let update = AppModel.shared?.availableUpdate {
+                        Text("\(update.version) available")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(SumiTheme.indigo)
+                        Button("Open release") { Platform.openExternal(update.pageURL) }
+                    } else {
+                        if let checked = updateResult {
+                            Text(checked)
+                                .font(.system(size: 12))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        Button(AppModel.shared?.isCheckingForUpdate == true ? "Checking…" : "Check now") {
+                            Task {
+                                await AppModel.shared?.checkForUpdates(force: true)
+                                updateResult = AppModel.shared?.availableUpdate == nil
+                                    ? "Up to date"
+                                    : nil
+                            }
+                        }
+                        .disabled(AppModel.shared?.isCheckingForUpdate == true)
+                    }
+                }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1225,39 +1455,37 @@ private struct SettingField<Trailing: View>: View {
     }
 }
 
-/// The theme row: one swatch per option, drawn in that option's own colours.
+/// The theme row: one swatch per skin, drawn in that skin's own colours.
 ///
-/// Reads `ThemeStore.shared` rather than keeping an `@AppStorage("anicat_theme")`
-/// of its own. The store already writes that key, and a second writer for one
+/// Reads `ThemeStore.shared` rather than keeping `@AppStorage` copies of its
+/// own. The store already writes both keys, and a second writer for one
 /// setting is how a picker ends up showing a theme the app is not using.
 private struct ThemePicker: View {
     @State private var store = ThemeStore.shared
 
-    // A fixed `HStack` fitted four options; six is 492pt of swatch before the
-    // trailing spacer, wider than the settings pane, and the row squeezed the
-    // swatches instead of wrapping. An adaptive grid reflows to however many
-    // fit and needs no revisit the next time a skin is added. `maximum` is
-    // pinned to the swatch width on purpose: left open it defaults to
-    // `.infinity`, the grid divides the whole pane between the columns it
-    // chose, and each 72pt swatch floats in the middle of an oversized cell.
+    // Three swatches fit a row; the grid is kept from when the flat list had
+    // six, so a fourth skin needs no revisit. `maximum` is pinned to the
+    // swatch width on purpose: left open it defaults to `.infinity`, the grid
+    // divides the whole pane between the columns it chose, and each 72pt
+    // swatch floats in the middle of an oversized cell.
     private let columns = [GridItem(.adaptive(minimum: 72, maximum: 72), spacing: 12, alignment: .topLeading)]
 
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            ForEach(AnicatTheme.allCases) { theme in
-                let isSelected = store.theme == theme
+            ForEach(SumiSkin.allCases) { skin in
+                let isSelected = store.skin == skin
                 Button {
                     guard !isSelected else { return }
                     SumiHaptics.selection()
-                    store.select(theme)
+                    store.select(skin)
                 } label: {
                     VStack(spacing: 7) {
                         ThemeSwatch(
-                            palette: theme.previewPalette(systemIsDark: ThemeStore.systemPrefersDark),
+                            palette: store.previewPalette(for: skin),
                             isSelected: isSelected
                         )
 
-                        Text(theme.displayName)
+                        Text(skin.displayName)
                             .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
                             .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
                             .lineLimit(1)
@@ -1265,7 +1493,7 @@ private struct ThemePicker: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(theme.caption)
+                .help(skin.caption)
             }
         }
     }

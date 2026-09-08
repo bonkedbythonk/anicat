@@ -205,11 +205,21 @@ private struct TrailerWebView: NSViewRepresentable {
         TrailerEmbedPage.load(url, into: view, state: context.coordinator)
     }
 
-    /// Loading `about:blank` rather than trusting deallocation: a web view
-    /// that is merely released keeps its media session alive long enough to
-    /// be heard under the stream the viewer just started.
+    /// Stopped explicitly rather than by deallocation, and `pauseAllMedia`
+    /// first.
+    ///
+    /// Blanking the page was already here and was not enough on its own:
+    /// `loadHTMLString` is asynchronous, SwiftUI releases the web view as
+    /// soon as this returns, and the navigation that would have torn the
+    /// iframe down never commits -- so the trailer went on playing, audible
+    /// under whatever the viewer did next. `pauseAllMediaPlayback` reaches
+    /// the content process directly and does not depend on a navigation
+    /// landing, which is the only part of this that stops a cross-origin
+    /// YouTube iframe. The blank load stays as the belt to its braces.
     static func dismantleNSView(_ view: WKWebView, coordinator: TrailerLoadState) {
         coordinator.stopPolling()
+        view.pauseAllMediaPlayback(completionHandler: nil)
+        view.closeAllMediaPresentations(completionHandler: {})
         view.stopLoading()
         view.loadHTMLString("", baseURL: nil)
     }
@@ -236,9 +246,12 @@ private struct TrailerWebView: UIViewRepresentable {
         TrailerEmbedPage.load(url, into: view, state: context.coordinator)
     }
 
-    /// See the macOS twin: releasing the view is not enough to stop audio.
+    /// See the macOS twin: releasing the view is not enough to stop audio,
+    /// and neither is a blank load that never commits.
     static func dismantleUIView(_ view: WKWebView, coordinator: TrailerLoadState) {
         coordinator.stopPolling()
+        view.pauseAllMediaPlayback(completionHandler: nil)
+        view.closeAllMediaPresentations(completionHandler: {})
         view.stopLoading()
         view.loadHTMLString("", baseURL: nil)
     }

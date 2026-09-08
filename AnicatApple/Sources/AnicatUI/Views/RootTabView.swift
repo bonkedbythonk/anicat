@@ -318,7 +318,7 @@ private struct UpNextTab: View {
         // On the stack, not on the button: the button is conditional on a
         // Mac being in range and takes its modifiers with it when that goes.
         .sheet(item: $remoteNode) { node in
-            PhoneRemoteView(node: node)
+            PhoneRemoteView(node: node, model: model)
                 .presentationDetents([.medium, .large])
         }
     }

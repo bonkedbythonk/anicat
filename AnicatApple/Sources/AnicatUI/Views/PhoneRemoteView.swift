@@ -8,10 +8,12 @@ import SwiftUI
 /// time is the thing the Films & TV segment is already hidden to avoid.
 struct PhoneRemoteView: View {
     let node: BonjourDiscovery.DiscoveredNode
+    let model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     private var client: RemoteClient { RemoteClient.shared }
     @State private var showingTracks = false
+    @State private var showingBrowse = false
 
     var body: some View {
         NavigationStack {
@@ -23,7 +25,7 @@ struct PhoneRemoteView: View {
                     } else {
                         message(
                             "Nothing playing",
-                            detail: "Open a title and choose Play on Mac, or start something on \(node.name).",
+                            detail: "Pick something with the list button, or start it on \(node.name).",
                             symbol: "play.slash"
                         )
                     }
@@ -62,10 +64,22 @@ struct PhoneRemoteView: View {
             .navigationTitle("Remote")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if client.status == .connected {
+                        Button {
+                            showingBrowse = true
+                        } label: {
+                            Image(systemName: "list.and.film")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+        .sheet(isPresented: $showingBrowse) {
+            PhoneRemoteBrowseView(node: node, model: model)
         }
         .sheet(isPresented: $showingTracks) {
             trackPicker

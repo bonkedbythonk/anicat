@@ -3054,6 +3054,113 @@ fn summarize_cinema(m: &anilist::types::MediaItem) -> MediaSummary {
 }
 
 #[cfg(test)]
+mod cinema_live_tests {
+    use super::*;
+
+    /// Live, and the only test that walks the path a viewer actually takes:
+    /// engine construction, TMDB detail, the year the film search hangs on,
+    /// the indexer search, and a stream URL with a torrent behind it.
+    ///
+    /// ```text
+    /// ANICAT_TMDB_PROXY=https://... cargo test --lib cinema_live -- --ignored --nocapture
+    /// ```
+    ///
+    /// `catalog::cinema`'s own live tests prove TMDB answers; this proves the
+    /// answer is enough to play something.
+    #[tokio::test]
+    #[ignore]
+    async fn live_a_film_resolves_through_the_cinema_path() {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info,librqbit=warn,librqbit_dht=warn"),
+        )
+        .try_init();
+        let key = std::env::var("ANICAT_TMDB_KEY").ok().filter(|k| !k.is_empty());
+        let proxy = std::env::var("ANICAT_TMDB_PROXY").ok().filter(|p| !p.is_empty());
+        if key.is_none() && proxy.is_none() {
+            eprintln!("set ANICAT_TMDB_PROXY or ANICAT_TMDB_KEY to run this");
+            return;
+        }
+        let dir = std::env::temp_dir().join("anicat-cinema-ffi-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = AnicatEngine::new(
+            dir.to_string_lossy().to_string(),
+            None,
+            key,
+            proxy,
+        )
+        .expect("engine");
+
+        let started = std::time::Instant::now();
+        let handle = engine
+            .resolve_stream(StreamRequest {
+                catalog: FfiCatalog::TmdbMovie,
+                // Fight Club (1999). One of the few films whose release names
+                // are unambiguous enough to make a failure here mean the
+                // path is broken rather than the swarm being thin.
+                catalog_id: 550,
+                episode: 1,
+                title: None,
+                prefer_dub: false,
+                chosen_name: None,
+                resume_fraction: None,
+                preload: false,
+            })
+            .await
+            .expect("resolve");
+        println!("film stream url: {} in {:?}", handle.url, started.elapsed());
+        assert!(handle.url.starts_with("http://127.0.0.1:"));
+
+        engine.playback_stopped().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The series half: the same path, but the episode number the app stores
+    /// has to become the `SxxEyy` a release is named with, against the season
+    /// map TMDB stated. Episode 11 of Silo is season 2 episode 1 -- an
+    /// off-by-one in `locate_episode` resolves a real file of the wrong
+    /// episode, which is the failure this is here to catch.
+    #[tokio::test]
+    #[ignore]
+    async fn live_an_episode_resolves_at_its_absolute_number() {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info,librqbit=warn,librqbit_dht=warn"),
+        )
+        .try_init();
+        let key = std::env::var("ANICAT_TMDB_KEY").ok().filter(|k| !k.is_empty());
+        let proxy = std::env::var("ANICAT_TMDB_PROXY").ok().filter(|p| !p.is_empty());
+        if key.is_none() && proxy.is_none() {
+            eprintln!("set ANICAT_TMDB_PROXY or ANICAT_TMDB_KEY to run this");
+            return;
+        }
+        let dir = std::env::temp_dir().join("anicat-cinema-series-ffi-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine =
+            AnicatEngine::new(dir.to_string_lossy().to_string(), None, key, proxy).expect("engine");
+
+        let started = std::time::Instant::now();
+        let handle = engine
+            .resolve_stream(StreamRequest {
+                catalog: FfiCatalog::TmdbTv,
+                // Silo, absolute episode 11 -- the first episode of season 2.
+                catalog_id: 125988,
+                episode: 11,
+                title: None,
+                prefer_dub: false,
+                chosen_name: None,
+                resume_fraction: None,
+                preload: false,
+            })
+            .await
+            .expect("resolve");
+        println!("episode stream url: {} in {:?}", handle.url, started.elapsed());
+        assert!(handle.url.starts_with("http://127.0.0.1:"));
+
+        engine.playback_stopped().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

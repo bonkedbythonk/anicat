@@ -118,6 +118,7 @@ extension AppModel {
 
         ContinuityManager.shared.advertisePlayback(
             catalogId: catalogId,
+            catalog: Self.handoffCatalog(catalog),
             title: title,
             episode: download.episode,
             timePositionSeconds: playerController.currentTime

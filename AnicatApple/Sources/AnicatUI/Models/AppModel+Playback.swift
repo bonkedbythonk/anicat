@@ -37,6 +37,17 @@ extension AppModel {
         playerController.nextEpisodeCountdown.reset()
     }
 
+    /// The catalog name Handoff carries. A bare id names three different
+    /// titles across the catalogs, so the receiving device needs this to know
+    /// which one was playing.
+    nonisolated static func handoffCatalog(_ catalog: FfiCatalog) -> String {
+        switch catalog {
+        case .tmdbMovie: return "tmdb_movie"
+        case .tmdbTv: return "tmdb_tv"
+        default: return "anilist"
+        }
+    }
+
     func playFeedback(_ sound: AppSounds) {
         sound.play()
     }
@@ -671,6 +682,7 @@ extension AppModel {
         if secondChanged {
             ContinuityManager.shared.advertisePlayback(
                 catalogId: catalogId,
+                catalog: Self.handoffCatalog(currentPlaybackCatalog),
                 title: title,
                 episode: Int(episode),
                 timePositionSeconds: currentTime
@@ -1047,6 +1059,7 @@ extension AppModel {
         // Apple Handoff: broadcast current playback activity to iPhone / iPad / Mac
         ContinuityManager.shared.advertisePlayback(
             catalogId: catalogId,
+            catalog: Self.handoffCatalog(catalog),
             title: effectiveTitle,
             episode: Int(episode),
             timePositionSeconds: playerController.currentTime

@@ -170,3 +170,5 @@ AnicatApple/Anicat.xcodeproj/
 AnicatApple/Generated/
 # xcodebuild DerivedData for the iOS target
 AnicatApple/.build-xcode/
+# xcodebuild DerivedData for device builds
+AnicatApple/.build-device/

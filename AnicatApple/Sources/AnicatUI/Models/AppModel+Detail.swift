@@ -81,7 +81,7 @@ extension AppModel {
             #if os(macOS)
             HoverActivityMonitor.shared.suppressHoverUntilPointerMoves()
             #endif
-            withAnimation(.sumi(.morph)) {
+            withAnimation(.sumi(.morphReturn)) {
                 selectedMediaDetails = nil
             } completion: { [weak self] in
                 self?.openingDetailSourceKey = nil
@@ -175,7 +175,7 @@ extension AppModel {
         #endif
         // Same reason as `closeDetail`: the source card has to keep its half
         // of the morph pair until the transition finishes.
-        withAnimation(.sumi(.morph)) {
+        withAnimation(.sumi(.morphReturn)) {
             selectedMediaDetails = nil
         } completion: { [weak self] in
             self?.openingDetailSourceKey = nil

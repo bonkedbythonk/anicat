@@ -20,6 +20,13 @@ public enum SumiMotion: Sendable {
     case pop
     /// A `matchedGeometryEffect` hand-off, the poster morph above all.
     case morph
+    /// The same hand-off run backwards: a poster returning to the card it
+    /// came from. Critically damped, where `morph` is not. A spring at 0.86
+    /// damping overshoots its target and rings back -- lively on the way out
+    /// of a card, and on the way back the owner described it as the page
+    /// vibrating before it went into place. Arriving somewhere it already
+    /// was does not want a bounce.
+    case morphReturn
 }
 
 // MARK: - Policy
@@ -133,6 +140,12 @@ public extension Animation {
             return .spring(response: 0.30, dampingFraction: 0.82)
         case .morph:
             return .spring(response: 0.38, dampingFraction: 0.86)
+        case .morphReturn:
+            // Shorter response than `.morph` as well as flat: it has to land
+            // with the page fade it travels with (`RootView.detailFadeOut`),
+            // and a critically damped spring spends its last third barely
+            // moving.
+            return .spring(response: 0.32, dampingFraction: 1.0)
         }
     }
 }

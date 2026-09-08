@@ -1111,17 +1111,7 @@ public struct RootView: View {
                             onTabChanged: { model.currentDetailTab = $0 }
                         )
                         .id(details.id)
-                        // The scale is only for an open with no poster
-                        // to morph — Up Next's rows, the schedule, the
-                        // command palette. On a shelf open the poster is
-                        // mid-`matchedGeometryEffect` inside this view,
-                        // and scaling the page moves the thing the morph
-                        // is interpolating towards.
-                        .sumiTransition(
-                            model.openingDetailSourceKey == nil
-                                ? AnyTransition.scale(scale: 0.96).combined(with: .opacity)
-                                : AnyTransition.opacity
-                        )
+                        .sumiTransition(detailTransition)
                         .zIndex(2)
                         // Same reason `sectionContent` is gated on the
                         // detail page: the detail page stays mounted
@@ -1165,6 +1155,27 @@ public struct RootView: View {
         case .anilist, .mangaDex:
             openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
         }
+    }
+
+    /// How the detail page enters and leaves.
+    ///
+    /// **The fade is deliberately much shorter than the transition.** Both the
+    /// page and the feed are opaque and near-black, so an opacity curve that
+    /// ran for the whole spring left the two legible on top of each other for
+    /// its entire length -- Up Next's rows readable straight through the
+    /// synopsis. That reads as a ghost, not as a navigation. Giving the
+    /// opacity its own 0.14s curve collapses the overlap to a few frames while
+    /// the poster morph and the feed's push-back keep the full spring.
+    ///
+    /// The offset is only for an open with no poster to morph -- Up Next's
+    /// rows, the schedule, the command palette. Without it those opens had no
+    /// motion at all beyond the fade, so the page simply appeared. On a shelf
+    /// open the poster is mid-`matchedGeometryEffect` inside this view, and
+    /// moving the page moves the thing the morph is interpolating towards.
+    private var detailTransition: AnyTransition {
+        let fade = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+        guard model.openingDetailSourceKey == nil else { return fade }
+        return AnyTransition.offset(y: 24).combined(with: fade)
     }
 
     /// Whether the section behind an open detail page is pushed back.

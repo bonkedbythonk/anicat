@@ -819,7 +819,16 @@ public struct MediaDetailView: View {
                 Spacer()
             }
             .padding(.horizontal, 56)
+            // Below the window's transparent title strip, not level with it.
+            // With `.fullSizeContentView` that strip takes the click rather
+            // than passing it down, and at a 24pt inset the top third of the
+            // most-pressed button in the app was dead -- measured: a press at
+            // y=17 did nothing, the same button at y=33 went back.
+            #if os(macOS)
+            .padding(.top, 34)
+            #else
             .padding(.top, 24)
+            #endif
             .frame(maxWidth: 1150, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }

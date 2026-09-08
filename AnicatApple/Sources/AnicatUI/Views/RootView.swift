@@ -6,6 +6,7 @@ import AppKit
 
 public struct RootView: View {
     @Bindable public var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
     @State private var showSyosetuReader = false
     // Shared between every card grid and the detail page so tapping a card
     // grows its poster into the detail page's poster rather than crossfading
@@ -133,6 +134,18 @@ public struct RootView: View {
                             .zIndex(1)
                             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(model.selectedMediaDetails == nil)
+                            // The feed drops back as the page comes forward,
+                            // so the two read as depth rather than as one
+                            // picture replacing another. Same gate as the
+                            // page's own scale: on a shelf open the poster
+                            // this layer holds is one half of a live
+                            // `matchedGeometryEffect` pair, and moving it
+                            // mid-flight is what the morph is measuring
+                            // against. Riding the same transaction as
+                            // `selectedMediaDetails`, so it needs no
+                            // animation of its own.
+                            .scaleEffect(isFeedPushedBack ? 0.97 : 1)
+                            .opacity(isFeedPushedBack ? 0.8 : 1)
 
                         // The detail page replaces the section, inside the
                         // content column. It is not a window-wide overlay: the
@@ -1074,6 +1087,17 @@ public struct RootView: View {
         case .anilist, .mangaDex:
             openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
         }
+    }
+
+    /// Whether the section behind an open detail page is pushed back.
+    ///
+    /// Never under Reduce Motion: the setting is read live from the
+    /// environment rather than through `MotionPolicy`, whose cached flag a
+    /// view body does not re-read when the system setting changes.
+    private var isFeedPushedBack: Bool {
+        !reduceMotionForPushBack
+            && model.selectedMediaDetails != nil
+            && model.openingDetailSourceKey == nil
     }
 
     private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false, sourceKey: String? = nil) {

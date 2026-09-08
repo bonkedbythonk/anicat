@@ -151,7 +151,22 @@ public struct RootView: View {
                             // sprang back into place. A spring is right for a
                             // poster being thrown across the screen and wrong
                             // for the wall behind it.
-                            .animation(.sumi(.page), value: isFeedPushedBack)
+                            //
+                            // Closing takes the page's own duration rather
+                            // than the longer one it opens with. One gesture
+                            // had three finishes -- the page's fade at 0.26,
+                            // this at 0.35, the travel somewhere between --
+                            // so the feed went on scaling by itself for
+                            // ~100ms after the page it was reacting to had
+                            // gone. Measured at ~14% of the transition's peak
+                            // movement, which is not a tail, it is a second
+                            // animation.
+                            .animation(
+                                isFeedPushedBack
+                                    ? .sumi(.page)
+                                    : .easeInOut(duration: Self.detailFadeOut),
+                                value: isFeedPushedBack
+                            )
 
                         // The detail page replaces the section, inside the
                         // content column. It is not a window-wide overlay: the
@@ -1184,6 +1199,12 @@ public struct RootView: View {
     /// motion at all beyond the fade, so the page simply appeared. On a shelf
     /// open the poster is mid-`matchedGeometryEffect` inside this view, and
     /// moving the page moves the thing the morph is interpolating towards.
+    /// How long everything that leaves with the detail page takes. Named once
+    /// because the page's fade, its travel and the feed's push-back all have
+    /// to land on the same frame; three separate literals is how they drifted
+    /// apart in the first place.
+    static let detailFadeOut: Double = 0.26
+
     private var detailTransition: AnyTransition {
         // Asymmetric, because the two directions have opposite problems.
         // Arriving, the page has to cover the feed fast or the two are
@@ -1193,7 +1214,7 @@ public struct RootView: View {
         // which is long enough to read as receding and still short enough
         // that the overlap never becomes a dissolve.
         let arrive = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
-        let leave = AnyTransition.opacity.animation(.easeInOut(duration: 0.26))
+        let leave = AnyTransition.opacity.animation(.easeInOut(duration: Self.detailFadeOut))
         guard model.openingDetailSourceKey == nil else {
             return .asymmetric(insertion: arrive, removal: leave)
         }
@@ -1205,7 +1226,11 @@ public struct RootView: View {
             // Less travel than it arrived with: a page being dismissed that
             // slides as far as it came reads as being thrown away rather than
             // as the layer above closing.
-            removal: AnyTransition.offset(y: 14).animation(.easeIn(duration: 0.26)).combined(with: leave)
+            // Same curve as the fade, not merely the same length: a shape
+            // that eases differently drifts against it and lands early.
+            removal: AnyTransition.offset(y: 14)
+                .animation(.easeInOut(duration: Self.detailFadeOut))
+                .combined(with: leave)
         )
     }
 

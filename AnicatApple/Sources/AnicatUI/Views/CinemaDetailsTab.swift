@@ -150,6 +150,7 @@ struct CinemaDetailsTabSection: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 8).stroke(SumiTheme.border, lineWidth: 1)
                         )
+                        .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 2)

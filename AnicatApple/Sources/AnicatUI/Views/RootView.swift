@@ -1493,6 +1493,7 @@ private struct HomeShelf: View {
                         }
                         .equatable()
                         .frame(width: 180)
+                        .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 4)

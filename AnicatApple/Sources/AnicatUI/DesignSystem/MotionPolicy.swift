@@ -116,9 +116,9 @@ public extension Animation {
     /// system has asked for reduced motion. Prefer this over naming
     /// `.snappy`/`.smooth`/`.spring` at a call site: those ignore the setting.
     ///
-    /// It cannot cover `phaseAnimator` or `keyframeAnimator`, which take an
-    /// animation per phase and per track and so never hand the policy one
-    /// value to collapse. A phase animator added without its own reduced-motion
+    /// It cannot cover `phaseAnimator`, `keyframeAnimator` or
+    /// `scrollTransition`, which take an animation per phase, per track or a
+    /// closure, and so never hand the policy one value to collapse. A phase animator added without its own reduced-motion
     /// path is an accessibility regression; hold it at a single phase — there
     /// is then nothing to advance to — rather than giving it a zero-duration
     /// curve, which still ticks.

@@ -387,6 +387,7 @@ private struct PosterShelf: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .sumiShelfEdge()
                         }
                     }
                     .padding(.horizontal, 16)

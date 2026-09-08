@@ -210,6 +210,7 @@ public struct ReadingView: View {
                         namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
                     ) { onSelect(item, "\(shelfKey):\(item.id)") }
                         .frame(width: 180)
+                        .sumiShelfEdge()
                 }
             }
             .padding(.vertical, 4)

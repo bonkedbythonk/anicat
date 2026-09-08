@@ -291,7 +291,9 @@ struct CinemaHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(shelf.items) { item in
-                        card(item, shelf: shelf.id).frame(width: 180)
+                        card(item, shelf: shelf.id)
+                            .frame(width: 180)
+                            .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 4)

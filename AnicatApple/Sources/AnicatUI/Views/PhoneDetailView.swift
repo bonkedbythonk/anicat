@@ -213,7 +213,7 @@ struct PhoneDetailView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 12) {
                             ForEach(model.selectedCharacters) { character in
-                                castCard(character)
+                                castCard(character).sumiShelfEdge()
                             }
                         }
                     }
@@ -232,6 +232,7 @@ struct PhoneDetailView: View {
                         HStack(alignment: .top, spacing: 12) {
                             ForEach(model.selectedRecommendations) { item in
                                 posterCard(id: item.id, title: item.title, cover: item.coverURL)
+                                    .sumiShelfEdge()
                             }
                         }
                     }
@@ -252,6 +253,7 @@ struct PhoneDetailView: View {
                                     cover: item.coverURL,
                                     caption: item.relationType.replacingOccurrences(of: "_", with: " ").capitalized
                                 )
+                                .sumiShelfEdge()
                             }
                         }
                     }

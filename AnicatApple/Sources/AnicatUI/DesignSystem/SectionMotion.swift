@@ -125,3 +125,65 @@ public extension View {
         }
     }
 }
+
+// MARK: - Shelf edges
+
+/// How a card reacts to the edge of a horizontal shelf.
+///
+/// A shelf is clipped by its own scroll view, so without this a card is cut
+/// in half by an invisible line at the page margin. Fading and shrinking it
+/// there gives the clip somewhere to happen and makes the shelf read as
+/// continuing past the window rather than ending at it.
+private struct ShelfEdgeModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            // Not for a shelf whose cards are sized with
+            // `containerRelativeFrame`: measured on the phone's Continue
+            // Watching row, the clipped third card stayed at identity and
+            // nothing happened, so the modifier is left off there rather
+            // than sitting in the tree doing nothing.
+            //
+            // `.interactive` and an explicit threshold, not the defaults.
+            // The default configuration calls a card identity as soon as any
+            // part of it is visible, so the half-clipped card at the edge —
+            // the only one this is for — never left identity and nothing
+            // happened on screen. `.visible(0.9)` puts the fade where the
+            // clip is, and the interactive configuration tracks the scroll
+            // instead of stepping between phases.
+            content.scrollTransition(
+                ScrollTransitionConfiguration.interactive.threshold(.visible(0.9)),
+                axis: .horizontal
+            ) { view, phase in
+                // 1 at rest, 0 fully outside. `phase.value` rather than
+                // `isIdentity`: the flag is a step and reads as the card
+                // blinking as it crosses.
+                let settled = 1 - min(abs(phase.value), 1)
+                // Scale stays shallow and there is no offset: on every shelf
+                // but the stills strip the card is also the poster morph's
+                // `matchedGeometryEffect` source, which already stacks an
+                // offset and a shadow of its own, and the morph flies from
+                // whatever frame this leaves behind. A card tapped while
+                // half off the edge should look like it came from where it
+                // was, not from somewhere the transition moved it.
+                return view
+                    .opacity(0.45 + 0.55 * settled)
+                    .scaleEffect(0.94 + 0.06 * settled)
+            }
+        }
+    }
+}
+
+public extension View {
+    /// Fades and shrinks a shelf card as it passes the edge of its scroll
+    /// view. Nothing under reduced motion: `scrollTransition` takes a closure,
+    /// so `Animation.sumi(_:)` has no single value to collapse and the branch
+    /// has to be here.
+    func sumiShelfEdge() -> some View {
+        modifier(ShelfEdgeModifier())
+    }
+}

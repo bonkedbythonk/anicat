@@ -373,26 +373,87 @@ private struct LibraryTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
 
+    /// The six AniList list statuses, in the order the site itself lists
+    /// them. Paired with their labels here rather than reusing
+    /// `PhoneDetailView.listStatus`: this drives a `Picker`'s tags, so the
+    /// raw values have to round-trip, not just render.
+    private static let statuses: [(raw: String, label: String)] = [
+        ("CURRENT", "Watching"),
+        ("PLANNING", "Planning"),
+        ("COMPLETED", "Completed"),
+        ("REPEATING", "Rewatching"),
+        ("PAUSED", "Paused"),
+        ("DROPPED", "Dropped")
+    ]
+
+    private var currentLabel: String {
+        Self.statuses.first { $0.raw == model.libraryStatus }?.label ?? "Watching"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    PosterSection(title: "Watching", items: model.watchingItems, onOpen: open)
-                    PosterSection(title: "Planning", items: model.planningItems, onOpen: open)
-
-                    if model.watchingItems.isEmpty && model.planningItems.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if !model.isSignedIn {
                         EmptyHint(
                             title: "No lists yet",
                             detail: "Connect AniList in Settings to see your library."
                         )
+                    } else if model.isLoading && model.libraryItems.isEmpty {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 64)
+                    } else if model.libraryItems.isEmpty {
+                        EmptyHint(
+                            title: "Nothing in \(currentLabel)",
+                            detail: "Titles you move to this list on AniList show up here."
+                        )
+                    } else {
+                        Text("\(model.libraryItems.count) TITLES")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(SumiTheme.muted)
+                            .padding(.horizontal, 16)
+                        PosterGrid(items: model.libraryItems, onOpen: open)
                     }
                 }
                 .padding(.vertical, 8)
             }
             .background(SumiTheme.background)
             .navigationTitle("Library")
-            .refreshable { await model.refreshAll() }
+            // A `Menu` in the bar, not a segmented control: six statuses in a
+            // segmented control on a 402pt screen truncate to two letters
+            // each. This is the same shape Mail uses for its filter.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Status", selection: Binding(
+                            get: { model.libraryStatus },
+                            set: { next in Task { await model.loadLibrary(status: next) } }
+                        )) {
+                            ForEach(Self.statuses, id: \.raw) { status in
+                                Text(status.label).tag(status.raw)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(currentLabel)
+                                .font(.system(size: 15))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                    }
+                }
+            }
+            .refreshable { await model.loadLibrary() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
+        }
+        // `refreshAll` only ever fetches `libraryStatus`'s current value, and
+        // the tab is built before that first fetch lands. Without this the
+        // grid stayed empty until the filter was touched.
+        .task {
+            if model.libraryItems.isEmpty, model.isSignedIn {
+                await model.loadLibrary()
+            }
         }
     }
 
@@ -631,7 +692,11 @@ private struct PosterGrid: View {
     static func meta(for item: MediaCard.Item) -> String? {
         var parts: [String] = []
         if let score = item.score, score > 0 {
-            parts.append(String(format: "* %.1f", Double(score) / 10))
+            // No star glyph in front of it: the house rule bars emoji, and
+            // the ones that are not emoji render as one on some faces. The
+            // detail hero's meta line already reads "7.3 · 2024 · 12 EPS",
+            // so this matches it.
+            parts.append(String(format: "%.1f", Double(score) / 10))
         }
         if let total = item.totalEpisodesOrChapters, total > 0 {
             parts.append("\(total) \(item.isManga ? "CH" : "EPS")")

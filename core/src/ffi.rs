@@ -802,6 +802,14 @@ pub struct AnicatEngine {
     catalogs: Catalogs,
     registry: Registry,
     offline: crate::reader::offline::OfflineLibrary,
+    /// Bytes the offline library may occupy before the least recently used
+    /// chapters are evicted. Settable, because what is a reasonable slice of
+    /// a disk is not something this can know.
+    offline_cap_bytes: std::sync::atomic::AtomicU64,
+    /// The chapter open in the reader, which eviction skips. Downloading one
+    /// chapter must never delete the one being read out from under it -- the
+    /// same pin the torrent cache keeps on the file a player is reading.
+    reading_chapter: std::sync::Mutex<Option<(Catalog, i64, String)>>,
     torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
     mangakatana: MangaKatanaClient,
@@ -872,6 +880,8 @@ impl AnicatEngine {
                 dir.join("offline-manga"),
                 http.clone(),
             ),
+            offline_cap_bytes: std::sync::atomic::AtomicU64::new(DEFAULT_OFFLINE_CAP_BYTES),
+            reading_chapter: std::sync::Mutex::new(None),
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
             mangakatana: MangaKatanaClient::new(http.clone()),
@@ -1192,6 +1202,8 @@ impl AnicatEngine {
             stored.pages.len(),
             stored.bytes / 1024
         );
+        // The library only grows one way, so this is the moment to trim it.
+        let _ = self.enforce_offline_limit();
         Ok(stored.pages.len() as u32)
     }
 
@@ -1217,6 +1229,92 @@ impl AnicatEngine {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The size the offline library is held to. Zero means no cap.
+    pub fn set_offline_limit_bytes(&self, bytes: u64) {
+        self.offline_cap_bytes
+            .store(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn offline_limit_bytes(&self) -> u64 {
+        self.offline_cap_bytes
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Names the chapter open in the reader, so eviction leaves it alone.
+    /// Cleared with `None` when the reader closes.
+    pub fn set_reading_chapter(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: Option<String>,
+    ) {
+        let catalog: Catalog = catalog.into();
+        if let Ok(mut pin) = self.reading_chapter.lock() {
+            *pin = chapter_id.clone().map(|id| (catalog, catalog_id, id));
+        }
+        // Opening is using: the cap evicts by when a chapter was last read,
+        // not by when it was fetched.
+        if let Some(chapter_id) = chapter_id {
+            let _ = self
+                .registry
+                .touch_offline_chapter(catalog, catalog_id, &chapter_id);
+        }
+    }
+
+    /// Brings the offline library back under its cap, least recently used
+    /// first. Returns how many chapters were removed.
+    ///
+    /// Run after a download rather than on a timer: the library only grows
+    /// one way, and doing it here means the chapter just fetched is the
+    /// newest and so the last thing considered.
+    pub fn enforce_offline_limit(&self) -> FfiResult<u32> {
+        let cap = self.offline_limit_bytes();
+        if cap == 0 {
+            return Ok(0);
+        }
+        let pinned = self.reading_chapter.lock().ok().and_then(|p| p.clone());
+        let mut rows = self
+            .registry
+            .offline_chapters_by_age()
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        let sizes: Vec<(u64, bool)> = rows
+            .iter()
+            .map(|row| {
+                let is_pinned = pinned
+                    .as_ref()
+                    .map(|(c, id, chapter)| {
+                        row.catalog == *c && row.catalog_id == *id && row.chapter_id == *chapter
+                    })
+                    .unwrap_or(false);
+                (row.bytes.max(0) as u64, is_pinned)
+            })
+            .collect();
+        let doomed = chapters_to_evict(&sizes, cap);
+        let mut total: u64 = sizes.iter().map(|(bytes, _)| bytes).sum();
+        let mut evicted = 0;
+        // Removed back to front so the indices stay valid.
+        for index in doomed.into_iter().rev() {
+            let row = rows.remove(index);
+            self.offline
+                .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
+                .map_err(|msg| AnicatError::Storage { msg })?;
+            self.registry
+                .forget_offline_chapter(row.catalog, row.catalog_id, &row.chapter_id)
+                .map_err(|msg| AnicatError::Storage { msg })?;
+            total = total.saturating_sub(row.bytes.max(0) as u64);
+            evicted += 1;
+            log::info!(
+                "[offline] evicted {} ch {} ({} KB), {} KB left of {} KB",
+                row.catalog_id,
+                row.chapter_number,
+                row.bytes / 1024,
+                total / 1024,
+                cap / 1024
+            );
+        }
+        Ok(evicted)
     }
 
     /// Every chapter kept on disk, newest first.
@@ -3746,6 +3844,37 @@ fn is_self_credit(character: Option<&str>) -> bool {
     matches!(first.as_str(), "self" | "himself" | "herself" | "themself" | "themselves")
 }
 
+/// Which rows to drop to bring a library under `cap`, given each row's size
+/// and whether it is pinned, least recently used first.
+///
+/// Separated from the deleting so the arithmetic can be tested: the failure
+/// this guards against is silent, since an over-eager eviction looks exactly
+/// like a chapter that was never downloaded.
+fn chapters_to_evict(sizes: &[(u64, bool)], cap: u64) -> Vec<usize> {
+    let mut total: u64 = sizes.iter().map(|(bytes, _)| bytes).sum();
+    let mut doomed = vec![];
+    for (index, (bytes, pinned)) in sizes.iter().enumerate() {
+        if total <= cap {
+            break;
+        }
+        // The chapter being read stays, even over the cap: deleting the pages
+        // on screen is a worse answer than a library one chapter too large.
+        if *pinned {
+            continue;
+        }
+        doomed.push(index);
+        total = total.saturating_sub(*bytes);
+    }
+    doomed
+}
+
+/// What the offline library may hold before it starts evicting.
+///
+/// Two gigabytes: a chapter runs 10-20 MB, so this is a hundred-odd chapters
+/// -- more than anyone has open questions about on a flight -- while staying
+/// a fraction of the 3 GB the stream cache already takes.
+const DEFAULT_OFFLINE_CAP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// A `file://` URL for a path on disk.
 ///
 /// Built here rather than pulled in with the `url` crate: the only characters
@@ -3922,6 +4051,40 @@ mod cinema_live_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eviction_takes_the_oldest_until_it_is_under_the_cap() {
+        // Least recently used first, 10 MB each, cap of 25 MB.
+        let mb = 1024 * 1024;
+        let sizes = vec![(10 * mb, false), (10 * mb, false), (10 * mb, false)];
+        // 30 over 25: one goes, and only one.
+        assert_eq!(chapters_to_evict(&sizes, 25 * mb), vec![0]);
+        // 30 over 15: two.
+        assert_eq!(chapters_to_evict(&sizes, 15 * mb), vec![0, 1]);
+        // Under the cap already: nothing is touched.
+        assert_eq!(chapters_to_evict(&sizes, 30 * mb), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn the_chapter_being_read_survives_its_turn() {
+        let mb = 1024 * 1024;
+        // The oldest is the one open in the reader.
+        let sizes = vec![(10 * mb, true), (10 * mb, false), (10 * mb, false)];
+        assert_eq!(chapters_to_evict(&sizes, 15 * mb), vec![1, 2]);
+
+        // And when it is the only thing left, the library stays over the cap
+        // rather than deleting the pages on screen.
+        let only_pinned = vec![(10 * mb, true)];
+        assert_eq!(chapters_to_evict(&only_pinned, 1), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_cap_of_zero_is_no_cap() {
+        // What "unlimited" is spelled as, so a viewer who wants everything
+        // kept does not have to guess a large number.
+        let sizes = vec![(u64::MAX / 2, false)];
+        assert_eq!(chapters_to_evict(&sizes, u64::MAX), Vec::<usize>::new());
+    }
 
     #[test]
     fn an_appearance_as_oneself_is_not_a_role() {

@@ -61,6 +61,10 @@ pub struct OfflineChapter {
     pub page_count: i64,
     pub bytes: i64,
     pub downloaded_at: String,
+    /// When it was last opened. Eviction order, and not the same as
+    /// `downloaded_at`: a chapter grabbed for a trip and never read should go
+    /// before one read yesterday.
+    pub last_used_at: String,
 }
 
 /// One chapter, as far as it was read.
@@ -402,14 +406,15 @@ impl Registry {
         let conn = self.lock()?;
         conn.execute(
             "INSERT INTO offline_chapters
-                (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+                (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at, last_used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))
              ON CONFLICT(catalog, catalog_id, chapter_id) DO UPDATE SET
                chapter_number = excluded.chapter_number,
                title = excluded.title,
                page_count = excluded.page_count,
                bytes = excluded.bytes,
-               downloaded_at = excluded.downloaded_at",
+               downloaded_at = excluded.downloaded_at,
+               last_used_at = excluded.downloaded_at",
             params![
                 catalog.as_str(),
                 catalog_id,
@@ -422,6 +427,31 @@ impl Registry {
         )
         .map(|_| ())
         .map_err(|e| e.to_string())
+    }
+
+    /// Marks a downloaded chapter as just used, so the size cap evicts it
+    /// last. Called on open, not on download.
+    pub fn touch_offline_chapter(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        chapter_id: &str,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE offline_chapters SET last_used_at = datetime('now')
+             WHERE catalog = ?1 AND catalog_id = ?2 AND chapter_id = ?3",
+            params![catalog.as_str(), catalog_id, chapter_id],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Downloaded chapters, least recently used first -- eviction order.
+    pub fn offline_chapters_by_age(&self) -> Result<Vec<OfflineChapter>, String> {
+        let mut rows = self.offline_chapters()?;
+        rows.sort_by(|a, b| a.last_used_at.cmp(&b.last_used_at));
+        Ok(rows)
     }
 
     pub fn forget_offline_chapter(
@@ -444,7 +474,8 @@ impl Registry {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at
+                "SELECT catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes,
+                        downloaded_at, COALESCE(last_used_at, downloaded_at)
                  FROM offline_chapters ORDER BY downloaded_at DESC",
             )
             .map_err(|e| e.to_string())?;
@@ -459,12 +490,13 @@ impl Registry {
                     r.get::<_, i64>(5)?,
                     r.get::<_, i64>(6)?,
                     r.get::<_, String>(7)?,
+                    r.get::<_, String>(8)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
         let mut out = vec![];
         for row in rows {
-            let (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, at) =
+            let (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, at, used) =
                 row.map_err(|e| e.to_string())?;
             let Some(catalog) = Catalog::parse(&catalog) else { continue };
             out.push(OfflineChapter {
@@ -476,6 +508,7 @@ impl Registry {
                 page_count,
                 bytes,
                 downloaded_at: at,
+                last_used_at: used,
             });
         }
         Ok(out)
@@ -964,7 +997,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]

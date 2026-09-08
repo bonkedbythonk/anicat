@@ -62,7 +62,13 @@ public struct RootTabView: View {
                         withAnimation(.smooth) { model.stopPlayback() }
                     }
                 )
-                .ignoresSafeArea()
+                // Deliberately NOT `.ignoresSafeArea()` here. Applying it to
+                // the whole player zeroes the insets *inside* it, so the
+                // controls' own `safeAreaPadding` padded by nothing and the
+                // title row landed on the clock and the Dynamic Island. The
+                // picture ignores the safe area from inside instead, where
+                // the video layer can do it without taking the chrome with
+                // it.
                 .transition(.opacity)
                 .zIndex(30)
             }

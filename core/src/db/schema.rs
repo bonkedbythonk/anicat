@@ -259,6 +259,26 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 6 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- When a downloaded chapter was last opened, which is what the
+            -- size cap evicts by. Downloading is not using: a chapter grabbed
+            -- for a trip and never read should go before one read yesterday,
+            -- and `downloaded_at` alone cannot tell them apart. Backfilled to
+            -- the download time, which is the only thing known about rows
+            -- that existed before this column did.
+            ALTER TABLE offline_chapters ADD COLUMN last_used_at TEXT;
+            UPDATE offline_chapters SET last_used_at = downloaded_at WHERE last_used_at IS NULL;
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 6)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

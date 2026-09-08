@@ -592,6 +592,10 @@ public final class AppModel {
     /// Every downloaded chapter, for the Downloads page.
     public var offlineChapters: [FfiOfflineChapter] = []
     public var offlineBytes: UInt64 = 0
+    public var offlineCapBytes: UInt64 = 0
+    /// What the offline library may hold, in gigabytes. `0` means no cap.
+    /// Settings owns the control; the engine is told at launch and on change.
+    static let offlineCapDefaultsKey = "anicat_offline_cap_gb"
 
     /// Chapters read on this device, for the History log and its day chart.
     public var readingActivity: [HistoryView.ReadingEntry] = []
@@ -739,6 +743,10 @@ public final class AppModel {
             } else if !UserDefaults.standard.bool(forKey: Self.onboardingSeenKey) {
                 self.onboardingOpen = true
             }
+
+            // The offline cap the engine holds is in memory, so it has to be
+            // told what Settings says on every launch.
+            applyOfflineLimit()
 
             let port = try await coreEngine.streamPort()
             print("Anicat Rust Engine ready! Dynamic stream server on port: \(port)")

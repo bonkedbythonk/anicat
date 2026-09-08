@@ -70,8 +70,10 @@ struct PhonePlayerView: View {
         .offset(y: dismissOffset)
         .scaleEffect(1 - min(dismissOffset / 2400, 0.08))
         .opacity(1 - min(dismissOffset / 700, 0.55))
-        .gesture(dismissDrag)
-        .statusBarHidden(!controller.areControlsVisible)
+        // Always hidden, not just while the controls are up: the system
+        // player hides it for the whole session, and leaving it on put the
+        // clock in the same strip as the title.
+        .statusBarHidden(true)
         .sheet(isPresented: $showReleases) { releaseSheet }
         .task {
             controller.showControlsBriefly()
@@ -119,9 +121,8 @@ struct PhonePlayerView: View {
             // the home indicator on a real phone — in landscape the notch
             // inset lands on a *side*, which no horizontal constant can know
             // about. `safeAreaPadding` is the only thing that does.
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .safeAreaPadding(.all)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
     }
 
@@ -385,7 +386,6 @@ struct PhonePlayerView: View {
             }
             .padding(.horizontal, 26)
             .padding(.bottom, controller.areControlsVisible ? 96 : 26)
-            .safeAreaPadding(.all)
         }
     }
 
@@ -396,6 +396,13 @@ struct PhonePlayerView: View {
         GeometryReader { geo in
             Color.clear
                 .contentShape(Rectangle())
+                // The dismiss drag lives here, beside the taps, and not on
+                // the player's root. On the root it was a competing gesture
+                // in a different arena: it claimed each touch down, failed
+                // its 18pt threshold, and the tap never reached the child —
+                // which is why tapping stopped showing the controls at all
+                // the moment swipe-to-dismiss was added.
+                .simultaneousGesture(dismissDrag)
                 // Simultaneous, not sequential. Declaring the double tap
                 // ahead of the single one makes SwiftUI hold every single tap
                 // for the double-tap timeout before acting on it — which on

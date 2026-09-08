@@ -561,6 +561,9 @@ private struct AccountTabSection: View {
     /// `TmdbCredential` is the reader; `@AppStorage` needs a literal here, so
     /// the two spellings have to agree.
     @AppStorage("anicat_tmdb_key") private var tmdbKeyInput: String = ""
+    /// `AppModel.offlineCapDefaultsKey`; `@AppStorage` needs a literal, so
+    /// the two spellings and the two defaults have to agree.
+    @AppStorage("anicat_offline_cap_gb") private var offlineCapGb: Int = 2
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -766,6 +769,26 @@ private struct AccountTabSection: View {
             // an empty credential box otherwise reads as a thing to go and
             // fill in before films will work. Takes effect on the next
             // launch: the engine is handed its key when it is constructed.
+            SettingsCard(title: "Offline manga") {
+                SettingField(
+                    label: "Keep at most",
+                    description: "Downloaded chapters above this are removed, least recently read first. The chapter open in the reader is never removed."
+                ) {
+                    Picker("", selection: $offlineCapGb) {
+                        Text("1 GB").tag(1)
+                        Text("2 GB").tag(2)
+                        Text("5 GB").tag(5)
+                        Text("10 GB").tag(10)
+                        Text("No limit").tag(0)
+                    }
+                    .frame(maxWidth: 140)
+                    .font(.system(size: 12))
+                }
+            }
+            // The engine holds the cap in memory, so a change has to be
+            // handed over rather than waiting for the next launch.
+            .onChange(of: offlineCapGb) { _, _ in AppModel.shared?.applyOfflineLimit() }
+
             SettingsCard(title: "Cinema (TMDB)") {
                 SettingField(
                     label: "Your own TMDB key",

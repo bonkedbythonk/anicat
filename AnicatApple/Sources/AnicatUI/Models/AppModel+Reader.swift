@@ -69,6 +69,11 @@ extension AppModel {
     }
 
     public func closeReader() {
+        // The pin goes with the reader: nothing is being read now, so
+        // eviction may consider every chapter again.
+        if let anilistId = activeReadingSession?.anilistId {
+            engine?.setReadingChapter(catalog: .anilist, catalogId: anilistId, chapterId: nil)
+        }
         activeReadingSession = nil
         // Hopped rather than called inline: this is reached from
         // `handleEscapeKey`, which is synchronous and not main-actor isolated,
@@ -162,6 +167,13 @@ extension AppModel {
                progress.page > 0,
                progress.page < Int64(urls.count) - 1 {
                 startPage = Int(progress.page)
+            }
+            if let anilistId {
+                // Pinned for as long as it is open: a download that lands
+                // mid-chapter must not evict the pages being read.
+                engine.setReadingChapter(
+                    catalog: .anilist, catalogId: anilistId, chapterId: chapter.id
+                )
             }
             self.activeReadingSession = MangaReadingSession(
                 title: title,
@@ -267,12 +279,26 @@ extension AppModel {
         loadOfflineChapters()
     }
 
+    /// Tells the engine the cap Settings holds. Called at launch and
+    /// whenever the control changes: the engine keeps it in memory, so it is
+    /// this side's job to say what it is.
+    public func applyOfflineLimit() {
+        guard let engine else { return }
+        let stored = UserDefaults.standard.object(forKey: Self.offlineCapDefaultsKey) as? Int
+        // Two gigabytes unless someone has chosen otherwise -- the engine's
+        // own default, repeated here so the Settings control has something
+        // to show before it is ever touched.
+        let gigabytes = stored ?? 2
+        engine.setOfflineLimitBytes(bytes: UInt64(max(0, gigabytes)) * 1024 * 1024 * 1024)
+    }
+
     /// What is on disk, for the Downloads page and for the chapter rows of
     /// the open title.
     public func loadOfflineChapters() {
         guard let engine else { return }
         offlineChapters = (try? engine.offlineChapters()) ?? []
         offlineBytes = engine.offlineSizeBytes()
+        offlineCapBytes = engine.offlineLimitBytes()
         guard let details = selectedMediaDetails else { return }
         var states = chapterOfflineStates
         for row in offlineChapters where row.catalogId == details.id {

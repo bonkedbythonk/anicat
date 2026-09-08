@@ -978,6 +978,7 @@ public struct RootView: View {
                 },
                 chapters: model.offlineChapters,
                 chapterBytes: model.offlineBytes,
+                chapterCapBytes: model.offlineCapBytes,
                 titles: model.knownTitles,
                 onRemoveChapter: { model.deleteOfflineChapter($0) }
             )

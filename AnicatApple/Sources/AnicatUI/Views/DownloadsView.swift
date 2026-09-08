@@ -24,6 +24,8 @@ public struct DownloadsView: View {
     /// separate pages would make the answer two places.
     var chapters: [FfiOfflineChapter] = []
     var chapterBytes: UInt64 = 0
+    /// What the library is held to, for the header. Zero means no cap.
+    var chapterCapBytes: UInt64 = 0
     /// Names for the ids the registry stores, from whatever the app has
     /// loaded. A chapter downloaded months ago may be on no shelf.
     var titles: [Int64: String] = [:]
@@ -36,6 +38,7 @@ public struct DownloadsView: View {
         onRemove: ((AppModel.LibraryDownload) -> Void)? = nil,
         chapters: [FfiOfflineChapter] = [],
         chapterBytes: UInt64 = 0,
+        chapterCapBytes: UInt64 = 0,
         titles: [Int64: String] = [:],
         onRemoveChapter: ((FfiOfflineChapter) -> Void)? = nil
     ) {
@@ -44,6 +47,7 @@ public struct DownloadsView: View {
         self.onRemove = onRemove
         self.chapters = chapters
         self.chapterBytes = chapterBytes
+        self.chapterCapBytes = chapterCapBytes
         self.titles = titles
         self.onRemoveChapter = onRemoveChapter
     }
@@ -105,7 +109,7 @@ public struct DownloadsView: View {
                 title: "Downloads",
                 subtitle: chapters.isEmpty
                     ? "\(queued.count) queued · \(offline.count) offline"
-                    : "\(queued.count) queued · \(offline.count) offline · \(chapters.count) chapters, \(Self.size(chapterBytes))"
+                    : "\(queued.count) queued · \(offline.count) offline · \(chapters.count) chapters, \(usage)"
             )
 
             SumiTabBar(
@@ -189,6 +193,15 @@ public struct DownloadsView: View {
                 }
             }
         }
+    }
+
+    /// "14 MB of 2 GB", or just the size when there is no cap. The ceiling
+    /// is worth saying: chapters leave on their own once it is reached, and
+    /// a list that shrinks by itself needs to have said why in advance.
+    private var usage: String {
+        chapterCapBytes == 0
+            ? Self.size(chapterBytes)
+            : "\(Self.size(chapterBytes)) of \(Self.size(chapterCapBytes))"
     }
 
     /// Bytes as the page says them. Rounded: the exact figure is noise next

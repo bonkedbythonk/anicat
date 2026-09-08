@@ -1,3 +1,6 @@
+#if os(macOS)
+import AppKit
+#endif
 import Foundation
 import Network
 import Observation
@@ -350,9 +353,11 @@ public final class RemoteHost {
             return
         case .open(let link):
             guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
+            Self.comeForward()
             model.handleDeepLink(deepLink)
         case .openAt(let link, let seconds):
             guard let url = URL(string: link), let deepLink = DeepLink(url: url) else { return }
+            Self.comeForward()
             model.handleDeepLink(deepLink)
             pendingSeek = seconds
         }
@@ -386,6 +391,25 @@ public final class RemoteHost {
             isSelected: track.isSelected,
             isForced: track.isForced
         )
+    }
+
+    /// Brings the Mac's window forward before a remotely started play.
+    ///
+    /// The fullscreen entrance, the hidden toolbar and the hidden pointer all
+    /// hang off `activeStreamURL` in `RootView`, and every one of them is a
+    /// no-op for an app that is not active: AppKit will not run a fullscreen
+    /// transition for a background app, so a stream started from the couch
+    /// opened in a window with the menu bar still across the top and the
+    /// cursor sitting on the picture. Nobody is at this keyboard -- the
+    /// request came from a phone -- so there is no work here to steal focus
+    /// from.
+    /// Nothing to do on iOS, where this type exists only because the file
+    /// compiles for both: a phone is never the host.
+    private static func comeForward() {
+        #if os(macOS)
+        NSApp.activate(ignoringOtherApps: true)
+        AppWindow.main?.makeKeyAndOrderFront(nil)
+        #endif
     }
 
     // MARK: - State

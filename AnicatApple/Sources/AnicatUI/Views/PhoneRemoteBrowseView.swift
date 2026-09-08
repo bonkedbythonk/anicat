@@ -131,6 +131,14 @@ struct PhoneRemoteBrowseView: View {
     private func send(_ link: DeepLink, named title: String) {
         RemoteClient.shared.send(.open(link: link.url.absoluteString), to: node)
         sentTitle = title
+        // Back to the transport, which is what the tap was for. The list
+        // stayed open with a confirmation line on it, so the thing that had
+        // just been started was behind two sheets and the Mac's resolve
+        // finished with nobody watching it.
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            dismiss()
+        }
     }
 
     /// Debounced, and run against the engine directly rather than through

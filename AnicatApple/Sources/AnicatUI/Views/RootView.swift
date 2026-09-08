@@ -734,6 +734,12 @@ public struct RootView: View {
                 // left near the top-left as fullscreen began; no traffic
                 // lights while a stream is up, so there is nothing to hover.
                 AppWindow.setTrafficLightsHidden(true)
+                // The pointer is hidden here and not left to the player's
+                // own idle timer: a stream started from the phone begins
+                // with nobody touching the mouse, so nothing ever moved to
+                // start that timer and the cursor sat on the picture for the
+                // whole episode. Any real movement brings it straight back.
+                NSCursor.setHiddenUntilMouseMoves(true)
                 // Env switch for a driven test copy: fullscreen would take
                 // the screen from whoever is at the keyboard.
                 if !wasPlaying, !window.styleMask.contains(.fullScreen),

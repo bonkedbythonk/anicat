@@ -28,37 +28,55 @@ struct RemoteLiveActivityWidget: Widget {
             let theme = context.attributes
             let state = context.state
             return DynamicIsland {
+                // The expanded Island's leading and trailing regions are
+                // narrow columns beside the camera, not halves of a row: the
+                // full index card was squeezed to a sliver there and the
+                // countdown wrapped onto two lines. Only the two short
+                // stamps go in them, and everything with a width goes in
+                // `.center` and `.bottom`.
                 DynamicIslandExpandedRegion(.leading) {
-                    EpisodeStamp(theme: theme, number: state.episodeNumber)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("EP")
+                            .font(SumiWidget.mono(8, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(theme.muted)
+                        Text(String(format: "%02d", state.episodeNumber))
+                            .font(SumiWidget.mono(17, weight: .semibold))
+                            .foregroundStyle(theme.accent)
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(state.remainingStamp)
-                            .font(SumiWidget.mono(13, weight: .medium))
-                            .foregroundStyle(theme.foreground)
-                        Text(theme.hostName.uppercased())
-                            .font(SumiWidget.mono(8))
-                            .tracking(0.8)
-                            .foregroundStyle(theme.muted)
-                            .lineLimit(1)
-                    }
-                }
-                DynamicIslandExpandedRegion(.center) {
-                    Text(state.title)
-                        .font(SumiWidget.heading(15, serif: theme.usesSerifHeadings))
+                    Text(state.remainingStamp)
+                        .font(SumiWidget.mono(13, weight: .medium))
                         .foregroundStyle(theme.foreground)
                         .lineLimit(1)
+                        .fixedSize()
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    VStack(spacing: 1) {
+                        Text(state.title)
+                            .font(SumiWidget.heading(14, serif: theme.usesSerifHeadings))
+                            .foregroundStyle(theme.foreground)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(state.subtitle)
+                            .font(SumiWidget.mono(10))
+                            .foregroundStyle(theme.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 12) {
-                        ProgressRule(theme: theme, state: state)
+                    VStack(spacing: 10) {
+                        ProgressRule(theme: theme, state: state, showsStamps: false)
                         Transport(theme: theme, state: state, compact: true)
                     }
-                    .padding(.top, 2)
+                    .padding(.top, 4)
                 }
             } compactLeading: {
                 // The accent tick, not a play glyph: the compact Island is
-                // four characters wide and the clock beside it already says
+                // a few characters wide and the clock beside it already says
                 // whether anything is moving.
                 HStack(spacing: 3) {
                     Circle()
@@ -72,6 +90,7 @@ struct RemoteLiveActivityWidget: Widget {
                 Text(state.remainingStamp)
                     .font(SumiWidget.mono(12))
                     .foregroundStyle(theme.muted)
+                    .fixedSize()
             } minimal: {
                 Circle()
                     .fill(state.isPlaying ? theme.accent : theme.muted)
@@ -117,6 +136,9 @@ private struct EpisodeStamp: View {
 private struct ProgressRule: View {
     let theme: RemoteActivityAttributes
     let state: RemoteActivityAttributes.ContentState
+    /// Off inside the Island, where the countdown is already stamped in the
+    /// trailing column and a second copy of it reads as a duplicate.
+    var showsStamps = true
 
     var body: some View {
         VStack(spacing: 5) {
@@ -130,13 +152,15 @@ private struct ProgressRule: View {
             }
             .frame(height: 3)
 
-            HStack {
-                Text(state.elapsedStamp)
-                Spacer()
-                Text(state.remainingStamp)
+            if showsStamps {
+                HStack {
+                    Text(state.elapsedStamp)
+                    Spacer()
+                    Text(state.remainingStamp)
+                }
+                .font(SumiWidget.mono(10))
+                .foregroundStyle(theme.muted)
             }
-            .font(SumiWidget.mono(10))
-            .foregroundStyle(theme.muted)
         }
     }
 }
@@ -202,37 +226,40 @@ private struct LockScreenView: View {
             HStack(alignment: .top, spacing: 12) {
                 EpisodeStamp(theme: attributes, number: state.episodeNumber)
 
+                // The title takes the whole width it can. A right-hand
+                // "ON <MAC>" column used to sit here and it lost twice: it
+                // truncated the title to about half the card and then
+                // truncated its own machine name anyway. The host is filed
+                // under the clocks instead, where a long name has the room
+                // to be read.
                 VStack(alignment: .leading, spacing: 3) {
                     Text(state.title)
                         .font(SumiWidget.heading(17, serif: attributes.usesSerifHeadings))
                         .foregroundStyle(attributes.foreground)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     Text(state.subtitle)
                         .font(SumiWidget.mono(11))
                         .foregroundStyle(attributes.muted)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer(minLength: 0)
-
-                // The card's own filing label: which machine this is
-                // driving, set in the same stamped register as the clocks.
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("ON")
-                        .font(SumiWidget.mono(8, weight: .medium))
-                        .tracking(1.4)
-                    Text(attributes.hostName.uppercased())
-                        .font(SumiWidget.mono(9, weight: .medium))
-                        .tracking(0.6)
-                        .lineLimit(1)
-                }
-                .foregroundStyle(attributes.muted)
-                .frame(maxWidth: 96, alignment: .trailing)
             }
 
             ProgressRule(theme: attributes, state: state)
 
-            Transport(theme: attributes, state: state)
+            HStack(alignment: .center) {
+                Text("ON \(attributes.hostName.uppercased())")
+                    .font(SumiWidget.mono(9, weight: .medium))
+                    .tracking(0.6)
+                    .foregroundStyle(attributes.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Transport(theme: attributes, state: state)
+            }
         }
         .padding(14)
     }

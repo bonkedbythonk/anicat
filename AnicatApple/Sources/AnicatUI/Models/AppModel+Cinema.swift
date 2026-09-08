@@ -216,40 +216,7 @@ extension AppModel {
         guard currentDetailCatalog == catalog, selectedMediaDetails?.id == id else { return }
 
         selectedEpisodes = Self.episodeItems(from: d)
-        // Built here rather than through the AniList path's own mapping: half
-        // of what that fills in -- the list entry, the score, the fixtures
-        // that stand in for personal data in screenshot mode -- is AniList's
-        // own and has no counterpart on a TMDB title.
-        let details = HeroBanner.Details(
-            id: d.catalogId,
-            title: d.title,
-            romajiTitle: d.romajiTitle,
-            bannerURL: d.bannerImage.flatMap(URL.init(string:)),
-            coverURL: URL(string: d.coverImage),
-            format: d.format,
-            year: d.year.map(Int.init),
-            studio: d.studio,
-            synopsis: d.synopsis,
-            genres: d.genres,
-            averageScore: d.averageScore.map(Int.init),
-            nextEpisodeText: nil,
-            status: d.status,
-            episodeCount: d.episodeCount.map(Int.init),
-            resumeEpisode: d.resumeEpisode.map(Int.init),
-            resumeSeconds: d.resumeSeconds.map(Int.init),
-            prequel: nil,
-            sequel: nil,
-            listStatus: nil,
-            userScore: nil,
-            listEntryId: nil,
-            listProgress: nil,
-            isFavourite: false,
-            malId: nil,
-            trailerSite: d.trailerSite,
-            trailerId: d.trailerId,
-            trailerThumbnail: d.trailerThumbnail,
-            studios: []
-        )
+        let details = Self.cinemaDetails(from: d)
         withAnimation(.easeInOut(duration: 0.24)) {
             selectedMediaDetails = details
             selectedRecommendations = d.recommendations.map {
@@ -306,6 +273,76 @@ extension AppModel {
             isManga: false,
             catalog: catalog
         )
+    }
+
+    /// A cinema title's header, mapped from `MediaDetail`.
+    ///
+    /// Built here rather than through the AniList path's own mapping: half of
+    /// what that fills in -- the list entry, the score, the fixtures that
+    /// stand in for personal data in screenshot mode -- is AniList's own and
+    /// has no counterpart on a TMDB title. Shared with the prefetch, so a
+    /// card hovered and a card opened write the same snapshot.
+    nonisolated static func cinemaDetails(from d: MediaDetail) -> HeroBanner.Details {
+        HeroBanner.Details(
+            id: d.catalogId,
+            title: d.title,
+            romajiTitle: d.romajiTitle,
+            bannerURL: d.bannerImage.flatMap(URL.init(string:)),
+            coverURL: URL(string: d.coverImage),
+            format: d.format,
+            year: d.year.map(Int.init),
+            studio: d.studio,
+            synopsis: d.synopsis,
+            genres: d.genres,
+            averageScore: d.averageScore.map(Int.init),
+            nextEpisodeText: nil,
+            status: d.status,
+            episodeCount: d.episodeCount.map(Int.init),
+            resumeEpisode: d.resumeEpisode.map(Int.init),
+            resumeSeconds: d.resumeSeconds.map(Int.init),
+            prequel: nil,
+            sequel: nil,
+            listStatus: nil,
+            userScore: nil,
+            listEntryId: nil,
+            listProgress: nil,
+            isFavourite: false,
+            malId: nil,
+            trailerSite: d.trailerSite,
+            trailerId: d.trailerId,
+            trailerThumbnail: d.trailerThumbnail,
+            studios: []
+        )
+    }
+
+    /// Warms the snapshot for a card the pointer is over, so opening it
+    /// paints from disk instead of from a spinner. Same idea as
+    /// `prefetchDetail` on the AniList side, and the same background
+    /// priority: it must never be what a real fetch is queued behind.
+    public func prefetchCinemaDetail(catalog: MediaCard.CardCatalog, id: Int64) {
+        guard let engine, catalog != .anilist, cinemaAvailable else { return }
+        guard DetailCache.load(id: id, isManga: false, catalog: catalog) == nil else { return }
+        guard !activePrefetches.contains(id) else { return }
+        activePrefetches.insert(id)
+        let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        Task(priority: .background) { [weak self] in
+            defer { self?.activePrefetches.remove(id) }
+            guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else { return }
+            DetailCache.save(
+                DetailCache.Snapshot(
+                    details: Self.cinemaDetails(from: d),
+                    episodes: Self.episodeItems(from: d),
+                    mangaChapters: [],
+                    relations: [],
+                    recommendations: [],
+                    characters: [],
+                    discussions: []
+                ),
+                id: id,
+                isManga: false,
+                catalog: catalog
+            )
+        }
     }
 
     /// Plays one episode of the open cinema title, or the film itself.

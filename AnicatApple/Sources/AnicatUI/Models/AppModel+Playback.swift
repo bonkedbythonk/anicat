@@ -378,7 +378,7 @@ extension AppModel {
         guard let engine, let details = selectedMediaDetails else { return [] }
         do {
             let choices = try await engine.listReleaseCandidates(
-                catalog: .anilist,
+                catalog: playbackCatalogForOpenDetail,
                 catalogId: details.id,
                 episode: Int64(episode),
                 title: details.title
@@ -406,11 +406,18 @@ extension AppModel {
         case nil, .notStarted?, .failed?: break
         }
         downloadStates[episode] = .downloading(percent: 0)
-        setLibraryDownload(catalogId: details.id, episode: episode, title: details.title, coverURL: details.coverURL, state: .downloading(percent: 0))
+        setLibraryDownload(
+            catalogId: details.id, episode: episode, title: details.title,
+            coverURL: details.coverURL, state: .downloading(percent: 0),
+            catalog: currentDetailCatalog
+        )
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
         do {
             try await engine.startEpisodeDownload(
-                catalog: .anilist,
+                // The open page's catalog, not AniList's: a film downloaded
+                // under `.anilist` searches for whatever anime carries the
+                // same number.
+                catalog: playbackCatalogForOpenDetail,
                 catalogId: details.id,
                 episode: Int64(episode),
                 title: details.title,
@@ -429,12 +436,15 @@ extension AppModel {
         let catalogId = details.id
         let title = details.title
         let coverURL = details.coverURL
+        // Same reason: the poll must ask about the catalog this download was
+        // started for, not whichever page is open a minute later.
+        let catalog = playbackCatalogForOpenDetail
         while true {
             // A cancelled task returns from `sleep` at once; with the error
             // swallowed this became a hot FFI poll until the download ended.
             do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
             let status = await engine.episodeDownloadStatus(
-                catalog: .anilist,
+                catalog: catalog,
                 catalogId: catalogId,
                 episode: Int64(episode)
             )
@@ -462,11 +472,27 @@ extension AppModel {
         }
     }
 
-    func setLibraryDownload(catalogId: Int64, episode: Int, title: String, coverURL: URL?, state: MediaDetailView.EpisodeDownloadState) {
+    func setLibraryDownload(
+        catalogId: Int64,
+        episode: Int,
+        title: String,
+        coverURL: URL?,
+        state: MediaDetailView.EpisodeDownloadState,
+        catalog: MediaCard.CardCatalog = .anilist
+    ) {
         if let idx = libraryDownloads.firstIndex(where: { $0.catalogId == catalogId && $0.episode == episode }) {
             libraryDownloads[idx].state = state
         } else {
-            libraryDownloads.append(LibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: state))
+            libraryDownloads.append(
+                LibraryDownload(
+                    catalogId: catalogId,
+                    episode: episode,
+                    title: title,
+                    coverURL: coverURL,
+                    state: state,
+                    catalog: catalog
+                )
+            )
         }
     }
 
@@ -534,7 +560,7 @@ extension AppModel {
         // took. The result is not read here; the real play hits the reuse
         // path in `TorrentManager::resolve`. `preload: true` keeps it from
         // taking the playing-file pin off the episode mpv is reading.
-        if currentPlaybackCatalog == .anilist, !hasPreloadedNextEpisode, dur > 0,
+        if currentPlaybackCatalog != .tmdbMovie, !hasPreloadedNextEpisode, dur > 0,
            playerController.hasNextEpisode,
            Double(stopTime) / Double(dur) * 100 >= Self.nextEpisodePreloadPct {
             hasPreloadedNextEpisode = true
@@ -543,7 +569,7 @@ extension AppModel {
                sorted.indices.contains(index + 1) {
                 let next = Int64(sorted[index + 1].number)
                 let req = StreamRequest(
-                    catalog: .anilist,
+                    catalog: currentPlaybackCatalog,
                     catalogId: catalogId,
                     episode: next,
                     title: currentPlaybackTitle,

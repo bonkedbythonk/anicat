@@ -178,7 +178,8 @@ struct CinemaHomeView: View {
         let key = "cinema:\(catalog.rawValue):\(shelf):\(item.id)"
         return MediaCard(
             item: item,
-            namespace: model.openingDetailSourceKey == key ? namespace : nil
+            namespace: model.openingDetailSourceKey == key ? namespace : nil,
+            onPrefetch: { model.prefetchCinemaDetail(catalog: catalog, id: item.id) }
         ) {
             model.openingDetailSourceKey = key
             Task {

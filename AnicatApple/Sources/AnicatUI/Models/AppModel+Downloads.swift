@@ -62,12 +62,19 @@ extension AppModel {
         // -- `MpvSurface.loadFile` opens nothing for a URL it has, so no
         // FILE_LOADED would ever lower the gate.
         let replayingCurrent = activeStreamURL == fileURL
-        currentPlaybackCatalog = .anilist
+        let catalog: FfiCatalog = {
+            switch download.catalog {
+            case .tmdbMovie: return .tmdbMovie
+            case .tmdbTv: return .tmdbTv
+            case .anilist: return .anilist
+            }
+        }()
+        currentPlaybackCatalog = catalog
         currentPlaybackCatalogId = catalogId
         currentPlaybackEpisode = episode
         playerController.awaitingNewFile = !replayingCurrent
         playerController.currentReleaseName = nil
-        ensurePlaybackEpisodes(for: catalogId, engine: engine)
+        ensurePlaybackEpisodes(for: catalogId, engine: engine, catalog: catalog)
         currentPlaybackTitle = title
         isPlayerMinimized = false
         resetPerEpisodeDedupState(discordPaused: false)
@@ -84,7 +91,7 @@ extension AppModel {
 
         var initialTime = 0.0
         var initialDuration = 0.0
-        if let progress = try? engine.getProgress(catalog: .anilist, catalogId: catalogId, episodeNumber: episode) {
+        if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
         }

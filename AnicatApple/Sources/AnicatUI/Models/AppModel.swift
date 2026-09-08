@@ -835,6 +835,10 @@ public final class AppModel {
         public let title: String
         public let coverURL: URL?
         public var state: MediaDetailView.EpisodeDownloadState
+        /// Which catalog the id belongs to. Playing a downloaded film under
+        /// AniList's would record the position against whatever anime shares
+        /// the number, and ask AniList for its episode list.
+        public var catalog: MediaCard.CardCatalog = .anilist
     }
 
     public var libraryDownloads: [LibraryDownload] = []

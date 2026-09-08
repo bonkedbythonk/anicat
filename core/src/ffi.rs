@@ -1163,14 +1163,16 @@ impl AnicatEngine {
         episode: i64,
         title: Option<String>,
     ) -> FfiResult<Vec<FfiTorrentChoice>> {
-        if catalog != FfiCatalog::Anilist {
-            return Err(AnicatError::NotFound {
-                msg: format!("{:?} playback is not wired up yet", catalog),
-            });
-        }
         let media = MediaKey::new(catalog.into(), catalog_id);
+        // The picker searches on the same terms the auto-pick does, or the
+        // list it shows is not the list the play would have chosen from.
+        let cinema = if catalog == FfiCatalog::Anilist {
+            None
+        } else {
+            Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
+        };
         let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title).await;
-        if info.titles.is_empty() {
+        if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
                 msg: format!("no search titles for {media}"),
             });
@@ -1184,20 +1186,39 @@ impl AnicatEngine {
                 ResolveTarget {
                     media,
                     episode,
-                    titles: &info.titles,
-                    allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
-                    episode_count: info.episode_count,
-                    aired_episodes: info.aired_episodes,
+                    titles: match &cinema {
+                        Some(c) => &c.titles,
+                        None => &info.titles,
+                    },
+                    allow_episodeless: match &cinema {
+                        Some(c) => !c.is_series,
+                        None => info.hint.kind == layout::EntryKind::Movie,
+                    },
+                    episode_count: cinema
+                        .as_ref()
+                        .map(|c| Some(c.episode_count))
+                        .unwrap_or(info.episode_count),
+                    aired_episodes: cinema
+                        .as_ref()
+                        .map(|c| Some(c.episode_count))
+                        .unwrap_or(info.aired_episodes),
                     // The picker shows every release regardless of dub
                     // preference — that choice belongs to whoever is
                     // picking, not to the same default the auto-pick uses.
                     prefer_dub: preview_dub,
                     browser_client: false,
                     chosen_name: None,
-                    movie: None,
-                    series: None,
-                    entry: info.hint,
-                    sibling_titles: &info.siblings,
+                    movie: cinema.as_ref().and_then(|c| c.movie_criteria),
+                    series: cinema.as_ref().and_then(|c| c.series_criteria),
+                    entry: match &cinema {
+                        Some(c) if !c.is_series => layout::EntryHint {
+                            kind: layout::EntryKind::Movie,
+                            ..Default::default()
+                        },
+                        Some(_) => layout::EntryHint::default(),
+                        None => info.hint,
+                    },
+                    sibling_titles: if cinema.is_some() { &[] } else { &info.siblings },
                     resume_fraction: None,
                     remembered: None,
                 },
@@ -1230,14 +1251,19 @@ impl AnicatEngine {
         title: Option<String>,
         prefer_dub: bool,
     ) -> FfiResult<()> {
-        if catalog != FfiCatalog::Anilist {
-            return Err(AnicatError::NotFound {
-                msg: format!("{:?} downloads are not wired up yet", catalog),
-            });
-        }
         let media = MediaKey::new(catalog.into(), catalog_id);
+        // A cinema download searches on exactly what a cinema play searches
+        // on -- same titles, same year or SxxEyy. They resolve into the same
+        // reuse cache keyed on the episode, so a download that searched
+        // differently would fetch a second, different release of the file
+        // already on disk.
+        let cinema = if catalog == FfiCatalog::Anilist {
+            None
+        } else {
+            Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
+        };
         let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title.clone()).await;
-        if info.titles.is_empty() {
+        if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
                 msg: format!("no search titles for {media}"),
             });
@@ -1253,17 +1279,36 @@ impl AnicatEngine {
                 ResolveTarget {
                     media,
                     episode,
-                    titles: &info.titles,
-                    allow_episodeless: info.hint.kind == layout::EntryKind::Movie,
-                    episode_count: info.episode_count,
-                    aired_episodes: info.aired_episodes,
+                    titles: match &cinema {
+                        Some(c) => &c.titles,
+                        None => &info.titles,
+                    },
+                    allow_episodeless: match &cinema {
+                        Some(c) => !c.is_series,
+                        None => info.hint.kind == layout::EntryKind::Movie,
+                    },
+                    episode_count: cinema
+                        .as_ref()
+                        .map(|c| Some(c.episode_count))
+                        .unwrap_or(info.episode_count),
+                    aired_episodes: cinema
+                        .as_ref()
+                        .map(|c| Some(c.episode_count))
+                        .unwrap_or(info.aired_episodes),
                     prefer_dub,
                     browser_client: false,
                     chosen_name: None,
-                    movie: None,
-                    series: None,
-                    entry: info.hint,
-                    sibling_titles: &info.siblings,
+                    movie: cinema.as_ref().and_then(|c| c.movie_criteria),
+                    series: cinema.as_ref().and_then(|c| c.series_criteria),
+                    entry: match &cinema {
+                        Some(c) if !c.is_series => layout::EntryHint {
+                            kind: layout::EntryKind::Movie,
+                            ..Default::default()
+                        },
+                        Some(_) => layout::EntryHint::default(),
+                        None => info.hint,
+                    },
+                    sibling_titles: if cinema.is_some() { &[] } else { &info.siblings },
                     resume_fraction: None,
                     remembered: None,
                 },
@@ -1281,7 +1326,10 @@ impl AnicatEngine {
             })?;
 
         let session = self.torrents.session().await.map_err(|msg| AnicatError::Internal { msg })?;
-        let display_title = title.unwrap_or_else(|| info.titles[0].clone());
+        let display_title = title.unwrap_or_else(|| match &cinema {
+            Some(c) => c.titles[0].clone(),
+            None => info.titles[0].clone(),
+        });
         self.torrents.spawn_episode_download(&session, torrent_id, file_id, display_title);
         Ok(())
     }
@@ -2405,66 +2453,9 @@ impl AnicatEngine {
         let port = self.ensure_stream_server().await?;
         let catalog: Catalog = req.catalog.into();
         let media = MediaKey::new(catalog, req.catalog_id);
-        let is_series = req.catalog == FfiCatalog::TmdbTv;
-        let detail = self
-            .catalogs
-            .cinema_detail(req.catalog_id, is_series)
-            .await
-            .map_err(|msg| AnicatError::Network { msg })?;
-
-        // Releases are named with either title TMDB carries -- an anime film
-        // on a western indexer is as likely to be listed under its original
-        // title as its english one -- and the page's own title goes in behind
-        // both, because it may be showing a translation of either.
-        let mut titles: Vec<String> = vec![];
-        let mut year: Option<i32> = None;
-        let mut season_map: Vec<(u32, u32)> = vec![];
-        if let Some(m) = &detail.movie {
-            push_title(&mut titles, m.title.clone());
-            push_title(&mut titles, m.original_title.clone());
-            year = release_year(m.release_date.as_deref());
-        }
-        if let Some(series) = &detail.series {
-            push_title(&mut titles, series.name.clone());
-            push_title(&mut titles, series.original_name.clone());
-            season_map = series.season_map();
-        }
-        push_title(&mut titles, req.title.clone());
-        if titles.is_empty() {
-            return Err(AnicatError::NotFound {
-                msg: format!("no search titles for {media}"),
-            });
-        }
-
-        let series_criteria = if is_series {
-            let (season, episode) =
-                crate::catalog::cinema::locate_episode(&season_map, req.episode.max(0) as u32)
-                    .ok_or_else(|| AnicatError::NotFound {
-                        msg: format!(
-                            "episode {} is past the {} seasons TMDB lists for {media}",
-                            req.episode,
-                            season_map.len()
-                        ),
-                    })?;
-            Some(crate::torrent::series::EpisodeCriteria {
-                season,
-                episode,
-                browser_client: false,
-            })
-        } else {
-            None
-        };
-        let movie_criteria = if is_series {
-            None
-        } else {
-            Some(crate::torrent::cinema::MovieCriteria { year, browser_client: false })
-        };
-
-        let episode_count: i64 = if is_series {
-            season_map.iter().map(|(_, count)| *count as i64).sum()
-        } else {
-            1
-        };
+        let CinemaSearchInputs { titles, movie_criteria, series_criteria, episode_count, is_series } =
+            self.cinema_search_inputs(req.catalog, req.catalog_id, req.episode, req.title.clone())
+                .await?;
 
         let remembered = self
             .registry
@@ -2530,6 +2521,90 @@ impl AnicatEngine {
             url,
             torrent_id: torrent_id as u64,
             file_id: file_id as u64,
+        })
+    }
+
+    /// What a cinema search needs, for a stream or for a download.
+    ///
+    /// Shared because the two must not drift: a download that searched on
+    /// different titles or a different SxxEyy than the stream would fetch a
+    /// different release for the same episode, and the reuse cache and the
+    /// remembered-release map are keyed on the episode, not on which button
+    /// asked for it.
+    async fn cinema_search_inputs(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        frontend_title: Option<String>,
+    ) -> FfiResult<CinemaSearchInputs> {
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        let is_series = catalog == FfiCatalog::TmdbTv;
+        let detail = self
+            .catalogs
+            .cinema_detail(catalog_id, is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+
+        // Releases are named with either title TMDB carries -- a film on a
+        // western indexer is as likely to be listed under its original title
+        // as its english one -- and the page's own title goes in behind both,
+        // because it may be showing a translation of either.
+        let mut titles: Vec<String> = vec![];
+        let mut year: Option<i32> = None;
+        let mut season_map: Vec<(u32, u32)> = vec![];
+        if let Some(m) = &detail.movie {
+            push_title(&mut titles, m.title.clone());
+            push_title(&mut titles, m.original_title.clone());
+            year = release_year(m.release_date.as_deref());
+        }
+        if let Some(series) = &detail.series {
+            push_title(&mut titles, series.name.clone());
+            push_title(&mut titles, series.original_name.clone());
+            season_map = series.season_map();
+        }
+        push_title(&mut titles, frontend_title);
+        if titles.is_empty() {
+            return Err(AnicatError::NotFound {
+                msg: format!("no search titles for {media}"),
+            });
+        }
+
+        let series_criteria = if is_series {
+            let (season, ep) =
+                crate::catalog::cinema::locate_episode(&season_map, episode.max(0) as u32)
+                    .ok_or_else(|| AnicatError::NotFound {
+                        msg: format!(
+                            "episode {} is past the {} seasons TMDB lists for {media}",
+                            episode,
+                            season_map.len()
+                        ),
+                    })?;
+            Some(crate::torrent::series::EpisodeCriteria {
+                season,
+                episode: ep,
+                browser_client: false,
+            })
+        } else {
+            None
+        };
+        let movie_criteria = if is_series {
+            None
+        } else {
+            Some(crate::torrent::cinema::MovieCriteria { year, browser_client: false })
+        };
+        let episode_count: i64 = if is_series {
+            season_map.iter().map(|(_, count)| *count as i64).sum()
+        } else {
+            1
+        };
+
+        Ok(CinemaSearchInputs {
+            titles,
+            movie_criteria,
+            series_criteria,
+            episode_count,
+            is_series,
         })
     }
 
@@ -3158,6 +3233,15 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
         next_airing_at: m.next_airing_episode.as_ref().and_then(|n| n.airing_at),
         next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
     }
+}
+
+/// Everything a cinema resolve needs that the catalog has to answer first.
+struct CinemaSearchInputs {
+    titles: Vec<String>,
+    movie_criteria: Option<crate::torrent::cinema::MovieCriteria>,
+    series_criteria: Option<crate::torrent::series::EpisodeCriteria>,
+    episode_count: i64,
+    is_series: bool,
 }
 
 /// Adds a title to the search list when it has one and it is not already

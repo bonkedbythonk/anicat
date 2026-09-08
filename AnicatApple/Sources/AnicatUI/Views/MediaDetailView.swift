@@ -250,6 +250,11 @@ public struct MediaDetailView: View {
     /// season breakdown, the stills. Nil on an AniList page, which is what
     /// keeps the Details tab out of the bar there.
     public var cinemaExtras: CinemaExtras?
+    /// The open cinema title's local list status, and how to change it.
+    /// Local because AniList has no entry for a TMDB title -- this is the
+    /// registry's own list, on this device.
+    public var cinemaListStatus: String?
+    public var onSetCinemaListStatus: (String?) -> Void = { _ in }
     
     public let onPlayEpisode: (EpisodeItem) -> Void
     /// Same episode as `onPlayEpisode`, ignoring the recorded resume
@@ -322,6 +327,11 @@ public struct MediaDetailView: View {
     @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     private var selectedAudioType: AudioType { AudioType(stored: storedSubDub) }
     @State private var selectedViewMode: EpisodeViewMode = .cards
+    /// Which season the episode list is filtered to, once someone picks one.
+    /// Nil means "whichever the resume position is in" -- see
+    /// `defaultSeason`, and note it must not be resolved at init: the
+    /// seasons arrive with the extras, after the page is already on screen.
+    @State private var selectedSeason: Int32?
     @State private var isSynopsisExpanded = false
     @State private var isBackHovered = false
     /// Set from the scroll offset, but only ever as this Bool — see
@@ -367,6 +377,8 @@ public struct MediaDetailView: View {
         isLoading: Bool = false,
         tracksOnAniList: Bool = true,
         cinemaExtras: CinemaExtras? = nil,
+        cinemaListStatus: String? = nil,
+        onSetCinemaListStatus: @escaping (String?) -> Void = { _ in },
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
         onReadChapter: @escaping (MangaChapterItem) -> Void = { _ in },
@@ -407,6 +419,8 @@ public struct MediaDetailView: View {
         self.isLoading = isLoading
         self.tracksOnAniList = tracksOnAniList
         self.cinemaExtras = cinemaExtras
+        self.cinemaListStatus = cinemaListStatus
+        self.onSetCinemaListStatus = onSetCinemaListStatus
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
         self.onReadChapter = onReadChapter
@@ -484,6 +498,10 @@ public struct MediaDetailView: View {
             }
         }
         .onChange(of: activeTab) { _, _ in closeTrailer() }
+        // A season picked on one show must not carry to the next: the page
+        // is reused for whatever opens, and season 4 of a four-season show
+        // filters a two-season one down to nothing.
+        .onChange(of: details.id) { _, _ in selectedSeason = nil }
         .onChange(of: TrailerState.shared.isOpen) { _, open in
             if !open { closeTrailer() }
         }
@@ -1315,6 +1333,35 @@ public struct MediaDetailView: View {
                 .buttonStyle(.sumiPressable)
             }
 
+            if !tracksOnAniList {
+                Menu {
+                    ForEach(["PLANNING", "CURRENT", "COMPLETED", "DROPPED"], id: \.self) { status in
+                        Button(Self.statusLabel(status)) { onSetCinemaListStatus(status) }
+                    }
+                    if cinemaListStatus != nil {
+                        Divider()
+                        Button("Remove from list") { onSetCinemaListStatus(nil) }
+                    }
+                } label: {
+                    Text(cinemaListStatus.map(Self.statusLabel) ?? "Add to List")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 16)
+                        .frame(height: 40)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                        .sumiMenuPressable()
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .animation(.snappy, value: cinemaListStatus)
+            }
+
             // AniList owns the list status, the score and the heart. A cinema
             // page has no entry to write to -- and its id is TMDB's, which
             // AniList would read as whatever anime carries the same number.
@@ -1434,6 +1481,72 @@ public struct MediaDetailView: View {
               let seconds = details.resumeSeconds, seconds > 0,
               target.number == details.resumeEpisode else { return nil }
         return seconds
+    }
+
+    /// TMDB's season breakdown for the open title, empty for anything else.
+    private var seasons: [CinemaSeason] { cinemaExtras?.seasons ?? [] }
+
+    /// The absolute episode numbers one season covers.
+    ///
+    /// The engine numbers episodes absolutely -- the registry, the resume
+    /// position and the remembered release all key on one number -- so a
+    /// season is a range in that sequence rather than a field on the row.
+    /// Built from the same map the engine resolves against, so what this
+    /// shows and what a play fetches cannot disagree.
+    private func range(ofSeason season: CinemaSeason) -> ClosedRange<Int> {
+        var start = 1
+        for entry in seasons {
+            if entry.number == season.number { break }
+            start += Int(entry.episodeCount)
+        }
+        return start...(start + Int(season.episodeCount) - 1)
+    }
+
+    private var episodesForSelectedSeason: [EpisodeItem] {
+        guard seasons.count > 1 else { return episodes }
+        let wanted = selectedSeason ?? defaultSeason
+        let season = seasons.first { $0.number == wanted } ?? seasons[0]
+        let span = range(ofSeason: season)
+        return episodes.filter { span.contains($0.number) }
+    }
+
+    /// Which season the list is showing. Defaults to the one the resume
+    /// position is in, so a show resumed at season 3 opens on season 3
+    /// rather than on a first season finished months ago.
+    private var defaultSeason: Int32 {
+        guard let resume = details.resumeEpisode else { return seasons.first?.number ?? 1 }
+        for season in seasons where range(ofSeason: season).contains(resume) {
+            return season.number
+        }
+        return seasons.first?.number ?? 1
+    }
+
+    private var seasonPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(seasons, id: \.number) { season in
+                    let isSelected = (selectedSeason ?? defaultSeason) == season.number
+                    Button {
+                        withAnimation(.snappy(duration: 0.25)) { selectedSeason = season.number }
+                    } label: {
+                        Text("S\(season.number)")
+                            .sumiTabularMono(size: 11.5, weight: isSelected ? .bold : .regular)
+                            .foregroundColor(isSelected ? SumiTheme.background : SumiTheme.muted)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(isSelected ? SumiTheme.foreground : SumiTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.clear : SumiTheme.border, lineWidth: 1)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
+            }
+            .padding(.vertical, 2)
+        }
     }
 
     /// A film: one sitting, numbered 1 only because the registry, the resume
@@ -1822,22 +1935,27 @@ public struct MediaDetailView: View {
             // 1854-line `body` above, so every tick re-evaluated the entire
             // detail page — banner, tabs, unrelated sections — to redraw one
             // row's percentage.
-            EpisodeListSection(
-                episodes: episodes,
-                resumeEpisode: details.resumeEpisode,
-                resumeSeconds: details.resumeSeconds,
-                selectedViewMode: selectedViewMode,
-                downloadStates: downloadStates,
-                isLoading: isLoading,
-                onPlayEpisode: { episode in startingPlayback { onPlayEpisode(episode) } },
-                onSetEpisodeWatched: onSetEpisodeWatched,
-                onLoadReleaseCandidates: onLoadReleaseCandidates,
-                onPlayWithRelease: { episode, name in startingPlayback { onPlayWithRelease(episode, name) } },
-                onDownloadEpisode: downloadEpisode,
-                catalogId: details.id,
-                playerNamespace: playerNamespace,
-                playerSourceKey: playerSourceKey
-            )
+            VStack(alignment: .leading, spacing: 12) {
+                if seasons.count > 1 {
+                    seasonPicker
+                }
+                EpisodeListSection(
+                    episodes: episodesForSelectedSeason,
+                    resumeEpisode: details.resumeEpisode,
+                    resumeSeconds: details.resumeSeconds,
+                    selectedViewMode: selectedViewMode,
+                    downloadStates: downloadStates,
+                    isLoading: isLoading,
+                    onPlayEpisode: { episode in startingPlayback { onPlayEpisode(episode) } },
+                    onSetEpisodeWatched: onSetEpisodeWatched,
+                    onLoadReleaseCandidates: onLoadReleaseCandidates,
+                    onPlayWithRelease: { episode, name in startingPlayback { onPlayWithRelease(episode, name) } },
+                    onDownloadEpisode: downloadEpisode,
+                    catalogId: details.id,
+                    playerNamespace: playerNamespace,
+                    playerSourceKey: playerSourceKey
+                )
+            }
         case .manga:
             MangaTabSection(chapters: mangaChapters, format: details.format, isLoading: isLoading, onReadChapter: onReadChapter)
         case .characters:

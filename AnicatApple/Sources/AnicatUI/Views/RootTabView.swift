@@ -183,7 +183,21 @@ private struct UpNextTab: View {
                     NavigationLink {
                         PhoneSettingsView(model: model)
                     } label: {
-                        Image(systemName: "person.crop.circle")
+                        // The signed-in avatar, not a generic person glyph.
+                        // A placeholder symbol in the bar reads as an
+                        // unfinished control floating over the large title;
+                        // the account's own picture reads as the account.
+                        if let avatar = model.viewer?.avatarUrl.flatMap(URL.init(string:)) {
+                            CachedAsyncImage(url: avatar, maxPixelSize: 96) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                SumiTheme.card
+                            }
+                            .frame(width: 26, height: 26)
+                            .clipShape(Circle())
+                        } else {
+                            Image(systemName: "person.crop.circle")
+                        }
                     }
                 }
             }

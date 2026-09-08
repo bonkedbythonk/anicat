@@ -72,6 +72,11 @@ extension AppModel {
         trendingItems = snapshot.trending
         watchingItems = snapshot.watching
         upNextItems = snapshot.upNext
+        // Cinema paints from the same snapshot the anime home does; without
+        // it, switching to cinema after a relaunch was eight empty shelves
+        // until TMDB answered.
+        cinemaShelves = snapshot.cinemaShelves ?? []
+        cinemaUpNext = snapshot.cinemaUpNext ?? []
         // `airingTimeText`/`countdownText`/`dayGroup` are rendered strings
         // computed relative to "now" at fetch time — stale the moment the
         // cache is more than a few minutes old — so they're rebuilt from the
@@ -123,7 +128,9 @@ extension AppModel {
             smartPicks: smartPicks,
             newlyReleasing: newlyReleasingItems,
             seasonal: seasonalItems,
-            becauseYouWatched: becauseYouWatched
+            becauseYouWatched: becauseYouWatched,
+            cinemaShelves: cinemaShelves,
+            cinemaUpNext: cinemaUpNext
         ))
     }
 

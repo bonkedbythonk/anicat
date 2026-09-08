@@ -12,8 +12,13 @@ public final class ContinuityManager: @unchecked Sendable {
     private init() {}
 
     /// Broadcasts current playback state for Apple Handoff (desk-to-bed continuity).
+    /// `catalog` travels with the id because a bare number names three
+    /// different titles now -- an AniList entry, a TMDB film and a TMDB
+    /// series -- and the receiving device would otherwise open whichever of
+    /// them its own default happened to be.
     public func advertisePlayback(
         catalogId: Int64,
+        catalog: String = "anilist",
         title: String,
         episode: Int,
         timePositionSeconds: Double
@@ -26,6 +31,7 @@ public final class ContinuityManager: @unchecked Sendable {
 
         activity.userInfo = [
             "catalogId": catalogId,
+            "catalog": catalog,
             "title": title,
             "episode": episode,
             "timePosition": timePositionSeconds,
@@ -86,7 +92,13 @@ public final class ContinuityManager: @unchecked Sendable {
            let episode = userInfo["episode"] as? Int,
            let timePos = userInfo["timePosition"] as? Double {
             let title = userInfo["title"] as? String ?? "Episode \(episode)"
-            return .playback(catalogId: catalogId, title: title, episode: episode, timePosition: timePos)
+            // An activity from a build before cinema mode carries no catalog
+            // at all, and everything those builds could play was AniList's.
+            let catalog = userInfo["catalog"] as? String ?? "anilist"
+            return .playback(
+                catalogId: catalogId, catalog: catalog, title: title,
+                episode: episode, timePosition: timePos
+            )
         }
 
         if activity.activityType == Self.readingActivityType,
@@ -102,7 +114,7 @@ public final class ContinuityManager: @unchecked Sendable {
     }
 
     public enum HandoffPayload: Sendable {
-        case playback(catalogId: Int64, title: String, episode: Int, timePosition: Double)
+        case playback(catalogId: Int64, catalog: String, title: String, episode: Int, timePosition: Double)
         case reading(mangaId: String, anilistId: Int64?, title: String, chapter: String, pageIndex: Int)
     }
 }

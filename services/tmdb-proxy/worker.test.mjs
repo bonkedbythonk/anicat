@@ -34,11 +34,13 @@ test("forwards the endpoints the app actually calls", async () => {
     "/3/movie/550",
     "/3/tv/125988/season/1",
     "/3/search/movie?query=dune",
+    "/3/discover/movie?with_genres=28&primary_release_year=1999",
+    "/3/genre/tv/list",
   ]) {
     const response = await call(path);
     assert.equal(response.status, 200, `${path} should forward`);
   }
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 7);
 });
 
 test("refuses anything else, so it is not an open TMDB account", async () => {
@@ -64,14 +66,23 @@ test("only GET is proxied", async () => {
   assert.equal(calls.length, 0);
 });
 
+test("the filter row's parameters survive, the rest still do not", async () => {
+  const calls = stubFetch();
+  await call("/3/discover/movie?with_genres=28&primary_release_year=1999&sort_by=vote_average.desc&with_people=500");
+  const forwarded = new URL(calls[0].url);
+  assert.equal(forwarded.searchParams.get("with_genres"), "28");
+  assert.equal(forwarded.searchParams.get("primary_release_year"), "1999");
+  assert.equal(forwarded.searchParams.get("sort_by"), "vote_average.desc");
+  assert.equal(forwarded.searchParams.get("with_people"), null);
+});
+
 test("a caller cannot smuggle parameters, or their own key, upstream", async () => {
   const calls = stubFetch();
-  await call("/3/search/movie?query=dune&page=2&api_key=theirs&session_id=x&sort_by=revenue.desc");
+  await call("/3/search/movie?query=dune&page=2&api_key=theirs&session_id=x&with_people=500");
   const forwarded = new URL(calls[0].url);
   assert.equal(forwarded.searchParams.get("query"), "dune");
   assert.equal(forwarded.searchParams.get("page"), "2");
   assert.equal(forwarded.searchParams.get("session_id"), null);
-  assert.equal(forwarded.searchParams.get("sort_by"), null);
   // The key on the wire is the proxy's own, never one the caller supplied.
   assert.equal(forwarded.searchParams.get("api_key"), "0123456789abcdef0123456789abcdef");
 });

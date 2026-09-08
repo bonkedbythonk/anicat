@@ -624,8 +624,9 @@ extension AppModel {
             )
         }
 
-        let title = currentPlaybackTitle ?? "Anime"
-        let episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
+        let title = currentPlaybackTitle ?? (currentPlaybackCatalog == .anilist ? "Anime" : "Film")
+        let episodeTitle = playbackEpisodes.first(where: { $0.number == Int(episode) })?.title
+            ?? (currentPlaybackCatalog == .tmdbMovie ? title : "")
         let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
         let catalog = currentPlaybackCatalog
         // Read here rather than inside the closure: the queue runs behind
@@ -845,7 +846,9 @@ extension AppModel {
         chosenName: String? = nil,
         fromStart: Bool = false
     ) async throws -> URL {
-        let effectiveTitle = title ?? self.selectedMediaDetails?.title ?? self.knownTitles[catalogId] ?? "Anime"
+        let effectiveTitle = title ?? self.selectedMediaDetails?.title
+            ?? self.knownTitles[catalogId]
+            ?? (catalog == .anilist ? "Anime" : "Film")
         self.playerController.title = effectiveTitle
         self.playerController.episodeNumber = Int(episode)
         self.playerController.isPlaying = true

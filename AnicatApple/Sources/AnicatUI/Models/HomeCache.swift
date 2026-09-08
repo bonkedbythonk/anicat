@@ -35,6 +35,10 @@ enum HomeCache {
         /// take `load()` to nil and cost the render-then-refresh launch this
         /// file exists for.
         var becauseYouWatched: [MediaCard.Item]?
+        /// Cinema mode's rows and resume queue. Optional for the same reason
+        /// as the field above -- an older snapshot has neither key.
+        var cinemaShelves: [AppModel.CinemaShelf]?
+        var cinemaUpNext: [UpNextQueueView.QueueEntry]?
     }
 
     private static let fileURL: URL = {

@@ -503,6 +503,34 @@ public final class AppModel {
     public var cinemaKnownCovers: [Int64: URL] = [:]
     /// Films and episodes with a stored position, most recent first.
     public var cinemaContinueWatching: [MediaCard.Item] = []
+    /// The Search section's filter row and its paging.
+    ///
+    /// A keyword search and a filtered browse are two different TMDB
+    /// endpoints -- `/search` takes a query and nothing else, `/discover`
+    /// takes genre, year and sort and no query -- so which one runs is
+    /// decided by whether there is text in the field.
+    public struct CinemaFilter: Equatable, Sendable {
+        public var isSeries: Bool = false
+        public var genreId: Int64?
+        public var year: Int?
+        public var sort: String = "popularity.desc"
+    }
+
+    public var cinemaFilter = CinemaFilter()
+    /// The open cinema page's local list status, and the list itself.
+    /// Local because there is nowhere else: AniList has no entry for a TMDB
+    /// title, so this is the registry's `local_library` and this device.
+    public var cinemaListStatus: String?
+    public var cinemaWatchlist: [MediaCard.Item] = []
+    public var cinemaWatchlistFilter: String = "PLANNING"
+    public var cinemaGenres: [FfiCinemaGenre] = []
+    public var cinemaSearchPage: Int32 = 1
+    public var cinemaSearchHasMore = false
+    public var isLoadingMoreCinema = false
+
+    /// The resume queue at the top of cinema's home, in the same shape the
+    /// anime one uses: what to play next, how far in, how long ago.
+    public var cinemaUpNext: [UpNextQueueView.QueueEntry] = []
 
     /// The facts TMDB carries that `MediaDetail` has no field for, for the
     /// open cinema page. Nil on an AniList page, which is what hides the

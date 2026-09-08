@@ -28,6 +28,8 @@ const ALLOWED = [
   /^\/3\/tv\/\d{1,9}$/,
   /^\/3\/tv\/\d{1,9}\/season\/\d{1,3}$/,
   /^\/3\/search\/(movie|tv)$/,
+  /^\/3\/discover\/(movie|tv)$/,
+  /^\/3\/genre\/(movie|tv)\/list$/,
 ];
 
 /** Query parameters forwarded to TMDB. Everything else is dropped.
@@ -42,6 +44,11 @@ const ALLOWED_PARAMS = new Set([
   "query",
   "include_adult",
   "append_to_response",
+  // The filter row: genre, year and sort, as /discover names them.
+  "with_genres",
+  "primary_release_year",
+  "first_air_date_year",
+  "sort_by",
 ]);
 
 /** How long the edge keeps a response.

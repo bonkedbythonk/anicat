@@ -267,6 +267,20 @@ pub struct CinemaExtras {
     pub seasons: Vec<CinemaSeason>,
 }
 
+/// One row of the local list.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLocalEntry {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCinemaGenre {
+    pub id: i64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CinemaSeason {
     pub number: i32,
@@ -1022,14 +1036,102 @@ impl AnicatEngine {
         Ok(items.iter().map(summarize_cinema).collect())
     }
 
-    /// Films and series matching a query, most popular first.
-    pub async fn search_cinema(&self, query: String, limit: i32) -> FfiResult<Vec<MediaSummary>> {
+    /// Films and series matching a query, most popular first. `page` is
+    /// TMDB's own, twenty results to a page.
+    pub async fn search_cinema(
+        &self,
+        query: String,
+        limit: i32,
+        page: i32,
+    ) -> FfiResult<Vec<MediaSummary>> {
         let items = self
             .catalogs
-            .cinema_search(&query, limit.max(1) as i64)
+            .cinema_search(&query, limit.max(1) as i64, page.max(1) as i64)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// TMDB's genre list, for the filter row.
+    pub async fn cinema_genres(&self, is_series: bool) -> FfiResult<Vec<FfiCinemaGenre>> {
+        let rows = self
+            .catalogs
+            .cinema_genres(is_series)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, name)| FfiCinemaGenre { id, name })
+            .collect())
+    }
+
+    /// Browse by genre, year and sort. A keyword search cannot answer
+    /// "action films from 1999, most popular first"; this is the endpoint
+    /// that can, and it is what the anime side's filtered search does
+    /// through AniList.
+    pub async fn cinema_discover(
+        &self,
+        is_series: bool,
+        genre_id: Option<i64>,
+        year: Option<i32>,
+        sort: Option<String>,
+        page: i32,
+    ) -> FfiResult<Vec<MediaSummary>> {
+        let items = self
+            .catalogs
+            .cinema_discover(is_series, genre_id, year, sort.as_deref(), page.max(1) as i64)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// Puts a film or series on the local list, or takes it off.
+    ///
+    /// Local because there is nowhere else: AniList has no entry for a TMDB
+    /// title, and cinema tracking is deliberately this device's registry and
+    /// nothing external. `status` is `PLANNING`, `CURRENT`, `COMPLETED` or
+    /// `DROPPED`, matching what the anime side's list statuses are called so
+    /// one set of labels serves both.
+    pub fn set_cinema_list_status(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        status: Option<String>,
+    ) -> FfiResult<()> {
+        self.registry
+            .set_local_status(catalog.into(), catalog_id, status.as_deref())
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    pub fn cinema_list_status(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<Option<String>> {
+        self.registry
+            .local_status(catalog.into(), catalog_id)
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// The local list, newest first. `status` narrows it; the rows carry no
+    /// titles because the registry has never known any -- the caller names
+    /// them from its own snapshots.
+    pub fn cinema_list(&self, status: Option<String>) -> FfiResult<Vec<FfiLocalEntry>> {
+        let rows = self
+            .registry
+            .local_library(
+                &[Catalog::TmdbMovie, Catalog::TmdbTv],
+                status.as_deref(),
+            )
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|(catalog, catalog_id, status)| FfiLocalEntry {
+                catalog: catalog.into(),
+                catalog_id,
+                status,
+            })
+            .collect())
     }
 
     /// The cast, top-billed first. Answered from the same cached TMDB detail
@@ -1900,6 +2002,21 @@ impl AnicatEngine {
     ) -> FfiResult<()> {
         self.registry
             .record_progress(catalog.into(), catalog_id, episode_number, stop_time, duration)
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// Forgets the local watch record for `episode_number` and everything
+    /// after it. The episode list's un-check calls this alongside the AniList
+    /// write; see `Registry::clear_progress_from` for why the AniList write
+    /// alone could not make an un-check stick.
+    pub fn clear_progress_from(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode_number: i64,
+    ) -> FfiResult<()> {
+        self.registry
+            .clear_progress_from(catalog.into(), catalog_id, episode_number)
             .map_err(|msg| AnicatError::Storage { msg })
     }
 

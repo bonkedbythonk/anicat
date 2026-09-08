@@ -99,6 +99,41 @@ impl Registry {
         Ok(())
     }
 
+    /// Forgets the local watch record for an episode and every episode after
+    /// it, for an explicit un-check in the episode list.
+    ///
+    /// Without this an un-check could not stick. `episode_is_watched` is
+    /// `local_percent >= 85.0 || number <= anilist_progress`, so a history
+    /// row past 85% pins the box on whatever AniList says: un-checking
+    /// episode 10 of AniList 156023 (stop_time 1319 of 1420, 92.9%) wrote
+    /// `progress: 9`, AniList took it, and the row snapped straight back to
+    /// checked. The viewer clicked it six times.
+    ///
+    /// Rows are deleted rather than zeroed because `recent_activity` and
+    /// `progress_rows` select every row regardless of `stop_time` — a
+    /// zeroed one would keep the episode in the activity feed and in the
+    /// lifetime statistics as something that was watched.
+    ///
+    /// From `from_episode` rather than that one episode alone: AniList holds
+    /// a single progress number, so un-checking episode 5 means "I have
+    /// watched up to 4", and leaving 6 through 10 locally watched would show
+    /// them checked while the list said 4.
+    pub fn clear_progress_from(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        from_episode: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "DELETE FROM watch_history
+             WHERE catalog = ?1 AND catalog_id = ?2 AND episode_number >= ?3",
+            params![catalog.as_str(), catalog_id, from_episode],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn get_progress(
         &self,
         catalog: Catalog,
@@ -293,6 +328,95 @@ impl Registry {
         Ok(())
     }
 
+    /// The viewer's own list for a catalog AniList does not track.
+    ///
+    /// `local_library` has been in the schema since migration 1 and unused
+    /// since: anime lists live on AniList. A film has no such home, so this
+    /// is the only place a "want to watch" can be kept, and it stays on the
+    /// device that recorded it.
+    pub fn set_local_status(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        status: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        match status {
+            // Clearing removes the row rather than storing an empty status:
+            // "not on the list" and "on the list with no status" are the same
+            // thing to every reader, and one of them would sort oddly.
+            None => conn
+                .execute(
+                    "DELETE FROM local_library WHERE catalog = ?1 AND catalog_id = ?2",
+                    params![catalog.as_str(), catalog_id],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Some(status) => conn
+                .execute(
+                    "INSERT INTO local_library (catalog, catalog_id, status, updated_at)
+                     VALUES (?1, ?2, ?3, datetime('now'))
+                     ON CONFLICT(catalog, catalog_id) DO UPDATE SET
+                       status = excluded.status, updated_at = excluded.updated_at",
+                    params![catalog.as_str(), catalog_id, status],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    pub fn local_status(&self, catalog: Catalog, catalog_id: i64) -> Result<Option<String>, String> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT status FROM local_library WHERE catalog = ?1 AND catalog_id = ?2",
+            params![catalog.as_str(), catalog_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(|v| v.flatten())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Everything on the local list, newest first. `status` narrows it;
+    /// `catalogs` keeps anime's own rows out of a cinema list.
+    pub fn local_library(
+        &self,
+        catalogs: &[Catalog],
+        status: Option<&str>,
+    ) -> Result<Vec<(Catalog, i64, String)>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, status FROM local_library
+                 WHERE status IS NOT NULL ORDER BY updated_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = vec![];
+        for row in rows {
+            let (catalog, id, row_status) = row.map_err(|e| e.to_string())?;
+            let Some(catalog) = Catalog::parse(&catalog) else { continue };
+            if !catalogs.is_empty() && !catalogs.contains(&catalog) {
+                continue;
+            }
+            if let Some(status) = status {
+                if !row_status.eq_ignore_ascii_case(status) {
+                    continue;
+                }
+            }
+            out.push((catalog, id, row_status));
+        }
+        Ok(out)
+    }
+
     pub fn get_provider_slug(
         &self,
         catalog: Catalog,
@@ -396,6 +520,33 @@ mod tests {
     use super::*;
 
     #[test]
+    #[test]
+    fn the_local_list_keeps_catalogs_apart_and_clears_by_deleting() {
+        let db = Registry::open_in_memory().unwrap();
+        db.set_local_status(Catalog::TmdbMovie, 550, Some("PLANNING")).unwrap();
+        db.set_local_status(Catalog::TmdbTv, 550, Some("CURRENT")).unwrap();
+        // Same number, three catalogs, three different titles.
+        db.set_local_status(Catalog::Anilist, 550, Some("COMPLETED")).unwrap();
+
+        let cinema = db.local_library(&[Catalog::TmdbMovie, Catalog::TmdbTv], None).unwrap();
+        assert_eq!(cinema.len(), 2, "an anime row must not reach a cinema list");
+        assert_eq!(db.local_status(Catalog::TmdbMovie, 550).unwrap().as_deref(), Some("PLANNING"));
+
+        let planning = db
+            .local_library(&[Catalog::TmdbMovie, Catalog::TmdbTv], Some("PLANNING"))
+            .unwrap();
+        assert_eq!(planning.len(), 1);
+
+        // Clearing removes the row: "not on the list" and "on the list with
+        // no status" would otherwise be two states meaning one thing.
+        db.set_local_status(Catalog::TmdbMovie, 550, None).unwrap();
+        assert_eq!(db.local_status(Catalog::TmdbMovie, 550).unwrap(), None);
+        assert_eq!(
+            db.local_library(&[Catalog::TmdbMovie, Catalog::TmdbTv], None).unwrap().len(),
+            1
+        );
+    }
+
     fn anilist_and_tmdb_ids_do_not_collide() {
         // The whole point of the composite key: the same integer under two
         // catalogs is two different shows. Under the old banding scheme this
@@ -416,6 +567,31 @@ mod tests {
         db.record_progress(Catalog::Anilist, 5, 3, 90, 0).unwrap();
         let e = db.get_progress(Catalog::Anilist, 5, 3).unwrap().unwrap();
         assert_eq!((e.stop_time, e.duration), (90, 1440));
+    }
+
+    #[test]
+    fn an_un_check_forgets_that_episode_and_the_ones_after_it() {
+        // The shape of the bug this exists for: episodes watched to the end
+        // stay watched locally, so nothing below the un-checked one may be
+        // touched and nothing at or above it may survive.
+        let db = Registry::open_in_memory().unwrap();
+        for ep in 8..=11 {
+            db.record_progress(Catalog::Anilist, 156023, ep, 1319, 1420).unwrap();
+        }
+        // Another title's episode 10 must not be swept up with it.
+        db.record_progress(Catalog::Anilist, 1535, 10, 1319, 1420).unwrap();
+
+        db.clear_progress_from(Catalog::Anilist, 156023, 10).unwrap();
+
+        assert!(db.get_progress(Catalog::Anilist, 156023, 9).unwrap().is_some());
+        assert!(db.get_progress(Catalog::Anilist, 156023, 10).unwrap().is_none());
+        assert!(db.get_progress(Catalog::Anilist, 156023, 11).unwrap().is_none());
+        assert!(db.get_progress(Catalog::Anilist, 1535, 10).unwrap().is_some());
+        // Deleted, not zeroed: a zeroed row still counts as a watch in
+        // `recent_activity` and in the lifetime statistics.
+        assert!(db.recent_activity(10).unwrap().iter().all(|a| {
+            !(a.catalog_id == 156023 && a.episode_number >= 10)
+        }));
     }
 
     #[test]

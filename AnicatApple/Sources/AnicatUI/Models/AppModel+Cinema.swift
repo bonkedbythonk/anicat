@@ -16,7 +16,7 @@ import AnicatCoreKit
 /// Pressing play on a film runs the same path as pressing play on an episode.
 extension AppModel {
     /// One row of the cinema home page.
-    public struct CinemaShelf: Identifiable, Sendable, Equatable {
+    public struct CinemaShelf: Identifiable, Sendable, Equatable, Codable {
         /// The engine's own row name (`trending_movies`), which is both the
         /// id and what `cinemaRow` is called with.
         public let id: String
@@ -133,19 +133,79 @@ extension AppModel {
         cinemaError = built.isEmpty ? failure : nil
     }
 
-    /// Films and series matching the search field's text.
-    public func searchCinema(_ query: String) async {
+    /// The Search section's results: a keyword search when there is text in
+    /// the field, a filtered browse when there is not.
+    ///
+    /// TMDB will not do both at once -- `/search` ignores a genre and
+    /// `/discover` ignores a query -- so this picks one rather than
+    /// pretending the filter row applies to a keyword search.
+    public func searchCinema(_ query: String, page: Int32 = 1, append: Bool = false) async {
         guard let engine, cinemaAvailable else { return }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            cinemaSearchResults = []
-            return
+        if append { isLoadingMoreCinema = true }
+        defer { isLoadingMoreCinema = false }
+
+        let results: [MediaSummary]
+        if trimmed.isEmpty {
+            results = (try? await engine.cinemaDiscover(
+                isSeries: cinemaFilter.isSeries,
+                genreId: cinemaFilter.genreId,
+                year: cinemaFilter.year.map(Int32.init),
+                sort: cinemaFilter.sort,
+                page: page
+            )) ?? []
+        } else {
+            results = (try? await engine.searchCinema(query: trimmed, limit: 40, page: page)) ?? []
+            // The field may have moved on while this was in flight; the anime
+            // search guards the same way.
+            guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
         }
-        let results = (try? await engine.searchCinema(query: trimmed, limit: 40)) ?? []
-        // The field may have moved on while this was in flight; the anime
-        // search guards the same way.
-        guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-        cinemaSearchResults = results.map(Self.cinemaCard)
+
+        let cards = results.map(Self.cinemaCard)
+        cinemaSearchResults = append ? cinemaSearchResults + cards : cards
+        cinemaSearchPage = page
+        // TMDB answers twenty to a page and says nothing useful about the
+        // total for a filtered browse, so a short page is the end of it.
+        cinemaSearchHasMore = results.count >= 20
+    }
+
+    /// The genre list behind the filter row. Loaded once per kind per
+    /// launch; the engine caches it for six hours on top of that.
+    public func loadCinemaGenres() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = (try? await engine.cinemaGenres(isSeries: cinemaFilter.isSeries)) ?? []
+        cinemaGenres = rows
+    }
+
+    /// Re-runs the Search section after a filter change, from page one --
+    /// keeping the old page number would ask for page 4 of a list nobody has
+    /// seen page 1 of.
+    public func applyCinemaFilter(_ change: (inout CinemaFilter) -> Void) {
+        var filter = cinemaFilter
+        change(&filter)
+        guard filter != cinemaFilter else { return }
+        let kindChanged = filter.isSeries != cinemaFilter.isSeries
+        cinemaFilter = filter
+        Task {
+            if kindChanged {
+                // Film genres and series genres are different lists, and a
+                // genre id from one means something else in the other.
+                cinemaFilter.genreId = nil
+                await loadCinemaGenres()
+            }
+            await searchCinema(searchQuery, page: 1, append: false)
+        }
+    }
+
+    /// The palette's own search: a handful of matches, no state written.
+    /// `searchCinema` fills the Search section and would fight the field
+    /// there with what someone typed into ⌘K.
+    public func quickSearchCinema(_ query: String) async -> [MediaCard.Item] {
+        guard let engine, cinemaAvailable else { return [] }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        let results = (try? await engine.searchCinema(query: trimmed, limit: 8, page: 1)) ?? []
+        return results.map(Self.cinemaCard)
     }
 
     /// Opens a cinema card's detail page.
@@ -175,6 +235,9 @@ extension AppModel {
         // spinner for as long as TMDB took, which is what made cinema feel
         // slower than anime rather than any difference in the animations.
         cinemaExtras = nil
+        cinemaListStatus = try? engine.cinemaListStatus(
+            catalog: catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, catalogId: id
+        )
         let cached = DetailCache.load(id: id, isManga: false, catalog: catalog)
         if let cached {
             isDetailLoading = false
@@ -345,6 +408,61 @@ extension AppModel {
         }
     }
 
+    /// The catalog a cinema id belongs to, as the resume queue knows it.
+    /// `UpNextQueueView.QueueEntry` carries an id and no catalog -- it
+    /// predates there being two -- so the row it was built from is the
+    /// answer.
+    public func cinemaCatalog(forId id: Int64) -> MediaCard.CardCatalog {
+        cinemaContinueWatching.first { $0.id == id }?.catalog ?? .tmdbMovie
+    }
+
+    /// Play from the resume queue: open the title's page first, then start
+    /// the stream over it. Closing the player then lands on the page of what
+    /// was just watched rather than back on the home rows, and a resolve
+    /// failure has that page underneath it -- the same shape as the anime
+    /// shelves' own Play.
+    public func playCinemaFromQueue(id: Int64, episode: Int, title: String, coverURL: URL?) async {
+        let catalog = cinemaCatalog(forId: id)
+        await openCinemaDetail(catalog: catalog, id: id, title: title, coverURL: coverURL)
+        await playCinemaEpisode(episode)
+    }
+
+    /// Puts the open title on the local list, or takes it off.
+    public func setCinemaListStatus(_ status: String?) {
+        guard let engine, let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }
+        let catalog: FfiCatalog = currentDetailCatalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        do {
+            try engine.setCinemaListStatus(catalog: catalog, catalogId: details.id, status: status)
+            cinemaListStatus = status
+            playFeedback(.watchedTick)
+            Task { await loadCinemaWatchlist() }
+        } catch {
+            errorMessage = "Could not update the list: \(error.localizedDescription)"
+        }
+    }
+
+    /// The local list for the Watching section's second tab.
+    public func loadCinemaWatchlist() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = (try? engine.cinemaList(status: cinemaWatchlistFilter)) ?? []
+        var items: [MediaCard.Item] = []
+        for row in rows.prefix(60) {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
+            cinemaKnownTitles[row.catalogId] = known.title
+            cinemaKnownCovers[row.catalogId] = known.coverURL
+            items.append(
+                MediaCard.Item(
+                    id: row.catalogId,
+                    title: known.title,
+                    coverImageURL: known.coverURL,
+                    catalog: catalog
+                )
+            )
+        }
+        cinemaWatchlist = items
+    }
+
     /// Plays one episode of the open cinema title, or the film itself.
     public func playCinemaEpisode(_ number: Int) async {
         guard let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }
@@ -418,11 +536,49 @@ extension AppModel {
             )
         }
         cinemaContinueWatching = items
+
+        // The resume queue: where each title actually stopped, which the
+        // activity rows do not carry -- they say an episode was watched, not
+        // how far into it. One registry read per row, no network.
+        var queue: [UpNextQueueView.QueueEntry] = []
+        for item in items.prefix(12) {
+            let ffiCatalog: FfiCatalog = item.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            let episode = Int64(item.progress ?? 1)
+            let progress = try? engine.getProgress(
+                catalog: ffiCatalog, catalogId: item.id, episodeNumber: episode
+            )
+            let percent: Double = {
+                guard let progress, progress.duration > 0 else { return 0 }
+                return Double(progress.stopTime) / Double(progress.duration) * 100
+            }()
+            // Past the watched threshold the queue should offer the *next*
+            // one, the same way the anime queue does, rather than replaying
+            // what was finished. A film has nothing after it.
+            let finished = percent >= 85
+            let isFilm = item.catalog == .tmdbMovie
+            if finished && isFilm { continue }
+            let next = finished ? episode + 1 : episode
+            queue.append(
+                UpNextQueueView.QueueEntry(
+                    id: item.id,
+                    title: item.title,
+                    thumbnailURL: item.coverImageURL,
+                    nextEpisodeOrChapter: Int(next),
+                    totalCount: item.totalEpisodesOrChapters ?? 0,
+                    progressPercent: finished ? 0 : percent,
+                    watchedTimeAgo: nil,
+                    hasNewEpisode: false,
+                    unit: isFilm ? "FILM" : "EP"
+                )
+            )
+        }
+        cinemaUpNext = queue
+        persistHomeCache()
     }
 
     /// A cinema title's name and poster: from the detail snapshot if this
     /// device has one, otherwise from TMDB.
-    private func cinemaTitle(
+    func cinemaTitle(
         catalog: MediaCard.CardCatalog,
         id: Int64
     ) async -> (title: String, coverURL: URL?)? {

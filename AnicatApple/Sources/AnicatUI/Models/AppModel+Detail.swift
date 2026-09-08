@@ -176,7 +176,14 @@ extension AppModel {
         // it (see `anilist/client.rs`) — invisible as a "why is this only
         // sometimes slow" spinner instead of the load it actually was.
         let cached = DetailCache.load(id: id, isManga: isManga)
-        if let cached {
+        // Only paint a snapshot over a page that is not already on screen.
+        // A refresh of the open page -- what every mark-watched click ends
+        // in -- would otherwise replace the optimistic flip the viewer just
+        // made with the snapshot written before it, animate that, and
+        // animate back a moment later when the fetch lands. The checkbox
+        // ticked twice on its way to the state it already had.
+        let alreadyShowing = selectedMediaDetails?.id == id
+        if let cached, !alreadyShowing {
             isDetailLoading = false
             // Explicit for the same reason as `closeDetail()`: an
             // `.animation(value:)` modifier watching this `@Observable`
@@ -190,7 +197,7 @@ extension AppModel {
                 selectedDiscussions = cached.discussions
                 selectedMediaDetails = cached.details
             }
-        } else {
+        } else if !alreadyShowing {
             // Optimistic immediate transition: render provisional details and skeletons in 0ms!
             let provisionalTitle = title ?? knownTitles[id] ?? "Loading..."
             let provisional = HeroBanner.Details(
@@ -630,6 +637,31 @@ extension AppModel {
                 airDate: ep.airDate,
                 runtimeMinutes: ep.runtimeMinutes
             )
+        }
+        // An un-check has to forget the local watch record too, not just move
+        // AniList's progress down. `episode_is_watched` is
+        // `local_percent >= 85.0 || number <= anilist_progress`, so a history
+        // row past 85% pinned the box on whatever the list said: un-checking
+        // episode 10 of a title watched to 92.9% wrote `progress: 9`, AniList
+        // took it, and the row snapped straight back to checked. Six clicks
+        // in four seconds, all of them landing, none of them visible.
+        //
+        // Before the mutation, and awaited: `updateListEntry` ends in a
+        // detail reload that rebuilds this list from the local history and
+        // the list entry together, so a clear that lands after it is a clear
+        // the viewer does not see.
+        if !watched, let engine {
+            let catalog = playbackCatalogForOpenDetail
+            await withCheckedContinuation { continuation in
+                engineIOQueue.async {
+                    try? engine.clearProgressFrom(
+                        catalog: catalog,
+                        catalogId: details.id,
+                        episodeNumber: Int64(episode)
+                    )
+                    continuation.resume()
+                }
+            }
         }
         await updateListEntry(status: status, progress: Int64(progress))
     }

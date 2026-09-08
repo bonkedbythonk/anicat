@@ -150,6 +150,8 @@ public struct RootView: View {
                                 isLoading: model.isDetailLoading,
                                 tracksOnAniList: model.currentDetailCatalog == .anilist,
                                 cinemaExtras: model.cinemaExtras,
+                                cinemaListStatus: model.cinemaListStatus,
+                                onSetCinemaListStatus: { model.setCinemaListStatus($0) },
                                 onPlayEpisode: { ep in
                                     playEpisode(
                                         model: model, catalogId: details.id, episode: ep.number, title: details.title,
@@ -280,6 +282,27 @@ public struct RootView: View {
             // Command palette. Above sections, player, and reader so navigation is accessible anywhere.
             if model.paletteOpen {
                 CommandPalette(commands: paletteCommands, onSearchTitles: { query in
+                    // The palette searches the world the app is showing. In
+                    // cinema mode it used to answer with anime, which is the
+                    // one place ⌘K could open a title the mode cannot play.
+                    if model.appMode == .cinema {
+                        let items = await model.quickSearchCinema(query)
+                        return items.map { item in
+                            let id = item.id
+                            let title = item.title
+                            let coverURL = item.coverImageURL
+                            let catalog = item.catalog ?? .tmdbMovie
+                            let group = catalog == .tmdbMovie ? "Films" : "Series"
+                            return CommandPalette.Command(id: "cinema-\(catalog.rawValue)-\(id)", label: title, group: group) {
+                                Task { @MainActor in
+                                    model.openingDetailSourceKey = nil
+                                    await model.openCinemaDetail(
+                                        catalog: catalog, id: id, title: title, coverURL: coverURL
+                                    )
+                                }
+                            }
+                        }
+                    }
                     let items = await model.quickSearchTitles(query)
                     return items.map { item in
                         // See `paletteCommands` below for why this hops back
@@ -316,7 +339,7 @@ public struct RootView: View {
 
             // Keyboard shortcuts overlay. Above palette and modal views.
             if model.shortcutsOpen {
-                KeyboardShortcutsOverlay {
+                KeyboardShortcutsOverlay(mode: model.appMode) {
                     withAnimation(.snappy) {
                         model.shortcutsOpen = false
                     }
@@ -549,8 +572,18 @@ public struct RootView: View {
         // playback from a system callback races `resolveAndPlay`'s own resume
         // logic with no user gesture behind it.
         .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
-            guard case .playback(let catalogId, _, _, _) = ContinuityManager.shared.parseIncomingActivity(activity) else { return }
-            Task { await model.openDetail(id: catalogId, isManga: false) }
+            guard case .playback(let catalogId, let catalog, let title, _, _) =
+                    ContinuityManager.shared.parseIncomingActivity(activity) else { return }
+            Task {
+                switch catalog {
+                case "tmdb_movie":
+                    await model.openCinemaDetail(catalog: .tmdbMovie, id: catalogId, title: title)
+                case "tmdb_tv":
+                    await model.openCinemaDetail(catalog: .tmdbTv, id: catalogId, title: title)
+                default:
+                    await model.openDetail(id: catalogId, isManga: false)
+                }
+            }
         }
         .onContinueUserActivity(ContinuityManager.readingActivityType) { activity in
             guard case .reading(_, let anilistId, _, _, _) = ContinuityManager.shared.parseIncomingActivity(activity),

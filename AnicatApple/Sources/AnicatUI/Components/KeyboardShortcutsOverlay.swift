@@ -26,9 +26,43 @@ public struct KeyboardShortcutsOverlay: View {
     }
 
     let onDismiss: () -> Void
+    /// Which mode's shortcuts to list. Defaults to anime's, which is what
+    /// every existing call site means.
+    var mode: AppModel.AppMode = .anime
 
-    public init(onDismiss: @escaping () -> Void) {
+    public init(mode: AppModel.AppMode = .anime, onDismiss: @escaping () -> Void) {
+        self.mode = mode
         self.onDismiss = onDismiss
+    }
+
+    /// The overlay for the mode showing.
+    ///
+    /// Cinema's rail has no Manga or Light Novels, so listing their keys
+    /// there advertises two shortcuts that do nothing, and the reader
+    /// section describes a screen that mode cannot open.
+    public static func sections(for mode: AppModel.AppMode) -> [ShortcutSection] {
+        guard mode == .cinema else { return defaultSections }
+        return defaultSections.compactMap { section in
+            switch section.id {
+            case "manga_reader":
+                return nil
+            case "navigation":
+                let items = section.items
+                    .filter { !["manga", "novels"].contains($0.id) }
+                    .map { item in
+                        item.id == "home"
+                            ? ShortcutItem(id: item.id, label: "Home", keys: item.keys)
+                            : item
+                    }
+                return ShortcutSection(id: section.id, title: section.title, items: items)
+            case "player":
+                // Anime4K is an anime upscaler by name and by training set.
+                let items = section.items.filter { $0.id != "anime4k" }
+                return ShortcutSection(id: section.id, title: section.title, items: items)
+            default:
+                return section
+            }
+        }
     }
 
     public static let defaultSections: [ShortcutSection] = [
@@ -130,7 +164,7 @@ public struct KeyboardShortcutsOverlay: View {
     private var shortcutsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                ForEach(Self.defaultSections) { section in
+                ForEach(Self.sections(for: mode)) { section in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(section.title)
                             .sumiTabularMono(size: 11, weight: .semibold)

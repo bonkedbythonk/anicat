@@ -127,27 +127,120 @@ impl Catalogs {
         }
     }
 
+    /// TMDB's genre list for films or series, for the filter row.
+    ///
+    /// Cached under the row TTL rather than the search one: the list changes
+    /// about never, and it is asked for every time the Search section opens.
+    pub async fn cinema_genres(&self, is_series: bool) -> Result<Vec<(i64, String)>, String> {
+        let kind = if is_series { "tv" } else { "movie" };
+        let key = AniListCache::key("tmdb_row", &[("kind", "genres"), ("type", kind)]);
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct GenreList {
+            genres: Option<Vec<super::tmdb::types::TmdbGenre>>,
+        }
+        let list: GenreList = self
+            .tmdb_cached(key, "tmdb_row", &format!("/genre/{kind}/list"), &[])
+            .await?;
+        Ok(list
+            .genres
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|g| Some((g.id?, g.name?)))
+            .collect())
+    }
+
+    /// Browse by genre, year and sort -- TMDB's `/discover`, which is what
+    /// the anime side's filtered search does through AniList. A plain
+    /// keyword search cannot answer "action films from 1999, most popular
+    /// first"; this endpoint is the one that can.
+    pub async fn cinema_discover(
+        &self,
+        is_series: bool,
+        genre_id: Option<i64>,
+        year: Option<i32>,
+        sort: Option<&str>,
+        page: i64,
+    ) -> Result<Vec<MediaItem>, String> {
+        let kind = if is_series { "tv" } else { "movie" };
+        let page = page.max(1);
+        let page_str = page.to_string();
+        let genre_str = genre_id.map(|g| g.to_string()).unwrap_or_default();
+        let year_str = year.map(|y| y.to_string()).unwrap_or_default();
+        let sort = sort.unwrap_or("popularity.desc");
+        let key = AniListCache::key(
+            "tmdb_row",
+            &[
+                ("kind", "discover"),
+                ("type", kind),
+                ("genre", &genre_str),
+                ("year", &year_str),
+                ("sort", sort),
+                ("page", &page_str),
+            ],
+        );
+
+        let mut query: Vec<(&str, String)> = vec![
+            ("page", page_str.clone()),
+            ("sort_by", sort.to_string()),
+            ("include_adult", "false".to_string()),
+        ];
+        if !genre_str.is_empty() {
+            query.push(("with_genres", genre_str.clone()));
+        }
+        if let Some(year) = year {
+            // TMDB names the year parameter after the medium: a film is
+            // released, a series first airs, and the other name is ignored
+            // rather than refused -- so the wrong one silently returns
+            // everything.
+            let param = if is_series { "first_air_date_year" } else { "primary_release_year" };
+            query.push((param, year.to_string()));
+        }
+
+        if is_series {
+            let page: TmdbPage<TmdbSeries> =
+                self.tmdb_cached(key, "tmdb_row", &format!("/discover/{kind}"), &query).await?;
+            Ok(into_items(page.results, TmdbSeries::into_media_item))
+        } else {
+            let page: TmdbPage<TmdbMovie> =
+                self.tmdb_cached(key, "tmdb_row", &format!("/discover/{kind}"), &query).await?;
+            Ok(into_items(page.results, TmdbMovie::into_media_item))
+        }
+    }
+
     /// Films and series for one query, best match first.
     ///
     /// Two searches rather than `/search/multi`: multi mixes people into the
     /// same array and distinguishes them only by a `media_type` string, so
     /// the shapes would have to be pulled apart after the fact anyway — and
     /// these two run concurrently, which multi cannot.
-    pub async fn cinema_search(&self, query: &str, limit: i64) -> Result<Vec<MediaItem>, String> {
+    pub async fn cinema_search(
+        &self,
+        query: &str,
+        limit: i64,
+        page: i64,
+    ) -> Result<Vec<MediaItem>, String> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
             return Ok(vec![]);
         }
         let limit_str = limit.to_string();
-        let key =
-            AniListCache::key("tmdb_search", &[("q", trimmed), ("limit", &limit_str)]);
+        let page = page.max(1);
+        let page_str = page.to_string();
+        let key = AniListCache::key(
+            "tmdb_search",
+            &[("q", trimmed), ("limit", &limit_str), ("page", &page_str)],
+        );
         if let Some(hit) = self.cache.get(&key) {
             if let Ok(parsed) = serde_json::from_value(hit) {
                 return Ok(parsed);
             }
         }
 
-        let params = [("query", trimmed.to_string()), ("include_adult", "false".to_string())];
+        let params = [
+            ("query", trimmed.to_string()),
+            ("include_adult", "false".to_string()),
+            ("page", page_str.clone()),
+        ];
         let (movies, series) = tokio::join!(
             self.tmdb.get::<TmdbPage<TmdbMovie>>("/search/movie", &params),
             self.tmdb.get::<TmdbPage<TmdbSeries>>("/search/tv", &params),
@@ -400,7 +493,7 @@ mod live_tests {
     #[ignore]
     async fn live_search_finds_films_and_series() {
         let Some(catalogs) = catalogs() else { return };
-        let items = catalogs.cinema_search("dune", 20).await.expect("search");
+        let items = catalogs.cinema_search("dune", 20, 1).await.expect("search");
         println!("dune: {} results", items.len());
         assert!(!items.is_empty());
         // The 2021 film is the one anybody searching this means; if it is not

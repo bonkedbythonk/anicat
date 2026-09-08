@@ -209,6 +209,10 @@ private struct GeneralTabSection: View {
     // needs a literal here, so the two spellings and the two defaults must
     // agree.
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
+    // Read once into state rather than off `UserDefaults` in the body: the
+    // paired list is written by `RemoteHost` from a socket callback, which
+    // no `@AppStorage` array binding observes.
+    @State private var pairedCount = RemoteHost.pairedDevices().count
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -247,7 +251,24 @@ private struct GeneralTabSection: View {
                 SumiSwitch(isOn: $notifyNewEpisodes)
             }
         }
+
+        SettingsCard(title: "Remote") {
+            SettingField(
+                label: "Paired iPhones",
+                badge: RemoteHost.shared.attachedRemoteName.map { "\($0) connected" },
+                description: pairedCount == 0
+                    ? "Anicat on an iPhone on this Wi-Fi can control playback here. The first time one asks, this Mac asks you first."
+                    : "\(pairedCount) iPhone\(pairedCount == 1 ? "" : "s") may control playback on this Mac. Forgetting them means being asked again next time."
+            ) {
+                Button("Forget All") {
+                    RemoteHost.shared.unpairAll()
+                    pairedCount = 0
+                }
+                .disabled(pairedCount == 0)
+            }
+        }
     }
+    .onAppear { pairedCount = RemoteHost.pairedDevices().count }
     }
 }
 
@@ -1212,8 +1233,17 @@ private struct SettingField<Trailing: View>: View {
 private struct ThemePicker: View {
     @State private var store = ThemeStore.shared
 
+    // A fixed `HStack` fitted four options; six is 492pt of swatch before the
+    // trailing spacer, wider than the settings pane, and the row squeezed the
+    // swatches instead of wrapping. An adaptive grid reflows to however many
+    // fit and needs no revisit the next time a skin is added. `maximum` is
+    // pinned to the swatch width on purpose: left open it defaults to
+    // `.infinity`, the grid divides the whole pane between the columns it
+    // chose, and each 72pt swatch floats in the middle of an oversized cell.
+    private let columns = [GridItem(.adaptive(minimum: 72, maximum: 72), spacing: 12, alignment: .topLeading)]
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             ForEach(AnicatTheme.allCases) { theme in
                 let isSelected = store.theme == theme
                 Button {
@@ -1237,8 +1267,6 @@ private struct ThemePicker: View {
                 .buttonStyle(.sumiPressable)
                 .help(theme.caption)
             }
-
-            Spacer(minLength: 0)
         }
     }
 }

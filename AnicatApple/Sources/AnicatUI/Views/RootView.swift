@@ -652,6 +652,27 @@ public struct RootView: View {
             Task { await model.openReadingHandoff(anilistId: anilistId, chapterId: chapterId, page: pageIndex) }
         }
         #if os(macOS)
+        // The one gate on the phone remote. `RemoteHost` accepts every
+        // connection the Bonjour listener hands it -- most are discovery
+        // probes that send nothing -- and only raises this once a device has
+        // announced itself with a `hello` it has never seen before.
+        .alert(
+            "Allow \(RemoteHost.shared.pendingPairing?.deviceName ?? "this iPhone") to control Anicat?",
+            isPresented: Binding(
+                get: { RemoteHost.shared.pendingPairing != nil },
+                // Dismissing without choosing is a refusal, not a deferral:
+                // leaving the request pending would have the phone sit on
+                // "waiting for approval" until it gave up.
+                set: { presented in
+                    if !presented { RemoteHost.shared.answerPairing(approved: false) }
+                }
+            )
+        ) {
+            Button("Allow") { RemoteHost.shared.answerPairing(approved: true) }
+            Button("Don't Allow", role: .cancel) { RemoteHost.shared.answerPairing(approved: false) }
+        } message: {
+            Text("It can play, pause, seek and change episodes on this Mac. Asked once per device; clear them under Settings, Remote.")
+        }
         // Driven off activeStreamURL's nil<->value edge rather than
         // PlayerView's onAppear/onDisappear: that view can be reused or
         // recreated across the transition (it's SwiftUI's call, not ours),

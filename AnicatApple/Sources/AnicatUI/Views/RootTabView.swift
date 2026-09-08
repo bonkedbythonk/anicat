@@ -232,12 +232,18 @@ private struct DetailPush: ViewModifier {
 private struct UpNextTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
+    @State private var showRemote = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    TabHeader(title: "Up Next", model: model) { profileButton }
+                    TabHeader(title: "Up Next", model: model) {
+                        HStack(spacing: 14) {
+                            remoteButton
+                            profileButton
+                        }
+                    }
 
                     if model.appMode == .cinema {
                         cinemaBody
@@ -317,6 +323,24 @@ private struct UpNextTab: View {
             return "TMDB is rate limiting this key. Try again shortly."
         }
         return raw
+    }
+
+    /// Appears only while a Mac running Anicat is advertising on this
+    /// Wi-Fi. There is no disabled state and no "no Mac found" screen: the
+    /// control is the answer to whether a Mac is there.
+    @ViewBuilder
+    private var remoteButton: some View {
+        if let node = BonjourDiscovery.shared.discoveredMacNode {
+            Button { showRemote = true } label: {
+                Image(systemName: "macbook.and.iphone")
+                    .font(.system(size: 21))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            .sheet(isPresented: $showRemote) {
+                PhoneRemoteView(node: node)
+                    .presentationDetents([.medium, .large])
+            }
+        }
     }
 
     /// Settings lives behind this button rather than in a fourth tab: it is

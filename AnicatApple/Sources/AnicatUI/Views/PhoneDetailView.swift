@@ -132,8 +132,30 @@ struct PhoneDetailView: View {
                         EpisodeRow(episode: episode)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { playOnMac(episode.number) }
                     Divider().overlay(SumiTheme.border)
                 }
+            }
+        }
+    }
+
+    /// Sends the episode to a Mac on the same Wi-Fi instead of playing it
+    /// here. As an `anicat://` address rather than a play command of its
+    /// own, so the Mac reaches the episode through `handleDeepLink` -- the
+    /// same single entry point a notification tap and the URL scheme use.
+    ///
+    /// Absent, not disabled, when no Mac is advertising: a menu item that
+    /// explains itself only after being pressed is worse than one that is
+    /// not there.
+    @ViewBuilder
+    private func playOnMac(_ number: Int) -> some View {
+        if let node = BonjourDiscovery.shared.discoveredMacNode,
+           let details = model.selectedMediaDetails {
+            Button {
+                let link = DeepLink.play(id: details.id, episode: number)
+                RemoteClient.shared.send(.open(link: link.url.absoluteString), to: node)
+            } label: {
+                Label("Play on \(node.name)", systemImage: "macbook")
             }
         }
     }

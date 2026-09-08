@@ -17,11 +17,18 @@ public final class BonjourDiscovery: @unchecked Sendable {
         public let id: String
         public let name: String
         public let host: String
-        public let port: UInt16
-
-        public var streamBaseURL: URL? {
-            URL(string: "http://\(host):\(port)")
-        }
+        /// The port the Mac's own Bonjour listener answers on -- what
+        /// `RemoteClient` speaks the remote protocol over. This is the
+        /// resolved endpoint's real port, not the TXT record's.
+        public let controlPort: UInt16
+        /// The Mac's range-server port, from the TXT record.
+        ///
+        /// Carried, not used: `torrent/stream.rs` binds `127.0.0.1` on
+        /// purpose (it authenticates nothing and hands out any file id it is
+        /// asked for), so this port names an address no other device can
+        /// reach. There used to be a `streamBaseURL` here built from it,
+        /// which read as a working offload and was never one.
+        public let streamPort: UInt16
     }
 
     private var listener: NWListener?
@@ -68,13 +75,15 @@ public final class BonjourDiscovery: @unchecked Sendable {
                 txtRecord: txtRecord
             )
 
-            // The listener exists only to publish the service and to give a
-            // browsing peer something to connect to so its host address
-            // resolves. Nothing is ever served over these connections, and a
-            // connection left neither accepted nor cancelled holds a socket
-            // for as long as the peer keeps it open.
+            // Two populations arrive here and they look identical on
+            // accept. Most are discovery probes: `startBrowsing` resolves a
+            // peer by connecting, reading the host off the ready connection
+            // and cancelling without sending a byte. The rest are phone
+            // remotes, which announce themselves with a `hello` frame.
+            // `RemoteHost` tells them apart by what they send, which is why
+            // nothing here may prompt, log or hold state per connection.
             listener.newConnectionHandler = { connection in
-                connection.cancel()
+                Task { @MainActor in RemoteHost.shared.accept(connection) }
             }
 
             listener.stateUpdateHandler = { [weak self] state in
@@ -169,14 +178,16 @@ public final class BonjourDiscovery: @unchecked Sendable {
                         // port itself publishes no TXT record, and for that
                         // one the endpoint's port is the right answer.
                         let streamPort = advertisedPort ?? port.rawValue
+                        let controlPort = port.rawValue
                         Task { @MainActor in
                             self.discoveredMacNode = DiscoveredNode(
                                 id: name,
                                 name: name,
                                 host: hostString,
-                                port: streamPort
+                                controlPort: controlPort,
+                                streamPort: streamPort
                             )
-                            print("[Bonjour] Discovered local Mac stream server: \(name) at \(hostString):\(streamPort)")
+                            print("[Bonjour] Discovered Mac \(name) at \(hostString), control \(controlPort), stream \(streamPort)")
                         }
                     case .failed, .cancelled:
                         self.pendingResolves.removeAll { $0 === connection }

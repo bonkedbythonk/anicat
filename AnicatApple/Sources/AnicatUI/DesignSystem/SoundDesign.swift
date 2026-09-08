@@ -39,9 +39,20 @@ public enum FeedbackDefaults {
 
 // MARK: - Sounds
 
-/// The app's six UI sounds. Each is a short blip synthesised in memory the
-/// first time it plays, or a system sound where one already says the right
-/// thing.
+/// The app's six UI sounds. Each is a short percussive tick synthesised in
+/// memory the first time it plays.
+///
+/// **Not tones.** The first version of this was a sine or triangle at one
+/// frequency per sound, and that is the sound a beep has: a pure partial with
+/// a fixed pitch reads as a test tone, not as an object. Everything here is
+/// instead a struck-object model -- a noise transient for the contact, then
+/// two or three *inharmonic* partials decaying at their own rates -- because
+/// that is what separates a pen tick from a beep. The partial ratios are
+/// deliberately not 2:3:4; integer ratios fuse back into one pitched note.
+///
+/// The set is tuned to the "Ink & Index" language the rest of the app is:
+/// paper, card stock and a stamp, all dull and close-miked, none of them
+/// musical.
 ///
 /// Synthesised into a WAV that an `AVAudioPlayer` reads, not rendered through
 /// an `AVAudioEngine`: libmpv runs in this process and holds the output
@@ -70,55 +81,139 @@ public enum AppSounds: String, CaseIterable, Sendable {
         AppSounds.play(self)
     }
 
-    /// The system sound this maps to on macOS, if any. Everything else is
-    /// synthesised, and iOS synthesises all six — `/System/Library/Sounds` is
-    /// a Mac directory.
-    var systemSoundName: String? {
-        #if os(macOS)
-        switch self {
-        case .watchedTick: return "Tink"
-        case .playerClose: return "Pop"
-        default: return nil
-        }
-        #else
-        return nil
-        #endif
-    }
-
-    /// Frequency, length and waveform of the synthesised blip. The two tab and
-    /// swipe sounds sit low so they can repeat without becoming an alarm; the
-    /// player and error tones are set apart in pitch so they are told apart
-    /// without being looked at.
+    /// What is struck, and how hard.
+    ///
+    /// Nothing maps to a `/System/Library/Sounds` file any more. Tink and Pop
+    /// were the two most recognisable sounds on macOS, so the app's own
+    /// feedback was the part of it that sounded like every other app.
     var recipe: SoundRecipe {
         switch self {
+        // A card tab flicked: almost all contact, a short bright ring over it.
         case .tabChange:
-            return SoundRecipe(frequency: 660, duration: 0.035, waveform: .sine, peak: 0.22)
+            return SoundRecipe(
+                partials: [
+                    Partial(frequency: 1_180, amplitude: 0.30, decay: 0.022),
+                    Partial(frequency: 1_791, amplitude: 0.10, decay: 0.013)
+                ],
+                noise: NoiseBurst(amplitude: 0.45, decay: 0.005),
+                cutoff: 5_200,
+                duration: 0.060,
+                peak: 0.20
+            )
+        // A drawer pulled open: low body, slight upward lean from the second
+        // partial outlasting the first.
         case .playerOpen:
-            return SoundRecipe(frequency: 523.25, duration: 0.070, waveform: .triangle, peak: 0.28)
+            return SoundRecipe(
+                partials: [
+                    Partial(frequency: 196, amplitude: 0.55, decay: 0.040),
+                    Partial(frequency: 297, amplitude: 0.26, decay: 0.036),
+                    Partial(frequency: 451, amplitude: 0.08, decay: 0.018)
+                ],
+                noise: NoiseBurst(amplitude: 0.20, decay: 0.010),
+                cutoff: 2_400,
+                duration: 0.150,
+                peak: 0.26
+            )
+        // The same drawer pushed shut: lower, and the upper partial dies first
+        // so it leans down instead of up.
         case .playerClose:
-            return SoundRecipe(frequency: 392, duration: 0.060, waveform: .triangle, peak: 0.26)
+            return SoundRecipe(
+                partials: [
+                    Partial(frequency: 165, amplitude: 0.55, decay: 0.036),
+                    Partial(frequency: 249, amplitude: 0.22, decay: 0.022)
+                ],
+                noise: NoiseBurst(amplitude: 0.22, decay: 0.008),
+                cutoff: 2_000,
+                duration: 0.130,
+                peak: 0.26
+            )
+        // A sheet sliding off a stack: noise with barely any pitch in it, so
+        // it can fire on every back-swipe without becoming a note.
         case .swipeBack:
-            return SoundRecipe(frequency: 440, duration: 0.045, waveform: .sine, peak: 0.20)
+            return SoundRecipe(
+                partials: [Partial(frequency: 523, amplitude: 0.10, decay: 0.030)],
+                noise: NoiseBurst(amplitude: 0.42, decay: 0.030),
+                cutoff: 3_100,
+                duration: 0.100,
+                peak: 0.17
+            )
+        // A stamp hitting paper: hard contact, one short ring, nothing after.
         case .watchedTick:
-            return SoundRecipe(frequency: 880, duration: 0.030, waveform: .sine, peak: 0.24)
+            return SoundRecipe(
+                partials: [
+                    Partial(frequency: 903, amplitude: 0.34, decay: 0.020),
+                    Partial(frequency: 1_367, amplitude: 0.13, decay: 0.010)
+                ],
+                noise: NoiseBurst(amplitude: 0.50, decay: 0.004),
+                cutoff: 4_400,
+                duration: 0.055,
+                peak: 0.22
+            )
+        // A knuckle on a desk. Low and dull rather than loud: an error the
+        // user can hear from the next room is a punishment, not a signal.
         case .error:
-            return SoundRecipe(frequency: 220, duration: 0.090, waveform: .triangle, peak: 0.30)
+            return SoundRecipe(
+                partials: [
+                    Partial(frequency: 146, amplitude: 0.60, decay: 0.045),
+                    Partial(frequency: 221, amplitude: 0.28, decay: 0.030),
+                    Partial(frequency: 311, amplitude: 0.10, decay: 0.018)
+                ],
+                noise: NoiseBurst(amplitude: 0.30, decay: 0.007),
+                cutoff: 1_700,
+                duration: 0.160,
+                peak: 0.28
+            )
         }
     }
 }
 
-public struct SoundRecipe: Sendable {
-    public enum Waveform: Sendable {
-        case sine
-        case triangle
-    }
-
+/// One decaying sine of a struck object.
+public struct Partial: Sendable {
     public let frequency: Double
+    public let amplitude: Double
+    /// Time constant of `exp(-t/decay)`, in seconds -- not a total length.
+    public let decay: Double
+
+    public init(frequency: Double, amplitude: Double, decay: Double) {
+        self.frequency = frequency
+        self.amplitude = amplitude
+        self.decay = decay
+    }
+}
+
+/// The contact transient. Without one every sound starts on a pitch, which is
+/// the single most "synthesised" thing a UI sound can do.
+public struct NoiseBurst: Sendable {
+    public let amplitude: Double
+    public let decay: Double
+
+    public init(amplitude: Double, decay: Double) {
+        self.amplitude = amplitude
+        self.decay = decay
+    }
+}
+
+public struct SoundRecipe: Sendable {
+    public let partials: [Partial]
+    public let noise: NoiseBurst?
+    /// One-pole lowpass corner, in Hz. The noise burst is white; unfiltered it
+    /// is a hiss, and every sound in the set ends up with the same bright top
+    /// regardless of what it is meant to be.
+    public let cutoff: Double
+    /// Total rendered length. Longer than what is audible, because a partial
+    /// cut off before its decay finishes clicks.
     public let duration: Double
-    public let waveform: Waveform
     /// Peak amplitude before the user's volume setting, 0...1. Kept well under
-    /// 1 so a blip layered over a playing episode is a texture, not a duck.
+    /// 1 so a tick layered over a playing episode is a texture, not a duck.
     public let peak: Double
+
+    public init(partials: [Partial], noise: NoiseBurst?, cutoff: Double, duration: Double, peak: Double) {
+        self.partials = partials
+        self.noise = noise
+        self.cutoff = cutoff
+        self.duration = duration
+        self.peak = peak
+    }
 }
 
 @MainActor
@@ -126,26 +221,8 @@ final class SoundBank {
     static let shared = SoundBank()
 
     private var players: [AppSounds: AVAudioPlayer] = [:]
-    #if os(macOS)
-    private var systemSounds: [AppSounds: NSSound] = [:]
-    #endif
 
     func play(_ sound: AppSounds, volume: Double) {
-        #if os(macOS)
-        if let name = sound.systemSoundName {
-            let cached = systemSounds[sound] ?? NSSound(named: name)
-            guard let cached else { return }
-            systemSounds[sound] = cached
-            // An NSSound already playing ignores `play()`; these fire faster
-            // than they finish (a watched tick per episode boundary during a
-            // binge), so the second one would be silently dropped.
-            cached.stop()
-            cached.volume = Float(volume)
-            cached.play()
-            return
-        }
-        #endif
-
         let player: AVAudioPlayer
         if let cached = players[sound] {
             player = cached
@@ -164,39 +241,69 @@ final class SoundBank {
 
     nonisolated static let sampleRate = 44_100.0
 
-    /// A 16-bit mono PCM WAV of one blip.
+    /// A 16-bit mono PCM WAV of one struck object.
     ///
-    /// The envelope is not decoration: a tone that starts and stops at full
-    /// amplitude clips at both ends and the click is louder than the tone. A
-    /// 4 ms raised-cosine attack and a cosine decay over the remainder remove
-    /// both without lengthening the sound.
+    /// Three things happen per frame, in this order, and the order is the
+    /// design:
+    ///
+    /// 1. Each partial is a sine under its own `exp(-t/decay)`. Different
+    ///    decay rates per partial are what makes it a struck thing rather than
+    ///    a chord -- the top dies first and the sound darkens as it falls.
+    /// 2. The noise burst is added under a much faster decay. This is the
+    ///    contact, and it is why the sound has an onset instead of a pitch.
+    /// 3. A one-pole lowpass over the sum. White noise unfiltered is a hiss
+    ///    that sounds identical whatever it is layered on.
+    ///
+    /// A 1.5 ms raised-cosine attack sits in front of all of it: a waveform
+    /// that starts at full amplitude clips, and the click is louder than the
+    /// sound.
     nonisolated static func wav(for recipe: SoundRecipe) -> Data {
         let frameCount = max(1, Int(sampleRate * recipe.duration))
-        let attackFrames = max(1, Int(sampleRate * 0.004))
+        let attackFrames = max(1, Int(sampleRate * 0.0015))
 
-        var samples = [Int16]()
-        samples.reserveCapacity(frameCount)
+        // Deterministic, so the same recipe always renders the same bytes and
+        // a test can assert on them. A per-run `random` would also mean the
+        // sound differed slightly every launch.
+        var rng = SplitMix64(seed: 0x5EED_A11C_E5_1234)
+
+        // One-pole coefficient from the corner frequency, the standard
+        // `1 - exp(-2*pi*fc/fs)` mapping.
+        let alpha = 1 - exp(-2 * .pi * recipe.cutoff / sampleRate)
+        var filtered = 0.0
+
+        var raw = [Double]()
+        raw.reserveCapacity(frameCount)
+        var loudest = 0.0
+
         for frame in 0..<frameCount {
             let t = Double(frame) / sampleRate
-            let phase = (recipe.frequency * t).truncatingRemainder(dividingBy: 1.0)
-            let wave: Double
-            switch recipe.waveform {
-            case .sine:
-                wave = sin(2 * .pi * phase)
-            case .triangle:
-                wave = 4 * abs(phase - 0.5) - 1
+
+            var value = 0.0
+            for partial in recipe.partials {
+                value += partial.amplitude * sin(2 * .pi * partial.frequency * t) * exp(-t / partial.decay)
+            }
+            if let noise = recipe.noise {
+                value += noise.amplitude * rng.nextBipolar() * exp(-t / noise.decay)
             }
 
-            let envelope: Double
-            if frame < attackFrames {
-                envelope = 0.5 - 0.5 * cos(.pi * Double(frame) / Double(attackFrames))
-            } else {
-                let decayProgress = Double(frame - attackFrames) / Double(max(1, frameCount - attackFrames))
-                envelope = 0.5 + 0.5 * cos(.pi * decayProgress)
-            }
+            filtered += alpha * (value - filtered)
 
-            let value = wave * envelope * recipe.peak
-            samples.append(Int16(max(-1, min(1, value)) * Double(Int16.max)))
+            let attack = frame < attackFrames
+                ? 0.5 - 0.5 * cos(.pi * Double(frame) / Double(attackFrames))
+                : 1.0
+            let sample = filtered * attack
+            raw.append(sample)
+            loudest = max(loudest, abs(sample))
+        }
+
+        // Normalised to the recipe's peak rather than trusting the amplitudes
+        // to sum there. Partials interfere, the lowpass takes energy out, and
+        // the noise seed changes the maximum; without this the six sounds
+        // arrive at noticeably different loudnesses from numbers that read as
+        // if they were matched.
+        let gain = loudest > 0 ? recipe.peak / loudest : 0
+        let samples = raw.map { sample -> Int16 in
+            Int16(max(-1, min(1, sample * gain)) * Double(Int16.max))
         }
 
         return riff(samples: samples)
@@ -233,6 +340,27 @@ final class SoundBank {
             withUnsafeBytes(of: sample.littleEndian) { data.append(contentsOf: $0) }
         }
         return data
+    }
+}
+
+/// Whitened counter PRNG. `arc4random` would do, but the render has to be
+/// reproducible for the same recipe.
+struct SplitMix64 {
+    private var state: UInt64
+
+    init(seed: UInt64) { state = seed }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+
+    /// -1...1.
+    mutating func nextBipolar() -> Double {
+        Double(next() >> 11) / Double(1 << 53) * 2 - 1
     }
 }
 

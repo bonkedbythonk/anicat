@@ -1883,8 +1883,14 @@ public struct MediaDetailView: View {
 
             Spacer(minLength: 12)
 
-            // Right side: Audio and ViewMode toggles when episodes tab is active
-            if activeTab == .episodes && !episodes.isEmpty {
+            // Right side: Audio and ViewMode toggles. Only the episodes tab
+            // can use them, but they stay in the layout on every tab. This
+            // row is `.bottom` aligned and, measured, the controls are 30pt
+            // against the tab strip's 25 — dropping them took the bar from
+            // 30pt to 25 and lifted the labels and the whole page under them
+            // on every switch away from Episodes.
+            if !episodes.isEmpty {
+                let showsEpisodeControls = activeTab == .episodes
                 HStack(spacing: 10) {
                     // Audio toggle
                     if tracksOnAniList {
@@ -1972,6 +1978,9 @@ public struct MediaDetailView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
                 .padding(.bottom, 6)
+                .opacity(showsEpisodeControls ? 1 : 0)
+                .allowsHitTesting(showsEpisodeControls)
+                .accessibilityHidden(!showsEpisodeControls)
             }
         }
         .overlay(Rectangle().fill(SumiTheme.border).frame(height: 1), alignment: .bottom)

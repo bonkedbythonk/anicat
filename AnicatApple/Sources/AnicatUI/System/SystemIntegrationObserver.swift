@@ -18,6 +18,9 @@ public struct SystemIntegrationObserver: View {
     }
 
     @State private var reachability = NetworkReachability()
+    #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
 
     public var body: some View {
         Color.clear
@@ -25,6 +28,17 @@ public struct SystemIntegrationObserver: View {
             .allowsHitTesting(false)
             // Mounted in both platform branches of `AnicatApp`, which makes
             // it the one place a reconnect hook reaches macOS and iOS alike.
+            #if os(iOS)
+            // The cache cap is sized for playback — an episode plus its N+1
+            // preload is most of 3 GiB — which is the right budget while
+            // watching and the wrong one for a phone that has stopped. The
+            // playing torrent is exempt inside the engine, so backgrounding
+            // mid-episode with audio still running keeps what it is reading.
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .background else { return }
+                Task { await model.purgeStreamCache() }
+            }
+            #endif
             .task {
                 reachability.start {
                     // Quietly: this fires while the viewer is looking at

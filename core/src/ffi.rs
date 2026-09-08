@@ -262,6 +262,11 @@ pub struct CinemaExtras {
     pub companies: Vec<String>,
     /// Backdrops then posters, capped -- the stills strip.
     pub gallery: Vec<String>,
+    /// The newest episode TMDB has as aired, as an absolute number against
+    /// the same season map the rest of the app counts by, and the date the
+    /// next one is due. What a "new episode" check reads.
+    pub last_aired_episode: Option<i32>,
+    pub next_air_date: Option<String>,
     pub homepage: Option<String>,
     /// A link, not a rating: IMDb publishes no free API, so the score on the
     /// page stays TMDB's own.
@@ -1176,6 +1181,26 @@ impl AnicatEngine {
         })
     }
 
+    /// Bytes the torrent stream cache is holding on disk.
+    ///
+    /// Scanned on call rather than tracked: librqbit writes to the same
+    /// directory — preallocating a file to its full length before a byte of
+    /// it arrives — so a counter kept alongside would drift immediately.
+    pub async fn stream_cache_bytes(&self) -> u64 {
+        self.torrents.cache_bytes().await
+    }
+
+    /// Drops everything in the stream cache except what a player is reading.
+    ///
+    /// The cap that governs the cache during playback is sized to hold an
+    /// episode and its preload; it is the wrong budget for a device that has
+    /// stopped watching, which on a phone is most of the time. Safe to call
+    /// while something is playing: the playing torrent is exempt.
+    pub async fn purge_stream_cache(&self) -> FfiResult<()> {
+        self.torrents.purge_stream_cache().await;
+        Ok(())
+    }
+
     /// Whether cinema mode has a TMDB credential to read with.
     ///
     /// The mode is hidden without one rather than shown broken: every call
@@ -1822,6 +1847,8 @@ impl AnicatEngine {
                 revenue: money(m.revenue),
                 season_count: None,
                 episode_count: None,
+                last_aired_episode: None,
+                next_air_date: None,
                 companies: m
                     .production_companies
                     .iter()
@@ -1852,6 +1879,23 @@ impl AnicatEngine {
             revenue: None,
             season_count: s.number_of_seasons,
             episode_count: s.number_of_episodes,
+            // Converted out of (season, episode) into the absolute number the
+            // registry, the resume position and the remembered release all
+            // key on, so a caller can compare it against progress without
+            // knowing the season map.
+            last_aired_episode: s.last_episode_to_air.as_ref().and_then(|ep| {
+                let season = ep.season_number?;
+                let number = ep.episode_number?;
+                let mut absolute = 0;
+                for (map_season, count) in s.season_map() {
+                    if map_season == season {
+                        return Some((absolute + number) as i32);
+                    }
+                    absolute += count;
+                }
+                None
+            }),
+            next_air_date: s.next_episode_to_air.as_ref().and_then(|ep| ep.air_date.clone()),
             companies: s.networks.iter().flatten().filter_map(|c| c.name.clone()).collect(),
             gallery: crate::catalog::tmdb::types::gallery_urls(s.images.as_ref()),
             homepage: s.homepage.clone().filter(|h| !h.is_empty()),

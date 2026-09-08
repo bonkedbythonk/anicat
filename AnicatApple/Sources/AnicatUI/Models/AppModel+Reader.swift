@@ -279,6 +279,60 @@ extension AppModel {
         loadOfflineChapters()
     }
 
+    /// What the newest chapter of each followed manga was, last time this
+    /// looked. `anicat_last_seen_chapter` in UserDefaults, keyed by AniList
+    /// id.
+    static let lastSeenChapterKey = "anicat_last_seen_chapter"
+
+    /// Announces manga whose source has published a chapter since the last
+    /// check.
+    ///
+    /// Not driven off the Up Next queue like the episode check: that queue is
+    /// built from AniList's *watching* list and only ever holds anime, which
+    /// is why including chapters there announced nothing. AniList also has no
+    /// "next chapter" field to read -- `chapters` is the published total and
+    /// is null for most ongoing series -- so the answer has to come from the
+    /// same source the reader reads: whatever MangaDex or MangaKatana lists
+    /// as the newest chapter.
+    ///
+    /// One pass over what is actually being read, capped, in the background.
+    @MainActor
+    public func checkForNewChapters() async {
+        guard let engine, SystemNotifications.areNewEpisodeNotificationsEnabled else { return }
+        var seen = (UserDefaults.standard.dictionary(forKey: Self.lastSeenChapterKey) as? [String: Double]) ?? [:]
+
+        for item in mangaReading.prefix(8) {
+            guard let manga = try? await engine.searchManga(query: item.title, anilistId: item.id),
+                  let first = manga.first else { continue }
+            let chapters = (try? await engine.getMangaChapters(mangaId: first.id)) ?? []
+            // Chapters number fractionally and arrive in feed order, so the
+            // newest is the largest number rather than the last row.
+            guard let newest = chapters.compactMap({ Double($0.number) }).max() else { continue }
+
+            let key = String(item.id)
+            defer { seen[key] = newest }
+            // The first look at a title only records: everything already
+            // published counts as new against an empty history, and
+            // announcing a back catalogue is a notification storm.
+            guard let previous = seen[key], newest > previous else { continue }
+
+            let id = item.id
+            let title = item.title
+            let cover = item.coverImageURL
+            let chapter = Int(newest.rounded(.down))
+            Task.detached(priority: .utility) {
+                await SystemNotifications.shared.notifyNewEpisode(
+                    catalogId: id,
+                    title: title,
+                    episode: chapter,
+                    coverURL: cover,
+                    unit: .chapter
+                )
+            }
+        }
+        UserDefaults.standard.set(seen, forKey: Self.lastSeenChapterKey)
+    }
+
     /// Tells the engine the cap Settings holds. Called at launch and
     /// whenever the control changes: the engine keeps it in memory, so it is
     /// this side's job to say what it is.

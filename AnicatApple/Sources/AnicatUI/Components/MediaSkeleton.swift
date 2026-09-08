@@ -45,6 +45,7 @@ public struct MediaGridSkeleton: View {
                 MediaCardSkeleton()
             }
         }
+        .sumiShimmer()
     }
 }
 
@@ -87,6 +88,7 @@ public struct MediaRowSkeleton: View {
                 .padding(.vertical, 4)
             }
         }
+        .sumiShimmer()
     }
 }
 
@@ -169,6 +171,7 @@ public struct EpisodeListSkeleton: View {
                 EpisodeRowSkeleton(isCompact: isCompact)
             }
         }
+        .sumiShimmer()
     }
 }
 
@@ -191,5 +194,6 @@ public struct SynopsisSkeleton: View {
                 .frame(width: 220, height: 14)
         }
         .padding(.vertical, 4)
+        .sumiShimmer()
     }
 }

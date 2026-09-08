@@ -199,6 +199,9 @@ extension AppModel {
         await history
         await loadHomeDiscoverRows()
         persistHomeCache()
+        // After the shelves, and detached: it is a handful of requests to the
+        // manga sources and nothing on screen waits for it.
+        Task { await checkForNewChapters() }
     }
 
     /// Re-reads the viewer's lists after a list mutation (status, score,

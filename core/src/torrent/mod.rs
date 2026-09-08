@@ -630,6 +630,32 @@ impl TorrentManager {
             .insert((media, episode), RememberedRelease::from_candidate(cand, r.prefer_dub));
     }
 
+    /// Evicts everything the cache holds except the torrent a player is
+    /// currently reading.
+    ///
+    /// For the moment the app stops being used — backgrounded on a phone, or
+    /// quit. The 3 GiB cap is sized for playback (one episode plus the N+1
+    /// preload is most of it), which is the right budget while watching and
+    /// the wrong one for a device that has finished. The playing torrent is
+    /// kept because on iOS a background is not a stop: audio can still be
+    /// running with the screen off.
+    pub async fn purge_stream_cache(&self) {
+        let protected: HashSet<usize> = self
+            .playing_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|(t, _)| t)
+            .into_iter()
+            .collect();
+        let session = self.session.get().cloned();
+        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, 0).await;
+    }
+
+    /// Bytes the stream cache is holding on disk right now.
+    pub async fn cache_bytes(&self) -> u64 {
+        stream_cache_bytes(&self.cache_dir).await
+    }
+
     pub async fn set_playing(&self, media: crate::media::MediaKey, episode: i64) {
         let resolved = self.resolved.lock().await.get(&(media, episode)).copied();
         let Some(r) = resolved else {
@@ -2335,7 +2361,35 @@ fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
 /// the cache sat at 8.7 GB against a 3 GB cap, and this sweep deleted the
 /// torrent mpv was reading. Playback then stopped at around 20 minutes,
 /// every episode, with nothing to buffer because the file was gone.
+/// Bytes the stream cache is holding on disk right now.
+///
+/// Scanned rather than tracked: the cache is a directory librqbit also
+/// writes to, so a counter kept in memory would drift the moment anything
+/// evicted, resumed or preallocated behind our back.
+pub async fn stream_cache_bytes(dir: &std::path::Path) -> u64 {
+    let scan = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let Ok(entries) = std::fs::read_dir(&scan) else { return 0 };
+        entries
+            .flatten()
+            .map(|e| dir_size_and_mtime(&e.path()).0)
+            .sum()
+    })
+    .await
+    .unwrap_or(0)
+}
+
 async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>, protected: &HashSet<usize>) {
+    cleanup_cache_to(dir, session, protected, CACHE_CAP_BYTES).await
+}
+
+/// `cleanup_cache` with the cap made explicit, so a purge can ask for zero.
+async fn cleanup_cache_to(
+    dir: &std::path::Path,
+    session: Option<&Arc<Session>>,
+    protected: &HashSet<usize>,
+    cap: u64,
+) {
     // The scan walks every torrent directory in the cache and stats every file
     // in it, which on a multi-GB cache is real, uninterruptible disk work.
     // This function became async so it could tell the Session about what it
@@ -2358,7 +2412,7 @@ async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>, pr
         return;
     };
     let mut total: u64 = items.iter().map(|(_, _, s)| s).sum();
-    if total <= CACHE_CAP_BYTES {
+    if total <= cap {
         return;
     }
     items.sort_by_key(|(_, mtime, _)| *mtime);

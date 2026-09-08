@@ -626,6 +626,8 @@ extension AppModel {
         }
         cinemaUpNext = queue
         persistHomeCache()
+        // After the queue is built, so it has the list of what is followed.
+        Task { await checkForNewCinemaEpisodes() }
     }
 
     /// Names and illustrates a registry row from whichever map owns its
@@ -648,6 +650,54 @@ extension AppModel {
         case .tmdbMovie: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbMovie, id: id)]
         case .tmdbTv: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbTv, id: id)]
         }
+    }
+
+    /// What the newest aired episode of each followed series was, last time
+    /// this looked. Keyed by TMDB id.
+    static let lastSeenCinemaEpisodeKey = "anicat_last_seen_cinema_episode"
+
+    /// Announces series in the local list that have aired an episode since
+    /// the last check.
+    ///
+    /// TMDB has no airing feed, only `last_episode_to_air` on the series
+    /// detail -- which the page already fetches and the engine caches for a
+    /// day, so this costs nothing on top of opening the app. Only series
+    /// being watched or on the list are asked about: everything else would be
+    /// a request per title for news about something nobody is following.
+    @MainActor
+    public func checkForNewCinemaEpisodes() async {
+        guard let engine, cinemaAvailable,
+              SystemNotifications.areNewEpisodeNotificationsEnabled else { return }
+        var seen = (UserDefaults.standard.dictionary(forKey: Self.lastSeenCinemaEpisodeKey) as? [String: Int]) ?? [:]
+
+        let followed = (cinemaContinueWatching + cinemaWatchlist)
+            .filter { $0.catalog == .tmdbTv }
+        var asked = Set<Int64>()
+        for item in followed where asked.insert(item.id).inserted {
+            guard let extras = try? await engine.cinemaExtras(catalog: .tmdbTv, catalogId: item.id),
+                  let aired = extras.lastAiredEpisode else { continue }
+            let key = String(item.id)
+            let latest = Int(aired)
+            defer { seen[key] = latest }
+            // First look records only, like the anime check: everything
+            // already aired is new against an empty history.
+            guard let previous = seen[key], latest > previous else { continue }
+
+            let id = item.id
+            let title = item.title
+            let cover = item.coverImageURL
+            Task.detached(priority: .utility) {
+                await SystemNotifications.shared.notifyNewEpisode(
+                    catalogId: id,
+                    title: title,
+                    episode: latest,
+                    coverURL: cover,
+                    unit: .episode,
+                    catalog: .tmdbTv
+                )
+            }
+        }
+        UserDefaults.standard.set(seen, forKey: Self.lastSeenCinemaEpisodeKey)
     }
 
     /// A cinema title's name and poster: from the detail snapshot if this

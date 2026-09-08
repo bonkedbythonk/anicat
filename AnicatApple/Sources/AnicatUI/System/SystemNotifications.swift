@@ -95,15 +95,50 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
 
     // MARK: - Posting
 
-    public func notifyNewEpisode(catalogId: Int64, title: String, episode: Int, coverURL: URL?) async {
+    /// What a release is called, and where its notification goes.
+    ///
+    /// A chapter is not an episode and cannot be played: tapping one has to
+    /// open the title so the reader can be started from it, while an episode
+    /// goes straight to playback.
+    public enum ReleaseUnit: Sendable {
+        case episode
+        case chapter
+
+        var noun: String {
+            switch self {
+            case .episode: return "Episode"
+            case .chapter: return "Chapter"
+            }
+        }
+    }
+
+    /// `catalog` for the same reason `notifyDownloadFinished` takes one: the
+    /// tap replays a deep link, and a series announced from TMDB whose link
+    /// said nothing would have opened -- and played -- whatever anime carries
+    /// that number.
+    public func notifyNewEpisode(
+        catalogId: Int64,
+        title: String,
+        episode: Int,
+        coverURL: URL?,
+        unit: ReleaseUnit = .episode,
+        catalog: MediaCard.CardCatalog = .anilist
+    ) async {
         guard Self.isAvailable, Self.areNewEpisodeNotificationsEnabled else { return }
-        guard markOnce(key: Self.notifiedEpisodesKey, entry: "\(catalogId):\(episode)") else { return }
+        // The key carries the unit and the catalog: chapter 5, episode 5 of
+        // an anime and episode 5 of the film catalogue's series 5 are three
+        // pieces of news, and a shared key would let whichever arrived first
+        // silence the rest.
+        let key = "\(catalog.rawValue):\(unit == .episode ? "ep" : "ch"):\(catalogId):\(episode)"
+        guard markOnce(key: Self.notifiedEpisodesKey, entry: key) else { return }
         await post(
-            identifier: "episode-\(catalogId)-\(episode)",
+            identifier: "\(unit == .episode ? "episode" : "chapter")-\(catalog.rawValue)-\(catalogId)-\(episode)",
             title: title,
-            body: "Episode \(episode) is out.",
+            body: "\(unit.noun) \(episode) is out.",
             coverURL: coverURL,
-            link: .play(id: catalogId, episode: episode)
+            link: unit == .episode
+                ? .play(id: catalogId, episode: episode, catalog: catalog)
+                : .title(id: catalogId, isManga: true, catalog: catalog)
         )
     }
 

@@ -328,6 +328,12 @@ pub struct TmdbSeries {
     pub status: Option<String>,
     pub homepage: Option<String>,
     pub seasons: Option<Vec<TmdbSeason>>,
+    /// The most recent episode TMDB has as aired, and the next one it has a
+    /// date for. Between them they are the only "is there something new"
+    /// signal TMDB offers -- there is no per-episode airing feed like
+    /// AniList's.
+    pub last_episode_to_air: Option<TmdbEpisode>,
+    pub next_episode_to_air: Option<TmdbEpisode>,
     pub tagline: Option<String>,
     pub networks: Option<Vec<TmdbCompany>>,
     #[serde(alias = "aggregate_credits")]

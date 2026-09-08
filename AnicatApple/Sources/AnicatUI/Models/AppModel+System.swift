@@ -146,7 +146,8 @@ extension AppModel {
 
     // MARK: - Notifications
 
-    /// Announces titles whose "new episode" flag has just turned on.
+    /// Announces titles whose "new episode" -- or new chapter -- flag has
+    /// just turned on.
     @MainActor
     func notifyAboutNewEpisodes() {
         // An empty queue is "nothing loaded yet", not "nothing airing": the
@@ -155,10 +156,14 @@ extension AppModel {
         // every backlogged show on the watching list look newly aired the
         // moment the real list arrived.
         guard !upNextItems.isEmpty else { return }
+        // Chapters included: they were filtered out here while the queue
+        // has carried them all along, so a manga that updated said nothing.
+        // The key carries the unit for the same reason the notification does
+        // -- chapter 5 and episode 5 of one title are different news.
         let current = Set(
             upNextItems
-                .filter { $0.hasNewEpisode && $0.unit != "CH" }
-                .map { "\($0.id):\($0.nextEpisodeOrChapter)" }
+                .filter(\.hasNewEpisode)
+                .map { "\($0.unit):\($0.id):\($0.nextEpisodeOrChapter)" }
         )
         // The first look of a session only records. Everything already
         // backlogged on the watching list has a new episode by this
@@ -172,17 +177,20 @@ extension AppModel {
         let appeared = current.subtracting(previous)
         guard !appeared.isEmpty else { return }
 
-        for entry in upNextItems where appeared.contains("\(entry.id):\(entry.nextEpisodeOrChapter)") {
+        for entry in upNextItems
+        where appeared.contains("\(entry.unit):\(entry.id):\(entry.nextEpisodeOrChapter)") {
             let id = entry.id
             let episode = entry.nextEpisodeOrChapter
             let title = entry.title
             let cover = knownCovers[id] ?? entry.thumbnailURL
+            let unit: SystemNotifications.ReleaseUnit = entry.unit == "CH" ? .chapter : .episode
             Task.detached(priority: .utility) {
                 await SystemNotifications.shared.notifyNewEpisode(
                     catalogId: id,
                     title: title,
                     episode: episode,
-                    coverURL: cover
+                    coverURL: cover,
+                    unit: unit
                 )
             }
         }

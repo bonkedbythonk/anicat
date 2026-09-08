@@ -28,6 +28,8 @@ struct PhoneSettingsView: View {
     @State private var isConnecting = false
     @State private var authFailure: String?
     @State private var confirmingDisconnect = false
+    @State private var cacheBytes: UInt64?
+    @State private var isPurging = false
 
     private static let authorizeURL = URL(
         string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token"
@@ -38,6 +40,7 @@ struct PhoneSettingsView: View {
             account
             playback
             appearance
+            storage
             notifications
             cinema
         }
@@ -233,6 +236,47 @@ struct PhoneSettingsView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
         }
+    }
+
+    /// What streaming has left on disk, and a way to be rid of it.
+    ///
+    /// Worth showing rather than leaving implicit: the cache is capped at
+    /// 3 GiB, which is a rounding error on a Mac and 2.5% of a 128 GB phone
+    /// for episodes already watched. It is emptied automatically when the
+    /// app is backgrounded; this is the same thing on demand, and the number
+    /// is what makes that behaviour believable.
+    @ViewBuilder
+    private var storage: some View {
+        Section("Storage") {
+            HStack {
+                Text("Stream cache")
+                    .font(.system(size: 15))
+                Spacer()
+                Text(cacheBytes.map(Self.formatted) ?? "—")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            Button(isPurging ? "Clearing…" : "Clear now") {
+                isPurging = true
+                Task {
+                    await model.purgeStreamCache()
+                    cacheBytes = await model.streamCacheBytes()
+                    isPurging = false
+                }
+            }
+            .disabled(isPurging || (cacheBytes ?? 0) == 0)
+            Text("Cleared automatically when you leave the app. Whatever is playing is kept.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+        }
+        .task { cacheBytes = await model.streamCacheBytes() }
+    }
+
+    static func formatted(_ bytes: UInt64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useMB, .useGB]
+        return formatter.string(fromByteCount: Int64(bytes))
     }
 
     @ViewBuilder

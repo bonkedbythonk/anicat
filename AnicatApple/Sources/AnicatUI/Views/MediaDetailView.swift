@@ -3470,7 +3470,15 @@ private struct ServerPickerView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 380)
+                // A row is about 62pt (a name on up to two 12pt lines, the
+                // seeders line, 9pt of padding either side, a divider), and
+                // `list_candidates` does not truncate — a popular episode
+                // comes back with dozens. At 380 that was six rows on
+                // screen, so picking a healthier release meant scrolling a
+                // list whose shape you could not see; 560 shows nine and
+                // still leaves room above and below the anchored row on a
+                // laptop display.
+                .frame(maxHeight: 560)
             }
         }
         .frame(width: 460)

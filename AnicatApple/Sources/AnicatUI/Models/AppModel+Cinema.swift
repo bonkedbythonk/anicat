@@ -238,7 +238,6 @@ extension AppModel {
         }
         activeDetailTask?.cancel()
         activeDetailExtrasTask?.cancel()
-        currentDetailCatalog = catalog
         loadingCatalogId = id
 
         // Render the last snapshot before the fetch, exactly as the AniList
@@ -250,8 +249,13 @@ extension AppModel {
             catalog: catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, catalogId: id
         )
         let cached = DetailCache.load(id: id, isManga: false, catalog: catalog)
-        if let cached {
+        if var cached {
             isDetailLoading = false
+            // A snapshot written before `Details` carried a catalog decodes
+            // without one, and would read as AniList for as long as it is on
+            // screen -- long enough to draw AniList's list controls over a
+            // film. The catalog is known here: it is the one being opened.
+            cached.details.catalog = catalog
             withAnimation(.easeInOut(duration: 0.32)) {
                 selectedEpisodes = cached.episodes
                 selectedMangaChapters = []
@@ -274,7 +278,8 @@ extension AppModel {
                     id: id,
                     title: title ?? "Loading...",
                     coverURL: coverURL,
-                    format: catalog == .tmdbMovie ? "MOVIE" : "TV"
+                    format: catalog == .tmdbMovie ? "MOVIE" : "TV",
+                    catalog: catalog
                 )
             }
         }
@@ -290,7 +295,7 @@ extension AppModel {
         guard currentDetailCatalog == catalog, selectedMediaDetails?.id == id else { return }
 
         selectedEpisodes = Self.episodeItems(from: d)
-        let details = Self.cinemaDetails(from: d)
+        let details = Self.cinemaDetails(from: d, catalog: catalog)
         withAnimation(.easeInOut(duration: 0.24)) {
             selectedMediaDetails = details
             selectedRecommendations = d.recommendations.map {
@@ -356,7 +361,10 @@ extension AppModel {
     /// stand in for personal data in screenshot mode -- is AniList's own and
     /// has no counterpart on a TMDB title. Shared with the prefetch, so a
     /// card hovered and a card opened write the same snapshot.
-    nonisolated static func cinemaDetails(from d: MediaDetail) -> HeroBanner.Details {
+    nonisolated static func cinemaDetails(
+        from d: MediaDetail,
+        catalog: MediaCard.CardCatalog
+    ) -> HeroBanner.Details {
         HeroBanner.Details(
             id: d.catalogId,
             title: d.title,
@@ -385,7 +393,8 @@ extension AppModel {
             trailerSite: d.trailerSite,
             trailerId: d.trailerId,
             trailerThumbnail: d.trailerThumbnail,
-            studios: []
+            studios: [],
+            catalog: catalog
         )
     }
 
@@ -404,7 +413,7 @@ extension AppModel {
             guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else { return }
             DetailCache.save(
                 DetailCache.Snapshot(
-                    details: Self.cinemaDetails(from: d),
+                    details: Self.cinemaDetails(from: d, catalog: catalog),
                     episodes: Self.episodeItems(from: d),
                     mangaChapters: [],
                     relations: [],
@@ -488,7 +497,7 @@ extension AppModel {
         guard let d = try? await engine.cinemaDetail(catalog: catalog, catalogId: id),
               selectedMediaDetails?.id == id else { return }
         selectedEpisodes = Self.episodeItems(from: d)
-        selectedMediaDetails = Self.cinemaDetails(from: d)
+        selectedMediaDetails = Self.cinemaDetails(from: d, catalog: currentDetailCatalog)
     }
 
     /// One cast member, for the sheet. Cached by the engine for a day, so

@@ -62,6 +62,24 @@ public enum HeroBanner {
         /// written before this field existed has no key for it.
         public let studios: [StudioRef]?
 
+        /// Which catalog `id` belongs to.
+        ///
+        /// The page carried an id and nothing else while there was one
+        /// catalog. There are three now -- an AniList entry, a TMDB film and
+        /// a TMDB series all number 550 -- and every caller that had to
+        /// remember which one this was got it wrong at least once: a
+        /// recommendation opened the anime with a film's number, Back
+        /// reloaded a film through AniList, closing the player landed on a
+        /// random title. Carried with the id so those cannot drift apart.
+        ///
+        /// Optional for the reason `trailerSite` documents: a snapshot
+        /// written before this field existed has no key for it, and
+        /// everything those builds could open was AniList's -- which is what
+        /// `mediaCatalog` answers for them.
+        public var catalog: MediaCard.CardCatalog?
+
+        public var mediaCatalog: MediaCard.CardCatalog { catalog ?? .anilist }
+
         /// A neighbouring season, as the detail page's chain cards draw it.
         public struct Relation: Sendable, Identifiable, Codable {
             public let id: Int64
@@ -121,12 +139,14 @@ public enum HeroBanner {
             trailerSite: String? = nil,
             trailerId: String? = nil,
             trailerThumbnail: String? = nil,
-            studios: [StudioRef]? = nil
+            studios: [StudioRef]? = nil,
+            catalog: MediaCard.CardCatalog? = nil
         ) {
             self.trailerSite = trailerSite
             self.trailerId = trailerId
             self.trailerThumbnail = trailerThumbnail
             self.studios = studios
+            self.catalog = catalog
             self.status = status
             self.episodeCount = episodeCount
             self.resumeEpisode = resumeEpisode

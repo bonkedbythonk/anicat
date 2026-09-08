@@ -12,7 +12,8 @@ struct RealDataWiringTests {
         let engine = try AnicatEngine(
             dataDir: tempDir,
             anilistToken: nil,
-            tmdbKey: nil
+            tmdbKey: nil,
+            tmdbProxy: nil
         )
         return (engine, tempDir)
     }

@@ -111,7 +111,6 @@ extension AppModel {
     /// whatever anime shares its number.
     func restore(_ step: DetailStep) {
         if step.catalog != .anilist {
-            currentDetailCatalog = step.catalog
             let task = Task { [weak self] () -> Void in
                 guard let self else { return }
                 await self.openCinemaDetail(
@@ -123,7 +122,6 @@ extension AppModel {
             activeDetailTask = task
             return
         }
-        currentDetailCatalog = .anilist
         // Load cached snapshot immediately so the transition renders
         // synchronously without waiting for an async Task to start up.
         if let cached = DetailCache.load(id: step.id, isManga: step.isManga) {
@@ -180,10 +178,6 @@ extension AppModel {
 
     func loadDetail(id: Int64, title: String? = nil, coverURL: URL? = nil, isManga: Bool, forceRefresh: Bool = false) async {
         guard let engine, !Task.isCancelled else { return }
-        // This page is AniList's. Left as it was, a film opened just before
-        // would still be the catalog every play, refresh and progress write
-        // from here named -- and TMDB's ids are not AniList's.
-        currentDetailCatalog = .anilist
         loadingCatalogId = id
         // Episode numbers repeat across titles, so a stale entry here would
         // show as "downloaded"/"downloading" on the wrong show's episode 1

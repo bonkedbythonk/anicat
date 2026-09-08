@@ -16,7 +16,8 @@ struct EngineBridgeTests {
         let engine = try AnicatEngine(
             dataDir: tempDir,
             anilistToken: nil,
-            tmdbKey: nil
+            tmdbKey: nil,
+            tmdbProxy: nil
         )
 
         // Verify dynamic stream port is assigned

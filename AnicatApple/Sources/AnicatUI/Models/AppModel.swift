@@ -543,9 +543,17 @@ public final class AppModel {
     /// Details tab there.
     public var cinemaExtras: CinemaExtras?
 
-    /// The catalog the open detail page belongs to. Every refresh path on
-    /// that page reads AniList, so it has to know when not to run.
-    public var currentDetailCatalog: MediaCard.CardCatalog = .anilist
+    /// The catalog the open detail page belongs to.
+    ///
+    /// Read from the page rather than tracked beside it. As a stored
+    /// property this was a second source of truth that every path had to
+    /// remember to set, and the ones that forgot are the bugs this became a
+    /// computed property to end: a recommendation opening the anime with a
+    /// film's number, Back reloading a film through AniList, closing the
+    /// player landing on a random title.
+    public var currentDetailCatalog: MediaCard.CardCatalog {
+        selectedMediaDetails?.mediaCatalog ?? .anilist
+    }
 
     // Library / Manga / Novels / History
     public var libraryItems: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }

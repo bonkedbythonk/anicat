@@ -10,7 +10,7 @@ final class BridgeTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("anicat-bridge-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return try AnicatEngine(dataDir: dir.path, anilistToken: nil, tmdbKey: nil)
+        return try AnicatEngine(dataDir: dir.path, anilistToken: nil, tmdbKey: nil, tmdbProxy: nil)
     }
 
     func testEngineConstructsAndOpensItsRegistry() throws {

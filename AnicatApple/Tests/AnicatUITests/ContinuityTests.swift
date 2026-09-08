@@ -18,8 +18,11 @@ struct ContinuityTests {
         let payload = ContinuityManager.shared.parseIncomingActivity(activity)
         #expect(payload != nil)
 
-        if case .playback(let catalogId, let title, let episode, let timePos) = payload {
+        if case .playback(let catalogId, let catalog, let title, let episode, let timePos) = payload {
             #expect(catalogId == 154587)
+            // No catalog key at all, as an activity from a build before
+            // cinema mode carries: everything those could play was AniList's.
+            #expect(catalog == "anilist")
             #expect(title == "Frieren: Beyond Journey's End")
             #expect(episode == 5)
             #expect(timePos == 742.5)

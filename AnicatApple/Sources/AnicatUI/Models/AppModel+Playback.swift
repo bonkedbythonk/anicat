@@ -770,6 +770,13 @@ extension AppModel {
         // stop for a play that never resolved), and an unconditional
         // sound is a close blip from an idle app.
         let wasPlaying = activeStreamURL != nil
+        #if os(iOS)
+        // Hands the grant back before anything else: the Mac keeps the file
+        // pinned out of its own cache eviction for as long as the token is
+        // live, and a phone that closed the player should not be holding
+        // that.
+        releaseRemoteStream()
+        #endif
         // Both calls are IPC writes into the Rust engine — `recordProgress`
         // hits SQLite, `discordClearPresence` hits Discord's socket, and the
         // comment on `handlePlaybackPositionChange` already documents that a
@@ -1029,7 +1036,23 @@ extension AppModel {
         // entirely and went straight to a release that worked, instantly.
         let handleURL: String
         do {
+            #if os(iOS)
+            // A Mac on the same Wi-Fi resolves and serves this instead,
+            // when there is one and it has approved this phone. The phone
+            // then joins no swarm, uploads nothing, and writes nothing to
+            // its own cache -- which is the whole point on a device with
+            // 128 GB and a battery. `remoteStreamURL` returns nil for every
+            // failure, so the local engine below stays the answer whenever
+            // the Mac is not there or says no.
+            if let remote = await remoteStreamURL(for: req) {
+                handleURL = remote.absoluteString
+            } else {
+                releaseRemoteStream()
+                handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
+            }
+            #else
             handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
+            #endif
             // The Cancel button (`cancelResolve`) only cancels *waiting* on
             // this Task, not the FFI call itself mid-flight — check here so
             // a resolve that finishes after the viewer already gave up

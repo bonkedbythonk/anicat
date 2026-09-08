@@ -20,6 +20,80 @@ public enum RemoteFrame: Codable, Sendable {
     /// side dialled out.
     case syncOffer([SyncRelease])
     case syncReply([SyncRelease])
+
+    // MARK: Streaming from the Mac
+    //
+    // Two frames on the control connection ask the Mac to resolve an episode
+    // and hand back a token; the rest happen on their own short-lived
+    // connections, one per range request the phone's player makes.
+
+    case streamResolve(id: String, ask: StreamAsk)
+    case streamResolved(id: String, grant: StreamGrant?, error: String?)
+    /// Sent when the phone stops playing, so the Mac stops honouring the
+    /// token. Also implied by the control connection dropping.
+    case streamRelease(token: String)
+
+    /// Opens a data connection: authenticates, names the grant and asks for
+    /// one byte range, all in the first frame.
+    ///
+    /// Its own frame rather than an ordinary `hello`: that path answers with
+    /// a `helloAck` and a state snapshot and starts the 1 Hz push, none of
+    /// which a connection that exists to carry video wants.
+    case helloData(deviceId: String, token: String, start: Int64, end: Int64)
+    /// The Mac's answer on a data connection. **Everything after this
+    /// frame's newline is raw video**, so both ends stop feeding the framer
+    /// at this point -- an MKV is full of `0x0A`, and a framer left running
+    /// would quietly eat the file looking for JSON.
+    case dataHeader(length: Int64, contentType: String)
+    case dataError(String)
+}
+
+/// What the phone asks the Mac to resolve. The same fields `StreamRequest`
+/// carries, minus `preload`: a resolve the phone is about to play is never
+/// speculative, and it must take the Mac's playing-file pin or
+/// `retain_recent` can evict the file out from under the phone.
+public struct StreamAsk: Codable, Sendable {
+    public var catalog: String
+    public var catalogId: Int64
+    public var episode: Int64
+    public var title: String?
+    public var preferDub: Bool
+    public var chosenName: String?
+    public var resumeFraction: Double?
+
+    public init(
+        catalog: String,
+        catalogId: Int64,
+        episode: Int64,
+        title: String?,
+        preferDub: Bool,
+        chosenName: String?,
+        resumeFraction: Double?
+    ) {
+        self.catalog = catalog
+        self.catalogId = catalogId
+        self.episode = episode
+        self.title = title
+        self.preferDub = preferDub
+        self.chosenName = chosenName
+        self.resumeFraction = resumeFraction
+    }
+}
+
+/// Permission to read one resolved file, and what it takes to serve it.
+public struct StreamGrant: Codable, Sendable {
+    /// A UUID, never a counter. It is the only thing between a data
+    /// connection and a file, and a predictable one would be a weaker check
+    /// than the device pairing it sits behind.
+    public var token: String
+    public var totalLength: Int64
+    public var contentType: String
+
+    public init(token: String, totalLength: Int64, contentType: String) {
+        self.token = token
+        self.totalLength = totalLength
+        self.contentType = contentType
+    }
 }
 
 /// One remembered release on the wire.

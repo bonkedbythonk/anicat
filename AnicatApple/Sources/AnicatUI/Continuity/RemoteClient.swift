@@ -49,6 +49,7 @@ public final class RemoteClient {
     /// open.
     private var isQuietSync = false
     private var quietSyncTimeout: Task<Void, Never>?
+    private var pendingResolves: [String: CheckedContinuation<StreamGrant, Error>] = [:]
 
     private init() {}
 
@@ -137,6 +138,10 @@ public final class RemoteClient {
     }
 
     public func disconnect() {
+        for (_, continuation) in pendingResolves {
+            continuation.resume(throwing: RemoteStreamError.notConnected)
+        }
+        pendingResolves.removeAll()
         quietSyncTimeout?.cancel()
         quietSyncTimeout = nil
         isQuietSync = false
@@ -194,6 +199,71 @@ public final class RemoteClient {
         }
     }
 
+    /// Asks the Mac to resolve an episode and hand back a grant this phone
+    /// can read it through.
+    ///
+    /// Leaves the control connection up afterwards, unlike `syncQuietly`:
+    /// the Mac drops every grant when its last approved controller goes, so
+    /// hanging up here would revoke the token the player is about to use.
+    func resolveOnHost(
+        _ ask: StreamAsk,
+        on node: BonjourDiscovery.DiscoveredNode
+    ) async throws -> StreamGrant {
+        if status != .connected {
+            isQuietSync = false
+            connect(to: node)
+            try await waitUntilConnected()
+        }
+        guard status == .connected, let connection else {
+            throw RemoteStreamError.notConnected
+        }
+        let id = UUID().uuidString
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                pendingResolves[id] = continuation
+                connection.sendFrame(.streamResolve(id: id, ask: ask))
+            }
+        } onCancel: {
+            Task { @MainActor in self.failResolve(id, with: CancellationError()) }
+        }
+    }
+
+    func releaseStream(token: String) {
+        connection?.sendFrame(.streamRelease(token: token))
+    }
+
+    enum RemoteStreamError: Error, LocalizedError {
+        case notConnected
+        case refused(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notConnected: return "Could not reach the Mac"
+            case .refused(let why): return why
+            }
+        }
+    }
+
+    /// Polls rather than waiting on a continuation because approval is a
+    /// human on the other end: the state this waits for can be minutes away
+    /// on a first pairing, and every other path already reads `status`.
+    private func waitUntilConnected(timeout: Duration = .seconds(20)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            switch status {
+            case .connected: return
+            case .denied, .failed, .idle: throw RemoteStreamError.notConnected
+            case .connecting, .awaitingApproval: break
+            }
+            try await Task.sleep(for: .milliseconds(120))
+        }
+        throw RemoteStreamError.notConnected
+    }
+
+    private func failResolve(_ id: String, with error: Error) {
+        pendingResolves.removeValue(forKey: id)?.resume(throwing: error)
+    }
+
     private func handle(_ frame: RemoteFrame) {
         switch frame {
         case .helloAck(let accepted, let name):
@@ -213,7 +283,15 @@ public final class RemoteClient {
         case .syncReply(let rows):
             RemoteSync.merge(rows)
             if isQuietSync { disconnect() }
-        case .hello, .command, .syncOffer:
+        case .streamResolved(let id, let grant, let error):
+            guard let continuation = pendingResolves.removeValue(forKey: id) else { return }
+            if let grant {
+                continuation.resume(returning: grant)
+            } else {
+                continuation.resume(throwing: RemoteStreamError.refused(error ?? "the Mac refused"))
+            }
+        case .hello, .command, .syncOffer, .streamResolve, .streamRelease,
+             .helloData, .dataHeader, .dataError:
             break
         }
     }

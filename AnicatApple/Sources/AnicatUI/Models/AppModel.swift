@@ -74,6 +74,9 @@ public final class AppModel {
     /// A play held back because the phone is on cellular. See
     /// `playGuardedByCellular`.
     public var cellularPrompt: CellularPrompt?
+    /// The grant the current episode is being read through, when it is
+    /// coming from a Mac rather than from this phone's own engine.
+    public var activeRemoteStreamToken: String?
     #endif
     /// Set alongside `errorMessage` when the failure is something retrying
     /// might actually fix (a resolve timeout, a candidate that turned out

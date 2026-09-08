@@ -23,6 +23,8 @@ struct PhoneSettingsView: View {
     // `AppModel.isCellularWarningEnabled` owns the reader and the default;
     // `@AppStorage` needs a literal here, so the two must agree.
     @AppStorage("anicat_warn_on_cellular") private var warnOnCellular: Bool = true
+    // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
+    @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = false
     @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
@@ -185,6 +187,10 @@ struct PhoneSettingsView: View {
             Toggle("Play next episode", isOn: $autoPlayNext)
             Toggle("Warn on cellular", isOn: $warnOnCellular)
             Text("Asked before each episode you start off Wi-Fi. Personal hotspots count.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+            Toggle("Stream from Mac when available", isOn: $streamFromMac)
+            Text("Plays through a Mac running Anicat on this Wi-Fi, so the phone joins no swarm and stores nothing. Falls back to streaming here when no Mac answers.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
         }

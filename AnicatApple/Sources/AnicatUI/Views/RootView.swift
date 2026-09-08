@@ -136,15 +136,22 @@ public struct RootView: View {
                             // The feed drops back as the page comes forward,
                             // so the two read as depth rather than as one
                             // picture replacing another. Same gate as the
-                            // page's own scale: on a shelf open the poster
+                            // page's own offset: on a shelf open the poster
                             // this layer holds is one half of a live
                             // `matchedGeometryEffect` pair, and moving it
                             // mid-flight is what the morph is measuring
-                            // against. Riding the same transaction as
-                            // `selectedMediaDetails`, so it needs no
-                            // animation of its own.
+                            // against.
                             .scaleEffect(isFeedPushedBack ? 0.97 : 1)
                             .opacity(isFeedPushedBack ? 0.8 : 1)
+                            // Its own curve, and a bounce-free one. Left to
+                            // ride the enclosing transaction it took
+                            // `.sumi(.morph)`, whose 0.86 damping is
+                            // underdamped by design -- so on close the whole
+                            // feed scaled a little past its resting size and
+                            // sprang back into place. A spring is right for a
+                            // poster being thrown across the screen and wrong
+                            // for the wall behind it.
+                            .animation(.sumi(.page), value: isFeedPushedBack)
 
                         // The detail page replaces the section, inside the
                         // content column. It is not a window-wide overlay: the
@@ -1185,12 +1192,15 @@ public struct RootView: View {
         guard model.openingDetailSourceKey == nil else {
             return .asymmetric(insertion: arrive, removal: leave)
         }
+        // The travel is bounce-free for the same reason the feed's is: a page
+        // that settles past its resting position and comes back reads as a
+        // wobble, not as a page.
         return .asymmetric(
-            insertion: AnyTransition.offset(y: 24).combined(with: arrive),
+            insertion: AnyTransition.offset(y: 24).animation(.sumi(.page)).combined(with: arrive),
             // Less travel than it arrived with: a page being dismissed that
             // slides as far as it came reads as being thrown away rather than
             // as the layer above closing.
-            removal: AnyTransition.offset(y: 14).combined(with: leave)
+            removal: AnyTransition.offset(y: 14).animation(.easeIn(duration: 0.26)).combined(with: leave)
         )
     }
 

@@ -39,6 +39,7 @@ The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping p
 - [Screenshots](#screenshots)
 - [Building from Source](#building-from-source)
 - [Dependencies](#dependencies)
+- [Project history](#project-history)
 - [Legal](#legal)
 - [License](#license)
 
@@ -164,6 +165,28 @@ relaunches it, and never touches the installed one.
 | [Syosetu](https://syosetu.com) | Web novels |
 | [AniSkip](https://api.aniskip.com) | Intro and outro timestamps |
 | [UniFFI](https://mozilla.github.io/uniffi-rs/) | Rust to Swift bindings |
+
+---
+
+## Project history
+
+Anicat has been rewritten from the ground up three times. Each rewrite threw
+away the UI layer and kept the idea: one place to find, play and track anime,
+with AniList as the source of truth.
+
+| When | What it was |
+|---|---|
+| **May 2026** | A Python command-line tool, playback handed to IINA. Built on the foundations of [Viu](https://github.com/viu-media/viu) and refined for macOS. |
+| **May 2026** | A FastAPI dashboard with a Next.js front end over the same Python core. |
+| **June 2026** | A packaged desktop app: CI for macOS and Windows, mpv bundled rather than assumed. The first build that could be handed to someone. |
+| **June 2026** · v4.0.0 | The first full rewrite. Tauri v2, Vite and React over a Rust backend, replacing Next.js and the monolithic Python sidecar. |
+| **September 2026** · v6.0.0 | The second, and the current one. A headless Rust engine that knows nothing about a UI, with SwiftUI and AppKit over it and libmpv in-process. |
+
+That is also why the version number is as high as it is: it counts the
+project, not the app in front of you. The native build reached v6.0.0 because
+the Tauri one had already run from v4.0.0 to v5.8.0 in four months.
+
+Dated commit by commit in [HISTORY.md](HISTORY.md).
 
 ---
 

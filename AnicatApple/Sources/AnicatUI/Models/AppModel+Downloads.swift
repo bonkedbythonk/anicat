@@ -11,8 +11,14 @@ extension AppModel {
     /// where the copy landed, not that it is still there: the folder is the
     /// user's own Downloads, and a file moved or deleted from it would
     /// otherwise reach mpv as a path that opens nothing.
-    public func finishedDownload(catalogId: Int64, episode: Int) -> LibraryDownload? {
-        guard let download = libraryDownloads.first(where: { $0.catalogId == catalogId && $0.episode == episode }),
+    public func finishedDownload(
+        catalog: MediaCard.CardCatalog,
+        catalogId: Int64,
+        episode: Int
+    ) -> LibraryDownload? {
+        guard let download = libraryDownloads.first(where: {
+                  $0.catalog == catalog && $0.catalogId == catalogId && $0.episode == episode
+              }),
               let path = DownloadsView.donePath(download.state),
               FileManager.default.fileExists(atPath: path) else { return nil }
         return download
@@ -104,7 +110,7 @@ extension AppModel {
         playerController.duration = initialDuration
 
         // Above the assignment that hands mpv the URL -- see `loadTrackMemory`.
-        playerController.titleTrackMemory = await loadTrackMemory(catalogId: catalogId, engine: engine)
+        playerController.titleTrackMemory = await loadTrackMemory(catalog: catalog, catalogId: catalogId, engine: engine)
         playerController.episodeTitle = playbackEpisodes.first(where: { $0.number == download.episode })?.title ?? ""
 
         // The curve `resolveAndPlay` opens with, so the two entrances match.

@@ -84,8 +84,12 @@ enum DetailCache {
     /// for every relation of the open title; going through `load` would
     /// promote a dozen titles the viewer never opened to the top of the
     /// LRU and evict ones they actually read.
-    static func peekFacts(id: Int64, isManga: Bool) -> Facts? {
-        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: isManga)),
+    static func peekFacts(
+        id: Int64,
+        isManga: Bool,
+        catalog: MediaCard.CardCatalog = .anilist
+    ) -> Facts? {
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: isManga, catalog: catalog)),
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return nil }
         return Facts(
             year: snapshot.details.year,

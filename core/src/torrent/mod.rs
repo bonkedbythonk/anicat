@@ -362,6 +362,24 @@ fn retain_recent(recent: &mut Vec<usize>, file_id: usize, pinned: Option<usize>)
     }
 }
 
+/// How many bytes a throughput sample has to see before it can call the swarm
+/// fast enough.
+///
+/// The sample used to ask `fetched_bytes_delta / window >= required_bps` after
+/// sleeping out the whole window. Asking for the byte count instead is the
+/// same verdict -- the rate form is that inequality multiplied by the window --
+/// except that a byte count can be checked *before* the window closes.
+/// librqbit only ever `fetch_add`s `fetched_bytes` (in `on_received_piece`, on
+/// a block actually received from a peer), so a target already met cannot
+/// un-meet itself by the end of the window: polling for it accepts exactly the
+/// set the flat sleep accepted, and never one the flat sleep would have
+/// rejected.
+fn throughput_target_bytes(required_bps: f64, window: std::time::Duration) -> u64 {
+    // Ceiling, not rounding: a target rounded down would pass a swarm one byte
+    // short of the bar that the flat sample failed.
+    (required_bps * window.as_secs_f64()).ceil().max(0.0) as u64
+}
+
 /// Strips characters a filesystem path component can't hold. Episode/series
 /// titles come from AniList free text and routinely carry `/` (a season
 /// subtitle written "Show / Subtitle") and other separators that would
@@ -1699,55 +1717,90 @@ impl TorrentManager {
         // to the explicit sample below exactly as before.
         const MIN_IMPLICIT_SAMPLE: std::time::Duration = std::time::Duration::from_secs(1);
         let prebuffer_window = started.elapsed();
-        let fetched_during_prebuffer = handle
-            .stats()
-            .live
-            .as_ref()
-            .map(|l| l.snapshot.fetched_bytes)
+        let live_fetched = handle.stats().live.as_ref().map(|l| l.snapshot.fetched_bytes);
+        // No live state at this one call reads as zero rather than as an
+        // error, and a live state that was torn down and rebuilt restarts the
+        // counter, which `saturating_sub` also turns into zero. Both fail
+        // *closed*: the explicit sample below does the measuring instead.
+        let fetched_during_prebuffer = live_fetched
             .unwrap_or(0)
             .saturating_sub(fetched_at_prebuffer_start);
-        if fetched_during_prebuffer > 0 {
-            let prebuffer_secs = prebuffer_window.as_secs_f64().max(0.001);
-            let prebuffer_bps = fetched_during_prebuffer as f64 / prebuffer_secs;
-            if (prebuffer_window >= MIN_IMPLICIT_SAMPLE || fetched_during_prebuffer >= want as u64)
-                && prebuffer_bps >= required_bps
-            {
-                stages.throughput_ms = stages.take();
-                log::info!(
-                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) from the pre-buffer window itself ({:?})",
-                    prebuffer_bps / 1024.0,
-                    required_bps / 1024.0,
-                    prebuffer_window
-                );
-                return Ok(());
-            }
+        let prebuffer_secs = prebuffer_window.as_secs_f64().max(0.001);
+        let prebuffer_bps = fetched_during_prebuffer as f64 / prebuffer_secs;
+        let window_is_long_enough =
+            prebuffer_window >= MIN_IMPLICIT_SAMPLE || fetched_during_prebuffer >= want as u64;
+        if fetched_during_prebuffer > 0 && window_is_long_enough && prebuffer_bps >= required_bps {
+            stages.throughput_ms = stages.take();
+            log::info!(
+                "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) from the pre-buffer window itself ({:?})",
+                prebuffer_bps / 1024.0,
+                required_bps / 1024.0,
+                prebuffer_window
+            );
+            return Ok(());
         }
+        // Declining used to be silent, which made it undiagnosable: a resolve
+        // logged prebuffer=2900ms followed by throughput=1500ms -- exactly the
+        // case this fast path exists to spare -- and nothing said which of the
+        // three conditions had failed, or whether the delta was zero because
+        // the pre-buffer came off disk, because the live stats were absent at
+        // that instant, or simply because the swarm had not ramped up yet.
+        log::info!(
+            "torrent: pre-buffer window is not proof ({}): {} KB off the swarm in {:?} = {:.0} KB/s, needs {:.0} KB/s",
+            match live_fetched {
+                None => "no live stats at this call",
+                Some(_) if fetched_during_prebuffer == 0 => "nothing came off the swarm",
+                Some(_) if !window_is_long_enough => "window too short to mean anything",
+                Some(_) => "under the bar",
+            },
+            fetched_during_prebuffer / 1024,
+            prebuffer_window,
+            prebuffer_bps / 1024.0,
+            required_bps / 1024.0
+        );
 
+        // Was a flat sleep for the whole window on every play, healthy or not,
+        // and that is the cost the fast path above only sometimes avoids.
+        // Measured: total=5116ms with prebuffer=2900ms and throughput=1500ms,
+        // the sample then reporting 24278 KB/s against a 785 KB/s bar -- 30x
+        // the bar, so the bytes the full window demands were in hand long
+        // before it closed. Stopping at that point is not a softer bar: see
+        // `throughput_target_bytes` for why an early stop cannot pass a swarm
+        // the full window would have failed.
         const THROUGHPUT_SAMPLE: std::time::Duration = std::time::Duration::from_millis(1500);
+        const THROUGHPUT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+        let target_bytes = throughput_target_bytes(required_bps, THROUGHPUT_SAMPLE);
+        let fetched_now = || {
+            handle
+                .stats()
+                .live
+                .as_ref()
+                .map(|l| l.snapshot.fetched_bytes)
+                .unwrap_or(0)
+        };
 
         let mut last_bps = 0.0f64;
         for attempt in 0..2 {
-            let fetched_before = handle
-                .stats()
-                .live
-                .as_ref()
-                .map(|l| l.snapshot.fetched_bytes)
-                .unwrap_or(0);
-            tokio::time::sleep(THROUGHPUT_SAMPLE).await;
-            let fetched_after = handle
-                .stats()
-                .live
-                .as_ref()
-                .map(|l| l.snapshot.fetched_bytes)
-                .unwrap_or(0);
-            let diff = fetched_after.saturating_sub(fetched_before);
-            last_bps = diff as f64 / THROUGHPUT_SAMPLE.as_secs_f64();
-            if last_bps >= required_bps {
+            let fetched_before = fetched_now();
+            let sample_started = std::time::Instant::now();
+            let mut diff;
+            loop {
+                let remaining = THROUGHPUT_SAMPLE.saturating_sub(sample_started.elapsed());
+                tokio::time::sleep(THROUGHPUT_POLL.min(remaining)).await;
+                diff = fetched_now().saturating_sub(fetched_before);
+                if diff >= target_bytes || sample_started.elapsed() >= THROUGHPUT_SAMPLE {
+                    break;
+                }
+            }
+            let sampled_for = sample_started.elapsed();
+            last_bps = diff as f64 / sampled_for.as_secs_f64();
+            if diff >= target_bytes {
                 stages.throughput_ms = stages.take();
                 log::info!(
-                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s){}",
+                    "torrent: throughput check passed at {:.0} KB/s (needs {:.0} KB/s) after {:?}{}",
                     last_bps / 1024.0,
                     required_bps / 1024.0,
+                    sampled_for,
                     if attempt > 0 { " on retry" } else { "" }
                 );
                 return Ok(());
@@ -2524,6 +2577,47 @@ mod tests {
         assert_eq!(should_delete(Some(3), 9), Some(3));
         assert_eq!(should_delete(Some(9), 9), None, "the loser became the winner");
         assert_eq!(should_delete(None, 9), None, "it never got as far as adding one");
+    }
+
+    /// The throughput gate stops sampling as soon as the swarm has delivered
+    /// the bytes the full window would have demanded. That is only allowed to
+    /// be a speed-up, never a softer bar, so the property under test is that
+    /// the early verdict and the flat-window verdict agree.
+    #[test]
+    fn stopping_the_throughput_sample_early_never_passes_a_slower_swarm() {
+        let window = std::time::Duration::from_millis(1500);
+        // The bar from the live 5116ms resolve: a 1.4 GiB file that has to
+        // finish inside 30 minutes.
+        let required_bps = 785.0 * 1024.0;
+        let target = throughput_target_bytes(required_bps, window);
+
+        // What the flat sample used to ask, at the end of the window.
+        let flat_verdict = |delivered: u64| delivered as f64 / window.as_secs_f64() >= required_bps;
+        // What the poll loop asks, at every tick.
+        let early_verdict = |delivered: u64| delivered >= target;
+
+        // Either side of the bar, plus the live reading that started this.
+        let rates = [0.0, 100.0, 784.0, 785.0, 786.0, 24_278.0];
+        for kb_per_sec in rates {
+            let delivered = (kb_per_sec * 1024.0 * window.as_secs_f64()) as u64;
+            assert_eq!(
+                early_verdict(delivered),
+                flat_verdict(delivered),
+                "{kb_per_sec} KB/s decided differently by the two forms"
+            );
+        }
+
+        // At the 24278 KB/s that resolve's sample reported, one 100ms poll is
+        // already past the target and the other 1400ms decide nothing.
+        let one_poll = (24_278.0 * 1024.0 * 0.1) as u64;
+        assert!(early_verdict(one_poll), "24278 KB/s clears a 785 KB/s bar inside one poll");
+
+        // A swarm under the bar never reaches the target however long it is
+        // watched, so it still pays the whole window and falls through to the
+        // next release -- the guarantee the gate exists for.
+        let slow_for_the_whole_window = (700.0 * 1024.0 * window.as_secs_f64()) as u64;
+        assert!(!early_verdict(slow_for_the_whole_window));
+        assert!(!flat_verdict(slow_for_the_whole_window));
     }
 
     #[test]

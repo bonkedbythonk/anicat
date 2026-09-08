@@ -116,11 +116,19 @@ extension AppModel {
         let index = allChapters.firstIndex(where: { $0.id == chapter.id }) ?? 0
         do {
             let urls: [URL]
+            // Downloaded pages first, and without asking the network at all:
+            // that is what "offline" has to mean, and a stored chapter opens
+            // at disk speed rather than at the provider's.
+            let stored = anilistId.map {
+                engine.offlineChapterPages(catalog: .anilist, catalogId: $0, chapterId: chapter.id)
+            } ?? []
             // A chapter the reader preloaded past 70% of the last one is
             // already here. Going back to the network for a list we hold would
             // put a spinner in front of the very turn the preload exists to
             // make instant.
-            if let preloaded = await MainActor.run(body: { ReaderBridge.shared.takePreloadedPages(chapterId: chapter.id) }) {
+            if !stored.isEmpty {
+                urls = stored.compactMap { URL(string: $0) }
+            } else if let preloaded = await MainActor.run(body: { ReaderBridge.shared.takePreloadedPages(chapterId: chapter.id) }) {
                 urls = preloaded
             } else {
                 isLoading = true
@@ -207,6 +215,73 @@ extension AppModel {
             allChapters: selectedMangaChapters,
             anilistId: anilistId
         )
+    }
+
+    /// Downloads a chapter for reading with no network.
+    ///
+    /// The pages are fetched and written by the engine; this only tracks the
+    /// row's state, because the button has to say something while it runs.
+    public func downloadChapter(_ chapter: MediaDetailView.MangaChapterItem) {
+        guard let engine, let details = selectedMediaDetails else { return }
+        guard chapterOfflineStates[chapter.id] != .downloading else { return }
+        chapterOfflineStates[chapter.id] = .downloading
+        let catalogId = details.id
+        let title = details.title
+        Task { [weak self] in
+            do {
+                _ = try await engine.downloadChapter(
+                    catalog: .anilist,
+                    catalogId: catalogId,
+                    chapterId: chapter.id,
+                    chapterNumber: chapter.number,
+                    title: title
+                )
+                guard let self else { return }
+                self.chapterOfflineStates[chapter.id] = .stored
+                self.loadOfflineChapters()
+            } catch {
+                guard let self else { return }
+                self.chapterOfflineStates[chapter.id] = .failed
+                self.errorMessage = "Could not download chapter \(chapter.number): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    public func deleteChapterDownload(_ chapter: MediaDetailView.MangaChapterItem) {
+        guard let engine, let details = selectedMediaDetails else { return }
+        try? engine.deleteOfflineChapter(
+            catalog: .anilist, catalogId: details.id, chapterId: chapter.id
+        )
+        chapterOfflineStates[chapter.id] = MediaDetailView.ChapterOfflineState.none
+        loadOfflineChapters()
+    }
+
+    /// Removes one downloaded chapter from the Downloads page, where there
+    /// is no open title to read the id from.
+    public func deleteOfflineChapter(_ row: FfiOfflineChapter) {
+        guard let engine else { return }
+        try? engine.deleteOfflineChapter(
+            catalog: row.catalog, catalogId: row.catalogId, chapterId: row.chapterId
+        )
+        chapterOfflineStates[row.chapterId] = MediaDetailView.ChapterOfflineState.none
+        loadOfflineChapters()
+    }
+
+    /// What is on disk, for the Downloads page and for the chapter rows of
+    /// the open title.
+    public func loadOfflineChapters() {
+        guard let engine else { return }
+        offlineChapters = (try? engine.offlineChapters()) ?? []
+        offlineBytes = engine.offlineSizeBytes()
+        guard let details = selectedMediaDetails else { return }
+        var states = chapterOfflineStates
+        for row in offlineChapters where row.catalogId == details.id {
+            // A download in flight keeps its own state: the row is written
+            // when it finishes, so anything mid-flight is not in this list
+            // yet and must not be reset to "not downloaded".
+            if states[row.chapterId] != .downloading { states[row.chapterId] = .stored }
+        }
+        chapterOfflineStates = states
     }
 
     /// Records the page a chapter is on, so reopening it resumes there.

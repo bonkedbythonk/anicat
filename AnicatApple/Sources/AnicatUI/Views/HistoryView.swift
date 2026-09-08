@@ -35,14 +35,17 @@ public struct HistoryView: View {
     /// Titles for the ids in the log, as far as they are known from the lists
     /// already loaded. An id with no title still shows, with the id — losing
     /// the row entirely would misreport how much was watched.
-    let titles: [Int64: String]
+    /// Names a row, given the catalog it belongs to. A dictionary keyed by
+    /// the bare id cannot answer this: TMDB's film and series spaces overlap
+    /// each other and AniList's, so one id names up to three titles.
+    let titleFor: (FfiCatalog, Int64) -> String?
     let namespace: Namespace.ID?
     let openingSourceKey: String?
     let onSelectFavourite: (MediaCard.Item) -> Void
     /// Opens a log row's title. The second argument is the title as this view
-    /// resolved it from `titles`, or nil for an id no loaded list has named —
+    /// resolved it from `titleFor`, or nil for an id no loaded list has named —
     /// the caller has a catalog fetch and this view does not.
-    let onOpenTitle: ((Int64, String?) -> Void)?
+    let onOpenTitle: ((Int64, String?, FfiCatalog) -> Void)?
     /// Deletes one watch from the registry. Optional, and the menu item is
     /// absent when it is nil: the engine exposes no per-row delete, so
     /// without a caller supplying one there is nothing honest to offer.
@@ -60,18 +63,18 @@ public struct HistoryView: View {
         viewer: ViewerProfile?,
         activity: [ActivityRow],
         reading: [ReadingEntry] = [],
-        titles: [Int64: String],
+        titleFor: @escaping (FfiCatalog, Int64) -> String?,
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
         onSelectFavourite: @escaping (MediaCard.Item) -> Void = { _ in },
-        onOpenTitle: ((Int64, String?) -> Void)? = nil,
+        onOpenTitle: ((Int64, String?, FfiCatalog) -> Void)? = nil,
         onRemoveActivity: ((ActivityRow) -> Void)? = nil,
         onClearHistory: (() -> Void)? = nil
     ) {
         self.viewer = viewer
         self.activity = activity
         self.reading = reading
-        self.titles = titles
+        self.titleFor = titleFor
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
         self.onSelectFavourite = onSelectFavourite
@@ -356,7 +359,9 @@ public struct HistoryView: View {
     /// because chapters number fractionally.
     @ViewBuilder
     private func readingRow(_ row: ReadingEntry, stamp: DateFormatter) -> some View {
-        let title = titles[row.catalogId]
+        // A chapter is always an AniList entry: the reader is reached from an
+        // AniList manga page, and MangaDex's own id lives in `chapterId`.
+        let title = titleFor(.anilist, row.catalogId)
         HStack(spacing: 12) {
             Text(title ?? "Media \(row.catalogId)")
                 .font(.system(size: 13.5, weight: .medium))
@@ -373,7 +378,7 @@ public struct HistoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
-        .onTapGesture { onOpenTitle?(row.catalogId, title) }
+        .onTapGesture { onOpenTitle?(row.catalogId, title, .anilist) }
     }
 
     @ViewBuilder
@@ -381,7 +386,7 @@ public struct HistoryView: View {
         // An id no loaded list has named still shows, with the id — dropping
         // the row would misreport how much was watched. It is still openable:
         // the detail page fetches the title this view could not resolve.
-        let title = titles[row.catalogId]
+        let title = titleFor(row.catalog, row.catalogId)
         let content = HStack(spacing: 12) {
             Text(title ?? "Media \(row.catalogId)")
                 .font(.system(size: 13.5, weight: .medium))
@@ -401,7 +406,7 @@ public struct HistoryView: View {
 
         let tappable = Group {
             if let onOpenTitle {
-                Button { onOpenTitle(row.catalogId, title) } label: { content }
+                Button { onOpenTitle(row.catalogId, title, row.catalog) } label: { content }
                     .buttonStyle(.sumiPressable)
             } else {
                 content
@@ -414,7 +419,7 @@ public struct HistoryView: View {
         if onOpenTitle != nil || onRemoveActivity != nil {
             tappable.contextMenu {
                 if let onOpenTitle {
-                    Button("Open") { onOpenTitle(row.catalogId, title) }
+                    Button("Open") { onOpenTitle(row.catalogId, title, row.catalog) }
                 }
                 if let onRemoveActivity {
                     Button("Remove from history", role: .destructive) { onRemoveActivity(row) }

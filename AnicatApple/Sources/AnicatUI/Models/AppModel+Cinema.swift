@@ -469,8 +469,9 @@ extension AppModel {
         for row in rows.prefix(60) {
             let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
             guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
-            cinemaKnownTitles[row.catalogId] = known.title
-            cinemaKnownCovers[row.catalogId] = known.coverURL
+            let key = CinemaTitleKey(catalog: catalog, id: row.catalogId)
+            cinemaKnownTitles[key] = known.title
+            cinemaKnownCovers[key] = known.coverURL
             items.append(
                 MediaCard.Item(
                     id: row.catalogId,
@@ -562,9 +563,10 @@ extension AppModel {
 
         // Newest first, one entry per title: a binge leaves ten rows for one
         // show and the shelf wants the show, not the episodes.
-        var seen = Set<Int64>()
+        var seen = Set<CinemaTitleKey>()
         var ordered: [ActivityRow] = []
-        for row in rows.sorted(by: { $0.watchedAt > $1.watchedAt }) where seen.insert(row.catalogId).inserted {
+        for row in rows.sorted(by: { $0.watchedAt > $1.watchedAt })
+            where seen.insert(CinemaTitleKey(catalog: row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, id: row.catalogId)).inserted {
             ordered.append(row)
         }
 
@@ -572,8 +574,9 @@ extension AppModel {
         for row in ordered.prefix(24) {
             let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
             guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
-            cinemaKnownTitles[row.catalogId] = known.title
-            cinemaKnownCovers[row.catalogId] = known.coverURL
+            let key = CinemaTitleKey(catalog: catalog, id: row.catalogId)
+            cinemaKnownTitles[key] = known.title
+            cinemaKnownCovers[key] = known.coverURL
             items.append(
                 MediaCard.Item(
                     id: row.catalogId,
@@ -625,6 +628,28 @@ extension AppModel {
         persistHomeCache()
     }
 
+    /// Names and illustrates a registry row from whichever map owns its
+    /// catalog. The History and Stats views used to be handed one dictionary
+    /// chosen by the mode showing, which meant a row of the other catalog was
+    /// looked up in the wrong map and drew a stranger's title.
+    public func registryTitle(catalog: FfiCatalog, id: Int64) -> String? {
+        switch catalog {
+        // `.mangaDex` identifies a provider's own record, not a catalog
+        // entry anything here has a name for; the row draws its bare id.
+        case .anilist, .mangaDex: return knownTitles[id]
+        case .tmdbMovie: return cinemaKnownTitles[CinemaTitleKey(catalog: .tmdbMovie, id: id)]
+        case .tmdbTv: return cinemaKnownTitles[CinemaTitleKey(catalog: .tmdbTv, id: id)]
+        }
+    }
+
+    public func registryCover(catalog: FfiCatalog, id: Int64) -> URL? {
+        switch catalog {
+        case .anilist, .mangaDex: return knownCovers[id]
+        case .tmdbMovie: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbMovie, id: id)]
+        case .tmdbTv: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbTv, id: id)]
+        }
+    }
+
     /// A cinema title's name and poster: from the detail snapshot if this
     /// device has one, otherwise from TMDB.
     func cinemaTitle(
@@ -634,8 +659,9 @@ extension AppModel {
         if let snapshot = DetailCache.load(id: id, isManga: false, catalog: catalog) {
             return (snapshot.details.title, snapshot.details.coverURL)
         }
-        if let cached = cinemaKnownTitles[id] {
-            return (cached, cinemaKnownCovers[id])
+        let key = CinemaTitleKey(catalog: catalog, id: id)
+        if let cached = cinemaKnownTitles[key] {
+            return (cached, cinemaKnownCovers[key])
         }
         guard let engine else { return nil }
         let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv

@@ -505,8 +505,21 @@ public final class AppModel {
     /// AniList shelves, so a film would have shown as a bare number. These
     /// are filled from the cinema shelves and the detail snapshots instead.
     public var cinemaActivity: [ActivityRow] = []
-    public var cinemaKnownTitles: [Int64: String] = [:]
-    public var cinemaKnownCovers: [Int64: URL] = [:]
+    /// TMDB numbers films and series in two independent spaces, so id 550 is
+    /// both Fight Club and a television series. Keyed by the bare id, one
+    /// evicted the other and `cinemaTitle` returned whichever had been
+    /// fetched last while ignoring the catalog it had been handed.
+    public struct CinemaTitleKey: Hashable, Sendable {
+        public let catalog: MediaCard.CardCatalog
+        public let id: Int64
+        public init(catalog: MediaCard.CardCatalog, id: Int64) {
+            self.catalog = catalog
+            self.id = id
+        }
+    }
+
+    public var cinemaKnownTitles: [CinemaTitleKey: String] = [:]
+    public var cinemaKnownCovers: [CinemaTitleKey: URL] = [:]
     /// Films and episodes with a stored position, most recent first.
     public var cinemaContinueWatching: [MediaCard.Item] = []
     /// The Search section's filter row and its paging.
@@ -573,6 +586,13 @@ public final class AppModel {
     public var novelPlanning: [MediaCard.Item] = [] { didSet { syncKnownTitles() } }
     public var viewer: ViewerProfile?
     public var activity: [ActivityRow] = []
+    /// Which chapters are downloaded, or downloading, for the open title.
+    /// Keyed by chapter id -- what the files and the registry are keyed on.
+    public var chapterOfflineStates: [String: MediaDetailView.ChapterOfflineState] = [:]
+    /// Every downloaded chapter, for the Downloads page.
+    public var offlineChapters: [FfiOfflineChapter] = []
+    public var offlineBytes: UInt64 = 0
+
     /// Chapters read on this device, for the History log and its day chart.
     public var readingActivity: [HistoryView.ReadingEntry] = []
 
@@ -891,7 +911,11 @@ public final class AppModel {
     /// survive the detail page closing, since a download keeps running on
     /// the Rust side regardless of what's on screen.
     public struct LibraryDownload: Identifiable, Sendable {
-        public var id: String { "\(catalogId)_\(episode)" }
+        /// The catalog is part of the identity, not decoration beside it.
+        /// Without it a film and an anime episode sharing a number collapsed
+        /// into one row, and `handleDownloadsChanged` — which dedupes
+        /// announcements on this string — swallowed the second completion.
+        public var id: String { "\(catalog.rawValue)_\(catalogId)_\(episode)" }
         public let catalogId: Int64
         public let episode: Int
         public let title: String

@@ -254,6 +254,10 @@ public struct MediaDetailView: View {
     /// Local because AniList has no entry for a TMDB title -- this is the
     /// registry's own list, on this device.
     public var cinemaListStatus: String?
+    /// Which chapters are downloaded, keyed by chapter id.
+    public var chapterOfflineStates: [String: ChapterOfflineState] = [:]
+    public var onDownloadChapter: ((MangaChapterItem) -> Void)?
+    public var onDeleteChapterDownload: ((MangaChapterItem) -> Void)?
     public var onSetCinemaListStatus: (String?) -> Void = { _ in }
     
     public let onPlayEpisode: (EpisodeItem) -> Void
@@ -378,6 +382,9 @@ public struct MediaDetailView: View {
         tracksOnAniList: Bool = true,
         cinemaExtras: CinemaExtras? = nil,
         cinemaListStatus: String? = nil,
+        chapterOfflineStates: [String: ChapterOfflineState] = [:],
+        onDownloadChapter: ((MangaChapterItem) -> Void)? = nil,
+        onDeleteChapterDownload: ((MangaChapterItem) -> Void)? = nil,
         onSetCinemaListStatus: @escaping (String?) -> Void = { _ in },
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
@@ -420,6 +427,9 @@ public struct MediaDetailView: View {
         self.tracksOnAniList = tracksOnAniList
         self.cinemaExtras = cinemaExtras
         self.cinemaListStatus = cinemaListStatus
+        self.chapterOfflineStates = chapterOfflineStates
+        self.onDownloadChapter = onDownloadChapter
+        self.onDeleteChapterDownload = onDeleteChapterDownload
         self.onSetCinemaListStatus = onSetCinemaListStatus
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
@@ -1313,13 +1323,18 @@ public struct MediaDetailView: View {
                     }
                     .buttonStyle(.sumiPressable)
                 }
-            } else if let first = mangaChapters.first {
+            } else if let target = resumeChapter {
                 Button {
-                    onReadChapter(first)
+                    onReadChapter(target)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "book.fill").font(.system(size: 13))
-                        Text("Read Chapter \(first.number)")
+                        // "Continue", not "Resume": a chapter has no saved
+                        // page offset to come back to, and the Up Next shelf
+                        // already draws the same distinction by unit.
+                        Text(isContinuingChapters
+                             ? "Continue Chapter \(target.number)"
+                             : "Read Chapter \(target.number)")
                     }
                     .font(.system(size: 13.5, weight: .bold))
                     .foregroundColor(SumiTheme.background)
@@ -1331,6 +1346,32 @@ public struct MediaDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
+
+                // Same rule as the episode branch above: offered only when
+                // the primary button points somewhere other than chapter 1,
+                // where "start over" would be the button next to itself.
+                if isContinuingChapters, let first = mangaChapters.first {
+                    Button {
+                        onReadChapter(first)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "gobackward").font(.system(size: 12))
+                            Text("Start over")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.foreground)
+                        .padding(.horizontal, 16)
+                        .frame(height: 40)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
             }
 
             if !tracksOnAniList {
@@ -1343,7 +1384,10 @@ public struct MediaDetailView: View {
                         Button("Remove from list") { onSetCinemaListStatus(nil) }
                     }
                 } label: {
-                    Text(cinemaListStatus.map(Self.statusLabel) ?? "Add to List")
+                    // Called, not passed by name: a reference to the function
+                    // loses its defaulted `manga:` and no longer matches
+                    // `map`'s single-argument closure.
+                    Text(cinemaListStatus.map { Self.statusLabel($0) } ?? "Add to List")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(SumiTheme.foreground)
                         .padding(.horizontal, 16)
@@ -1368,13 +1412,13 @@ public struct MediaDetailView: View {
             if tracksOnAniList {
             Menu {
                 ForEach(Self.listStatusOptions, id: \.self) { status in
-                    Button(Self.statusLabel(status)) { onSetListStatus(status) }
+                    Button(Self.statusLabel(status, manga: isMangaMedia)) { onSetListStatus(status) }
                 }
             } label: {
                 // No manual chevron here: `.menuStyle(.borderlessButton)` below
                 // already draws its own disclosure caret, so this used to show
                 // two arrows stacked next to each other.
-                Text(Self.statusLabel(details.listStatus))
+                Text(Self.statusLabel(details.listStatus, manga: isMangaMedia))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                     .padding(.horizontal, 16)
@@ -1437,14 +1481,19 @@ public struct MediaDetailView: View {
 
     private static let listStatusOptions = ["CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"]
 
-    private static func statusLabel(_ status: String?) -> String {
+    /// AniList stores one set of status tokens for both catalogs but names
+    /// them differently: `CURRENT` is "Watching" on an anime and "Reading" on
+    /// a manga, `REPEATING` "Rewatching" and "Rereading". Without the flag the
+    /// Tomodachi Game page offered "Watching" for a book. `manga` defaults to
+    /// false for the cinema menu, which has no manga case to get wrong.
+    private static func statusLabel(_ status: String?, manga: Bool = false) -> String {
         switch status {
-        case "CURRENT": return "Watching"
+        case "CURRENT": return manga ? "Reading" : "Watching"
         case "PLANNING": return "Planning"
         case "COMPLETED": return "Completed"
         case "PAUSED": return "Paused"
         case "DROPPED": return "Dropped"
-        case "REPEATING": return "Rewatching"
+        case "REPEATING": return manga ? "Rereading" : "Rewatching"
         default: return "Add to List"
         }
     }
@@ -1481,6 +1530,31 @@ public struct MediaDetailView: View {
               let seconds = details.resumeSeconds, seconds > 0,
               target.number == details.resumeEpisode else { return nil }
         return seconds
+    }
+
+    /// The chapter the primary button opens: the first one numbered past
+    /// AniList's progress count, else the first chapter. Read from
+    /// `listProgress` rather than `resumeEpisode`, which a manga never sets —
+    /// without it the page offered "Read Chapter 1" to a reader sitting at
+    /// 35 of 130 while the Up Next shelf beside it said CH 36.
+    ///
+    /// The numbers are strings ("36", "36.5", "Oneshot"), so one that does
+    /// not parse is skipped rather than guessed at.
+    private var resumeChapter: MangaChapterItem? {
+        guard let progress = details.listProgress, progress > 0 else { return mangaChapters.first }
+        let next = mangaChapters.first { chapter in
+            guard let number = Double(chapter.number) else { return false }
+            return number > Double(progress)
+        }
+        return next ?? mangaChapters.first
+    }
+
+    /// Whether the manga primary button points past the first chapter, which
+    /// is the only case where "Start over" is not a second button doing what
+    /// the first one already does.
+    private var isContinuingChapters: Bool {
+        guard let target = resumeChapter, let first = mangaChapters.first else { return false }
+        return target.id != first.id
     }
 
     /// TMDB's season breakdown for the open title, empty for anything else.
@@ -1957,7 +2031,15 @@ public struct MediaDetailView: View {
                 )
             }
         case .manga:
-            MangaTabSection(chapters: mangaChapters, format: details.format, isLoading: isLoading, onReadChapter: onReadChapter)
+            MangaTabSection(
+                chapters: mangaChapters,
+                format: details.format,
+                isLoading: isLoading,
+                offlineStates: chapterOfflineStates,
+                onDownloadChapter: onDownloadChapter,
+                onDeleteChapterDownload: onDeleteChapterDownload,
+                onReadChapter: onReadChapter
+            )
         case .characters:
             CharactersTabSection(characters: characters, onSelectCharacter: onSelectCharacter)
         case .related:
@@ -1980,8 +2062,19 @@ public struct MediaDetailView: View {
         }
     }
 
+    /// What a chapter's download control is showing.
+    public enum ChapterOfflineState: Equatable, Sendable {
+        case none
+        case downloading
+        case stored
+        case failed
+    }
+
     fileprivate struct ChapterRowView: View {
         let chapter: MediaDetailView.MangaChapterItem
+        var offline: ChapterOfflineState = .none
+        var onDownload: (() -> Void)?
+        var onDeleteDownload: (() -> Void)?
         let onRead: () -> Void
 
         @State private var isHovered = false
@@ -1997,6 +2090,7 @@ public struct MediaDetailView: View {
                         .foregroundColor(SumiTheme.foreground)
                         .lineLimit(1)
                     Spacer()
+                    offlineControl
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -2011,6 +2105,41 @@ public struct MediaDetailView: View {
             .buttonStyle(.sumiPressable)
             .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
+        }
+
+        /// Download, or the state of one. Shown on hover while a chapter is
+        /// not downloaded, and always once it is: an icon that appears only
+        /// under the pointer is fine for an action, and wrong for the fact
+        /// that something is already on disk.
+        @ViewBuilder
+        private var offlineControl: some View {
+            switch offline {
+            case .stored:
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.indigo)
+                    .onTapGesture { onDeleteDownload?() }
+                    .help("Downloaded — click to remove")
+            case .downloading:
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .frame(width: 16, height: 16)
+            case .failed:
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.warning)
+                    .onTapGesture { onDownload?() }
+                    .help("Download failed — click to retry")
+            case .none:
+                if isHovered, onDownload != nil {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(SumiTheme.muted)
+                        .onTapGesture { onDownload?() }
+                        .help("Download for offline reading")
+                }
+            }
         }
     }
 
@@ -2334,6 +2463,11 @@ private struct MangaTabSection: View {
     let chapters: [MediaDetailView.MangaChapterItem]
     let format: String?
     var isLoading: Bool = false
+    /// Which chapters are on disk, or on their way there. Keyed by chapter
+    /// id because that is what the registry and the files are keyed on.
+    var offlineStates: [String: MediaDetailView.ChapterOfflineState] = [:]
+    var onDownloadChapter: ((MediaDetailView.MangaChapterItem) -> Void)?
+    var onDeleteChapterDownload: ((MediaDetailView.MangaChapterItem) -> Void)?
     let onReadChapter: (MediaDetailView.MangaChapterItem) -> Void
 
     var body: some View {
@@ -2351,7 +2485,12 @@ private struct MangaTabSection: View {
         } else {
             LazyVStack(spacing: 8) {
                 ForEach(chapters) { chapter in
-                    MediaDetailView.ChapterRowView(chapter: chapter) {
+                    MediaDetailView.ChapterRowView(
+                        chapter: chapter,
+                        offline: offlineStates[chapter.id] ?? .none,
+                        onDownload: onDownloadChapter.map { action in { action(chapter) } },
+                        onDeleteDownload: onDeleteChapterDownload.map { action in { action(chapter) } }
+                    ) {
                         onReadChapter(chapter)
                     }
                 }

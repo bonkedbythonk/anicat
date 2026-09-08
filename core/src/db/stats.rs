@@ -18,7 +18,7 @@ use chrono::{DateTime, Datelike, Days, NaiveDate, TimeZone, Timelike};
 /// The share of an episode that counts as having watched it. The same 85% the
 /// player uses to advance AniList progress and the detail page uses to tick an
 /// episode off, so "watched" means one thing across the app.
-const WATCHED_FRACTION: f64 = 0.85;
+pub const WATCHED_FRACTION: f64 = 0.85;
 
 /// The widest window `aggregate` will build day buckets for. A caller asking
 /// for a decade gets five years of rows rather than 3650 allocations of
@@ -35,6 +35,10 @@ pub struct ProgressRow {
     pub episode_number: i64,
     pub stop_time: i64,
     pub duration: i64,
+    /// Migration 5's sticky flag. A rewatch resets `stop_time`, so the
+    /// percentage alone stopped counting episodes that had genuinely been
+    /// finished.
+    pub completed: bool,
     pub watched_at: DateTime<chrono::Utc>,
 }
 
@@ -98,7 +102,8 @@ fn row_seconds(row: &ProgressRow) -> i64 {
 }
 
 fn is_watched(row: &ProgressRow) -> bool {
-    row.duration > 0 && (row.stop_time as f64 / row.duration as f64) >= WATCHED_FRACTION
+    row.completed
+        || (row.duration > 0 && (row.stop_time as f64 / row.duration as f64) >= WATCHED_FRACTION)
 }
 
 /// Longest run of consecutive dates in `active`.
@@ -270,6 +275,10 @@ mod tests {
             episode_number: episode,
             stop_time: stop,
             duration,
+            // The fixtures set positions, not the sticky flag: `is_watched`
+            // must still read the percentage for rows written before
+            // migration 5 added the column.
+            completed: false,
             watched_at: at(when),
         }
     }

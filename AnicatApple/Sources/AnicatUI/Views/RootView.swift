@@ -151,6 +151,9 @@ public struct RootView: View {
                                 tracksOnAniList: model.currentDetailCatalog == .anilist,
                                 cinemaExtras: model.cinemaExtras,
                                 cinemaListStatus: model.cinemaListStatus,
+                                chapterOfflineStates: model.chapterOfflineStates,
+                                onDownloadChapter: { model.downloadChapter($0) },
+                                onDeleteChapterDownload: { model.deleteChapterDownload($0) },
                                 onSetCinemaListStatus: { model.setCinemaListStatus($0) },
                                 onPlayEpisode: { ep in
                                     playEpisode(
@@ -928,29 +931,35 @@ public struct RootView: View {
                 // Chapters belong in the anime-mode log: they are the same
                 // registry and the same question, "what did I read or watch".
                 reading: model.appMode == .cinema ? [] : model.readingActivity,
-                titles: model.appMode == .cinema ? model.cinemaKnownTitles : model.knownTitles,
+                titleFor: { catalog, id in model.registryTitle(catalog: catalog, id: id) },
                 namespace: cardNamespace,
                 openingSourceKey: model.openingDetailSourceKey,
                 onSelectFavourite: { item in
                     openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga, sourceKey: "history-fav:\(item.id)")
                 },
-                onOpenTitle: { id, title in
-                    openRegistryTitle(id: id, title: title)
+                onOpenTitle: { id, title, catalog in
+                    openRegistryTitle(id: id, title: title, catalog: catalog)
+                },
+                onRemoveActivity: { row in
+                    Task { await model.removeWatch(row) }
+                },
+                onClearHistory: {
+                    Task { await model.clearWatchHistory() }
                 }
             )
         case .stats:
             StatsView(
                 stats: model.watchStatsSnapshot,
                 recentStats: model.watchStatsRecentSnapshot,
-                knownTitles: model.appMode == .cinema ? model.cinemaKnownTitles : model.knownTitles,
-                knownCovers: model.appMode == .cinema ? model.cinemaKnownCovers : model.knownCovers,
+                titleFor: { catalog, id in model.registryTitle(catalog: catalog, id: id) },
+                coverFor: { catalog, id in model.registryCover(catalog: catalog, id: id) },
                 // Reloaded on every entry into the section and nowhere else.
                 // The other obvious trigger is "after progress is recorded",
                 // which lives in the playback path; every panel here but the
                 // streak has a day's resolution, so an open is soon enough.
                 onLoad: { model.loadWatchStats() },
-                onSelectTitle: { id, title in
-                    openRegistryTitle(id: id, title: title)
+                onSelectTitle: { id, title, catalog in
+                    openRegistryTitle(id: id, title: title, catalog: catalog)
                 },
                 onResolveTitle: { id in model.ensureKnownTitle(id) }
             )
@@ -966,8 +975,13 @@ public struct RootView: View {
                 },
                 onRemove: { download in
                     model.libraryDownloads.removeAll { $0.id == download.id }
-                }
+                },
+                chapters: model.offlineChapters,
+                chapterBytes: model.offlineBytes,
+                titles: model.knownTitles,
+                onRemoveChapter: { model.deleteOfflineChapter($0) }
             )
+            .task { model.loadOfflineChapters() }
         }
     }
 
@@ -1001,20 +1015,29 @@ public struct RootView: View {
     /// Opens a row that came out of the registry -- History, Stats -- where
     /// the id is whatever catalog recorded it. In cinema mode that is TMDB's,
     /// and sending it to `openDetailFor` opened the anime with that number.
-    private func openRegistryTitle(id: Int64, title: String?) {
-        if model.appMode == .cinema {
-            let catalog = model.cinemaCatalog(forId: id)
+    /// Opens a row that came out of the local registry — History, Stats.
+    ///
+    /// Routed by the row's own catalog, never by the mode showing or by the
+    /// id alone. Reading the mode sent a TMDB row in the anime History to
+    /// AniList, where 129552 is an unrelated manga rather than The Night
+    /// Agent; and `cinemaCatalog(forId:)` answers `.tmdbMovie` for any id
+    /// absent from the resume queue, so a series watched once and since
+    /// fallen off it opened as a film.
+    private func openRegistryTitle(id: Int64, title: String?, catalog: FfiCatalog) {
+        switch catalog {
+        case .tmdbMovie, .tmdbTv:
+            let card: MediaCard.CardCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
             Task {
                 await model.openCinemaDetail(
-                    catalog: catalog,
+                    catalog: card,
                     id: id,
-                    title: title ?? model.cinemaKnownTitles[id],
-                    coverURL: model.cinemaKnownCovers[id]
+                    title: title ?? model.cinemaKnownTitles[AppModel.CinemaTitleKey(catalog: card, id: id)],
+                    coverURL: model.cinemaKnownCovers[AppModel.CinemaTitleKey(catalog: card, id: id)]
                 )
             }
-            return
+        case .anilist, .mangaDex:
+            openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
         }
-        openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
     }
 
     private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false, sourceKey: String? = nil) {

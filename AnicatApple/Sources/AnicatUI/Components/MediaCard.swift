@@ -1,4 +1,5 @@
 import SwiftUI
+import AnicatCoreKit
 
 public struct MediaCard: View, Equatable {
     /// Which catalog a card's id belongs to.
@@ -15,6 +16,18 @@ public struct MediaCard: View, Equatable {
         case anilist
         case tmdbMovie
         case tmdbTv
+
+        /// The engine's spelling of the same thing. Written out here rather
+        /// than at each call site: the conversion was open-coded in six
+        /// places and every one of them had to remember that a card without
+        /// a catalog is AniList's.
+        public var ffi: FfiCatalog {
+            switch self {
+            case .anilist: return .anilist
+            case .tmdbMovie: return .tmdbMovie
+            case .tmdbTv: return .tmdbTv
+            }
+        }
     }
 
     public struct Item: Identifiable, Sendable, Equatable, Codable {

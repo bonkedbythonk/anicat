@@ -107,15 +107,26 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         )
     }
 
-    public func notifyDownloadFinished(catalogId: Int64, title: String, episode: Int, coverURL: URL?) async {
+    /// `catalog` is not optional-with-a-default on purpose: the tap replays
+    /// this link through `playFromShelf`, whose own catalog defaulted to
+    /// AniList, so a finished film announced itself and then played whatever
+    /// anime shared its number.
+    public func notifyDownloadFinished(
+        catalog: MediaCard.CardCatalog,
+        catalogId: Int64,
+        title: String,
+        episode: Int,
+        coverURL: URL?
+    ) async {
         guard Self.isAvailable else { return }
-        guard markOnce(key: Self.notifiedDownloadsKey, entry: "\(catalogId):\(episode)") else { return }
+        let key = "\(catalog.rawValue):\(catalogId):\(episode)"
+        guard markOnce(key: Self.notifiedDownloadsKey, entry: key) else { return }
         await post(
-            identifier: "download-\(catalogId)-\(episode)",
+            identifier: "download-\(catalog.rawValue)-\(catalogId)-\(episode)",
             title: title,
             body: "Episode \(episode) finished downloading.",
             coverURL: coverURL,
-            link: .play(id: catalogId, episode: episode)
+            link: .play(id: catalogId, episode: episode, catalog: catalog)
         )
     }
 

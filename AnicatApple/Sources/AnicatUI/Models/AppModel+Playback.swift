@@ -292,7 +292,16 @@ extension AppModel {
         // Next out of a downloaded episode into another downloaded one used
         // to resolve the swarm for a file already on disk; the Downloads
         // page's own Play opens it from there, so this does too.
-        if let download = finishedDownload(catalogId: catalogId, episode: target.number) {
+        let playingCatalog: MediaCard.CardCatalog = {
+            switch currentPlaybackCatalog {
+            case .tmdbMovie: return .tmdbMovie
+            case .tmdbTv: return .tmdbTv
+            case .anilist, .mangaDex: return .anilist
+            }
+        }()
+        if let download = finishedDownload(
+            catalog: playingCatalog, catalogId: catalogId, episode: target.number
+        ) {
             await playDownloadedFile(download)
             return
         }
@@ -350,7 +359,8 @@ extension AppModel {
             elapsed: playerController.currentTime,
             duration: playerController.duration,
             rate: playerController.isPlaying ? playerController.playbackRate : 0,
-            coverURL: pageCover ?? playbackCoverURL ?? knownCovers[catalogId]
+            coverURL: pageCover ?? playbackCoverURL
+                ?? registryCover(catalog: currentPlaybackCatalog, id: catalogId)
         )
         nowPlaying.setNavigation(
             hasNext: playerController.hasNextEpisode,
@@ -491,7 +501,9 @@ extension AppModel {
         state: MediaDetailView.EpisodeDownloadState,
         catalog: MediaCard.CardCatalog = .anilist
     ) {
-        if let idx = libraryDownloads.firstIndex(where: { $0.catalogId == catalogId && $0.episode == episode }) {
+        if let idx = libraryDownloads.firstIndex(where: {
+            $0.catalog == catalog && $0.catalogId == catalogId && $0.episode == episode
+        }) {
             libraryDownloads[idx].state = state
         } else {
             libraryDownloads.append(
@@ -698,8 +710,10 @@ extension AppModel {
     /// of those costs when it runs on the main actor mid-playback.
     func recordTrackMemory(_ memory: PlayerController.TrackMemory?) {
         guard let engine, let catalogId = currentPlaybackCatalogId else { return }
+        let catalog = currentPlaybackCatalog
         engineIOQueue.async {
             try? engine.recordTitleTrackPreference(
+                catalog: catalog,
                 catalogId: catalogId,
                 audioLang: memory?.audioLang,
                 subtitleLang: memory?.subtitleLang,
@@ -716,10 +730,21 @@ extension AppModel {
     /// after that event as often as not, which would silently drop the
     /// remembered pick for that episode. Still on `engineIOQueue`, so the
     /// main actor waits on the continuation rather than on SQLite.
-    func loadTrackMemory(catalogId: Int64, engine: AnicatEngine) async -> PlayerController.TrackMemory? {
+    /// `catalog` is not optional: `title_track_prefs` is keyed
+    /// `(catalog, catalog_id)` like every other registry table, but the two
+    /// FFI methods used to hardcode AniList — so picking a subtitle track on
+    /// a film with TMDB id 550 wrote it against the anime with AniList id 550,
+    /// and that anime's next episode opened with the film's choice.
+    func loadTrackMemory(
+        catalog: FfiCatalog,
+        catalogId: Int64,
+        engine: AnicatEngine
+    ) async -> PlayerController.TrackMemory? {
         await withCheckedContinuation { continuation in
             engineIOQueue.async {
-                let stored = (try? engine.titleTrackPreference(catalogId: catalogId)) ?? nil
+                let stored = (try? engine.titleTrackPreference(
+                    catalog: catalog, catalogId: catalogId
+                )) ?? nil
                 continuation.resume(returning: stored.map {
                     PlayerController.TrackMemory(
                         audioLang: $0.audioLang,
@@ -867,7 +892,7 @@ extension AppModel {
         fromStart: Bool = false
     ) async throws -> URL {
         let effectiveTitle = title ?? self.selectedMediaDetails?.title
-            ?? self.knownTitles[catalogId]
+            ?? self.registryTitle(catalog: catalog, id: catalogId)
             ?? (catalog == .anilist ? "Anime" : "Film")
         self.playerController.title = effectiveTitle
         self.playerController.episodeNumber = Int(episode)
@@ -1018,7 +1043,7 @@ extension AppModel {
 
         // Read here, above the assignment that hands mpv the URL — see
         // `loadTrackMemory` for why the ordering is the whole point.
-        self.playerController.titleTrackMemory = await loadTrackMemory(catalogId: catalogId, engine: engine)
+        self.playerController.titleTrackMemory = await loadTrackMemory(catalog: catalog, catalogId: catalogId, engine: engine)
 
         // Before returning streamURL, configure playerController with actual title, episode number, and duration
         self.playerController.title = effectiveTitle

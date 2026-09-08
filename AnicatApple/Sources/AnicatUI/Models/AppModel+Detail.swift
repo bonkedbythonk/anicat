@@ -116,7 +116,7 @@ extension AppModel {
                 await self.openCinemaDetail(
                     catalog: step.catalog,
                     id: step.id,
-                    title: self.cinemaKnownTitles[step.id]
+                    title: self.cinemaKnownTitles[CinemaTitleKey(catalog: step.catalog, id: step.id)]
                 )
             }
             activeDetailTask = task
@@ -322,6 +322,10 @@ extension AppModel {
                 updateEpisodeNavigationState()
             }
             self.selectedMangaChapters = chapters
+            // Which of them are already on disk, so a downloaded chapter
+            // shows as downloaded rather than offering to fetch it again.
+            self.chapterOfflineStates = [:]
+            self.loadOfflineChapters()
             self.selectedRelations = relations
             self.selectedRecommendations = recommendations
             // Characters/discussions are fetched separately below and

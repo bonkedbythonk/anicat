@@ -68,6 +68,7 @@ struct PhoneDetailView: View {
         .background(SumiTheme.background)
         .navigationTitle(model.selectedMediaDetails?.title ?? "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         // The item is unconditional and the menu handles the not-yet-loaded
         // case: wrapping the `ToolbarItem` itself in `if let` renders no
         // button at all, which is why list editing had no entry point.
@@ -329,7 +330,7 @@ struct PhoneDetailView: View {
                     // it, so that width became the whole page's width and the
                     // column rendered with its left half off the screen.
                     Color.clear
-                        .frame(height: 190)
+                        .frame(height: 250)
                         .overlay {
                             CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 900) { image in
                                 image.resizable().aspectRatio(contentMode: .fill)
@@ -338,6 +339,22 @@ struct PhoneDetailView: View {
                             }
                         }
                         .clipped()
+                        // The art runs up under the status bar. Before this it
+                        // started below the navigation bar and met the black
+                        // page in a hard horizontal line across the screen.
+                        .ignoresSafeArea(edges: .top)
+                        // Its own scrim, so the back chevron and title stay
+                        // readable over a bright banner.
+                        .overlay(alignment: .top) {
+                            LinearGradient(
+                                colors: [.black.opacity(0.55), .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 120)
+                            .ignoresSafeArea(edges: .top)
+                            .allowsHitTesting(false)
+                        }
 
                     // The title sits on the artwork, so it needs its own
                     // ground: a bright banner made white text unreadable.

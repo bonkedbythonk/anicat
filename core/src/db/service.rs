@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::schema::{migrate, Catalog};
-use super::stats::ProgressRow;
+use super::stats::{ProgressRow, WATCHED_FRACTION};
 use crate::torrent::RememberedRelease;
 
 /// The audio and subtitle tracks chosen for one title, by language rather
@@ -31,6 +31,36 @@ pub struct WatchEntry {
     pub episode_number: i64,
     pub stop_time: i64,
     pub duration: i64,
+    /// Set once the episode passed the 85% bar and never cleared by a later
+    /// position; see migration 5. Read alongside the percentage rather than
+    /// instead of it, so a row written before the column existed still counts.
+    pub completed: bool,
+}
+
+/// A chapter about to be recorded as downloaded. A record rather than eight
+/// positional arguments, half of them strings that would sit next to each
+/// other at the call site.
+pub struct NewOfflineChapter<'a> {
+    pub catalog: Catalog,
+    pub catalog_id: i64,
+    pub chapter_id: &'a str,
+    pub chapter_number: &'a str,
+    pub title: Option<&'a str>,
+    pub page_count: i64,
+    pub bytes: i64,
+}
+
+/// One chapter kept on disk.
+#[derive(Debug, Clone)]
+pub struct OfflineChapter {
+    pub catalog: Catalog,
+    pub catalog_id: i64,
+    pub chapter_id: String,
+    pub chapter_number: String,
+    pub title: Option<String>,
+    pub page_count: i64,
+    pub bytes: i64,
+    pub downloaded_at: String,
 }
 
 /// One chapter, as far as it was read.
@@ -96,8 +126,8 @@ impl Registry {
         let conn = self.lock()?;
         conn.execute(
             "INSERT INTO watch_history
-                 (catalog, catalog_id, episode_number, stop_time, duration, watched_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+                 (catalog, catalog_id, episode_number, stop_time, duration, completed, watched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
              ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
                  stop_time = excluded.stop_time,
                  -- A zero duration means the player had not reported one yet.
@@ -105,8 +135,20 @@ impl Registry {
                  -- denominator the watched-percentage is computed against.
                  duration = CASE WHEN excluded.duration > 0
                                  THEN excluded.duration ELSE duration END,
+                 -- Sticky: a rewatch resets the position, not the fact. See
+                 -- migration 5 -- 50 seconds into a finished episode used to
+                 -- take it back out of the watched set entirely.
+                 completed = CASE WHEN excluded.completed = 1
+                                  THEN 1 ELSE completed END,
                  watched_at = excluded.watched_at",
-            params![catalog.as_str(), catalog_id, episode_number, stop_time, duration],
+            params![
+                catalog.as_str(),
+                catalog_id,
+                episode_number,
+                stop_time,
+                duration,
+                i64::from(duration > 0 && (stop_time as f64 / duration as f64) >= WATCHED_FRACTION)
+            ],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -155,7 +197,7 @@ impl Registry {
     ) -> Result<Option<WatchEntry>, String> {
         let conn = self.lock()?;
         conn.query_row(
-            "SELECT episode_number, stop_time, duration FROM watch_history
+            "SELECT episode_number, stop_time, duration, completed FROM watch_history
              WHERE catalog = ?1 AND catalog_id = ?2 AND episode_number = ?3",
             params![catalog.as_str(), catalog_id, episode_number],
             |r| {
@@ -163,6 +205,7 @@ impl Registry {
                     episode_number: r.get(0)?,
                     stop_time: r.get(1)?,
                     duration: r.get(2)?,
+                    completed: r.get::<_, i64>(3)? == 1,
                 })
             },
         )
@@ -174,7 +217,7 @@ impl Registry {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT episode_number, stop_time, duration FROM watch_history
+                "SELECT episode_number, stop_time, duration, completed FROM watch_history
                  WHERE catalog = ?1 AND catalog_id = ?2 ORDER BY episode_number",
             )
             .map_err(|e| e.to_string())?;
@@ -184,6 +227,7 @@ impl Registry {
                     episode_number: r.get(0)?,
                     stop_time: r.get(1)?,
                     duration: r.get(2)?,
+                    completed: r.get::<_, i64>(3)? == 1,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -231,7 +275,8 @@ impl Registry {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT catalog, catalog_id, episode_number, stop_time, duration, watched_at
+                "SELECT catalog, catalog_id, episode_number, stop_time, duration, completed,
+                        watched_at
                  FROM watch_history",
             )
             .map_err(|e| e.to_string())?;
@@ -243,13 +288,14 @@ impl Registry {
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, i64>(4)?,
-                    r.get::<_, String>(5)?,
+                    r.get::<_, i64>(5)? == 1,
+                    r.get::<_, String>(6)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         for row in rows {
-            let (catalog, catalog_id, episode_number, stop_time, duration, watched_at) =
+            let (catalog, catalog_id, episode_number, stop_time, duration, completed, watched_at) =
                 row.map_err(|e| e.to_string())?;
             let Some(parsed) = parse_watched_at(&watched_at) else {
                 log::warn!("watch_history: unreadable watched_at {watched_at:?}, skipping row");
@@ -261,6 +307,7 @@ impl Registry {
                 episode_number,
                 stop_time,
                 duration,
+                completed,
                 watched_at: parsed,
             });
         }
@@ -339,6 +386,99 @@ impl Registry {
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Notes a chapter as downloaded.
+    pub fn record_offline_chapter(&self, row: NewOfflineChapter<'_>) -> Result<(), String> {
+        let NewOfflineChapter {
+            catalog,
+            catalog_id,
+            chapter_id,
+            chapter_number,
+            title,
+            page_count,
+            bytes,
+        } = row;
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO offline_chapters
+                (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+             ON CONFLICT(catalog, catalog_id, chapter_id) DO UPDATE SET
+               chapter_number = excluded.chapter_number,
+               title = excluded.title,
+               page_count = excluded.page_count,
+               bytes = excluded.bytes,
+               downloaded_at = excluded.downloaded_at",
+            params![
+                catalog.as_str(),
+                catalog_id,
+                chapter_id,
+                chapter_number,
+                title,
+                page_count,
+                bytes
+            ],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn forget_offline_chapter(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        chapter_id: &str,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "DELETE FROM offline_chapters WHERE catalog = ?1 AND catalog_id = ?2 AND chapter_id = ?3",
+            params![catalog.as_str(), catalog_id, chapter_id],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Every downloaded chapter, newest first.
+    pub fn offline_chapters(&self) -> Result<Vec<OfflineChapter>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, downloaded_at
+                 FROM offline_chapters ORDER BY downloaded_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
+                    r.get::<_, String>(7)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = vec![];
+        for row in rows {
+            let (catalog, catalog_id, chapter_id, chapter_number, title, page_count, bytes, at) =
+                row.map_err(|e| e.to_string())?;
+            let Some(catalog) = Catalog::parse(&catalog) else { continue };
+            out.push(OfflineChapter {
+                catalog,
+                catalog_id,
+                chapter_id,
+                chapter_number,
+                title,
+                page_count,
+                bytes,
+                downloaded_at: at,
+            });
+        }
+        Ok(out)
     }
 
     /// Records where a chapter was left.
@@ -601,6 +741,39 @@ impl Registry {
     /// offline list mirror, and per-show prefs. Schema/migrations are left
     /// alone — only rows go, not structure — so the next write just refills
     /// an empty database rather than re-running `migrate`.
+    /// Empties the watch log, and only that.
+    ///
+    /// Deliberately not `clear_all` under another name: that also drops the
+    /// resume positions, the remembered releases and the track picks, which
+    /// is a different thing to ask for. The History page has offered a
+    /// "Clear history" button since it was written and had no engine call to
+    /// bind it to, so the button was never drawn.
+    pub fn clear_watch_history(&self) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM watch_history", [])
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Forgets one watch. The row is deleted rather than zeroed: a zeroed row
+    /// stays in `recent_activity` and the lifetime totals, which both read
+    /// every row regardless of position.
+    pub fn remove_watch(
+        &self,
+        catalog: Catalog,
+        catalog_id: i64,
+        episode_number: i64,
+    ) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute(
+            "DELETE FROM watch_history
+             WHERE catalog = ?1 AND catalog_id = ?2 AND episode_number = ?3",
+            params![catalog.as_str(), catalog_id, episode_number],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
     pub fn clear_all(&self) -> Result<(), String> {
         let conn = self.lock()?;
         conn.execute_batch(
@@ -763,12 +936,52 @@ mod tests {
     }
 
     #[test]
+    fn clearing_the_watch_log_leaves_the_rest_of_the_registry_alone() {
+        let db = Registry::open_in_memory().unwrap();
+        db.record_progress(Catalog::Anilist, 21, 1, 100, 1400).unwrap();
+        db.record_progress(Catalog::TmdbTv, 21, 1, 100, 1400).unwrap();
+        db.set_provider_slug(Catalog::Anilist, 21, "nyaa", "One Piece").unwrap();
+
+        db.remove_watch(Catalog::TmdbTv, 21, 1).unwrap();
+        assert!(db.get_progress(Catalog::TmdbTv, 21, 1).unwrap().is_none());
+        assert!(
+            db.get_progress(Catalog::Anilist, 21, 1).unwrap().is_some(),
+            "the same number under another catalog is a different row"
+        );
+
+        db.clear_watch_history().unwrap();
+        assert!(db.get_progress(Catalog::Anilist, 21, 1).unwrap().is_none());
+        assert_eq!(
+            db.get_provider_slug(Catalog::Anilist, 21, "nyaa").unwrap().as_deref(),
+            Some("One Piece"),
+            "clearing the watch log is not clearing the registry"
+        );
+    }
+
+    #[test]
     fn migrate_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
+    }
+
+    #[test]
+    fn a_rewatch_moves_the_resume_point_without_disowning_the_watch() {
+        let db = Registry::open_in_memory().unwrap();
+        // Finished: 1407 of 1420 is past the 85% bar.
+        db.record_progress(Catalog::Anilist, 156_023, 8, 1407, 1420).unwrap();
+        assert!(db.get_progress(Catalog::Anilist, 156_023, 8).unwrap().unwrap().completed);
+        // Reopened and closed 50 seconds in. The resume position follows the
+        // rewatch; the completion does not.
+        db.record_progress(Catalog::Anilist, 156_023, 8, 50, 1420).unwrap();
+        let row = db.get_progress(Catalog::Anilist, 156_023, 8).unwrap().unwrap();
+        assert_eq!(row.stop_time, 50);
+        assert!(row.completed, "a rewatch must not erase that the episode was finished");
+        // An explicit un-check is the one thing that clears it.
+        db.clear_progress_from(Catalog::Anilist, 156_023, 8).unwrap();
+        assert!(db.get_progress(Catalog::Anilist, 156_023, 8).unwrap().is_none());
     }
 
     #[test]

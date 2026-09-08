@@ -298,6 +298,20 @@ pub struct CinemaCredit {
     pub year: Option<i32>,
 }
 
+/// One chapter kept on disk.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiOfflineChapter {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub chapter_id: String,
+    pub chapter_number: String,
+    pub title: Option<String>,
+    pub page_count: u32,
+    pub bytes: u64,
+    /// `YYYY-MM-DD HH:MM:SS` in UTC, as SQLite writes it.
+    pub downloaded_at: String,
+}
+
 /// How far into a chapter the viewer got.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiReadingProgress {
@@ -787,6 +801,7 @@ pub struct AnicatEngine {
     http: reqwest::Client,
     catalogs: Catalogs,
     registry: Registry,
+    offline: crate::reader::offline::OfflineLibrary,
     torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
     mangakatana: MangaKatanaClient,
@@ -850,6 +865,13 @@ impl AnicatEngine {
                 AniListCache::persistent(&dir.join("catalog-cache.sqlite")),
             ),
             registry,
+            // Chapters kept for offline reading. Application Support rather
+            // than Caches: this is what the viewer asked to keep, and the
+            // system empties Caches whenever it likes.
+            offline: crate::reader::offline::OfflineLibrary::new(
+                dir.join("offline-manga"),
+                http.clone(),
+            ),
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
             mangakatana: MangaKatanaClient::new(http.clone()),
@@ -909,20 +931,11 @@ impl AnicatEngine {
 
     /// Whether the engine currently holds an AniList token. Says nothing
     /// about whether it is still valid — `viewer_profile` answers that.
-    pub fn has_anilist_token(&self) -> bool {
-        self.catalogs.anilist.has_token()
-    }
-
+    /// Kept for `BridgeTests`, which exercises the search path through the
+    /// narrowest surface it can. The MANGA and NOVEL siblings had no caller
+    /// at all and are gone.
     pub async fn search_anime(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
         self.search_catalog(Some(query), Some("ANIME".to_string()), None, None).await
-    }
-
-    pub async fn search_manga_catalog(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(Some(query), Some("MANGA".to_string()), None, None).await
-    }
-
-    pub async fn search_novel(&self, query: String) -> FfiResult<Vec<MediaSummary>> {
-        self.search_catalog(Some(query), Some("NOVEL".to_string()), None, None).await
     }
 
     pub async fn search_catalog(
@@ -1137,6 +1150,119 @@ impl AnicatEngine {
             .await
             .map_err(|msg| AnicatError::Network { msg })?;
         Ok(items.iter().map(summarize_cinema).collect())
+    }
+
+    /// Downloads a chapter's pages for reading with no network.
+    ///
+    /// The pages are ordinary image URLs, so this is a fetch and a write; the
+    /// reader is handed `file://` URLs afterwards and cannot tell the
+    /// difference. A partial download is discarded rather than kept: half a
+    /// chapter reads as a chapter that ends early, with nothing on the page
+    /// to say otherwise.
+    pub async fn download_chapter(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: String,
+        chapter_number: String,
+        title: Option<String>,
+    ) -> FfiResult<u32> {
+        let pages = self.get_manga_pages(chapter_id.clone()).await?;
+        let catalog: Catalog = catalog.into();
+        let stored = self
+            .offline
+            .download(catalog.as_str(), catalog_id, &chapter_id, &pages)
+            .await
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        self.registry
+            .record_offline_chapter(crate::db::service::NewOfflineChapter {
+                catalog,
+                catalog_id,
+                chapter_id: &chapter_id,
+                chapter_number: &chapter_number,
+                title: title.as_deref(),
+                page_count: stored.pages.len() as i64,
+                bytes: stored.bytes as i64,
+            })
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        log::info!(
+            "[offline] {} ch {} stored: {} pages, {} KB",
+            catalog_id,
+            chapter_number,
+            stored.pages.len(),
+            stored.bytes / 1024
+        );
+        Ok(stored.pages.len() as u32)
+    }
+
+    /// The stored pages of a chapter as `file://` URLs, or empty when it is
+    /// not downloaded.
+    ///
+    /// Answered from the directory, not from the registry row: files deleted
+    /// underneath the app -- a sync tool, a manual clean -- must read as "not
+    /// downloaded" rather than as a chapter with holes in it.
+    pub fn offline_chapter_pages(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: String,
+    ) -> Vec<String> {
+        let catalog: Catalog = catalog.into();
+        self.offline
+            .pages(catalog.as_str(), catalog_id, &chapter_id)
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(|p| file_url(&p))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every chapter kept on disk, newest first.
+    pub fn offline_chapters(&self) -> FfiResult<Vec<FfiOfflineChapter>> {
+        let rows = self
+            .registry
+            .offline_chapters()
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        Ok(rows
+            .into_iter()
+            .map(|r| FfiOfflineChapter {
+                catalog: r.catalog.into(),
+                catalog_id: r.catalog_id,
+                chapter_id: r.chapter_id,
+                chapter_number: r.chapter_number,
+                title: r.title,
+                page_count: r.page_count as u32,
+                bytes: r.bytes as u64,
+                downloaded_at: r.downloaded_at,
+            })
+            .collect())
+    }
+
+    /// Removes a downloaded chapter, files first.
+    ///
+    /// If the files go and the row stays, the app offers to read something
+    /// that is not there; the other way round it merely forgets a directory,
+    /// which the next download overwrites.
+    pub fn delete_offline_chapter(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        chapter_id: String,
+    ) -> FfiResult<()> {
+        let catalog: Catalog = catalog.into();
+        self.offline
+            .delete(catalog.as_str(), catalog_id, &chapter_id)
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        self.registry
+            .forget_offline_chapter(catalog, catalog_id, &chapter_id)
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// Bytes the offline library occupies.
+    pub fn offline_size_bytes(&self) -> u64 {
+        self.offline.size_bytes()
     }
 
     /// Records where a chapter was left, so reopening it lands on the page
@@ -1853,6 +1979,7 @@ impl AnicatEngine {
                 .filter(|e| e.duration > 0)
                 .map(|e| (e.stop_time as f64 / e.duration as f64) * 100.0)
                 .unwrap_or(0.0);
+            let locally_completed = entry.is_some_and(|e| e.completed);
 
             // Match by parsed episode number, or fallback to positional index
             let from_stream = stream_by_num.get(&number).copied().or_else(|| {
@@ -1898,7 +2025,7 @@ impl AnicatEngine {
                 number,
                 title,
                 thumbnail,
-                is_watched: episode_is_watched(number, percent, list_progress),
+                is_watched: episode_is_watched(number, percent, locally_completed, list_progress),
                 progress_percent: percent,
                 runtime_minutes,
                 synopsis: az.and_then(|a| a.overview.clone()),
@@ -2226,6 +2353,25 @@ impl AnicatEngine {
 
     /// Wipes resume positions, provider overrides, the offline list mirror,
     /// and per-show prefs. Settings' "Clear Local Registry" action.
+    /// Empties the watch log without touching resume positions, remembered
+    /// releases or track picks -- what the History page's "Clear history"
+    /// means, as against Settings' wipe.
+    pub fn clear_watch_history(&self) -> FfiResult<()> {
+        self.registry.clear_watch_history().map_err(|msg| AnicatError::Storage { msg })
+    }
+
+    /// Forgets one watch, for the History row's own context menu.
+    pub fn remove_watch(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode_number: i64,
+    ) -> FfiResult<()> {
+        self.registry
+            .remove_watch(catalog.into(), catalog_id, episode_number)
+            .map_err(|msg| AnicatError::Storage { msg })
+    }
+
     pub fn clear_local_registry(&self) -> FfiResult<()> {
         self.registry.clear_all().map_err(|msg| AnicatError::Storage { msg })
     }
@@ -2575,6 +2721,7 @@ impl AnicatEngine {
     /// not record it.
     pub fn record_title_track_preference(
         &self,
+        catalog: FfiCatalog,
         catalog_id: i64,
         audio_lang: Option<String>,
         subtitle_lang: Option<String>,
@@ -2582,17 +2729,21 @@ impl AnicatEngine {
     ) -> FfiResult<()> {
         self.registry
             .set_title_track_preference(
-                Catalog::Anilist,
+                catalog.into(),
                 catalog_id,
                 &crate::db::service::TrackPreference { audio_lang, subtitle_lang, subtitle_title },
             )
             .map_err(|msg| AnicatError::Storage { msg })
     }
 
-    pub fn title_track_preference(&self, catalog_id: i64) -> FfiResult<Option<FfiTrackPreference>> {
+    pub fn title_track_preference(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+    ) -> FfiResult<Option<FfiTrackPreference>> {
         let pref = self
             .registry
-            .title_track_preference(Catalog::Anilist, catalog_id)
+            .title_track_preference(catalog.into(), catalog_id)
             .map_err(|msg| AnicatError::Storage { msg })?;
         Ok(pref.map(|p| FfiTrackPreference {
             audio_lang: p.audio_lang,
@@ -2969,6 +3120,11 @@ impl AnicatEngine {
                 .map(|e| (e.stop_time as f64 / e.duration as f64) * 100.0)
                 .unwrap_or(0.0)
         };
+        let watched_completed = |number: i32| -> bool {
+            history
+                .iter()
+                .any(|e| e.episode_number == number as i64 && e.completed)
+        };
         if is_series {
             for ep in &detail.episodes {
                 let number = ep.absolute as i32;
@@ -2983,7 +3139,7 @@ impl AnicatEngine {
                         format!("S{:02}E{:02}", ep.season, ep.episode)
                     }),
                     thumbnail: ep.still_url.clone(),
-                    is_watched: episode_is_watched(number, percent, None),
+                    is_watched: episode_is_watched(number, percent, watched_completed(number), None),
                     progress_percent: percent,
                     runtime_minutes: ep.runtime_minutes,
                     synopsis: ep.overview.clone(),
@@ -3003,7 +3159,7 @@ impl AnicatEngine {
                     .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
                     .unwrap_or_else(|| "Film".to_string()),
                 thumbnail: item.banner_image.clone(),
-                is_watched: episode_is_watched(1, percent, None),
+                is_watched: episode_is_watched(1, percent, watched_completed(1), None),
                 progress_percent: percent,
                 runtime_minutes: item.duration,
                 synopsis: item.description.clone(),
@@ -3192,8 +3348,16 @@ impl AnicatEngine {
 /// primary button offering "Start Episode 1" regardless of what AniList
 /// said. AniList has no per-second position, so it can only ever confirm
 /// whole episodes — the local source still owns `resume_seconds`.
-fn episode_is_watched(number: i32, local_percent: f64, anilist_progress: Option<i32>) -> bool {
-    local_percent >= 85.0 || anilist_progress.is_some_and(|p| number <= p)
+/// `locally_completed` is migration 5's sticky flag: a rewatch resets
+/// `stop_time`, so the percentage alone reported a finished episode as
+/// unwatched the moment someone reopened it and stopped early.
+fn episode_is_watched(
+    number: i32,
+    local_percent: f64,
+    locally_completed: bool,
+    anilist_progress: Option<i32>,
+) -> bool {
+    locally_completed || local_percent >= 85.0 || anilist_progress.is_some_and(|p| number <= p)
 }
 
 /// The local-history episode the primary button should offer to resume
@@ -3582,6 +3746,25 @@ fn is_self_credit(character: Option<&str>) -> bool {
     matches!(first.as_str(), "self" | "himself" | "herself" | "themself" | "themselves")
 }
 
+/// A `file://` URL for a path on disk.
+///
+/// Built here rather than pulled in with the `url` crate: the only characters
+/// that need escaping in these paths are the ones Application Support puts
+/// there (a space) and anything a title id contributes, and a whole URL
+/// dependency for that is a dependency for one function.
+fn file_url(path: &std::path::Path) -> String {
+    let mut out = String::from("file://");
+    for byte in path.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 /// Adds a title to the search list when it has one and it is not already
 /// there. TMDB repeats the same string in `title` and `original_title` for
 /// any english-language film, and a duplicated title is a duplicated search.
@@ -3804,28 +3987,37 @@ mod tests {
     fn anilist_progress_marks_episodes_watched_with_no_local_history() {
         // The exact scenario this existed to fix: AniList says 10, this
         // device's registry has nothing at all.
-        assert!(episode_is_watched(1, 0.0, Some(10)));
-        assert!(episode_is_watched(10, 0.0, Some(10)));
-        assert!(!episode_is_watched(11, 0.0, Some(10)));
+        assert!(episode_is_watched(1, 0.0, false, Some(10)));
+        assert!(episode_is_watched(10, 0.0, false, Some(10)));
+        assert!(!episode_is_watched(11, 0.0, false, Some(10)));
     }
 
     #[test]
     fn local_history_alone_still_marks_watched_with_no_anilist_entry() {
-        assert!(episode_is_watched(3, 90.0, None));
-        assert!(!episode_is_watched(3, 40.0, None));
+        assert!(episode_is_watched(3, 90.0, false, None));
+        assert!(!episode_is_watched(3, 40.0, false, None));
     }
 
     #[test]
     fn either_source_is_enough() {
         // Watched locally on this device (past 85%) but AniList hasn't
         // synced yet — still watched.
-        assert!(episode_is_watched(5, 86.0, Some(2)));
+        assert!(episode_is_watched(5, 86.0, false, Some(2)));
         // Synced on AniList from elsewhere but not finished locally.
-        assert!(episode_is_watched(5, 20.0, Some(5)));
+        assert!(episode_is_watched(5, 20.0, false, Some(5)));
+    }
+
+    #[test]
+    fn a_rewatch_that_stops_early_does_not_unwatch_the_episode() {
+        // 50 seconds into a 1420s episode already finished: the percentage
+        // has collapsed to 3.5 and AniList is not there to cover for it
+        // (a local-only title, or a signed-out device).
+        assert!(!episode_is_watched(8, 3.5, false, None));
+        assert!(episode_is_watched(8, 3.5, true, None));
     }
 
     fn progress(episode_number: i64, stop_time: i64, duration: i64) -> crate::db::service::WatchEntry {
-        crate::db::service::WatchEntry { episode_number, stop_time, duration }
+        crate::db::service::WatchEntry { episode_number, stop_time, duration, completed: false }
     }
 
     #[test]

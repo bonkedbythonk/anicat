@@ -8,6 +8,7 @@
 //! id names its source (UUID or page URL), which is how one list can hold
 //! both and the page fetch still reaches the right site.
 
+pub mod offline;
 pub mod mangadex;
 pub mod mangakatana;
 pub mod syosetu;

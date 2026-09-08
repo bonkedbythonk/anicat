@@ -110,6 +110,45 @@ extension AppModel {
         becauseYouWatched = snapshot.becauseYouWatched ?? []
     }
 
+    /// Empties the local watch log, and only that.
+    ///
+    /// Not `clearLocalRegistry`: that also drops resume positions, remembered
+    /// releases and track picks. The History page has drawn a "Clear history"
+    /// button behind an optional callback since it was written, and nothing
+    /// ever passed one, so the button never appeared.
+    public func clearWatchHistory() async {
+        guard let engine else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            engineIOQueue.async {
+                try? engine.clearWatchHistory()
+                continuation.resume()
+            }
+        }
+        activity = []
+        cinemaActivity = []
+        loadWatchStats()
+    }
+
+    /// Forgets one watch, for the History row's context menu.
+    public func removeWatch(_ row: ActivityRow) async {
+        guard let engine else { return }
+        let catalog = row.catalog
+        let id = row.catalogId
+        let episode = row.episodeNumber
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            engineIOQueue.async {
+                try? engine.removeWatch(catalog: catalog, catalogId: id, episodeNumber: episode)
+                continuation.resume()
+            }
+        }
+        let gone: (ActivityRow) -> Bool = {
+            $0.catalog == catalog && $0.catalogId == id && $0.episodeNumber == episode
+        }
+        activity.removeAll(where: gone)
+        cinemaActivity.removeAll(where: gone)
+        loadWatchStats()
+    }
+
     func persistHomeCache() {
         // Fixture shelves must not become the snapshot the real app paints
         // from at its next launch; the caches directory is shared.

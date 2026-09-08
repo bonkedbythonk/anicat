@@ -196,6 +196,69 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 5 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- That an episode was finished, kept apart from where the player
+            -- last was.
+            --
+            -- 'Watched' used to be derived from `stop_time / duration >= 0.85`
+            -- alone, and `stop_time` is a resume position that a rewatch is
+            -- entitled to reset: opening a finished episode and stopping 50
+            -- seconds in took a row from 1407/1420 to 50/1420, which dropped
+            -- it out of the statistics and made it read as unwatched. On
+            -- AniList-tracked anime the list progress masked it; a local-only
+            -- title, a signed-out device or a film had no such backstop.
+            --
+            -- Set once and never cleared by a later position, so a rewatch
+            -- moves the resume point without disowning the watch. An explicit
+            -- un-check still deletes the row outright (`clear_progress_from`).
+            ALTER TABLE watch_history ADD COLUMN completed INTEGER NOT NULL DEFAULT 0;
+
+            -- Existing rows already past the bar keep their standing.
+            UPDATE watch_history
+               SET completed = 1
+             WHERE duration > 0 AND CAST(stop_time AS REAL) / duration >= 0.85;
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 5)
+            .map_err(|e| e.to_string())?;
+    }
+
+    if version < 5 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- Chapters kept on disk for reading with no network.
+            --
+            -- The files are the truth and this is the index: what was
+            -- downloaded, how big it is and when, so a list of downloads does
+            -- not mean walking the directory tree and re-deriving titles.
+            -- `reader::offline` reads the directory itself when asked for
+            -- pages, so a row whose files have been deleted underneath us
+            -- reads as not downloaded rather than as a chapter with holes.
+            CREATE TABLE IF NOT EXISTS offline_chapters (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                chapter_id TEXT NOT NULL,
+                chapter_number TEXT NOT NULL,
+                title TEXT,
+                page_count INTEGER NOT NULL DEFAULT 0,
+                bytes INTEGER NOT NULL DEFAULT 0,
+                downloaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id, chapter_id)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 5)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.

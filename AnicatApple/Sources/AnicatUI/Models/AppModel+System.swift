@@ -62,9 +62,24 @@ extension AppModel {
         }
 
         switch link {
-        case .title(let id, let isManga):
-            Task { await openDetail(id: id, isManga: isManga) }
-        case .play(let id, let episode):
+        case .title(let id, let isManga, let catalog):
+            if catalog == .anilist {
+                Task { await openDetail(id: id, isManga: isManga) }
+            } else {
+                Task { await openCinemaDetail(catalog: catalog, id: id) }
+            }
+        case .play(let id, let episode, let catalog):
+            guard catalog == .anilist else {
+                // A film's page first, then the stream over it -- the same
+                // shape as the cinema shelves' own Play, and the only route
+                // that resolves against TMDB rather than against whatever
+                // anime shares the number.
+                Task {
+                    await openCinemaDetail(catalog: catalog, id: id)
+                    await playCinemaEpisode(episode)
+                }
+                return
+            }
             playFromShelf(
                 model: self,
                 catalogId: id,
@@ -197,9 +212,11 @@ extension AppModel {
             let id = download.catalogId
             let episode = download.episode
             let title = download.title
-            let cover = download.coverURL ?? knownCovers[id]
+            let catalog = download.catalog
+            let cover = download.coverURL ?? registryCover(catalog: catalog.ffi, id: id)
             Task.detached(priority: .utility) {
                 await SystemNotifications.shared.notifyDownloadFinished(
+                    catalog: catalog,
                     catalogId: id,
                     title: title,
                     episode: episode,

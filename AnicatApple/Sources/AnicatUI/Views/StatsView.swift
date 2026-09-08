@@ -138,28 +138,30 @@ public struct StatsView: View {
     /// Names and covers for the top-titles list. `FfiTitleCount` carries an
     /// id and nothing else — the registry never learns what a show is called —
     /// so the name has to come from whatever the catalog views have loaded.
-    let knownTitles: [Int64: String]
-    let knownCovers: [Int64: URL]
+    /// Both take the row's catalog: see `HistoryView.titleFor` for why an
+    /// id alone cannot name a title.
+    let titleFor: (FfiCatalog, Int64) -> String?
+    let coverFor: (FfiCatalog, Int64) -> URL?
     /// The 30-day window behind the "most watched" card; the year-long
     /// `stats` feeds everything else.
     let recentStats: FfiWatchStats?
     let onLoad: () -> Void
-    let onSelectTitle: (Int64, String?) -> Void
+    let onSelectTitle: (Int64, String?, FfiCatalog) -> Void
     let onResolveTitle: (Int64) -> Void
 
     public init(
         stats: FfiWatchStats?,
         recentStats: FfiWatchStats? = nil,
-        knownTitles: [Int64: String] = [:],
-        knownCovers: [Int64: URL] = [:],
+        titleFor: @escaping (FfiCatalog, Int64) -> String? = { _, _ in nil },
+        coverFor: @escaping (FfiCatalog, Int64) -> URL? = { _, _ in nil },
         onLoad: @escaping () -> Void = {},
-        onSelectTitle: @escaping (Int64, String?) -> Void = { _, _ in },
+        onSelectTitle: @escaping (Int64, String?, FfiCatalog) -> Void = { _, _, _ in },
         onResolveTitle: @escaping (Int64) -> Void = { _ in }
     ) {
         self.stats = stats
         self.recentStats = recentStats
-        self.knownTitles = knownTitles
-        self.knownCovers = knownCovers
+        self.titleFor = titleFor
+        self.coverFor = coverFor
         self.onLoad = onLoad
         self.onSelectTitle = onSelectTitle
         self.onResolveTitle = onResolveTitle
@@ -364,16 +366,16 @@ public struct StatsView: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 topTitleRow(index: index, row: row)
                     .onAppear {
-                        if knownTitles[row.catalogId] == nil { onResolveTitle(row.catalogId) }
+                        if titleFor(row.catalog, row.catalogId) == nil { onResolveTitle(row.catalogId) }
                     }
             }
         }
     }
 
     private func topTitleRow(index: Int, row: FfiTitleCount) -> some View {
-        let title = knownTitles[row.catalogId]
+        let title = titleFor(row.catalog, row.catalogId)
         return Button {
-            onSelectTitle(row.catalogId, title)
+            onSelectTitle(row.catalogId, title, row.catalog)
         } label: {
             HStack(spacing: 10) {
                 Text("\(index + 1)")
@@ -381,7 +383,7 @@ public struct StatsView: View {
                     .foregroundColor(SumiTheme.muted)
                     .frame(width: 18, alignment: .trailing)
 
-                CachedAsyncImage(url: knownCovers[row.catalogId], maxPixelSize: 120) { image in
+                CachedAsyncImage(url: coverFor(row.catalog, row.catalogId), maxPixelSize: 120) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     Rectangle().fill(SumiTheme.foregroundWash)
@@ -415,7 +417,7 @@ public struct StatsView: View {
     }
 
     private func yearInReviewCard(_ stats: FfiWatchStats) -> some View {
-        let top = stats.topTitles.first.flatMap { knownTitles[$0.catalogId] }
+        let top = stats.topTitles.first.flatMap { titleFor($0.catalog, $0.catalogId) }
         return card(title: "Year in review") {
             Text(Self.yearInReview(
                 hours: Double(stats.totalWatchSeconds) / 3600,

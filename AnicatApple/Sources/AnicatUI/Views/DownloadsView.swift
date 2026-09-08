@@ -1,4 +1,5 @@
 import SwiftUI
+import AnicatCoreKit
 #if os(macOS)
 import AppKit
 #endif
@@ -18,16 +19,33 @@ public struct DownloadsView: View {
     /// Drops the row from `libraryDownloads`. Optional for the same reason:
     /// the list is model state this view only reads.
     let onRemove: ((AppModel.LibraryDownload) -> Void)?
+    /// Chapters kept for offline reading. Episodes and chapters share this
+    /// page because they are one question -- what is on this disk -- and
+    /// separate pages would make the answer two places.
+    var chapters: [FfiOfflineChapter] = []
+    var chapterBytes: UInt64 = 0
+    /// Names for the ids the registry stores, from whatever the app has
+    /// loaded. A chapter downloaded months ago may be on no shelf.
+    var titles: [Int64: String] = [:]
+    var onRemoveChapter: ((FfiOfflineChapter) -> Void)?
     @State private var tab = "queue"
 
     public init(
         downloads: [AppModel.LibraryDownload],
         onPlay: ((AppModel.LibraryDownload) -> Void)? = nil,
-        onRemove: ((AppModel.LibraryDownload) -> Void)? = nil
+        onRemove: ((AppModel.LibraryDownload) -> Void)? = nil,
+        chapters: [FfiOfflineChapter] = [],
+        chapterBytes: UInt64 = 0,
+        titles: [Int64: String] = [:],
+        onRemoveChapter: ((FfiOfflineChapter) -> Void)? = nil
     ) {
         self.downloads = downloads
         self.onPlay = onPlay
         self.onRemove = onRemove
+        self.chapters = chapters
+        self.chapterBytes = chapterBytes
+        self.titles = titles
+        self.onRemoveChapter = onRemoveChapter
     }
 
     /// A row can be removed once its download has stopped moving. Removing a
@@ -83,14 +101,22 @@ public struct DownloadsView: View {
 
     public var body: some View {
         SumiPage {
-            SumiPageHeader(title: "Downloads", subtitle: "\(queued.count) queued · \(offline.count) offline")
+            SumiPageHeader(
+                title: "Downloads",
+                subtitle: chapters.isEmpty
+                    ? "\(queued.count) queued · \(offline.count) offline"
+                    : "\(queued.count) queued · \(offline.count) offline · \(chapters.count) chapters, \(Self.size(chapterBytes))"
+            )
 
             SumiTabBar(
-                tabs: [("queue", "Queue"), ("offline", "Offline")],
+                tabs: [("queue", "Queue"), ("offline", "Offline"), ("chapters", "Chapters")],
                 selection: $tab
             )
 
             Group {
+                if tab == "chapters" {
+                    chapterList
+                } else {
                 let shown = tab == "queue" ? queued : offline
                 if shown.isEmpty {
                     SumiEmptyState(
@@ -108,6 +134,7 @@ public struct DownloadsView: View {
                         }
                     }
                 }
+                }
             }
             .animation(.smooth, value: tab)
             // Without an animated value on the list a removed row vanished
@@ -116,6 +143,61 @@ public struct DownloadsView: View {
             // leaving Queue for Offline animates out the same way.
             .animation(.snappy, value: membership)
         }
+    }
+
+    /// Chapters on disk, newest first, each removable.
+    @ViewBuilder
+    private var chapterList: some View {
+        if chapters.isEmpty {
+            SumiEmptyState(
+                headline: "No chapters downloaded",
+                detail: "Download a chapter from a manga's chapter list to read it with no network."
+            )
+        } else {
+            VStack(spacing: 8) {
+                ForEach(chapters, id: \.chapterId) { chapter in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(titles[chapter.catalogId] ?? chapter.title ?? "Media \(chapter.catalogId)")
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            Text("CH \(chapter.chapterNumber) · \(chapter.pageCount) pages · \(Self.size(chapter.bytes))")
+                                .sumiTabularMono(size: 11)
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        Spacer()
+                        if let onRemoveChapter {
+                            Button {
+                                onRemoveChapter(chapter)
+                            } label: {
+                                Text("Remove")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(SumiTheme.muted)
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    /// Bytes as the page says them. Rounded: the exact figure is noise next
+    /// to "is this worth removing".
+    static func size(_ bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1024 { return String(format: "%.1f GB", mb / 1024) }
+        if mb >= 1 { return String(format: "%.0f MB", mb) }
+        return String(format: "%.0f KB", Double(bytes) / 1024)
     }
 }
 

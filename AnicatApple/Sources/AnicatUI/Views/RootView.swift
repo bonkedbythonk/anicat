@@ -649,6 +649,18 @@ public struct RootView: View {
                 KeyboardBacklightDimmer.shared.stop()
             }
         }
+        // The keyboard goes out with the chrome rather than on the dimmer's
+        // own three-second clock. The controls fading is the stronger
+        // signal: it says the picture is what is being looked at, and a lit
+        // keyboard under a dark room is the same distraction the chrome was.
+        .onChange(of: model.playerController.areControlsVisible) { _, visible in
+            guard model.activeStreamURL != nil else { return }
+            if visible {
+                KeyboardBacklightDimmer.shared.noteUserActivity()
+            } else {
+                KeyboardBacklightDimmer.shared.dimNow()
+            }
+        }
         #endif
     }
 

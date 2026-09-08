@@ -24,6 +24,10 @@ struct RemoteLiveActivityWidget: Widget {
             LockScreenView(attributes: context.attributes, state: context.state)
                 .activityBackgroundTint(context.attributes.background)
                 .activitySystemActionForegroundColor(context.attributes.accent)
+                // Tapping anywhere that is not a button opens the remote
+                // itself. A widget can only ask for a URL, which is why
+                // `anicat://remote` exists as a link rather than a flag.
+                .widgetURL(URL(string: "anicat://remote"))
         } dynamicIsland: { context in
             let theme = context.attributes
             let state = context.state
@@ -34,6 +38,11 @@ struct RemoteLiveActivityWidget: Widget {
                 // countdown wrapped onto two lines. Only the two short
                 // stamps go in them, and everything with a width goes in
                 // `.center` and `.bottom`.
+                // Both columns are given the full width of their region and
+                // told which edge to sit on. Left to itself a `VStack` centres
+                // in the space it is handed, which is what had the episode
+                // stamp and the clock floating somewhere inboard of the
+                // corners instead of squared up with them.
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("EP")
@@ -44,13 +53,23 @@ struct RemoteLiveActivityWidget: Widget {
                             .font(SumiWidget.mono(17, weight: .semibold))
                             .foregroundStyle(theme.accent)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(state.remainingStamp)
-                        .font(SumiWidget.mono(13, weight: .medium))
-                        .foregroundStyle(theme.foreground)
-                        .lineLimit(1)
-                        .fixedSize()
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("LEFT")
+                            .font(SumiWidget.mono(8, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(theme.muted)
+                        Text(state.remainingStamp)
+                            .font(SumiWidget.mono(15, weight: .semibold))
+                            .foregroundStyle(theme.foreground)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(spacing: 1) {
@@ -171,7 +190,7 @@ private struct Transport: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: compact ? 14 : 18) {
+        HStack(spacing: compact ? 12 : 20) {
             key(.back10, symbol: "gobackward.10")
             key(
                 .playPause,
@@ -200,11 +219,16 @@ private struct Transport: View {
         symbol: String,
         emphasised: Bool = false
     ) -> some View {
-        Button(intent: RemoteActivityButtonIntent(command: command)) {
+        // Sized for a thumb on a locked phone, not for a pointer. The keys
+        // were 32/38pt, under Apple's 44pt minimum, which is a hard target
+        // to hit on a screen you are not looking at closely -- and this is
+        // the surface most likely to be used without looking.
+        let side: CGFloat = compact ? (emphasised ? 44 : 38) : (emphasised ? 56 : 48)
+        return Button(intent: RemoteActivityButtonIntent(command: command)) {
             Image(systemName: symbol)
-                .font(.system(size: emphasised ? 17 : 14, weight: .medium))
+                .font(.system(size: emphasised ? side * 0.42 : side * 0.38, weight: .medium))
                 .foregroundStyle(emphasised ? theme.background : theme.foreground)
-                .frame(width: emphasised ? 38 : 32, height: emphasised ? 38 : 32)
+                .frame(width: side, height: side)
                 .background(
                     Circle()
                         .fill(emphasised ? theme.accent : theme.card)
@@ -243,6 +267,12 @@ private struct LockScreenView: View {
                         .foregroundStyle(attributes.muted)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    Text("ON \(attributes.hostName.uppercased())")
+                        .font(SumiWidget.mono(9, weight: .medium))
+                        .tracking(0.6)
+                        .foregroundStyle(attributes.muted.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -251,15 +281,12 @@ private struct LockScreenView: View {
 
             ProgressRule(theme: attributes, state: state)
 
-            HStack(alignment: .center) {
-                Text("ON \(attributes.hostName.uppercased())")
-                    .font(SumiWidget.mono(9, weight: .medium))
-                    .tracking(0.6)
-                    .foregroundStyle(attributes.muted)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Transport(theme: attributes, state: state)
-            }
+            // Centred on its own row: the keys are the reason this card is
+            // on the lock screen, and sharing the row with the host label
+            // pushed them off-centre against a Dynamic Island that centres
+            // its own.
+            Transport(theme: attributes, state: state)
+                .frame(maxWidth: .infinity)
         }
         .padding(14)
     }

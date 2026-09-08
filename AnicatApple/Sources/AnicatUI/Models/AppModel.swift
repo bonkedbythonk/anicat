@@ -458,6 +458,9 @@ public final class AppModel {
     public var activeReadingSession: MangaReadingSession?
 
     // Dashboard State
+    /// Set by the `anicat://remote` deep link the Live Activity carries.
+    /// `RootTabView` clears it when it opens the sheet.
+    public var wantsRemoteSheet = false
     public var upNextItems: [UpNextQueueView.QueueEntry] = []
     // `didSet` keeps `knownTitles` a plain stored read instead of a fan-out
     // computed property: HistoryView's body used to read all six arrays

@@ -13,6 +13,10 @@ public enum DeepLink: Equatable, Sendable {
     case title(id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist)
     /// `anicat://play/<id>/<episode>` (same `?catalog=` as above).
     case play(id: Int64, episode: Int, catalog: MediaCard.CardCatalog = .anilist)
+    /// `anicat://remote` -- the phone's remote for a Mac on the same
+    /// Wi-Fi. Reached from the Live Activity, which is why it is a link and
+    /// not a flag: a widget can only ask for a URL.
+    case remote
     /// `anicat://search?q=<text>`.
     case search(query: String)
     /// `anicat://section/<home|schedule|library|manga|novels|search|history|downloads|settings>`.
@@ -43,6 +47,8 @@ public enum DeepLink: Equatable, Sendable {
                 return nil
             }
             self = .play(id: id, episode: episode, catalog: Self.catalog(from: queryItems))
+        case "remote":
+            self = .remote
         case "search":
             self = .search(query: queryItems.first { $0.name == "q" }?.value ?? "")
         case "section":
@@ -73,6 +79,8 @@ public enum DeepLink: Equatable, Sendable {
             if let name = Self.catalogName(catalog) {
                 components.queryItems = [URLQueryItem(name: "catalog", value: name)]
             }
+        case .remote:
+            components.host = "remote"
         case .search(let query):
             components.host = "search"
             components.queryItems = [URLQueryItem(name: "q", value: query)]

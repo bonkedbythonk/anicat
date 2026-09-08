@@ -855,15 +855,24 @@ public final class PlayerController {
             #else
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
             #endif
-            if !Task.isCancelled && isPlaying && !isScrubbing && !isMenuOpen && !isPointerOverChrome {
-                await MainActor.run {
+            guard !Task.isCancelled, !isScrubbing, !isMenuOpen, !isPointerOverChrome else { return }
+            await MainActor.run {
+                // The chrome only goes while something is playing: a paused
+                // player is usually paused *at* something, and hiding the
+                // scrubber someone stopped to use is taking away the tool
+                // they reached for.
+                if self.isPlaying {
                     withAnimation(.smooth) {
                         self.areControlsVisible = false
                     }
-                    #if os(macOS)
-                    NSCursor.setHiddenUntilMouseMoves(true)
-                    #endif
                 }
+                // The pointer goes either way. A still frame is a picture
+                // like any other, and an arrow parked in the middle of it is
+                // the one piece of chrome that was never asked for. One
+                // twitch brings it back.
+                #if os(macOS)
+                NSCursor.setHiddenUntilMouseMoves(true)
+                #endif
             }
         }
     }

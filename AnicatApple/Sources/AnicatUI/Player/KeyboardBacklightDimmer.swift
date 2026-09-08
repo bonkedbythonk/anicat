@@ -183,6 +183,17 @@ public final class KeyboardBacklightDimmer {
         restore()
     }
 
+    /// Fades the backlight now rather than at the end of the idle window.
+    ///
+    /// The player's chrome fading out is a stronger signal than three
+    /// seconds of no input: it means the picture is what is being looked at.
+    /// Any real input still brings the light back through the monitor
+    /// installed by `beginWatching`.
+    public func dimNow() {
+        guard isWatching else { return }
+        beginFade()
+    }
+
     // MARK: - Watching
 
     private func beginWatching() {

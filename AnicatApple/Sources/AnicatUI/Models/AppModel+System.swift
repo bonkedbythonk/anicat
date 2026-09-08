@@ -101,6 +101,13 @@ extension AppModel {
             // No `search()` call here: `SearchView` commits its own bound
             // text through a `.task(id:)` debounce, and running the query
             // from both sides fires the same AniList request twice.
+        case .remote:
+            #if os(iOS)
+            // A request, not a presentation: the sheet belongs to
+            // `RootTabView`, which is also the only place that knows whether
+            // a Mac is in range to show it for.
+            wantsRemoteSheet = true
+            #endif
         case .section(let section):
             navigate(to: section)
         }

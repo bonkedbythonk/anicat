@@ -317,9 +317,22 @@ private struct UpNextTab: View {
         }
         // On the stack, not on the button: the button is conditional on a
         // Mac being in range and takes its modifiers with it when that goes.
-        .sheet(item: $remoteNode) { node in
+        // `fullScreenCover`, not a detented sheet. The remote was coming up
+        // at `.medium` -- a half-height card with a poster, a scrubber and
+        // two rows of controls crammed into it, under a title bar that still
+        // belonged to the page behind. It is the only thing being used while
+        // it is open, so it takes the screen.
+        .fullScreenCover(item: $remoteNode) { node in
             PhoneRemoteView(node: node, model: model)
-                .presentationDetents([.medium, .large])
+        }
+        // `anicat://remote`, which is the only thing a Live Activity can ask
+        // for. Answered here because this is where the sheet lives and where
+        // the discovered Mac is known.
+        .onChange(of: model.wantsRemoteSheet) { _, wanted in
+            guard wanted else { return }
+            model.wantsRemoteSheet = false
+            guard let node = BonjourDiscovery.shared.discoveredMacNode else { return }
+            remoteNode = node
         }
     }
 

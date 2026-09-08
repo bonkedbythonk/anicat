@@ -769,7 +769,7 @@ private struct AccountTabSection: View {
             SettingsCard(title: "Cinema (TMDB)") {
                 SettingField(
                     label: "Your own TMDB key",
-                    description: "Optional. Anicat ships with a key, so films and series work without one. Paste a v3 key or a v4 read token to use your own quota instead. Restart to apply."
+                    description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. Restart to apply."
                 ) {
                     SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
                         .textFieldStyle(.plain)

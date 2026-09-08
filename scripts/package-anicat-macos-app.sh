@@ -68,12 +68,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>${COMMIT}</string>
     <key>AnicatBuiltAt</key>
     <string>${BUILT_AT}</string>
-    <!-- Cinema mode's TMDB key, taken from the environment at package time.
-         A packaged .app has no environment of its own to read at launch, and
-         nobody is asked to register with TMDB themselves (see
-         TmdbCredential.swift). Empty when ANICAT_TMDB_KEY is unset, which
-         reads as "no key" and hides cinema mode rather than shipping a
-         credential-shaped blank. -->
+    <!-- How cinema mode reaches TMDB, taken from the environment at package
+         time: a packaged .app has no environment of its own to read at launch.
+         Prefer the proxy (services/tmdb-proxy): with it, no credential ships
+         at all, and this plist is plain text that `plutil -p` prints for
+         anyone who has the app. A key here is public the moment it is
+         distributed -- treat it as rotatable, not secret, and set it only for
+         a build with no proxy behind it. Both empty reads as "no TMDB", which
+         hides cinema mode rather than shipping something credential-shaped
+         and blank. -->
+    <key>ANICATTMDBProxy</key>
+    <string>${ANICAT_TMDB_PROXY:-}</string>
     <key>ANICATTMDBKey</key>
     <string>${ANICAT_TMDB_KEY:-}</string>
     <key>LSMinimumSystemVersion</key>

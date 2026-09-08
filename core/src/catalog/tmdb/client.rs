@@ -1,9 +1,18 @@
 //! TMDB's REST client.
 //!
 //! Deliberately thinner than `anilist::client`: TMDB is a plain REST API with
-//! generous limits and no GraphQL envelope, so there is no query batching or
-//! rate-limit backoff to model. What it does share is the token living behind
-//! a lock, so Settings can paste a new one in without a restart.
+//! generous limits and no GraphQL envelope, so there is no query batching to
+//! model. What it does share is the credential living behind a lock, so
+//! Settings can paste a new one in without a restart.
+//!
+//! **Two ways to reach TMDB, and the key only exists in one of them.** With a
+//! proxy configured, requests go to it and carry no credential at all: the
+//! key lives on the proxy, which is the only arrangement where a key shipped
+//! to every install cannot be read back out of the app -- an Info.plist entry
+//! is plain text (`plutil -p`) and a constant in the binary is `strings`.
+//! Without a proxy the client talks to TMDB directly with whatever key it was
+//! given, which is what a viewer's own key in Settings does: their quota,
+//! their request, no reason to route it through anyone.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -15,6 +24,9 @@ const TMDB_URL: &str = "https://api.themoviedb.org/3";
 pub struct TmdbClient {
     client: reqwest::Client,
     token: Mutex<Option<String>>,
+    /// Base URL of a proxy that holds the key, when there is one. Requests
+    /// to it are unauthenticated -- see this module's header.
+    proxy: Mutex<Option<String>>,
     /// When the next request may go out, after TMDB answered 429.
     ///
     /// Shared across every caller rather than kept per request: a cinema home
@@ -31,6 +43,7 @@ impl Clone for TmdbClient {
         Self {
             client: self.client.clone(),
             token: Mutex::new(self.token.lock().unwrap().clone()),
+            proxy: Mutex::new(self.proxy.lock().unwrap().clone()),
             rate_limited_until: Mutex::new(None),
         }
     }
@@ -55,11 +68,18 @@ fn is_v4_token(token: &str) -> bool {
 }
 
 impl TmdbClient {
-    pub fn new(client: reqwest::Client, token: Option<String>) -> Self {
+    pub fn new(client: reqwest::Client, token: Option<String>, proxy: Option<String>) -> Self {
         Self {
             client,
             token: Mutex::new(token.filter(|t| !t.trim().is_empty())),
+            proxy: Mutex::new(clean_proxy(proxy)),
             rate_limited_until: Mutex::new(None),
+        }
+    }
+
+    pub fn set_proxy(&self, proxy: Option<String>) {
+        if let Ok(mut p) = self.proxy.lock() {
+            *p = clean_proxy(proxy);
         }
     }
 
@@ -69,8 +89,24 @@ impl TmdbClient {
         }
     }
 
+    /// Whether there is any way to reach TMDB at all: a proxy, or a key of
+    /// our own. Cinema mode is hidden when there is neither.
     pub fn has_token(&self) -> bool {
-        self.token.lock().map(|t| t.is_some()).unwrap_or(false)
+        let keyed = self.token.lock().map(|t| t.is_some()).unwrap_or(false);
+        keyed || self.proxy.lock().map(|p| p.is_some()).unwrap_or(false)
+    }
+
+    /// A viewer's own key goes straight to TMDB. Routing it through the proxy
+    /// would spend the proxy's key instead of theirs, which is the opposite
+    /// of what pasting a key in Settings asks for.
+    fn route(&self) -> Route {
+        if let Some(token) = self.token.lock().ok().and_then(|t| t.clone()) {
+            return Route::Direct(token);
+        }
+        match self.proxy.lock().ok().and_then(|p| p.clone()) {
+            Some(base) => Route::Proxy(base),
+            None => Route::Nothing,
+        }
     }
 
     /// GET a TMDB endpoint. `path` is everything after /3, starting with a
@@ -80,12 +116,10 @@ impl TmdbClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, String> {
-        let token = self
-            .token
-            .lock()
-            .ok()
-            .and_then(|t| t.clone())
-            .ok_or_else(|| "no_tmdb_token".to_string())?;
+        let route = self.route();
+        if matches!(route, Route::Nothing) {
+            return Err("no_tmdb_token".to_string());
+        }
 
         // One retry, and only for a 429. A throttled key is the one failure
         // that is certain to pass on its own, and letting the row fail instead
@@ -95,7 +129,7 @@ impl TmdbClient {
         // answer.
         for attempt in 0..2 {
             self.await_cooldown().await;
-            match self.send(path, query, &token).await {
+            match self.send(path, query, &route).await {
                 Err(TmdbFailure::RateLimited(cooldown)) if attempt == 0 => {
                     log::warn!(
                         "tmdb: 429 on {} -- backing off {:?} before one retry",
@@ -142,18 +176,26 @@ impl TmdbClient {
         &self,
         path: &str,
         query: &[(&str, String)],
-        token: &str,
+        route: &Route,
     ) -> Result<T, TmdbFailure> {
-        let mut request = self.client.get(format!("{}{}", TMDB_URL, path));
+        let mut request = self.client.get(request_url(route, path));
 
         let mut params: Vec<(String, String)> = vec![("language".into(), "en-US".into())];
         for (k, v) in query {
             params.push((k.to_string(), v.clone()));
         }
-        if is_v4_token(token) {
-            request = request.bearer_auth(token);
-        } else {
-            params.push(("api_key".into(), token.to_string()));
+        match route {
+            // A v4 read token is a JWT and goes in the header; a v3 key is a
+            // 32-character hex string and goes in the query string. TMDB
+            // offers both on the account page without saying they
+            // authenticate differently, so they are told apart by shape.
+            Route::Direct(token) if is_v4_token(token) => {
+                request = request.bearer_auth(token);
+            }
+            Route::Direct(token) => params.push(("api_key".into(), token.clone())),
+            // Nothing is attached: the proxy holds the key and adds it on the
+            // far side, which is the entire point of having one.
+            Route::Proxy(_) | Route::Nothing => {}
         }
 
         // This client is shared with the proxy's streaming client (state.rs),
@@ -200,6 +242,36 @@ impl TmdbClient {
             .await
             .map_err(|e| TmdbFailure::Other(format!("tmdb response did not parse: {}", e)))
     }
+}
+
+/// Where one request is going, and what it carries.
+enum Route {
+    /// Straight to TMDB with this credential.
+    Direct(String),
+    /// To a proxy at this base URL, unauthenticated.
+    Proxy(String),
+    /// Neither is configured; cinema mode is off.
+    Nothing,
+}
+
+/// The URL for one request. A proxy is addressed with the same `/3/...` paths
+/// TMDB uses, so it can forward them unchanged and this stays one string
+/// substitution rather than a second set of endpoint names to keep in step.
+fn request_url(route: &Route, path: &str) -> String {
+    match route {
+        Route::Proxy(base) => format!("{}/3{}", base.trim_end_matches('/'), path),
+        _ => format!("{}{}", TMDB_URL, path),
+    }
+}
+
+/// A proxy URL has to be an origin we can build `/3/...` onto. A blank entry
+/// (the packaging script writes the key unconditionally, so it is often
+/// blank) and anything not http(s) read as "no proxy" rather than being
+/// concatenated into a nonsense URL that fails every row with a parse error.
+fn clean_proxy(proxy: Option<String>) -> Option<String> {
+    proxy
+        .map(|p| p.trim().trim_end_matches('/').to_string())
+        .filter(|p| p.starts_with("https://") || p.starts_with("http://"))
 }
 
 /// How long to wait after a 429, from the header TMDB sends with it.
@@ -259,7 +331,7 @@ mod tests {
         // Settings writes an empty string when the field is cleared, and an
         // empty Authorization header reads as a malformed request rather than
         // as "not configured".
-        let client = TmdbClient::new(reqwest::Client::new(), Some("   ".to_string()));
+        let client = TmdbClient::new(reqwest::Client::new(), Some("   ".to_string()), None);
         assert!(!client.has_token());
         client.set_token(Some("".to_string()));
         assert!(!client.has_token());
@@ -267,9 +339,77 @@ mod tests {
         assert!(client.has_token());
     }
 
+    #[test]
+    fn a_proxy_counts_as_a_way_in_and_a_key_still_wins() {
+        let client = TmdbClient::new(reqwest::Client::new(), None, Some("https://p.example/".into()));
+        assert!(client.has_token(), "a proxy is how a keyless build reaches TMDB");
+        assert!(matches!(client.route(), Route::Proxy(base) if base == "https://p.example"));
+        // A viewer's own key is theirs to spend: it goes straight to TMDB
+        // rather than through somebody else's proxy and quota.
+        client.set_token(Some("0123456789abcdef0123456789abcdef".to_string()));
+        assert!(matches!(client.route(), Route::Direct(_)));
+    }
+
+    #[test]
+    fn a_proxy_is_addressed_with_tmdb_s_own_paths() {
+        let proxy = Route::Proxy("https://p.example".to_string());
+        assert_eq!(request_url(&proxy, "/movie/550"), "https://p.example/3/movie/550");
+        let direct = Route::Direct("k".to_string());
+        assert_eq!(request_url(&direct, "/movie/550"), "https://api.themoviedb.org/3/movie/550");
+    }
+
+    #[test]
+    fn an_unusable_proxy_url_reads_as_no_proxy() {
+        // The packaging script writes the entry unconditionally, so a build
+        // with no proxy still has the key present and empty.
+        assert_eq!(clean_proxy(Some("".into())), None);
+        assert_eq!(clean_proxy(Some("  ".into())), None);
+        assert_eq!(clean_proxy(Some("p.example".into())), None);
+        assert_eq!(clean_proxy(Some("https://p.example/".into())), Some("https://p.example".into()));
+    }
+
+    /// The proxy's whole purpose, asserted against a real socket: a build
+    /// pointed at one sends no credential anywhere. A regression here would
+    /// not fail anything visible -- the rows would still load, because the
+    /// key would still be attached -- it would just quietly put the key back
+    /// on the wire from every install.
     #[tokio::test]
-    async fn a_request_without_a_token_fails_before_it_is_sent() {
-        let client = TmdbClient::new(reqwest::Client::new(), None);
+    async fn a_proxied_request_carries_no_credential_at_all() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let read = socket.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..read]).to_string();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}",
+                )
+                .await
+                .unwrap();
+            request
+        });
+
+        let client = TmdbClient::new(
+            reqwest::Client::new(),
+            None,
+            Some(format!("http://127.0.0.1:{port}")),
+        );
+        let out: Result<serde_json::Value, String> = client.get("/movie/550", &[]).await;
+        assert!(out.is_ok(), "proxied request failed: {out:?}");
+
+        let request = server.await.unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("get /3/movie/550?"), "wrong path: {request}");
+        assert!(!request.contains("api_key"), "the key must not reach the URL");
+        assert!(!request.contains("authorization"), "no credential header either");
+    }
+
+    #[tokio::test]
+    async fn a_request_with_no_key_and_no_proxy_fails_before_it_is_sent() {
+        let client = TmdbClient::new(reqwest::Client::new(), None, None);
         let out: Result<serde_json::Value, String> = client.get("/movie/550", &[]).await;
         assert_eq!(out.unwrap_err(), "no_tmdb_token");
     }

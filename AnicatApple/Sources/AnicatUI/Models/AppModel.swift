@@ -622,10 +622,12 @@ public final class AppModel {
                 dataDir: dataDir.path,
                 anilistToken: token,
                 // Nobody is asked to register with TMDB to watch a film: the
-                // app carries a key and Settings can override it. See
-                // `TmdbCredential` for the order and why none of it is in the
-                // repo.
-                tmdbKey: tmdbKey ?? TmdbCredential.key
+                // build carries a proxy that holds the key, or a key of its
+                // own, and Settings can override either with the viewer's.
+                // See `TmdbCredential` for the order and why none of it is in
+                // the repo.
+                tmdbKey: tmdbKey ?? TmdbCredential.key,
+                tmdbProxy: TmdbCredential.proxyURL
             )
             self.engine = coreEngine
             self.cinemaAvailable = coreEngine.hasTmdbKey()

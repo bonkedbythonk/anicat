@@ -703,6 +703,11 @@ impl AnicatEngine {
         data_dir: String,
         anilist_token: Option<String>,
         tmdb_key: Option<String>,
+        // Base URL of a proxy holding the TMDB key, when the build ships one.
+        // With it, no key reaches the app at all -- see
+        // `catalog::tmdb::client`'s header for why that is the only version
+        // of "the key cannot be extracted" that is true.
+        tmdb_proxy: Option<String>,
     ) -> FfiResult<Arc<Self>> {
         // stderr, `RUST_LOG` respected, info by default. `try_init` because
         // a test binary or a second engine may already have installed one.
@@ -737,6 +742,7 @@ impl AnicatEngine {
                 http.clone(),
                 anilist_token,
                 tmdb_key,
+                tmdb_proxy,
                 AniListCache::persistent(&dir.join("catalog-cache.sqlite")),
             ),
             registry,
@@ -3463,7 +3469,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_replies_keep_their_fields_through_the_untyped_blob() {
-        let catalogs = Catalogs::new(reqwest::Client::new(), None, None);
+        let catalogs = Catalogs::new(reqwest::Client::new(), None, None, None);
         let threads = catalogs.media_discussions(154587).await.expect("discussions");
         let thread_id = threads
             .iter()

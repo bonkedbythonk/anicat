@@ -126,6 +126,15 @@ lives here, and nothing here knows there is a UI.
   calendar, per-viewer recommendations (seeds from the viewer's lists, one
   batched request), studio detail, trailer fields, and a Jikan lookup that
   fills a missing MyAnimeList id so AniSkip still fires.
+- **`catalog/cinema.rs`** — cinema mode's TMDB reads: eight home rows, film
+  and series search run concurrently, detail, and a season's episodes, all
+  answering in the same `MediaItem` the AniList path returns so nothing
+  downstream learns which catalog a title came from. `TmdbClient` reaches
+  TMDB one of two ways: through a proxy that holds the key
+  (`services/tmdb-proxy`, a Cloudflare Worker — the only arrangement where a
+  key shipped to every install cannot be read back out of the app), or
+  directly with a key of its own, which is what a viewer's own key in
+  Settings does. A 429 parks every caller for the `Retry-After` it names.
 - **`media.rs`** — `MediaKey(catalog, id)`. The Tauri build shifted TMDB ids
   into numeric bands inside one `i64`; the pair is now explicit and a new
   catalog is a new enum variant.
@@ -150,10 +159,12 @@ lives here, and nothing here knows there is a UI.
   release names the wanted episode, `search.rs` samples the numbers the
   groups use and re-runs at the franchise's absolute number if a contiguous
   run matches the aired count (Bleach TYBW's fourth cour ships episode 1
-  as 41). Uploading is compiled out. `cinema.rs` and
-  `series.rs` (TMDB-matched films and TV) are in the crate but
-  `resolve_stream` refuses non-AniList requests until the TMDB detail path is
-  wired.
+  as 41). Uploading is compiled out. `cinema.rs` (films, matched on release
+  year) and `series.rs` (TV, matched on `SxxEyy`) are reached by
+  `resolve_cinema_stream`, which converts the absolute episode number the
+  registry keys on into a season and episode against TMDB's season map, and
+  refuses an episode past the end of it rather than resolving a real, wrong
+  file.
 - **`discord.rs`** — Rich Presence.
 
 ## Sources of truth

@@ -68,8 +68,13 @@ pub struct Catalogs {
 }
 
 impl Catalogs {
-    pub fn new(http: reqwest::Client, anilist_token: Option<String>, tmdb_key: Option<String>) -> Self {
-        Self::with_cache(http, anilist_token, tmdb_key, AniListCache::new())
+    pub fn new(
+        http: reqwest::Client,
+        anilist_token: Option<String>,
+        tmdb_key: Option<String>,
+        tmdb_proxy: Option<String>,
+    ) -> Self {
+        Self::with_cache(http, anilist_token, tmdb_key, tmdb_proxy, AniListCache::new())
     }
 
     /// `cache` is `AniListCache::persistent(..)` in the app and the plain
@@ -78,11 +83,12 @@ impl Catalogs {
         http: reqwest::Client,
         anilist_token: Option<String>,
         tmdb_key: Option<String>,
+        tmdb_proxy: Option<String>,
         cache: AniListCache,
     ) -> Self {
         Self {
             anilist: Arc::new(AniListClient::new(http.clone(), anilist_token)),
-            tmdb: Arc::new(TmdbClient::new(http, tmdb_key)),
+            tmdb: Arc::new(TmdbClient::new(http, tmdb_key, tmdb_proxy)),
             cache: Arc::new(cache),
         }
     }
@@ -844,7 +850,7 @@ mod tests {
     /// and a test that quietly depended on one would pass only on the
     /// developer's machine.
     fn catalogs() -> Catalogs {
-        Catalogs::new(reqwest::Client::new(), None, None)
+        Catalogs::new(reqwest::Client::new(), None, None, None)
     }
 
     /// Live. `cargo test --lib catalog::tests -- --ignored --nocapture`
@@ -999,7 +1005,7 @@ mod tests {
     async fn live_viewer_recommendations() {
         let token = std::env::var("ANILIST_TOKEN").ok();
         assert!(token.is_some(), "set ANILIST_TOKEN to run this");
-        let catalogs = Catalogs::new(reqwest::Client::new(), token, None);
+        let catalogs = Catalogs::new(reqwest::Client::new(), token, None, None);
         let rows = catalogs.viewer_recommendations(20).await.expect("recommendations");
         for row in &rows {
             println!(

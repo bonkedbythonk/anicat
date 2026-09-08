@@ -8,30 +8,45 @@ import Foundation
 /// not built for mobile at all. Asking every viewer to walk that before they
 /// can see a film is the whole reason cinema mode sat unreachable.
 ///
-/// So the app carries a key, and the three sources below are tried in order:
+/// So a build carries one of two things, and the first is much the better:
 ///
-/// 1. `anicat_tmdb_key` in UserDefaults -- Settings' own field, for anyone
-///    who would rather spend their own quota than share the app's.
-/// 2. `ANICAT_TMDB_KEY` in the environment -- how a dev build gets one
-///    without the key ever reaching a file in the repo.
-/// 3. `ANICATTMDBKey` in the bundle's Info.plist -- what
-///    `package-anicat-macos-app.sh` writes from that same environment
-///    variable, since a packaged .app has no environment to read.
+/// 1. **A proxy URL** (`ANICAT_TMDB_PROXY`, or `ANICATTMDBProxy` in the
+///    bundle). The key lives on the proxy and no credential ships at all.
+///    This is the only arrangement in which the key genuinely cannot be
+///    extracted: an Info.plist entry is plain text, a constant in the binary
+///    is one `strings` away, and obfuscation only decides how many minutes it
+///    takes. See `services/tmdb-proxy/`.
+/// 2. **A key** (`ANICAT_TMDB_KEY`, or `ANICATTMDBKey` in the bundle), for a
+///    dev build or a build with no proxy behind it. It ships inside the app
+///    and should be treated as public and rotatable, not as a secret.
 ///
-/// Nothing here is a secret in the cryptographic sense: a key shipped inside
-/// a distributed binary can be read back out of it, and the honest model is a
-/// shared key that can be rotated if it is ever abused. What it must never be
-/// is committed -- the repo is public -- which is why there is no fourth
-/// source and no default literal.
+/// A viewer's own key in Settings (`anicat_tmdb_key`) beats both and goes
+/// straight to TMDB -- their quota, their request, no reason to spend the
+/// proxy's.
+///
+/// Nothing here is ever committed: the repo is public, and there is no
+/// default literal for either.
 public enum TmdbCredential {
     /// Settings writes this; a viewer's own key wins over the shipped one.
     public static let userKeyDefaultsKey = "anicat_tmdb_key"
 
     static let environmentVariable = "ANICAT_TMDB_KEY"
     static let infoPlistKey = "ANICATTMDBKey"
+    static let proxyEnvironmentVariable = "ANICAT_TMDB_PROXY"
+    static let proxyInfoPlistKey = "ANICATTMDBProxy"
 
-    /// The key to build the engine with, or nil when there is none and cinema
-    /// mode should stay hidden.
+    /// The proxy to build the engine with, or nil when this build ships none.
+    /// Not a viewer-facing setting: which server the app talks to is decided
+    /// by whoever packaged it, not by whoever is using it.
+    public static var proxyURL: String? {
+        if let env = clean(ProcessInfo.processInfo.environment[proxyEnvironmentVariable]) {
+            return env
+        }
+        return clean(Bundle.main.object(forInfoDictionaryKey: proxyInfoPlistKey) as? String)
+    }
+
+    /// The key to build the engine with, or nil when there is none. Cinema
+    /// mode stays hidden only when there is neither this nor a proxy.
     public static var key: String? {
         if let user = clean(UserDefaults.standard.string(forKey: userKeyDefaultsKey)) {
             return user

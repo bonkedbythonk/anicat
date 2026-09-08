@@ -323,10 +323,15 @@ public enum SumiHaptics {
 // MARK: - Motion Tokens
 
 public extension Animation {
-    /// Refined, organic spring for pills and indicators: fast with subtle, natural settling.
-    static var sumiSpring: Animation {
-        .spring(response: 0.30, dampingFraction: 0.82)
-    }
+    /// The pill-and-indicator spring, as an alias for the occasion that
+    /// already names it.
+    ///
+    /// This used to spell its own `.spring(response: 0.30, dampingFraction:
+    /// 0.82)` — the same numbers `sumi(.pop)` returns, but reaching no
+    /// further, so all nine call sites went on springing after the system
+    /// asked for less motion. `MotionPolicy` is the only thing that knows
+    /// about that setting, and a bare `.spring` cannot ask it.
+    static var sumiSpring: Animation { .sumi(.pop) }
 }
 
 

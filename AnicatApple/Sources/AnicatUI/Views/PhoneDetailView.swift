@@ -68,6 +68,43 @@ struct PhoneDetailView: View {
         .background(SumiTheme.background)
         .navigationTitle(model.selectedMediaDetails?.title ?? "")
         .navigationBarTitleDisplayMode(.inline)
+        // The item is unconditional and the menu handles the not-yet-loaded
+        // case: wrapping the `ToolbarItem` itself in `if let` renders no
+        // button at all, which is why list editing had no entry point.
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { listMenu }
+        }
+    }
+
+    /// List editing, behind the bar's "...". `updateListEntry` and
+    /// `toggleFavourite` already existed on the model and were simply
+    /// unreachable from the phone.
+    @ViewBuilder
+    private var listMenu: some View {
+        let details = model.selectedMediaDetails
+        Menu {
+            Picker("Status", selection: Binding(
+                get: { details?.listStatus ?? "" },
+                set: { status in
+                    Task { await model.updateListEntry(status: status) }
+                }
+            )) {
+                Text("Watching").tag("CURRENT")
+                Text("Planning").tag("PLANNING")
+                Text("Completed").tag("COMPLETED")
+                Text("Paused").tag("PAUSED")
+                Text("Dropped").tag("DROPPED")
+            }
+            Button {
+                Task { await model.toggleFavourite() }
+            } label: {
+                Label(details?.isFavourite == true ? "Remove from favourites" : "Add to favourites",
+                      systemImage: details?.isFavourite == true ? "heart.fill" : "heart")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .disabled(details == nil)
     }
 
     @ViewBuilder
@@ -184,12 +221,12 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private func factRow(_ details: HeroBanner.Details) -> some View {
         let facts: [(String, String)] = [
-            ("STATUS", details.status.map(Self.humanStatus)),
+            ("STATUS", details.status.map(Self.mediaStatus)),
             ("FORMAT", details.format),
             ("EPISODES", details.episodeCount.map(String.init)),
             ("SCORE", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
             ("YOUR SCORE", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
-            ("ON YOUR LIST", details.listStatus.map(Self.humanStatus))
+            ("ON YOUR LIST", details.listStatus.map(Self.listStatus))
         ].compactMap { name, value in value.map { (name, $0) } }
 
         if !facts.isEmpty {
@@ -249,14 +286,27 @@ struct PhoneDetailView: View {
             .foregroundStyle(SumiTheme.muted)
     }
 
-    /// AniList spells these in caps with underscores; nothing else in the
-    /// app shows them raw.
-    static func humanStatus(_ raw: String) -> String {
+    /// The show's own airing status. Kept apart from `listStatus` because
+    /// AniList's two vocabularies collide: one map for both put CURRENT and
+    /// RELEASING on the same case, so a title the viewer was *watching* read
+    /// "ON YOUR LIST: Airing".
+    static func mediaStatus(_ raw: String) -> String {
         switch raw {
-        case "RELEASING", "CURRENT": return "Airing"
-        case "FINISHED", "COMPLETED": return "Finished"
+        case "RELEASING": return "Airing"
+        case "FINISHED": return "Finished"
         case "NOT_YET_RELEASED": return "Unaired"
+        case "CANCELLED": return "Cancelled"
+        case "HIATUS": return "On hiatus"
+        default: return raw.capitalized
+        }
+    }
+
+    /// Where the title sits on the viewer's own list.
+    static func listStatus(_ raw: String) -> String {
+        switch raw {
+        case "CURRENT": return "Watching"
         case "PLANNING": return "Planning"
+        case "COMPLETED": return "Completed"
         case "PAUSED": return "Paused"
         case "DROPPED": return "Dropped"
         case "REPEATING": return "Rewatching"

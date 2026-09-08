@@ -7,7 +7,6 @@ import AppKit
 public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
-    @State private var showSyosetuReader = false
     // Shared between every card grid and the detail page so tapping a card
     // grows its poster into the detail page's poster rather than crossfading
     // two separate images. Which card (if any) actually gets tagged with
@@ -152,161 +151,7 @@ public struct RootView: View {
                         // sidebar stays visible and stays navigable, which is what
                         // the web build does by rendering it inside <main>.
                         if let details = model.selectedMediaDetails {
-                            MediaDetailView(
-                                details: details,
-                                episodes: model.selectedEpisodes,
-                                mangaChapters: model.selectedMangaChapters,
-                                characters: model.selectedCharacters,
-                                relations: model.selectedRelations,
-                                recommendations: model.selectedRecommendations,
-                                discussions: model.selectedDiscussions,
-                                isLoading: model.isDetailLoading,
-                                tracksOnAniList: model.currentDetailCatalog == .anilist,
-                                cinemaExtras: model.cinemaExtras,
-                                cinemaListStatus: model.cinemaListStatus,
-                                chapterOfflineStates: model.chapterOfflineStates,
-                                onDownloadChapter: { model.downloadChapter($0) },
-                                onDeleteChapterDownload: { model.deleteChapterDownload($0) },
-                                onSetCinemaListStatus: { model.setCinemaListStatus($0) },
-                                onPlayEpisode: { ep in
-                                    playEpisode(
-                                        model: model, catalogId: details.id, episode: ep.number, title: details.title,
-                                        catalog: model.playbackCatalogForOpenDetail,
-                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
-                                        morphThumbnailURL: ep.thumbnailURL
-                                    )
-                                },
-                                onPlayEpisodeFromStart: { ep in
-                                    playEpisode(
-                                        model: model, catalogId: details.id, episode: ep.number, title: details.title,
-                                        catalog: model.playbackCatalogForOpenDetail, fromStart: true,
-                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
-                                        morphThumbnailURL: ep.thumbnailURL
-                                    )
-                                },
-                                onReadChapter: { chapter in
-                                    Task {
-                                        await model.openReader(
-                                            title: details.title,
-                                            chapter: chapter,
-                                            allChapters: model.selectedMangaChapters,
-                                            anilistId: details.id
-                                        )
-                                    }
-                                },
-                                onSelectRelation: { rel in
-                                    let isManga: Bool
-                                    if let fmt = rel.format {
-                                        isManga = AppModel.isMangaFormat(fmt)
-                                    } else {
-                                        isManga = AppModel.isMangaFormat(details.format)
-                                    }
-                                    openDetailFor(
-                                        id: rel.id,
-                                        title: rel.title,
-                                        coverURL: rel.coverURL,
-                                        isManga: isManga
-                                    )
-                                },
-                                onSelectMediaId: { id, title, coverURL, isManga in
-                                    // TMDB recommends films for a film and
-                                    // series for a series, so a pick here
-                                    // belongs to the page's own catalog --
-                                    // sent through `openDetailFor` it opened
-                                    // whatever anime carries that number.
-                                    if model.currentDetailCatalog != .anilist {
-                                        Task {
-                                            await model.openCinemaDetail(
-                                                catalog: model.currentDetailCatalog,
-                                                id: id,
-                                                title: title,
-                                                coverURL: coverURL
-                                            )
-                                        }
-                                    } else {
-                                        openDetailFor(
-                                            id: id,
-                                            title: title,
-                                            coverURL: coverURL,
-                                            isManga: isManga
-                                        )
-                                    }
-                                },
-                                onExportAppleBooks: {},
-                                onSelectCharacter: { id in
-                                    // A cinema page's cast are TMDB people;
-                                    // `openCharacter` is AniList's and would
-                                    // look this id up in the wrong catalog.
-                                    if model.currentDetailCatalog == .anilist {
-                                        model.openCharacter(id: id)
-                                    } else {
-                                        let name = model.selectedCharacters
-                                            .first { $0.id == id }?.name ?? ""
-                                        model.openCinemaPerson(id: id, name: name)
-                                    }
-                                },
-                                onSelectThread: { model.openThread(id: $0) },
-                                // Not wrapped in `withAnimation` here:
-                                // `closeDetail()` animates its own mutation
-                                // internally (see AppModel). Wrapping it again at
-                                // every call site raced a second transaction
-                                // against the first with a different curve —
-                                // that's what read as "jitters, stops, pops
-                                // away," worse the faster it was retriggered.
-                                onClose: {
-                                    model.closeDetail()
-                                },
-                                onSetListStatus: { status in
-                                    Task { await model.updateListEntry(status: status) }
-                                },
-                                onToggleFavourite: {
-                                    Task { await model.toggleFavourite() }
-                                },
-                                onRemoveFromList: {
-                                    Task { await model.removeFromList() }
-                                },
-                                onSetEpisodeWatched: { episode, watched in
-                                    Task { await model.setEpisodeWatched(episode, watched: watched) }
-                                },
-                                onLoadReleaseCandidates: { episode in
-                                    await model.loadReleaseCandidates(episode: episode)
-                                },
-                                onPlayWithRelease: { ep, releaseName in
-                                    playEpisode(
-                                        model: model, catalogId: details.id, episode: ep.number, title: details.title, chosenName: releaseName,
-                                        morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
-                                        morphThumbnailURL: ep.thumbnailURL
-                                    )
-                                },
-                                onDownloadEpisode: { ep in
-                                    Task { await model.startDownload(episode: ep.number) }
-                                },
-                                downloadStates: { model.downloadStates },
-                                namespace: model.openingDetailSourceKey != nil ? cardNamespace : nil,
-                                playerNamespace: playerNamespace,
-                                playerSourceKey: model.openingPlayerSourceKey,
-                                restoredTab: model.restoredDetailTab,
-                                onTabChanged: { model.currentDetailTab = $0 }
-                            )
-                            .id(details.id)
-                            // The scale is only for an open with no poster
-                            // to morph — Up Next's rows, the schedule, the
-                            // command palette. On a shelf open the poster is
-                            // mid-`matchedGeometryEffect` inside this view,
-                            // and scaling the page moves the thing the morph
-                            // is interpolating towards.
-                            .sumiTransition(
-                                model.openingDetailSourceKey == nil
-                                    ? AnyTransition.scale(scale: 0.96).combined(with: .opacity)
-                                    : AnyTransition.opacity
-                            )
-                            .zIndex(2)
-                            // Same reason `sectionContent` is gated on the
-                            // detail page: the detail page stays mounted
-                            // under an open character/staff/thread page, so
-                            // without this its cards keep taking clicks and
-                            // hover through the page covering them.
-                            .allowsHitTesting(!model.isPersonPageOpen)
+                            detailPage(details)
                         }
 
                         // A character, staff or thread page covers the
@@ -481,6 +326,17 @@ public struct RootView: View {
                     removal: .opacity
                 ))
                 .zIndex(30)
+            }
+
+            // The novel reader, over everything, the way the manga reader
+            // and the player are. It was a sheet on the novels section, which
+            // meant two things: prose read in a 560pt box with the app around
+            // it, and a volume opened from a light novel's own page set the
+            // session while that section's sheet was nowhere on screen.
+            if model.novelReaderOpen {
+                SyosetuReaderView(model: model)
+                    .transition(.opacity)
+                    .zIndex(31)
             }
 
             // In-App Manga Reader Overlay
@@ -988,12 +844,8 @@ public struct RootView: View {
                 // AniList/RanobeDB entries above have no linked text source
                 // yet (see `AppModel.SyosetuSession`'s comment) — this is the
                 // only way into a novel's actual chapter text today.
-                onOpenSyosetu: { showSyosetuReader = true }
+                onOpenSyosetu: { model.openNovelReaderEntry() }
             )
-            .sheet(isPresented: $showSyosetuReader) {
-                SyosetuReaderView(model: model)
-                    .frame(minWidth: 560, minHeight: 640)
-            }
             }
         case .history:
             HistoryView(
@@ -1097,6 +949,192 @@ public struct RootView: View {
     /// Agent; and `cinemaCatalog(forId:)` answers `.tmdbMovie` for any id
     /// absent from the resume queue, so a series watched once and since
     /// fallen off it opened as a film.
+    /// The detail page, lifted out of `body`.
+    ///
+    /// Not a style choice: with everything it takes inline, the enclosing
+    /// builder passed the point where the type-checker gives up -- "unable
+    /// to type-check this expression in reasonable time". `MediaDetailView`
+    /// splits its own tabs out for the same reason; this is that boundary
+    /// one level up.
+    @ViewBuilder
+    private func detailPage(_ details: HeroBanner.Details) -> some View {
+                        let novelState = MediaDetailView.NovelTabState(
+                            volumes: model.novelVolumes,
+                            isLoading: model.isLoadingNovelVolumes,
+                            sourceMissing: model.novelSourceMissing
+                        )
+                        MediaDetailView(
+                            details: details,
+                            episodes: model.selectedEpisodes,
+                            mangaChapters: model.selectedMangaChapters,
+                            novel: novelState,
+                            onReadVolume: readNovelVolume,
+                            characters: model.selectedCharacters,
+                            relations: model.selectedRelations,
+                            recommendations: model.selectedRecommendations,
+                            discussions: model.selectedDiscussions,
+                            isLoading: model.isDetailLoading,
+                            tracksOnAniList: model.currentDetailCatalog == .anilist,
+                            cinemaExtras: model.cinemaExtras,
+                            cinemaListStatus: model.cinemaListStatus,
+                            chapterOfflineStates: model.chapterOfflineStates,
+                            onDownloadChapter: { model.downloadChapter($0) },
+                            onDeleteChapterDownload: { model.deleteChapterDownload($0) },
+                            onSetCinemaListStatus: { model.setCinemaListStatus($0) },
+                            onPlayEpisode: { ep in
+                                playEpisode(
+                                    model: model, catalogId: details.id, episode: ep.number, title: details.title,
+                                    catalog: model.playbackCatalogForOpenDetail,
+                                    morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                    morphThumbnailURL: ep.thumbnailURL
+                                )
+                            },
+                            onPlayEpisodeFromStart: { ep in
+                                playEpisode(
+                                    model: model, catalogId: details.id, episode: ep.number, title: details.title,
+                                    catalog: model.playbackCatalogForOpenDetail, fromStart: true,
+                                    morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                    morphThumbnailURL: ep.thumbnailURL
+                                )
+                            },
+                            onReadChapter: { chapter in
+                                Task {
+                                    await model.openReader(
+                                        title: details.title,
+                                        chapter: chapter,
+                                        allChapters: model.selectedMangaChapters,
+                                        anilistId: details.id
+                                    )
+                                }
+                            },
+                            onSelectRelation: { rel in
+                                let isManga: Bool
+                                if let fmt = rel.format {
+                                    isManga = AppModel.isMangaFormat(fmt)
+                                } else {
+                                    isManga = AppModel.isMangaFormat(details.format)
+                                }
+                                openDetailFor(
+                                    id: rel.id,
+                                    title: rel.title,
+                                    coverURL: rel.coverURL,
+                                    isManga: isManga
+                                )
+                            },
+                            onSelectMediaId: { id, title, coverURL, isManga in
+                                // TMDB recommends films for a film and
+                                // series for a series, so a pick here
+                                // belongs to the page's own catalog --
+                                // sent through `openDetailFor` it opened
+                                // whatever anime carries that number.
+                                if model.currentDetailCatalog != .anilist {
+                                    Task {
+                                        await model.openCinemaDetail(
+                                            catalog: model.currentDetailCatalog,
+                                            id: id,
+                                            title: title,
+                                            coverURL: coverURL
+                                        )
+                                    }
+                                } else {
+                                    openDetailFor(
+                                        id: id,
+                                        title: title,
+                                        coverURL: coverURL,
+                                        isManga: isManga
+                                    )
+                                }
+                            },
+                            onExportAppleBooks: {},
+                            onSelectCharacter: { id in
+                                // A cinema page's cast are TMDB people;
+                                // `openCharacter` is AniList's and would
+                                // look this id up in the wrong catalog.
+                                selectCharacter(id)
+                            },
+                            onSelectThread: { model.openThread(id: $0) },
+                            // Not wrapped in `withAnimation` here:
+                            // `closeDetail()` animates its own mutation
+                            // internally (see AppModel). Wrapping it again at
+                            // every call site raced a second transaction
+                            // against the first with a different curve —
+                            // that's what read as "jitters, stops, pops
+                            // away," worse the faster it was retriggered.
+                            onClose: {
+                                model.closeDetail()
+                            },
+                            onSetListStatus: { status in
+                                Task { await model.updateListEntry(status: status) }
+                            },
+                            onToggleFavourite: {
+                                Task { await model.toggleFavourite() }
+                            },
+                            onRemoveFromList: {
+                                Task { await model.removeFromList() }
+                            },
+                            onSetEpisodeWatched: { episode, watched in
+                                Task { await model.setEpisodeWatched(episode, watched: watched) }
+                            },
+                            onLoadReleaseCandidates: { episode in
+                                await model.loadReleaseCandidates(episode: episode)
+                            },
+                            onPlayWithRelease: { ep, releaseName in
+                                playEpisode(
+                                    model: model, catalogId: details.id, episode: ep.number, title: details.title, chosenName: releaseName,
+                                    morphKey: MediaDetailView.playerMorphKey(catalogId: details.id, episode: ep.number),
+                                    morphThumbnailURL: ep.thumbnailURL
+                                )
+                            },
+                            onDownloadEpisode: { ep in
+                                Task { await model.startDownload(episode: ep.number) }
+                            },
+                            downloadStates: { model.downloadStates },
+                            namespace: model.openingDetailSourceKey != nil ? cardNamespace : nil,
+                            playerNamespace: playerNamespace,
+                            playerSourceKey: model.openingPlayerSourceKey,
+                            restoredTab: model.restoredDetailTab,
+                            onTabChanged: { model.currentDetailTab = $0 }
+                        )
+                        .id(details.id)
+                        // The scale is only for an open with no poster
+                        // to morph — Up Next's rows, the schedule, the
+                        // command palette. On a shelf open the poster is
+                        // mid-`matchedGeometryEffect` inside this view,
+                        // and scaling the page moves the thing the morph
+                        // is interpolating towards.
+                        .sumiTransition(
+                            model.openingDetailSourceKey == nil
+                                ? AnyTransition.scale(scale: 0.96).combined(with: .opacity)
+                                : AnyTransition.opacity
+                        )
+                        .zIndex(2)
+                        // Same reason `sectionContent` is gated on the
+                        // detail page: the detail page stays mounted
+                        // under an open character/staff/thread page, so
+                        // without this its cards keep taking clicks and
+                        // hover through the page covering them.
+                        .allowsHitTesting(!model.isPersonPageOpen)
+    }
+
+    /// Extracted for the same type-checking reason as `readNovelVolume`.
+    /// A character on a TMDB page is a cast member, and `openCharacter`
+    /// would look the id up in the wrong catalog.
+    private func selectCharacter(_ id: Int64) {
+        if model.currentDetailCatalog == .anilist {
+            model.openCharacter(id: id)
+        } else {
+            let name = model.selectedCharacters.first { $0.id == id }?.name ?? ""
+            model.openCinemaPerson(id: id, name: name)
+        }
+    }
+
+    /// Extracted rather than written inline at the call site: adding a
+    /// closure literal to `MediaDetailView`'s initializer took it past
+    /// "unable to type-check this expression in reasonable time".
+    private func readNovelVolume(_ volume: NovelChapterRef) {
+        model.openLightNovelVolume(bookURL: volume.url, title: volume.title)
+    }
+
     private func openRegistryTitle(id: Int64, title: String?, catalog: FfiCatalog) {
         switch catalog {
         case .tmdbMovie, .tmdbTv:

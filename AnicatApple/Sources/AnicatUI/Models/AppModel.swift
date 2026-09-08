@@ -1075,7 +1075,13 @@ public final class AppModel {
     // rather than the app resolving one from an AniList/RanobeDB entry — see
     // `reader::syosetu`'s module comment in the core crate. AniList-linked
     // light novel matching is a separate, unstarted piece of work.
+    /// Which reader a session is driving. A chapter is a whole page on
+    /// Syosetu and an anchor into one big page on lnori, so the fetch
+    /// differs even though everything the reader draws is the same.
+    public enum NovelSource: Sendable, Equatable { case syosetu, lnori }
+
     public struct SyosetuSession {
+        public var source: NovelSource = .syosetu
         public var sourceURL: String
         public var info: NovelInfo?
         public var currentChapterIndex: Int = 0
@@ -1086,6 +1092,31 @@ public final class AppModel {
     }
 
     public var syosetuSession: SyosetuSession?
+    /// Whether the novel reader is on screen. Owned here rather than as a
+    /// view's `@State`: the reader is opened from the novels page *and* from
+    /// a light novel's own detail page, and its Close has to mean the same
+    /// thing in both -- including the URL-entry state, which has no session
+    /// to clear.
+    public var novelReaderOpen = false
+
+    // MARK: - Light novels, from a catalogue entry
+    //
+    // The Novels section listed titles it had no way to open: `syosetu` takes
+    // a pasted URL and nothing resolved one from an AniList entry, so every
+    // light-novel page ended on "reading isn't available yet". `lnori` is an
+    // index slugged from English titles, which is what makes the match
+    // possible at all -- see `reader::lnori`.
+
+    /// Volumes of the open light novel, once a source has been found.
+    public var novelVolumes: [NovelChapterRef] = []
+    /// Which title the volumes above belong to, so a page restored from the
+    /// detail cache and then refreshed from the network does not look the
+    /// same novel up twice.
+    var novelVolumesTitle: String?
+    public var isLoadingNovelVolumes = false
+    /// Set when the search finished and found nothing, which is an ordinary
+    /// outcome and a different message from "still looking".
+    public var novelSourceMissing = false
 
     /// Handles dismissal hierarchy for ESC key:
     /// 1. KeyboardShortcutsOverlay (topmost help modal)
@@ -1110,6 +1141,13 @@ public final class AppModel {
         }
         if activeStreamURL != nil {
             stopPlayback()
+            return true
+        }
+        // Above the manga reader in the ladder for the same reason it is
+        // above it in the ZStack: whichever reader is on screen is what
+        // Escape means.
+        if novelReaderOpen {
+            closeSyosetuReader()
             return true
         }
         if activeReadingSession != nil {

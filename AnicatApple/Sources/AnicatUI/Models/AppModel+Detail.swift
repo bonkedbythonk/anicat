@@ -244,6 +244,11 @@ extension AppModel {
         if !forceRefresh, cached != nil, let cacheAge, cacheAge < Self.detailFreshnessWindow {
             loadingCatalogId = nil
             isDetailLoading = false
+            // The volumes are not part of the snapshot, so this path has to
+            // ask for them even though it is skipping the network otherwise.
+            if let shown = selectedMediaDetails, shown.id == id {
+                await refreshNovelVolumes(for: shown)
+            }
             return
         }
 
@@ -279,12 +284,29 @@ extension AppModel {
             // `.manga` tab case, which shows a distinct "not available"
             // empty state for `format == "NOVEL"` rather than the generic
             // "no chapters found" a real manga search failure gets.
-            if d.format != "NOVEL", isManga || d.chapterCount != nil || Self.isMangaFormat(d.format) {
+            //
+            // A novel now has a source of its own (`reader::lnori`), but it
+            // still must not go down the line above: the hazard that comment
+            // describes is MangaDex's, not an absence of anywhere to send it.
+            if d.format == "NOVEL" {
                 if Task.isCancelled { return }
+                if novelVolumesTitle != d.title {
+                    novelVolumesTitle = d.title
+                    await loadLightNovelVolumes(title: d.title, romajiTitle: d.romajiTitle)
+                }
+            } else if isManga || d.chapterCount != nil || Self.isMangaFormat(d.format) {
+                if Task.isCancelled { return }
+                // Volumes from a novel opened earlier would otherwise still
+                // be sitting under a manga's chapter list.
+                novelVolumes = []
+                novelSourceMissing = false
                 let fetched = (try? await engine.mangaChapters(detail: d)) ?? []
                 chapters = fetched.map {
                     MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
                 }
+            } else {
+                novelVolumes = []
+                novelSourceMissing = false
             }
             if Task.isCancelled { return }
 

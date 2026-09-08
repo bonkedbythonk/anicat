@@ -42,6 +42,12 @@ public struct SyosetuReaderView: View {
                 urlEntry
             }
         }
+        // An overlay, not a sheet any more, so it has to paint its own ground
+        // and take the whole window -- prose in a 560pt box with the app
+        // showing around it was the thing to get rid of.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SumiTheme.background)
+        .ignoresSafeArea()
     }
 
     private var urlEntry: some View {
@@ -252,6 +258,12 @@ public struct SyosetuReaderView: View {
                 .disabled(session.info == nil)
         }
         .padding(12)
+        // The reader fills the window, so its own bar starts where the window's
+        // does and the Close button landed underneath the traffic lights.
+        // Measured: the green button's right edge sits at x=70.
+        #if os(macOS)
+        .padding(.leading, 66)
+        #endif
     }
 
     private var typographyPopover: some View {

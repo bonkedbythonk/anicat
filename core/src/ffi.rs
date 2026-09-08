@@ -19,6 +19,7 @@ use crate::db::{Catalog, ExportedRelease, Registry};
 use crate::media::MediaKey;
 use crate::reader::mangadex::MangaDexClient;
 use crate::reader::mangakatana::MangaKatanaClient;
+use crate::reader::lnori::LnoriClient;
 use crate::reader::syosetu::SyosetuClient;
 use crate::discord::DiscordClient;
 use crate::torrent::{layout, ResolveTarget, TorrentManager};
@@ -929,6 +930,7 @@ pub struct AnicatEngine {
     mangadex: MangaDexClient,
     mangakatana: MangaKatanaClient,
     syosetu: SyosetuClient,
+    lnori: LnoriClient,
     discord: DiscordClient,
     /// Started on the first resolve rather than in the constructor, which is
     /// sync and so has no runtime to bind a listener on. `OnceCell` rather
@@ -1001,6 +1003,7 @@ impl AnicatEngine {
             mangadex: MangaDexClient::new(http.clone()),
             mangakatana: MangaKatanaClient::new(http.clone()),
             syosetu: SyosetuClient::new(http.clone()),
+            lnori: LnoriClient::new(http.clone()),
             discord: DiscordClient::new(),
             http,
             stream_port: tokio::sync::OnceCell::new(),
@@ -2700,6 +2703,58 @@ impl AnicatEngine {
     /// from a `ncode.syosetu.com/nXXXXXX/` URL pasted in by the viewer — see
     /// `reader::syosetu`'s module comment for why this takes a URL directly
     /// rather than an AniList/RanobeDB id.
+    /// The lnori series page for a light novel, by the titles AniList has
+    /// for it, or `None` when nothing in the index matches well enough.
+    ///
+    /// Nothing connected a catalogue entry to readable text before this:
+    /// `syosetu` takes a pasted URL and no more, so the Light Novels section
+    /// could list titles it had no way to open. Pass every title worth
+    /// trying, best first -- English then romaji -- because the index is
+    /// slugged from English titles and a romaji-only match is the weaker of
+    /// the two.
+    ///
+    /// A miss is `Ok(None)`, not an error: "no readable source" is an
+    /// ordinary answer here and the caller says so, where an error would
+    /// read as something having broken.
+    pub async fn light_novel_source(&self, titles: Vec<String>) -> FfiResult<Option<String>> {
+        self.lnori
+            .find_series(&titles)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// The volumes of a series, in reading order.
+    pub async fn light_novel_volumes(&self, series_url: String) -> FfiResult<Vec<NovelChapterRef>> {
+        self.lnori
+            .volumes(&series_url)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// One volume's table of contents. The whole book is a single page on
+    /// lnori, so these are anchors into it rather than URLs of their own.
+    pub async fn light_novel_chapters(&self, book_url: String) -> FfiResult<Vec<NovelChapterRef>> {
+        self.lnori
+            .volume_chapters(&book_url)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
+    /// One section's text, sliced out of the volume page.
+    pub async fn light_novel_chapter(
+        &self,
+        book_url: String,
+        anchor: String,
+    ) -> FfiResult<NovelChapterContent> {
+        self.lnori
+            .chapter_content(&book_url, &anchor)
+            .await
+            .map(Into::into)
+            .map_err(|msg| AnicatError::Network { msg })
+    }
+
     pub async fn novel_info(&self, url: String) -> FfiResult<NovelInfo> {
         if !SyosetuClient::can_handle(&url) {
             return Err(AnicatError::NotFound { msg: format!("not a syosetu.com URL: {url}") });

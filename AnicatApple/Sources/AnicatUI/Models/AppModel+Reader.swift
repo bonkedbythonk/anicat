@@ -7,13 +7,97 @@ import Observation
 import AnicatCoreKit
 
 extension AppModel {
+    /// Loads volumes for a detail page, whichever way that page arrived.
+    ///
+    /// `loadDetail` returns early when the cached snapshot is still fresh,
+    /// which skipped the fetch path entirely -- a novel opened once and
+    /// reopened showed "nothing readable" without ever having looked.
+    func refreshNovelVolumes(for details: HeroBanner.Details) async {
+        guard details.format == "NOVEL" else {
+            novelVolumes = []
+            novelSourceMissing = false
+            novelVolumesTitle = nil
+            return
+        }
+        guard novelVolumesTitle != details.title else { return }
+        novelVolumesTitle = details.title
+        await loadLightNovelVolumes(title: details.title, romajiTitle: details.romajiTitle)
+    }
+
+    /// Finds a readable source for the open light novel and lists its
+    /// volumes. Called when a NOVEL detail page opens.
+    ///
+    /// Both titles are offered because the index is slugged from English
+    /// ones: a romaji-only match is the weaker of the two and should not win
+    /// where an English title exists.
+    public func loadLightNovelVolumes(title: String, romajiTitle: String?) async {
+        guard let engine else { return }
+        novelVolumes = []
+        novelSourceMissing = false
+        isLoadingNovelVolumes = true
+        defer { isLoadingNovelVolumes = false }
+
+        var titles = [title]
+        if let romajiTitle, !romajiTitle.isEmpty, romajiTitle != title { titles.append(romajiTitle) }
+
+        guard let series = try? await engine.lightNovelSource(titles: titles) else {
+            // Nothing matched. An ordinary answer, not a failure: most of
+            // AniList's light novels have no English translation indexed.
+            novelSourceMissing = true
+            return
+        }
+        let volumes = (try? await engine.lightNovelVolumes(seriesUrl: series)) ?? []
+        novelVolumes = volumes
+        novelSourceMissing = volumes.isEmpty
+    }
+
+    /// Opens one volume in the novel reader. The volume is a single page, so
+    /// its table of contents becomes the reader's chapter list.
+    public func openLightNovelVolume(bookURL: String, title: String) {
+        novelReaderOpen = true
+        syosetuSession = SyosetuSession(source: .lnori, sourceURL: bookURL)
+        Task { await loadLightNovelVolume(bookURL: bookURL, title: title) }
+    }
+
+    func loadLightNovelVolume(bookURL: String, title: String) async {
+        guard let engine else { return }
+        syosetuSession?.isLoading = true
+        syosetuSession?.errorMessage = nil
+        do {
+            let chapters = try await engine.lightNovelChapters(bookUrl: bookURL)
+            guard syosetuSession?.sourceURL == bookURL else { return }
+            syosetuSession?.info = NovelInfo(
+                title: title,
+                author: "",
+                description: "",
+                chapters: chapters
+            )
+            syosetuSession?.isLoading = false
+            if let first = chapters.first {
+                await loadSyosetuChapter(url: first.url, index: 0)
+            }
+        } catch {
+            guard syosetuSession?.sourceURL == bookURL else { return }
+            syosetuSession?.isLoading = false
+            syosetuSession?.errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Opens the reader with no source yet, for the "Open a Syosetu URL"
+    /// entry point.
+    public func openNovelReaderEntry() {
+        novelReaderOpen = true
+    }
+
     public func openSyosetuReader(url: String) {
+        novelReaderOpen = true
         syosetuSession = SyosetuSession(sourceURL: url)
         Task { await loadSyosetuInfo(url: url) }
     }
 
     public func closeSyosetuReader() {
         syosetuSession = nil
+        novelReaderOpen = false
     }
 
     func loadSyosetuInfo(url: String) async {
@@ -50,7 +134,18 @@ extension AppModel {
         syosetuSession?.isLoading = true
         syosetuSession?.errorMessage = nil
         do {
-            let chapter = try await engine.novelChapter(url: url)
+            // An lnori chapter is an anchor into one big volume page, so the
+            // fragment carries the section and the rest is the book.
+            let chapter: NovelChapterContent
+            if session.source == .lnori {
+                let parts = url.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+                chapter = try await engine.lightNovelChapter(
+                    bookUrl: String(parts[0]),
+                    anchor: parts.count > 1 ? String(parts[1]) : ""
+                )
+            } else {
+                chapter = try await engine.novelChapter(url: url)
+            }
             guard syosetuSession?.sourceURL == sourceURL else { return }
             syosetuSession?.currentChapterIndex = index
             syosetuSession?.chapterTitle = chapter.title

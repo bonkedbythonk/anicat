@@ -235,6 +235,24 @@ public struct MediaDetailView: View {
     public let details: HeroBanner.Details
     public let episodes: [EpisodeItem]
     public let mangaChapters: [MangaChapterItem]
+    /// The light-novel tab's state, grouped rather than passed as three
+    /// separate props: this initializer is already at the point where the
+    /// type-checker gives up ("unable to type-check this expression in
+    /// reasonable time"), and three more arguments took it over.
+    public struct NovelTabState {
+        public var volumes: [NovelChapterRef]
+        public var isLoading: Bool
+        public var sourceMissing: Bool
+
+        public init(volumes: [NovelChapterRef] = [], isLoading: Bool = false, sourceMissing: Bool = false) {
+            self.volumes = volumes
+            self.isLoading = isLoading
+            self.sourceMissing = sourceMissing
+        }
+    }
+
+    public var novel: NovelTabState = .init()
+    public var onReadVolume: ((NovelChapterRef) -> Void)?
     public let characters: [CharacterItem]
     public let relations: [RelationItem]
     public let recommendations: [RecommendationItem]
@@ -374,6 +392,8 @@ public struct MediaDetailView: View {
         details: HeroBanner.Details,
         episodes: [EpisodeItem] = [],
         mangaChapters: [MangaChapterItem] = [],
+        novel: NovelTabState = .init(),
+        onReadVolume: ((NovelChapterRef) -> Void)? = nil,
         characters: [CharacterItem] = [],
         relations: [RelationItem] = [],
         recommendations: [RecommendationItem] = [],
@@ -419,6 +439,8 @@ public struct MediaDetailView: View {
         self.details = details
         self.episodes = episodes
         self.mangaChapters = mangaChapters
+        self.novel = novel
+        self.onReadVolume = onReadVolume
         self.characters = characters
         self.relations = relations
         self.recommendations = recommendations
@@ -2039,6 +2061,10 @@ public struct MediaDetailView: View {
                 chapters: mangaChapters,
                 format: details.format,
                 isLoading: isLoading,
+                novelVolumes: novel.volumes,
+                isLoadingNovelVolumes: novel.isLoading,
+                novelSourceMissing: novel.sourceMissing,
+                onReadVolume: onReadVolume,
                 offlineStates: chapterOfflineStates,
                 onDownloadChapter: onDownloadChapter,
                 onDeleteChapterDownload: onDeleteChapterDownload,
@@ -2464,9 +2490,67 @@ private struct EpisodeListSection: View {
 /// below so switching tabs, or any one tab's own state changing, only
 /// re-evaluates that tab's struct instead of the whole detail page body.
 private struct MangaTabSection: View {
+    /// Volumes of a light novel, or an honest word about why there are none.
+    ///
+    /// This tab used to say reading "isn't available yet" for every novel,
+    /// because nothing resolved a catalogue entry to a source at all. Most
+    /// AniList light novels still have no indexed English translation, so a
+    /// miss stays a first-class outcome rather than an error.
+    @ViewBuilder
+    var novelVolumeList: some View {
+        if isLoadingNovelVolumes {
+            EpisodeListSkeleton(count: 4, isCompact: true)
+        } else if !novelVolumes.isEmpty {
+            LazyVStack(spacing: 8) {
+                ForEach(novelVolumes, id: \.url) { volume in
+                    Button { onReadVolume?(volume) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "book.closed")
+                                .font(.system(size: 13))
+                                .foregroundColor(SumiTheme.muted)
+                                .frame(width: 20)
+                            Text(volume.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
+            }
+        } else if novelSourceMissing {
+            SumiEmptyState(
+                headline: "No readable copy found",
+                detail: "No English translation of this novel is indexed. Titles that are translated open here; the rest can still be read by pasting a Syosetu link into the Light Novels page."
+            )
+        } else {
+            SumiEmptyState(
+                headline: "No chapters found",
+                detail: "Nothing readable was found for this title."
+            )
+        }
+    }
+
     let chapters: [MediaDetailView.MangaChapterItem]
     let format: String?
     var isLoading: Bool = false
+    var novelVolumes: [NovelChapterRef] = []
+    var isLoadingNovelVolumes: Bool = false
+    var novelSourceMissing: Bool = false
+    var onReadVolume: ((NovelChapterRef) -> Void)?
     /// Which chapters are on disk, or on their way there. Keyed by chapter
     /// id because that is what the registry and the files are keyed on.
     var offlineStates: [String: MediaDetailView.ChapterOfflineState] = [:]
@@ -2479,10 +2563,7 @@ private struct MangaTabSection: View {
             if isLoading {
                 EpisodeListSkeleton(count: 6, isCompact: true)
             } else if format == "NOVEL" {
-                SumiEmptyState(
-                    headline: "Light novel reading isn't available yet",
-                    detail: "There's no light-novel reader in the native app yet — this section is a placeholder, not a failed search."
-                )
+                novelVolumeList
             } else {
                 SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
             }

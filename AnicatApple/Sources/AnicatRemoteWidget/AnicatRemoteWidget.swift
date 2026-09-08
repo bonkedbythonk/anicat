@@ -89,7 +89,11 @@ struct RemoteLiveActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 10) {
                         ProgressRule(theme: theme, state: state, showsStamps: false)
-                        Transport(theme: theme, state: state, compact: true)
+                        HStack {
+                            Spacer(minLength: 0)
+                            Transport(theme: theme, state: state, compact: true)
+                            Spacer(minLength: 0)
+                        }
                     }
                     .padding(.top, 4)
                 }
@@ -267,12 +271,6 @@ private struct LockScreenView: View {
                         .foregroundStyle(attributes.muted)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("ON \(attributes.hostName.uppercased())")
-                        .font(SumiWidget.mono(9, weight: .medium))
-                        .tracking(0.6)
-                        .foregroundStyle(attributes.muted.opacity(0.8))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -285,8 +283,15 @@ private struct LockScreenView: View {
             // on the lock screen, and sharing the row with the host label
             // pushed them off-centre against a Dynamic Island that centres
             // its own.
-            Transport(theme: attributes, state: state)
-                .frame(maxWidth: .infinity)
+            // Spacers rather than `frame(maxWidth:)`: an `HStack` given a
+            // wide frame still lays its children out from the leading edge,
+            // so the keys sat left of centre while looking like they had
+            // been centred.
+            HStack {
+                Spacer(minLength: 0)
+                Transport(theme: attributes, state: state)
+                Spacer(minLength: 0)
+            }
         }
         .padding(14)
     }

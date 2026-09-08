@@ -138,7 +138,7 @@ public struct DownloadsView: View {
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
             Spacer()
-            Text("\(count) \(unit)\(count == 1 ? "" : "s")")
+            Text(Self.count(count, unit))
                 .sumiTabularMono(size: 10.5)
                 .foregroundColor(SumiTheme.muted)
         }
@@ -156,12 +156,7 @@ public struct DownloadsView: View {
 
     public var body: some View {
         SumiPage {
-            SumiPageHeader(
-                title: "Downloads",
-                subtitle: chapters.isEmpty
-                    ? "\(queued.count) queued · \(offline.count) offline"
-                    : "\(queued.count) queued · \(offline.count) offline · \(chapters.count) chapters, \(usage)"
-            )
+            SumiPageHeader(title: "Downloads", subtitle: summary)
 
             SumiTabBar(
                 tabs: [("queue", "Queue"), ("offline", "Offline"), ("chapters", "Chapters")],
@@ -254,6 +249,25 @@ public struct DownloadsView: View {
                 }
             }
         }
+    }
+
+    /// What is here, named by what it actually is.
+    ///
+    /// It read "0 queued · 1 offline · 1 chapters" -- three counts, two of
+    /// them in units the page never says elsewhere, and one of them a plural
+    /// on a count of one. Empty parts are dropped rather than shown as zero:
+    /// a queue nobody is using is not news.
+    private var summary: String {
+        var parts: [String] = []
+        if !queued.isEmpty { parts.append("\(queued.count) queued") }
+        if !offline.isEmpty { parts.append(Self.count(offline.count, "episode")) }
+        if !chapters.isEmpty { parts.append("\(Self.count(chapters.count, "chapter")) · \(usage)") }
+        return parts.isEmpty ? "Nothing downloaded yet" : parts.joined(separator: " · ")
+    }
+
+    /// "1 episode", "2 episodes".
+    static func count(_ n: Int, _ noun: String) -> String {
+        "\(n) \(noun)\(n == 1 ? "" : "s")"
     }
 
     /// "14 MB of 2 GB", or just the size when there is no cap. The ceiling

@@ -84,6 +84,9 @@ public final class RemoteClient {
         connection = nil
         framer = RemoteFramer()
         state = RemoteState()
+        #if os(iOS)
+        RemoteLiveActivity.shared.end()
+        #endif
         hostVersion = 0
         hostFeatures = []
         audioTracks = []
@@ -321,6 +324,11 @@ public final class RemoteClient {
             subtitleTracks = subtitle
         case .state(let incoming):
             state = incoming
+            #if os(iOS)
+            // Every frame, not only the ones the sheet is open for: the whole
+            // point of the activity is being reachable with the app closed.
+            RemoteLiveActivity.shared.sync(state: incoming, hostName: hostName)
+            #endif
         case .syncReply(let rows):
             RemoteSync.merge(rows)
             if isQuietSync { disconnect() }

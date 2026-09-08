@@ -42,6 +42,10 @@ targets:
         product: AnicatUI
       - package: AnicatApple
         product: AnicatCoreKit
+      # Embeds the widget extension. Without this line the extension builds
+      # and is never copied into the .app, so the Live Activity request
+      # fails at runtime with nothing to render it.
+      - target: AnicatRemoteWidget
     info:
       path: Generated/Info.plist
       properties:
@@ -92,6 +96,10 @@ targets:
         NSUserActivityTypes:
           - com.anicat.playback
           - com.anicat.reading
+        # Without this the Live Activity request fails silently -- there is
+        # no error, `Activity.request` simply throws and the lock screen
+        # stays empty.
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios
@@ -111,3 +119,35 @@ targets:
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # The Live Activity's lock-screen and Dynamic Island face. A remote cannot
+  # hold the Now Playing slot -- iOS gives that to whichever app owns an
+  # active audio session, and this one plays no audio; claiming it would mean
+  # looping a silent track and taking audio focus from whatever the person is
+  # actually listening to.
+  AnicatRemoteWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/AnicatRemoteWidget
+    dependencies:
+      # Only the shared attribute types, never AnicatUI: linking that would
+      # pull mpv, FFmpeg and their whole xcframework closure into a process
+      # that draws a progress bar.
+      - package: AnicatApple
+        product: AnicatRemoteActivity
+    info:
+      path: Generated/WidgetInfo.plist
+      properties:
+        CFBundleDisplayName: Anicat Remote
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios.remotewidget
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES

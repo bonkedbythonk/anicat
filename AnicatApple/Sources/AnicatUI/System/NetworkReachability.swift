@@ -18,7 +18,18 @@ import Network
 @MainActor
 @Observable
 public final class NetworkReachability {
+    /// One monitor for the process. `NWPathMonitor` costs a system callback
+    /// per path change per instance, and the play path needs to read the
+    /// same answer the reconnect hook is driven from.
+    public static let shared = NetworkReachability()
+
     public private(set) var isOnline = true
+    /// True on cellular and on a personal hotspot alike.
+    ///
+    /// `isExpensive`, not `usesInterfaceType(.cellular)`: tethering to a
+    /// phone puts the traffic on the same bill and reports as Wi-Fi, and an
+    /// episode is well over a gigabyte either way.
+    public private(set) var isExpensive = false
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.anicat.reachability")
@@ -34,10 +45,12 @@ public final class NetworkReachability {
         self.onReconnect = onReconnect
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
+            let expensive = path.isExpensive
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let wasOffline = !self.isOnline
                 self.isOnline = satisfied
+                self.isExpensive = expensive
                 if satisfied && wasOffline {
                     self.onReconnect?()
                 }

@@ -127,7 +127,7 @@ struct PhoneDetailView: View {
                         // pushed page it returned silently and the tap did
                         // nothing at all. `resolveAndPlay` is what sets them,
                         // via `ensurePlaybackEpisodes`.
-                        play(episode.number)
+                        model.playGuardedByCellular { play(episode.number) }
                     } label: {
                         EpisodeRow(episode: episode)
                     }
@@ -510,7 +510,7 @@ struct PhoneDetailView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(details.title)
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.sumiHeading(size: 22, weight: .bold))
                             .foregroundStyle(SumiTheme.foreground)
                             .lineLimit(2)
                         Text(metaLine)

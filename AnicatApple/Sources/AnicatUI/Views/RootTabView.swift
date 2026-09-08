@@ -101,6 +101,22 @@ public struct RootTabView: View {
         .onChange(of: model.selectedMediaDetails?.id) { _, id in
             if id != nil, detailOwner == nil { detailOwner = tab }
         }
+        // One alert for every play the phone starts from a tap, mounted on
+        // the root so the two call sites -- Continue Watching and an episode
+        // row on a pushed page -- share it rather than each growing their
+        // own.
+        .alert("You are on cellular", isPresented: Binding(
+            get: { model.cellularPrompt != nil },
+            set: { if !$0 { model.cellularPrompt = nil } }
+        ), presenting: model.cellularPrompt) { prompt in
+            Button("Play Anyway") {
+                model.cellularPrompt = nil
+                prompt.proceed()
+            }
+            Button("Cancel", role: .cancel) { model.cellularPrompt = nil }
+        } message: { _ in
+            Text("An episode is usually over a gigabyte, and the stream keeps downloading while it plays. Turn this warning off in Settings.")
+        }
         // Handoff, Mac to phone. Both platforms have always *advertised*
         // playback through `ContinuityManager`; only `RootView` ever
         // received, so picking the phone up from the Mac's Handoff banner
@@ -472,13 +488,15 @@ private struct ContinueWatchingRow: View {
                             if entry.unit == "CH" {
                                 onOpen(entry.id, entry.title, entry.thumbnailURL, true)
                             } else {
-                                playFromShelf(
-                                    model: model,
-                                    catalogId: entry.id,
-                                    episode: entry.nextEpisodeOrChapter,
-                                    title: entry.title,
-                                    coverURL: entry.thumbnailURL
-                                )
+                                model.playGuardedByCellular {
+                                    playFromShelf(
+                                        model: model,
+                                        catalogId: entry.id,
+                                        episode: entry.nextEpisodeOrChapter,
+                                        title: entry.title,
+                                        coverURL: entry.thumbnailURL
+                                    )
+                                }
                             }
                         } label: {
                             ContinueWatchingCard(entry: entry)

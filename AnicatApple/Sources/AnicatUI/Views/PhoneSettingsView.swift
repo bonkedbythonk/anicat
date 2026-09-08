@@ -20,9 +20,18 @@ struct PhoneSettingsView: View {
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subbed"
     @AppStorage("anicat_autoskip") private var autoSkip: Bool = false
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
+    // `AppModel.isCellularWarningEnabled` owns the reader and the default;
+    // `@AppStorage` needs a literal here, so the two must agree.
+    @AppStorage("anicat_warn_on_cellular") private var warnOnCellular: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = false
     @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
+
+    // The theme controls gate view *structure* on `skin.hasLight` and on
+    // `appearance`, so those reads have to be observed ones — off
+    // `ThemeStore.shared` inline the toggle would stay on screen after a
+    // switch to OLED until something else redrew the Form.
+    @State private var store = ThemeStore.shared
 
     @State private var tokenInput = ""
     @State private var isConnecting = false
@@ -174,6 +183,10 @@ struct PhoneSettingsView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Play next episode", isOn: $autoPlayNext)
+            Toggle("Warn on cellular", isOn: $warnOnCellular)
+            Text("Asked before each episode you start off Wi-Fi. Personal hotspots count.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
         }
     }
 
@@ -187,11 +200,36 @@ struct PhoneSettingsView: View {
             // rebuilding the palette, so the app keeps the old colours until
             // the next launch.
             Picker("Theme", selection: Binding(
-                get: { ThemeStore.shared.theme },
-                set: { ThemeStore.shared.select($0) }
+                get: { store.skin },
+                set: { store.select($0) }
             )) {
-                ForEach(AnicatTheme.allCases) { theme in
-                    Text(theme.displayName).tag(theme)
+                ForEach(SumiSkin.allCases) { skin in
+                    Text(skin.displayName).tag(skin)
+                }
+            }
+            // OLED has no light half, so it gets no appearance control at all
+            // rather than one whose Light does nothing.
+            if store.skin.hasLight {
+                Toggle("Follow system appearance", isOn: Binding(
+                    get: { store.appearance == .system },
+                    set: { follows in
+                        // Leaving Follow system lands on the side the system
+                        // was already showing, so the toggle never changes the
+                        // colours by itself.
+                        store.select(follows
+                            ? .system
+                            : (ThemeStore.systemPrefersDark ? .dark : .light))
+                    }
+                ))
+                if store.appearance != .system {
+                    Picker("Appearance", selection: Binding(
+                        get: { store.appearance },
+                        set: { store.select($0) }
+                    )) {
+                        Text("Light").tag(AnicatAppearance.light)
+                        Text("Dark").tag(AnicatAppearance.dark)
+                    }
+                    .pickerStyle(.segmented)
                 }
             }
             Picker("Time", selection: $timeFormat) {

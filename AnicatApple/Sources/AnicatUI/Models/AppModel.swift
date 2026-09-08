@@ -70,6 +70,11 @@ public final class AppModel {
     public var isInitialized = false
     public var isLoading = false
     public var errorMessage: String?
+    #if os(iOS)
+    /// A play held back because the phone is on cellular. See
+    /// `playGuardedByCellular`.
+    public var cellularPrompt: CellularPrompt?
+    #endif
     /// Set alongside `errorMessage` when the failure is something retrying
     /// might actually fix (a resolve timeout, a candidate that turned out
     /// dead) — the error banner shows a Retry button when this is non-nil.

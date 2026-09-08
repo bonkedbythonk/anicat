@@ -17,7 +17,7 @@ public struct SystemIntegrationObserver: View {
         self.model = model
     }
 
-    @State private var reachability = NetworkReachability()
+    private let reachability = NetworkReachability.shared
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
     #endif

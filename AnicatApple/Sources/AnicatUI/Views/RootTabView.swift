@@ -55,17 +55,12 @@ public struct RootTabView: View {
             // and the episode killed by switching tabs — the same failure
             // `RootView` records for the minimize branch on macOS.
             if let streamURL = model.activeStreamURL {
-                PlayerView(
+                PhonePlayerView(
                     controller: model.playerController,
                     streamURL: streamURL,
                     onClose: {
                         withAnimation(.smooth) { model.stopPlayback() }
-                    },
-                    onMinimize: { model.isPlayerMinimized = true },
-                    isMinimized: model.isPlayerMinimized,
-                    onRestore: { model.isPlayerMinimized = false },
-                    morphSource: nil,
-                    morphThumbnailURL: nil
+                    }
                 )
                 .ignoresSafeArea()
                 .transition(.opacity)
@@ -73,7 +68,7 @@ public struct RootTabView: View {
                 // A video is a landscape object on a device that starts
                 // portrait. Rotating the window rather than asking the user
                 // to turn the phone is what every other player on iOS does.
-                .modifier(PlayerOrientation(active: !model.isPlayerMinimized))
+                .modifier(PlayerOrientation(active: true))
             }
         }
         .tint(SumiTheme.indigo)
@@ -421,9 +416,15 @@ private struct PlayerOrientation: ViewModifier {
     }
 
     private func apply(_ mask: UIInterfaceOrientationMask) {
-        guard let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive })
+        // Falls back to any window scene rather than requiring a
+        // foregroundActive one. Launching straight into the player (the
+        // ANICAT_DEBUG_PLAY_FILE path, and a notification tap in the real
+        // app) runs `onAppear` before the scene finishes activating, so the
+        // strict lookup found nothing and the window stayed portrait with
+        // the video letterboxed across the middle.
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
+            ?? scenes.first
         else { return }
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
     }

@@ -1,0 +1,414 @@
+#if os(iOS)
+import SwiftUI
+
+/// The player chrome on iPhone, shaped like `AVPlayerViewController`'s.
+///
+/// The system player itself is not usable here: `AVFoundation` has no
+/// Matroska demuxer, no ASS renderer and no way to use a file's embedded
+/// font attachments, and every release this app streams is MKV — the one
+/// measured on 2026-09-08 was h264 + aac + ass with nine TTF attachments.
+/// Pointing `AVPlayerViewController` at the range server does not degrade,
+/// it fails to open the file. So mpv keeps decoding and this view supplies
+/// the layout, gestures and controls people expect from the system player.
+///
+/// `PlayerView` stays the macOS chrome. Splitting rather than adding `#if`
+/// branches to its 1700 lines: almost nothing survives the crossing — no
+/// hover, no key monitor, no mini-player, no Anime4K row (iOS never runs
+/// shaders), no window to resize.
+struct PhonePlayerView: View {
+    @Bindable var controller: PlayerController
+    let streamURL: URL
+    let onClose: () -> Void
+
+    @State private var audioTracks: [PlayerTrack] = []
+    @State private var subtitleTracks: [PlayerTrack] = []
+    @State private var scrubTarget: Double?
+    @State private var flash: (symbol: String, trailing: Bool)?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            // The one mount site. `MpvSurface`'s dismantle path stops
+            // playback, so this must never move between branches of an
+            // `if`, which is the failure `PlayerView` records on macOS.
+            MpvSurface(controller: controller, streamURL: streamURL, cornerRadius: 0)
+                .ignoresSafeArea()
+
+            // Gestures live on a clear layer above the surface, not on the
+            // ZStack around it. `MpvEventCatcherView` is topmost inside the
+            // host view and carries its own tap recognizer, so a tap handled
+            // further out never arrived — it was swallowed and turned into a
+            // play/pause toggle instead of showing the controls.
+            gestureLayer
+
+            if controller.isBuffering {
+                bufferingIndicator
+            }
+
+            skipPill
+
+            if controller.areControlsVisible {
+                controls
+                    .transition(.opacity)
+            }
+
+            if let flash {
+                seekFlash(symbol: flash.symbol, trailing: flash.trailing)
+            }
+        }
+        .statusBarHidden(!controller.areControlsVisible)
+        .task {
+            controller.showControlsBriefly()
+            fetchTracks()
+        }
+        .onDisappear { controller.cancelAutohide() }
+    }
+
+    // MARK: Controls
+
+    @ViewBuilder
+    private var controls: some View {
+        ZStack {
+            // Scrims rather than a flat dim: white glyphs over a bright frame
+            // are unreadable without one, and dimming the whole picture to
+            // fix that is what the system player pointedly does not do.
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0.55), .clear],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 120)
+                Spacer()
+                LinearGradient(colors: [.clear, .black.opacity(0.65)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 160)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack {
+                topBar
+                Spacer()
+                transport
+                Spacer()
+                bottomBar
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+        }
+    }
+
+    @ViewBuilder
+    private var topBar: some View {
+        HStack(spacing: 14) {
+            Button(action: onClose) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(controller.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if !controller.episodeTitle.isEmpty {
+                    Text("Episode \(controller.episodeNumber) · \(controller.episodeTitle)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            tracksMenu
+        }
+    }
+
+    @ViewBuilder
+    private var tracksMenu: some View {
+        Menu {
+            if !audioTracks.isEmpty {
+                Picker("Audio", selection: audioSelection) {
+                    ForEach(audioTracks) { track in
+                        Text(label(for: track)).tag(track.id)
+                    }
+                }
+            }
+            if !subtitleTracks.isEmpty {
+                Picker("Subtitles", selection: subtitleSelection) {
+                    Text("Off").tag(PlayerTrack.off)
+                    ForEach(subtitleTracks) { track in
+                        Text(label(for: track)).tag(track.id)
+                    }
+                }
+            }
+            if controller.hasNextEpisode {
+                Button("Next episode") { controller.nextEpisode() }
+            }
+            if controller.hasPreviousEpisode {
+                Button("Previous episode") { controller.previousEpisode() }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.black.opacity(0.35), in: Circle())
+        }
+        // A menu that closes on its own the moment the controls auto-hide is
+        // unusable, so the timer is held off while it is open.
+        .onTapGesture { controller.cancelAutohide() }
+    }
+
+    private var audioSelection: Binding<String> {
+        Binding(
+            get: { audioTracks.first(where: \.isSelected)?.id ?? "" },
+            set: { id in
+                controller.onSelectAudioTrack?(id)
+                if let track = audioTracks.first(where: { $0.id == id }) {
+                    controller.rememberAudioTrack(track)
+                }
+                fetchTracks()
+            }
+        )
+    }
+
+    private var subtitleSelection: Binding<String> {
+        Binding(
+            get: { subtitleTracks.first(where: \.isSelected)?.id ?? PlayerTrack.off },
+            set: { id in
+                let track = subtitleTracks.first(where: { $0.id == id })
+                controller.onSelectSubtitleTrack?(id == PlayerTrack.off ? nil : id)
+                controller.rememberSubtitleTrack(track)
+                fetchTracks()
+            }
+        )
+    }
+
+    private func label(for track: PlayerTrack) -> String {
+        let name = track.title ?? track.lang ?? "Track \(track.id)"
+        return track.isForced ? "\(name) (forced)" : name
+    }
+
+    private func fetchTracks() {
+        controller.onFetchTracks? { audio, subtitle in
+            audioTracks = audio
+            subtitleTracks = subtitle
+        }
+    }
+
+    @ViewBuilder
+    private var transport: some View {
+        HStack(spacing: 46) {
+            Button { seek(by: -10) } label: {
+                Image(systemName: "gobackward.10")
+                    .font(.system(size: 30, weight: .regular))
+            }
+            Button {
+                controller.togglePlayPause()
+                controller.showControlsBriefly()
+            } label: {
+                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 40, weight: .regular))
+                    .frame(width: 54, height: 54)
+            }
+            Button { seek(by: 10) } label: {
+                Image(systemName: "goforward.10")
+                    .font(.system(size: 30, weight: .regular))
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        HStack(spacing: 12) {
+            Text(Self.timestamp(scrubTarget ?? controller.currentTime))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 46, alignment: .leading)
+
+            Scrubber(
+                value: scrubTarget ?? controller.currentTime,
+                duration: max(controller.duration, 0.001),
+                onScrub: { value in
+                    scrubTarget = value
+                    controller.isScrubbing = true
+                    controller.cancelAutohide()
+                },
+                onCommit: { value in
+                    controller.seek(to: value)
+                    scrubTarget = nil
+                    controller.isScrubbing = false
+                    controller.showControlsBriefly()
+                }
+            )
+            .frame(height: 28)
+
+            // Remaining, not total: the system player shows what is left and
+            // that is the number people are actually reading.
+            Text("-" + Self.timestamp(max(0, controller.duration - (scrubTarget ?? controller.currentTime))))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 50, alignment: .trailing)
+        }
+    }
+
+    // MARK: Skip intro / outro
+
+    @ViewBuilder
+    private var skipPill: some View {
+        if let window = controller.activeSkipWindow, !controller.autoSkipEnabled {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.snappy) { controller.skipPendingWindow() }
+                    } label: {
+                        Text(window.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(.white.opacity(0.92), in: Capsule())
+                    }
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.bottom, controller.areControlsVisible ? 96 : 26)
+        }
+    }
+
+    // MARK: Gestures
+
+    @ViewBuilder
+    private var gestureLayer: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                // Double tap is declared first so SwiftUI waits for it
+                // before resolving the single tap; the other order makes
+                // every double tap fire the single-tap handler as well.
+                .onTapGesture(count: 2) { location in
+                    let trailing = location.x > geo.size.width / 2
+                    seek(by: trailing ? 10 : -10)
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        flash = (trailing ? "goforward.10" : "gobackward.10", trailing)
+                    }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(450))
+                        withAnimation(.easeIn(duration: 0.2)) { flash = nil }
+                    }
+                }
+                // Tap shows the controls; it does not toggle playback. The
+                // system player behaves the same way, and a tap that pauses
+                // is the thing people hit by accident reaching for a button.
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        if controller.areControlsVisible {
+                            controller.areControlsVisible = false
+                            controller.cancelAutohide()
+                        } else {
+                            controller.showControlsBriefly()
+                        }
+                    }
+                }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func seek(by delta: Double) {
+        controller.seekRelative(by: delta)
+        controller.showControlsBriefly()
+    }
+
+    @ViewBuilder
+    private func seekFlash(symbol: String, trailing: Bool) -> some View {
+        HStack {
+            if trailing { Spacer() }
+            Image(systemName: symbol)
+                .font(.system(size: 34, weight: .regular))
+                .foregroundStyle(.white)
+                .padding(26)
+                .background(.black.opacity(0.35), in: Circle())
+            if !trailing { Spacer() }
+        }
+        .padding(.horizontal, 40)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var bufferingIndicator: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            if let percent = controller.bufferingPercent {
+                Text("\(percent)%")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+        }
+    }
+
+    static func timestamp(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds)
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0
+            ? String(format: "%d:%02d:%02d", h, m, s)
+            : String(format: "%d:%02d", m, s)
+    }
+}
+
+/// The scrub bar. A `Slider` was tried first and rejected: its thumb is a
+/// fixed 27pt circle that cannot be shrunk to the system player's hairline
+/// bead, and its track ignores `tint` on iOS 17 when the view is inside a
+/// dark overlay.
+private struct Scrubber: View {
+    let value: Double
+    let duration: Double
+    let onScrub: (Double) -> Void
+    let onCommit: (Double) -> Void
+
+    @State private var isDragging = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = min(max(value / duration, 0), 1)
+            let width = geo.size.width
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.28))
+                    .frame(height: isDragging ? 7 : 4)
+                Capsule()
+                    .fill(.white)
+                    .frame(width: width * fraction, height: isDragging ? 7 : 4)
+                Circle()
+                    .fill(.white)
+                    .frame(width: isDragging ? 15 : 11)
+                    .offset(x: width * fraction - (isDragging ? 7.5 : 5.5))
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        if !isDragging {
+                            withAnimation(.easeOut(duration: 0.12)) { isDragging = true }
+                        }
+                        onScrub(min(max(drag.location.x / width, 0), 1) * duration)
+                    }
+                    .onEnded { drag in
+                        withAnimation(.easeOut(duration: 0.15)) { isDragging = false }
+                        onCommit(min(max(drag.location.x / width, 0), 1) * duration)
+                    }
+            )
+        }
+    }
+}
+#endif

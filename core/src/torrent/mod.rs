@@ -648,7 +648,7 @@ impl TorrentManager {
             .into_iter()
             .collect();
         let session = self.session.get().cloned();
-        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, 0).await;
+        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, 0, false).await;
     }
 
     /// Bytes the stream cache is holding on disk right now.
@@ -2380,15 +2380,23 @@ pub async fn stream_cache_bytes(dir: &std::path::Path) -> u64 {
 }
 
 async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>, protected: &HashSet<usize>) {
-    cleanup_cache_to(dir, session, protected, CACHE_CAP_BYTES).await
+    cleanup_cache_to(dir, session, protected, CACHE_CAP_BYTES, true).await
 }
 
 /// `cleanup_cache` with the cap made explicit, so a purge can ask for zero.
+///
+/// `respect_grace` is what separates the two callers. The periodic cleanup
+/// must not evict the episode being watched, so it skips anything touched in
+/// the last ten minutes. A deliberate purge has to ignore that: everything in
+/// the cache when someone taps "Clear now" was, by definition, watched
+/// recently, so the grace window protected all of it and the button did
+/// nothing at all.
 async fn cleanup_cache_to(
     dir: &std::path::Path,
     session: Option<&Arc<Session>>,
     protected: &HashSet<usize>,
     cap: u64,
+    respect_grace: bool,
 ) {
     // The scan walks every torrent directory in the cache and stats every file
     // in it, which on a multi-GB cache is real, uninterruptible disk work.
@@ -2437,10 +2445,10 @@ async fn cleanup_cache_to(
     };
 
     for (path, mtime, size) in items {
-        if total <= CACHE_CAP_BYTES {
+        if total <= cap {
             break;
         }
-        if mtime > grace_cutoff {
+        if respect_grace && mtime > grace_cutoff {
             continue;
         }
         let matched_id = path

@@ -273,6 +273,9 @@ struct PhoneSettingsView: View {
     }
 
     static func formatted(_ bytes: UInt64) -> String {
+        // ByteCountFormatter renders 0 as "Zero KB", which reads like a unit
+        // conversion went wrong rather than like an empty cache.
+        guard bytes > 0 else { return "Empty" }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         formatter.allowedUnits = [.useMB, .useGB]

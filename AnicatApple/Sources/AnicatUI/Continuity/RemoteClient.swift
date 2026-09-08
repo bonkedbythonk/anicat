@@ -27,6 +27,15 @@ public final class RemoteClient {
     public private(set) var status: Status = .idle
     public private(set) var state = RemoteState()
     public private(set) var hostName: String?
+    /// The protocol version the attached Mac announced, 0 for one too old to
+    /// announce anything. Read by the sheet to decide which controls to draw:
+    /// a command this Mac has never heard of is dropped by its framer without
+    /// a word, so a button for it would be a button that does nothing.
+    public private(set) var hostVersion = 0
+    private var hostFeatures: Set<String> = []
+
+    /// Whether the attached Mac can serve a named verb.
+    public func hostSupports(_ feature: String) -> Bool { hostFeatures.contains(feature) }
 
     private var connection: NWConnection?
     private var framer = RemoteFramer()
@@ -70,6 +79,8 @@ public final class RemoteClient {
         connection = nil
         framer = RemoteFramer()
         state = RemoteState()
+        hostVersion = 0
+        hostFeatures = []
         status = .connecting
         hostName = node.name
 
@@ -295,6 +306,9 @@ public final class RemoteClient {
                 connection.sendFrame(.syncOffer(RemoteSync.export()))
             }
             queued.removeAll()
+        case .hostInfo(let version, let features):
+            hostVersion = version
+            hostFeatures = Set(features)
         case .state(let incoming):
             state = incoming
         case .syncReply(let rows):

@@ -9,6 +9,12 @@ import Network
 /// contain one: an anime title with a line break in it cannot split its own
 /// frame in half.
 public enum RemoteFrame: Codable, Sendable {
+    /// Bumped whenever the Mac learns a verb the phone needs to know about
+    /// before it can offer the control. A phone talking to an older Mac
+    /// hides what that Mac cannot serve rather than drawing a button whose
+    /// press is dropped by the framer with no feedback of any kind.
+    public static let currentVersion = 1
+
     /// First frame a controller sends. Nothing else is honoured until the
     /// Mac has answered it, and a connection that never sends one is a
     /// discovery probe rather than a remote (see `RemoteHost.accept`).
@@ -16,6 +22,14 @@ public enum RemoteFrame: Codable, Sendable {
     case helloAck(accepted: Bool, hostName: String)
     case command(RemoteCommand)
     case state(RemoteState)
+    /// What this Mac can actually do, sent straight after `helloAck`.
+    ///
+    /// A separate frame rather than more fields on `helloAck`: adding an
+    /// associated value to an existing case changes how that case decodes,
+    /// so an older peer would fail on the one frame the handshake cannot
+    /// afford to lose. An older Mac sends no `hostInfo` at all and the phone
+    /// reads that as version 0, which is exactly what it is.
+    case hostInfo(version: Int, features: [String])
     /// "Here are my remembered releases, send me yours." Sent by whichever
     /// side dialled out.
     case syncOffer([SyncRelease])
@@ -137,6 +151,20 @@ public struct SyncRelease: Codable, Sendable {
     }
 }
 
+/// Names for the optional verbs a Mac may or may not serve, as they travel
+/// in `hostInfo`.
+///
+/// Strings on the wire and not an enum: an older peer must be able to carry
+/// a name it has never heard of through `Codable` untouched, and a
+/// `RawRepresentable` enum would refuse the frame outright.
+public enum RemoteFeature {
+    public static let speed = "speed"
+    public static let tracks = "tracks"
+    public static let skip = "skip"
+    public static let autoNext = "autoNext"
+    public static let browse = "browse"
+}
+
 /// What the phone can ask the Mac to do.
 ///
 /// Deliberately the same verbs `PlayerController` already exposes rather
@@ -199,6 +227,32 @@ public struct RemoteState: Codable, Sendable {
         self.volume = volume
         self.isMuted = isMuted
         self.isBuffering = isBuffering
+    }
+
+    /// Decoded field by field with a default for every one, rather than
+    /// letting the synthesised initialiser require them all.
+    ///
+    /// The two apps are built and installed separately -- one phone install
+    /// away from a Mac pushing a state with a key the phone has never heard
+    /// of, or missing one the phone now expects. A missing key throws, and
+    /// `RemoteFramer.ingest` drops a frame that fails to decode *silently*,
+    /// so the whole remote would go blank and stay blank with nothing logged
+    /// anywhere. Every field added here from now on must be optional or
+    /// carry a default for exactly that reason.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hasPlayback = try c.decodeIfPresent(Bool.self, forKey: .hasPlayback) ?? false
+        isPlaying = try c.decodeIfPresent(Bool.self, forKey: .isPlaying) ?? false
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        episodeNumber = try c.decodeIfPresent(Int.self, forKey: .episodeNumber) ?? 0
+        episodeTitle = try c.decodeIfPresent(String.self, forKey: .episodeTitle) ?? ""
+        currentTime = try c.decodeIfPresent(Double.self, forKey: .currentTime) ?? 0
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        hasNext = try c.decodeIfPresent(Bool.self, forKey: .hasNext) ?? false
+        hasPrevious = try c.decodeIfPresent(Bool.self, forKey: .hasPrevious) ?? false
+        volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        isMuted = try c.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
+        isBuffering = try c.decodeIfPresent(Bool.self, forKey: .isBuffering) ?? false
     }
 }
 

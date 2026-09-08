@@ -44,6 +44,11 @@ public final class RemoteHost {
 
     static let pairedDevicesKey = "anicat_remote_paired_devices"
 
+    /// The optional verbs this build serves, announced in `hostInfo`. A verb
+    /// goes in here in the same commit that teaches `apply` to honour it, so
+    /// the two cannot drift.
+    static let features: Set<String> = []
+
     private init() {}
 
     // MARK: - Accepting controllers
@@ -139,7 +144,7 @@ public final class RemoteHost {
             // leaves both sides holding the same set.
             RemoteSync.merge(rows)
             session.connection.sendFrame(.syncReply(RemoteSync.export()))
-        case .helloAck, .state, .syncReply, .streamResolved, .dataHeader, .dataError:
+        case .helloAck, .hostInfo, .state, .syncReply, .streamResolved, .dataHeader, .dataError:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
             break
@@ -269,6 +274,10 @@ public final class RemoteHost {
     private func approve(_ session: Session) {
         session.isApproved = true
         session.connection.sendFrame(.helloAck(accepted: true, hostName: Platform.deviceName))
+        session.connection.sendFrame(.hostInfo(
+            version: RemoteFrame.currentVersion,
+            features: Array(Self.features)
+        ))
         session.connection.sendFrame(.state(snapshot()))
         refreshAttachment()
         startPushing()

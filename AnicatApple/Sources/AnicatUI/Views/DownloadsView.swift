@@ -214,15 +214,25 @@ public struct DownloadsView: View {
                 VStack(spacing: 8) {
                 groupHeader(title, count: rows.count, unit: "item")
                 ForEach(rows, id: \.chapterId) { chapter in
+                    // Built before the view rather than inside the `Text`
+                    // initialisers. Two interpolations carrying a ternary
+                    // each put this body past the solver's budget in a
+                    // release build -- "unable to type-check this expression
+                    // in reasonable time" -- while the debug build compiled
+                    // it fine, so it only ever failed at packaging time.
+                    let isNovel = chapter.kind == .novel
+                    let heading = isNovel ? chapter.chapterNumber : "CH " + chapter.chapterNumber
+                    let unit = isNovel ? "chapters" : "pages"
+                    let detail = "\(chapter.pageCount) " + unit + " · " + Self.size(chapter.bytes)
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
                             // A novel row's "number" is the volume's name, so
                             // prefixing it with CH would read "CH Volume 1".
-                            Text(chapter.kind == .novel ? chapter.chapterNumber : "CH \(chapter.chapterNumber)")
+                            Text(heading)
                                 .font(.system(size: 13.5, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
-                            Text("\(chapter.pageCount) \(chapter.kind == .novel ? "chapters" : "pages") · \(Self.size(chapter.bytes))")
+                            Text(detail)
                                 .sumiTabularMono(size: 11)
                                 .foregroundColor(SumiTheme.muted)
                         }

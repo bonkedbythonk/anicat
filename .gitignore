@@ -172,3 +172,8 @@ AnicatApple/Generated/
 AnicatApple/.build-xcode/
 # xcodebuild DerivedData for device builds
 AnicatApple/.build-device/
+
+# Editor/agent rule directories from other tools
+.clinerules/
+.cursor/
+.windsurf/

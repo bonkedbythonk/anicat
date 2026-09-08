@@ -250,15 +250,17 @@ struct AnicatApp: App {
                 .onOpenURL { url in
                     model.handleOpenURL(url)
                 }
-                .frame(minWidth: 1080, idealWidth: 1280, minHeight: 700, idealHeight: 820)
+                .frame(minWidth: 1080, idealWidth: 1213, minHeight: 700, idealHeight: 754)
                 .background(WindowConfigurator())
                 .background(SystemIntegrationObserver(model: model))
         }
         .windowStyle(.hiddenTitleBar)
         // First launch, before any autosaved frame exists; after that the
         // autosaved frame wins, so resizing once is enough. 1440x900 read
-        // as too big on a 14-inch panel, 1080x820 as a square.
-        .defaultSize(width: 1280, height: 820)
+        // as too big on a 14-inch panel, 1080x820 as a square, and 1280x820
+        // still left the detail page's hero taller than it wanted to be.
+        // 1213x754 is the size the app was actually settled at in use.
+        .defaultSize(width: 1213, height: 754)
 
         MenuBarExtra {
             // `.window` style renders arbitrary SwiftUI in a popover instead of
@@ -287,10 +289,40 @@ struct AnicatApp: App {
                             countdownText: $0.countdownText
                         )
                     },
+                // Everything after the one already drawn in the resume card
+                // above, so the same title is not offered twice.
+                upNext: model.upNextItems
+                    .dropFirst(model.activeStreamURL == nil ? 1 : 0)
+                    .prefix(3)
+                    .map {
+                        MenuBarView.UpNextItem(
+                            id: $0.id,
+                            title: $0.title,
+                            episodeNumber: Int($0.nextEpisodeOrChapter),
+                            thumbnailURL: $0.thumbnailURL
+                        )
+                    },
+                sleepTimerCaption: model.sleepTimerCaption,
                 nowPlaying: model.activeStreamURL != nil ? model.playerController : nil,
                 onOpenAiringItem: { item in
                     model.handleDeepLink(.title(id: item.id, isManga: false))
                 },
+                onPlayUpNext: { item in
+                    model.handleDeepLink(.play(id: item.id, episode: item.episodeNumber))
+                },
+                onSetSleepTimer: { choice in
+                    switch choice {
+                    case .off: model.sleepTimer = .off
+                    case .afterEpisode: model.sleepTimer = .afterEpisode
+                    case .minutes(let m):
+                        model.sleepTimer = .at(Date().addingTimeInterval(TimeInterval(m * 60)))
+                    }
+                },
+                onMarkWatched: model.activeStreamURL != nil ? {
+                    guard let id = model.currentPlaybackCatalogId,
+                          let ep = model.currentPlaybackEpisode else { return }
+                    model.markEpisodeFinished(catalogId: id, episode: ep)
+                } : nil,
                 onResumeLastWatched: {
                     if model.activeStreamURL != nil {
                         // Restore the player if it was backgrounded (see

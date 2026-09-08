@@ -109,6 +109,18 @@ struct ThemePaletteTests {
         }
     }
 
+    @Test("serif headings are Sakura's alone")
+    func serifHeadings() {
+        // The palette's only non-colour axis. A skin that picks it up by
+        // accident changes every page title in the app, which no contrast
+        // check would catch.
+        #expect(SumiPalette.sakura.usesSerifHeadings)
+        #expect(SumiPalette.sakuraLight.usesSerifHeadings)
+        for palette in [SumiPalette.ink, .paper, .oled] {
+            #expect(palette.usesSerifHeadings == false, "\(palette.id) grew serif headings")
+        }
+    }
+
     @Test("the accent stays readable on its own ground")
     func accentContrast() {
         // Ink's #8FB8DC over Paper's off-white measures 1.77:1 — the reason
@@ -150,24 +162,48 @@ struct ThemePaletteTests {
 
     // MARK: Selection
 
-    @Test("every theme resolves to a palette, and Follow system never picks OLED")
-    func themeResolution() {
-        #expect(AnicatTheme.ink.palette(systemIsDark: true).id == "ink")
-        #expect(AnicatTheme.paper.palette(systemIsDark: false).id == "paper")
-        #expect(AnicatTheme.oled.palette(systemIsDark: false).id == "oled")
+    @Test("a skin plus an appearance resolves to a palette, and OLED stays dark")
+    func skinResolution() {
+        #expect(SumiSkin.ink.palette(isLight: false).id == "ink")
+        #expect(SumiSkin.ink.palette(isLight: true).id == "paper")
+        #expect(SumiSkin.sakura.palette(isLight: false).id == "sakura")
+        #expect(SumiSkin.sakura.palette(isLight: true).id == "sakura-light")
 
-        // OLED is a statement about the panel, which the OS setting says
-        // nothing about, so following the system can only ever mean Ink/Paper.
-        #expect(AnicatTheme.system.palette(systemIsDark: true).id == "ink")
-        #expect(AnicatTheme.system.palette(systemIsDark: false).id == "paper")
+        // OLED is a statement about the panel, and there is no light ground
+        // that switches pixels off. Asking for Light has to land back on its
+        // own dark rather than on some other skin's paper.
+        #expect(SumiSkin.oled.hasLight == false)
+        #expect(SumiSkin.oled.palette(isLight: true).id == "oled")
 
-        // The stored value is the raw value; a rename would silently reset
+        #expect(AnicatAppearance.system.isLight(systemIsDark: true) == false)
+        #expect(AnicatAppearance.system.isLight(systemIsDark: false))
+        #expect(AnicatAppearance.light.isLight(systemIsDark: true))
+        #expect(AnicatAppearance.dark.isLight(systemIsDark: false) == false)
+
+        // The stored values are the raw values; a rename would silently reset
         // every existing user to the default.
-        #expect(AnicatTheme(rawValue: "ink") == .ink)
-        #expect(AnicatTheme(rawValue: "paper") == .paper)
-        #expect(AnicatTheme(rawValue: "oled") == .oled)
-        #expect(AnicatTheme(rawValue: "system") == .system)
-        #expect(ThemeStore.defaultsKey == "anicat_theme")
+        #expect(SumiSkin(rawValue: "ink") == .ink)
+        #expect(SumiSkin(rawValue: "sakura") == .sakura)
+        #expect(SumiSkin(rawValue: "oled") == .oled)
+        #expect(AnicatAppearance(rawValue: "system") == .system)
+        #expect(ThemeStore.skinKey == "anicat_skin")
+        #expect(ThemeStore.appearanceKey == "anicat_appearance")
+    }
+
+    @Test("the old single key migrates to a skin and an appearance")
+    func legacyMigration() {
+        // Paper and Sakura Light were their own entries before the split.
+        // Anyone sitting on one of them has to come back as the light half of
+        // the skin they were actually looking at, not as its dark.
+        #expect(LegacyAnicatTheme.ink.migrated == (skin: .ink, appearance: .dark))
+        #expect(LegacyAnicatTheme.paper.migrated == (skin: .ink, appearance: .light))
+        #expect(LegacyAnicatTheme.oled.migrated == (skin: .oled, appearance: .dark))
+        #expect(LegacyAnicatTheme.sakura.migrated == (skin: .sakura, appearance: .dark))
+        #expect(LegacyAnicatTheme.sakuraLight.migrated == (skin: .sakura, appearance: .light))
+        #expect(LegacyAnicatTheme.system.migrated == (skin: .ink, appearance: .system))
+
+        #expect(ThemeStore.legacyKey == "anicat_theme")
+        #expect(LegacyAnicatTheme(rawValue: "sakuraLight") == .sakuraLight)
     }
 
     @Test("colorScheme follows the palette's own ground, not the system's")

@@ -169,4 +169,145 @@ struct AmbientGlowTests {
         #expect(gate.gaveUp)
         #expect(!gate.isDue(at: 10_000))
     }
+
+    /// The Grisaia case, at thumbnail scale: a 16:9 file whose picture is
+    /// 2.35:1 with the bars burned in. `contentInset` is the only thing that
+    /// can see them — every property mpv reports says 1920x1080, 16:9,
+    /// sample aspect 1:1.
+    @Test("Bars encoded into the frame are found as fractions of it")
+    func encodedBarsAreDetected() throws {
+        let barRows = 4, height = 36, width = 64
+        let (bytes, stride) = frame(width: width, height: height) { _, y in
+            (y < barRows || y >= height - barRows) ? (0, 0, 0) : (200, 180, 160)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride))
+        #expect(inset.top == Double(barRows) / Double(height))
+        #expect(inset.bottom == Double(barRows) / Double(height))
+        #expect(inset.left == 0)
+        #expect(inset.right == 0)
+    }
+
+    @Test("A picture that fills its frame reports no bars at all")
+    func fullFrameHasNoInset() throws {
+        let (bytes, stride) = frame(width: 64, height: 36) { _, _ in (120, 120, 120) }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride))
+        #expect(inset.isZero)
+    }
+
+    /// Without this the rect collapsed on every fade and snapped back open
+    /// on the next shot.
+    @Test("A frame too dark to tell reports nothing rather than a full inset")
+    func fadeToBlackReportsNothing() {
+        let (bytes, stride) = frame(width: 64, height: 36) { _, _ in (0, 0, 0) }
+        #expect(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride) == nil)
+    }
+
+    /// A dark scene is not a bar: the threshold has to sit under the darkest
+    /// picture rather than over the brightest black.
+    @Test("Rows just above the bar level are picture, not bar")
+    func darkPictureIsNotABar() throws {
+        let level = AmbientGlow.barLevel + 4
+        let (bytes, stride) = frame(width: 64, height: 36) { _, y in
+            y < 4 ? (level, level, level) : (200, 200, 200)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride))
+        #expect(inset.top == 0)
+    }
+
+    @Test("Pillarbox bars encoded into the frame are found too")
+    func encodedPillarboxIsDetected() throws {
+        let barColumns = 8, width = 64, height = 36
+        let (bytes, stride) = frame(width: width, height: height) { x, _ in
+            (x < barColumns || x >= width - barColumns) ? (0, 0, 0) : (90, 140, 210)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride))
+        #expect(inset.left == Double(barColumns) / Double(width))
+        #expect(inset.right == Double(barColumns) / Double(width))
+        #expect(inset.top == 0)
+    }
+
+    /// The bands are placed from this, against the video rect the chrome
+    /// already computes, so the arithmetic has to stay in that space.
+    @Test("An inset maps onto the video rect the chrome laid out")
+    func insetAppliesToTheVideoRect() {
+        let inset = AmbientContentInset(top: 0.1, bottom: 0.2, left: 0, right: 0)
+        let rect = inset.apply(to: CGRect(x: 0, y: 50, width: 1000, height: 500))
+        #expect(rect.minX == 0)
+        #expect(rect.width == 1000)
+        #expect(rect.minY == 100)
+        #expect(rect.height == 350)
+    }
+
+    /// The centring in `bandEdges` is mpv's, and it is right for the
+    /// window's own letterbox — but it takes only the picture's *size*, so
+    /// an encoded bar on one edge alone used to be split across both and
+    /// half the glow drawn over the picture.
+    @Test("A one-sided encoded bar stays on its own edge")
+    func oneSidedInsetIsNotRecentred() {
+        let window = CGSize(width: 1000, height: 500)
+        let video = CGRect(x: 0, y: 0, width: 1000, height: 500)
+        let edges = AmbientGlowView.bandEdges(
+            video: video,
+            contentInset: AmbientContentInset(top: 0.2, bottom: 0, left: 0, right: 0),
+            windowSize: window,
+            scale: 2
+        )
+        #expect(edges.top == 100)
+        #expect(edges.bottom == 500)
+    }
+
+    @Test("With no encoded bars the band edges are the window letterbox alone")
+    func zeroInsetKeepsTheLetterboxEdges() {
+        let window = CGSize(width: 1000, height: 600)
+        let video = CGRect(x: 0, y: 50, width: 1000, height: 500)
+        let edges = AmbientGlowView.bandEdges(
+            video: video, contentInset: .zero, windowSize: window, scale: 2
+        )
+        #expect(edges.top == 50)
+        #expect(edges.bottom == 550)
+        #expect(edges.left == 0)
+        #expect(edges.right == 1000)
+    }
+
+    /// The thumbnail is a bilinear downscale, so the row the picture's edge
+    /// falls in is part bar and part picture and never passes the bar test.
+    /// Counting whole rows alone left 16 px of black between the glow and
+    /// the frame on the Grisaia cold open.
+    @Test("The row the picture edge falls in is credited by how much of it was bar")
+    func blendedBoundaryRowIsCredited() throws {
+        let width = 64, height = 36
+        // Rows 0-3 bar, row 4 three-quarters bar, the rest picture.
+        let picture: UInt8 = 200
+        let blended = UInt8(Double(picture) * 0.25)
+        let (bytes, stride) = frame(width: width, height: height) { _, y in
+            if y < 4 { return (0, 0, 0) }
+            if y == 4 { return (blended, blended, blended) }
+            return (picture, picture, picture)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride))
+        let credited = inset.top * Double(height)
+        #expect(credited > 4.6 && credited < 4.9)
+    }
+
+    /// A hard edge has nothing to credit, and crediting one anyway would put
+    /// the band a row over the picture.
+    @Test("A hard picture edge is not extended into")
+    func hardEdgeIsNotExtended() throws {
+        let (bytes, stride) = frame(width: 64, height: 36) { _, y in
+            y < 4 ? (0, 0, 0) : (200, 200, 200)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride))
+        #expect(inset.top == 4.0 / 36.0)
+    }
+
+    /// Refining off a picture barely brighter than a bar is guesswork, and
+    /// guessing long draws glow over the frame.
+    @Test("A picture too close to black to tell is left as whole rows")
+    func lowContrastEdgeIsNotRefined() throws {
+        let (bytes, stride) = frame(width: 64, height: 36) { _, y in
+            y < 4 ? (0, 0, 0) : (30, 30, 30)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride))
+        #expect(inset.top == 4.0 / 36.0)
+    }
 }

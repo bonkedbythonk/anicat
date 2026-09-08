@@ -135,10 +135,31 @@ else
     echo "package-anicat-macos-app: warning: no resource bundle at $RESOURCE_BUNDLE — Anime4K shaders will be missing" >&2
 fi
 
-echo "=== Codesigning executable (ad-hoc) ==="
+# Ad-hoc unless told otherwise. macOS keys the privacy database to the code
+# signature, and an ad-hoc one gets a fresh cdhash on every build -- so every
+# rebuild looked like a different app and re-asked for Documents and
+# Downloads. Signing with a real identity gives a designated requirement that
+# survives rebuilds and the prompts stop.
+#
+# From the environment rather than written here, exactly like
+# ANICAT_DEVELOPMENT_TEAM in project.yml: an identity string carries the
+# developer's name, email and personal team, and this repo is deliberately
+# pseudonymous (see DISCLAIMER.md). Unset, this behaves as it always did, so
+# CI and a fresh clone need no change.
+#
+#   security find-identity -v -p codesigning     # to find yours
+#   export ANICAT_CODESIGN_IDENTITY="Apple Development: you@example.com (XXXXXXXXXX)"
+SIGN_IDENTITY="${ANICAT_CODESIGN_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    echo "=== Codesigning executable (ad-hoc) ==="
+    echo "package-anicat-macos-app: ad-hoc signed; macOS will re-ask for folder access after every build."
+    echo "package-anicat-macos-app: set ANICAT_CODESIGN_IDENTITY to a stable identity to stop that."
+else
+    echo "=== Codesigning executable ($SIGN_IDENTITY) ==="
+fi
 xattr -cr "$APP" 2>/dev/null || true
-codesign -s - --force "$APP/Contents/MacOS/$EXE_NAME"
-codesign -s - --force "$APP"
+codesign -s "$SIGN_IDENTITY" --force "$APP/Contents/MacOS/$EXE_NAME"
+codesign -s "$SIGN_IDENTITY" --force "$APP"
 
 echo "=== Verifying no remaining Homebrew references ==="
 LEFTOVER=$(find "$APP" -type f \( -perm +111 -o -name "*.dylib" \) -exec otool -L {} + | grep -c /opt/homebrew || true)

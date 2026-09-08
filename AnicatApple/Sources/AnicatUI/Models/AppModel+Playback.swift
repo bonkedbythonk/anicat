@@ -953,6 +953,16 @@ extension AppModel {
         chosenName: String? = nil,
         fromStart: Bool = false
     ) async throws -> URL {
+        // A reader open over the player is a reader over the picture. Both
+        // sit above it by design -- opening a chapter while an episode plays
+        // is a deliberate thing to do -- but a *stream* arriving under an
+        // open reader is not: locally there is no way to ask for one from
+        // inside the reader, and remotely there is, so a play sent from the
+        // phone started behind whatever was being read and showed nothing at
+        // all.
+        closeReader()
+        closeSyosetuReader()
+
         let effectiveTitle = title ?? self.selectedMediaDetails?.title
             ?? self.registryTitle(catalog: catalog, id: catalogId)
             ?? (catalog == .anilist ? "Anime" : "Film")

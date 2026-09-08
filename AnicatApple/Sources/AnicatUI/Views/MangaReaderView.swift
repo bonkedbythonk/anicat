@@ -857,6 +857,13 @@ public struct MangaReaderView: View {
             )
         }
         .padding(SumiTheme.spaceMd)
+        // Clear of the window's transparent title strip, which takes the
+        // click rather than passing it down: at a 16pt inset the top 12pt of
+        // the close button was dead, and the same bug had the novel reader's
+        // Close doing nothing when it was pressed near its top edge.
+        #if os(macOS)
+        .padding(.top, SyosetuReaderView.titleStripHeight)
+        #endif
         .background(
             LinearGradient(
                 colors: [SumiTheme.background.opacity(0.95), Color.clear],

@@ -30,6 +30,10 @@ public struct SyosetuReaderView: View {
     /// that is still one row tall and does nothing.
     private static let restoreDelay: Duration = .milliseconds(80)
 
+    /// The chapter heading's scroll id. Negative so it cannot collide with a
+    /// paragraph index.
+    private static let topAnchor = -1
+
     public init(model: AppModel) {
         self.model = model
     }
@@ -166,6 +170,11 @@ public struct SyosetuReaderView: View {
                         .font(typography.font(size: typography.fontSize + 4, weight: .semibold))
                         .foregroundColor(typography.theme.foreground)
                         .padding(.bottom, 4)
+                        // The heading sits above paragraph 0, so scrolling to
+                        // paragraph 0 is not the top of the chapter -- it puts
+                        // the title just off screen, which is what a chapter
+                        // opened with Next looked like.
+                        .id(Self.topAnchor)
                     // A machine-translation pass would sit here, between the
                     // chapter text arriving and it being laid out: one
                     // translated string per paragraph, with the original kept
@@ -198,9 +207,14 @@ public struct SyosetuReaderView: View {
                 )
                 visibleParagraphs = []
                 topParagraph = saved
-                guard saved > 0 else { return }
                 isRestoring = true
                 defer { isRestoring = false }
+                // Always, even with nothing saved. The ScrollView is not
+                // rebuilt between chapters -- only its text changes -- so it
+                // keeps the offset it had, and Next from halfway down a
+                // chapter opened the next one already halfway down.
+                proxy.scrollTo(Self.topAnchor, anchor: .top)
+                guard saved > 0 else { return }
                 try? await Task.sleep(for: Self.restoreDelay)
                 guard !Task.isCancelled else { return }
                 proxy.scrollTo(saved, anchor: .top)
@@ -270,13 +284,19 @@ public struct SyosetuReaderView: View {
                 .disabled(session.info == nil)
         }
         .padding(12)
-        // The reader fills the window, so its own bar starts where the window's
-        // does and the Close button landed underneath the traffic lights.
-        // Measured: the green button's right edge sits at x=70.
+        // Below the title strip, not beside it. The reader fills the window,
+        // so its own bar starts where the window's does -- and that strip is
+        // not merely where the traffic lights are drawn, it is a region that
+        // takes the click: the top half of Close (y 14 to 28) did nothing at
+        // all, while the half below the strip closed the reader.
         #if os(macOS)
-        .padding(.leading, 66)
+        .padding(.top, Self.titleStripHeight)
         #endif
     }
+
+    /// The height AppKit's transparent title bar occupies over the content,
+    /// matching `TitleStripDoubleClick.stripHeight` in the app target.
+    static let titleStripHeight: CGFloat = 28
 
     private var typographyPopover: some View {
         VStack(alignment: .leading, spacing: 14) {

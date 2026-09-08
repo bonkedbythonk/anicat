@@ -37,7 +37,7 @@ extension AppModel {
 
         // Only save current title to history if it's a different title and not a provisional loading placeholder
         if let current = selectedMediaDetails, current.id != id, !isDetailLoading {
-            detailHistory.append((id: current.id, isManga: Self.isMangaFormat(current.format), tab: currentDetailTab))
+            detailHistory.append(currentDetailStep(current))
         }
         detailForwardStack = []
         // A fresh forward navigation (a relation click, not a back/forward
@@ -87,12 +87,46 @@ extension AppModel {
         // tap — no source card to morph from, so this is a plain fade.
         openingDetailSourceKey = nil
         if let current = selectedMediaDetails, !isDetailLoading {
-            detailForwardStack.append((id: current.id, isManga: Self.isMangaFormat(current.format), tab: currentDetailTab))
+            detailForwardStack.append(currentDetailStep(current))
         }
         restoredDetailTab = previous.tab
-        // Load cached snapshot immediately so the back transition renders
+        restore(previous)
+    }
+
+    /// The step the open page would be, for the stacks.
+    func currentDetailStep(_ details: HeroBanner.Details) -> DetailStep {
+        DetailStep(
+            id: details.id,
+            isManga: Self.isMangaFormat(details.format),
+            catalog: currentDetailCatalog,
+            tab: currentDetailTab
+        )
+    }
+
+    /// Re-opens one step, through the catalog it belongs to.
+    ///
+    /// Both directions go through here so a back and a forward cannot
+    /// disagree about which path a step reloads on -- and a cinema step must
+    /// not reload on AniList's, which is what made Back on a film land on
+    /// whatever anime shares its number.
+    func restore(_ step: DetailStep) {
+        if step.catalog != .anilist {
+            currentDetailCatalog = step.catalog
+            let task = Task { [weak self] () -> Void in
+                guard let self else { return }
+                await self.openCinemaDetail(
+                    catalog: step.catalog,
+                    id: step.id,
+                    title: self.cinemaKnownTitles[step.id]
+                )
+            }
+            activeDetailTask = task
+            return
+        }
+        currentDetailCatalog = .anilist
+        // Load cached snapshot immediately so the transition renders
         // synchronously without waiting for an async Task to start up.
-        if let cached = DetailCache.load(id: previous.id, isManga: previous.isManga) {
+        if let cached = DetailCache.load(id: step.id, isManga: step.isManga) {
             withAnimation(.easeInOut(duration: 0.32)) {
                 selectedEpisodes = cached.episodes
                 selectedMangaChapters = cached.mangaChapters
@@ -105,7 +139,7 @@ extension AppModel {
         }
         let task = Task { [weak self] () -> Void in
             guard let self else { return }
-            await self.loadDetail(id: previous.id, isManga: previous.isManga)
+            await self.loadDetail(id: step.id, isManga: step.isManga)
         }
         activeDetailTask = task
     }
@@ -116,27 +150,10 @@ extension AppModel {
         guard let next = detailForwardStack.popLast() else { return }
         openingDetailSourceKey = nil
         if let current = selectedMediaDetails, !isDetailLoading {
-            detailHistory.append((id: current.id, isManga: Self.isMangaFormat(current.format), tab: currentDetailTab))
+            detailHistory.append(currentDetailStep(current))
         }
         restoredDetailTab = next.tab
-        // Load cached snapshot immediately so the forward transition renders
-        // synchronously without waiting for an async Task to start up.
-        if let cached = DetailCache.load(id: next.id, isManga: next.isManga) {
-            withAnimation(.easeInOut(duration: 0.32)) {
-                selectedEpisodes = cached.episodes
-                selectedMangaChapters = cached.mangaChapters
-                selectedRelations = cached.relations
-                selectedRecommendations = cached.recommendations
-                selectedCharacters = cached.characters
-                selectedDiscussions = cached.discussions
-                selectedMediaDetails = cached.details
-            }
-        }
-        let task = Task { [weak self] () -> Void in
-            guard let self else { return }
-            await self.loadDetail(id: next.id, isManga: next.isManga)
-        }
-        activeDetailTask = task
+        restore(next)
     }
 
     public nonisolated static func isMangaFormat(_ format: String?) -> Bool {
@@ -429,7 +446,8 @@ extension AppModel {
                 if self.selectedMediaDetails?.id == id {
                     if let previous = self.detailHistory.popLast() {
                         self.restoredDetailTab = previous.tab
-                        await self.loadDetail(id: previous.id, isManga: previous.isManga)
+                        // Through its own catalog, like every other restore.
+                        self.restore(previous)
                     } else {
                         withAnimation(.easeInOut(duration: 0.32)) {
                             self.selectedMediaDetails = nil

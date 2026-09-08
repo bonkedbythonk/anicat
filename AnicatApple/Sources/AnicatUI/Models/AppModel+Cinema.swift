@@ -75,7 +75,10 @@ extension AppModel {
            !SidebarView.NavSection.systemItems.contains(currentNavSection) {
             currentNavSection = .upNext
         }
-        closeDetail()
+        // `clearDetail`, not `closeDetail`: the stacks hold pages from the
+        // world being left, and a back step across modes is exactly the
+        // mixing this switch is supposed to prevent.
+        clearDetail()
         if mode == .cinema {
             Task {
                 if cinemaShelves.isEmpty { await loadCinemaHome() }
@@ -225,6 +228,14 @@ extension AppModel {
         guard let engine, catalog != .anilist else { return }
         let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
 
+        // The page being left is a step back, exactly as it is on the anime
+        // side -- otherwise a recommendation or a cast credit opened from
+        // here had no way back to what opened it, and Back popped whatever
+        // AniList page was last on the stack instead.
+        if let current = selectedMediaDetails, current.id != id, !isDetailLoading {
+            detailHistory.append(currentDetailStep(current))
+            detailForwardStack = []
+        }
         activeDetailTask?.cancel()
         activeDetailExtrasTask?.cancel()
         currentDetailCatalog = catalog

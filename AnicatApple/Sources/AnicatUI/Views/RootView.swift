@@ -193,12 +193,28 @@ public struct RootView: View {
                                     )
                                 },
                                 onSelectMediaId: { id, title, coverURL, isManga in
-                                    openDetailFor(
-                                        id: id,
-                                        title: title,
-                                        coverURL: coverURL,
-                                        isManga: isManga
-                                    )
+                                    // TMDB recommends films for a film and
+                                    // series for a series, so a pick here
+                                    // belongs to the page's own catalog --
+                                    // sent through `openDetailFor` it opened
+                                    // whatever anime carries that number.
+                                    if model.currentDetailCatalog != .anilist {
+                                        Task {
+                                            await model.openCinemaDetail(
+                                                catalog: model.currentDetailCatalog,
+                                                id: id,
+                                                title: title,
+                                                coverURL: coverURL
+                                            )
+                                        }
+                                    } else {
+                                        openDetailFor(
+                                            id: id,
+                                            title: title,
+                                            coverURL: coverURL,
+                                            isManga: isManga
+                                        )
+                                    }
                                 },
                                 onExportAppleBooks: {},
                                 onSelectCharacter: { id in
@@ -902,7 +918,7 @@ public struct RootView: View {
                     openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: item.isManga, sourceKey: "history-fav:\(item.id)")
                 },
                 onOpenTitle: { id, title in
-                    openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
+                    openRegistryTitle(id: id, title: title)
                 }
             )
         case .stats:
@@ -917,7 +933,7 @@ public struct RootView: View {
                 // streak has a day's resolution, so an open is soon enough.
                 onLoad: { model.loadWatchStats() },
                 onSelectTitle: { id, title in
-                    openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
+                    openRegistryTitle(id: id, title: title)
                 },
                 onResolveTitle: { id in model.ensureKnownTitle(id) }
             )
@@ -965,6 +981,25 @@ public struct RootView: View {
     // it came from (e.g. "watching:12345") — relation/recommendation clicks
     // inside the detail page, schedule taps, and any other non-card open
     // leave it nil, which just means a plain fade with no poster morph.
+    /// Opens a row that came out of the registry -- History, Stats -- where
+    /// the id is whatever catalog recorded it. In cinema mode that is TMDB's,
+    /// and sending it to `openDetailFor` opened the anime with that number.
+    private func openRegistryTitle(id: Int64, title: String?) {
+        if model.appMode == .cinema {
+            let catalog = model.cinemaCatalog(forId: id)
+            Task {
+                await model.openCinemaDetail(
+                    catalog: catalog,
+                    id: id,
+                    title: title ?? model.cinemaKnownTitles[id],
+                    coverURL: model.cinemaKnownCovers[id]
+                )
+            }
+            return
+        }
+        openDetailFor(id: id, title: title ?? "", coverURL: model.knownCovers[id], isManga: false)
+    }
+
     private func openDetailFor(id: Int64, title: String, coverURL: URL?, isManga: Bool = false, sourceKey: String? = nil) {
         // Every navigation to a *different* title funnels through here (a
         // relation, a recommendation, a command-palette pick). A character

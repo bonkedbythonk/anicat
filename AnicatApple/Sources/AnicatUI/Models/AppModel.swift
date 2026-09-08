@@ -807,14 +807,26 @@ public final class AppModel {
     /// back button) always landed on the home screen: opening season 2 from
     /// season 1's detail page overwrote `selectedMediaDetails` in place, so
     /// there was nothing to return to except nil.
-    var detailHistory: [(id: Int64, isManga: Bool, tab: MediaDetailView.DetailTab?)] = []
+    var detailHistory: [DetailStep] = []
+
+    /// One step of detail navigation. The catalog is part of it because an id
+    /// alone names three different titles -- an AniList entry, a TMDB film
+    /// and a TMDB series -- so a back step that only remembered the number
+    /// reloaded it through whichever path happened to run, which is how a
+    /// film's Back could land on an anime.
+    struct DetailStep {
+        let id: Int64
+        let isManga: Bool
+        let catalog: MediaCard.CardCatalog
+        let tab: MediaDetailView.DetailTab?
+    }
 
     /// The mirror image of `detailHistory`: entries popped by `closeDetail()`
     /// land here so a forward swipe/gesture can redo them, browser-style.
     /// Any *fresh* navigation (a new relation click, not a back/forward step)
     /// clears it — once you branch off the path you were on, "forward" no
     /// longer means anything.
-    var detailForwardStack: [(id: Int64, isManga: Bool, tab: MediaDetailView.DetailTab?)] = []
+    var detailForwardStack: [DetailStep] = []
 
     /// Kept live by `MediaDetailView`'s own tab-change callback so that
     /// whichever navigation site pushes onto `detailHistory`/`detailForwardStack`

@@ -276,7 +276,17 @@ public struct RootView: View {
                                 onTabChanged: { model.currentDetailTab = $0 }
                             )
                             .id(details.id)
-                            .transition(.opacity)
+                            // The scale is only for an open with no poster
+                            // to morph — Up Next's rows, the schedule, the
+                            // command palette. On a shelf open the poster is
+                            // mid-`matchedGeometryEffect` inside this view,
+                            // and scaling the page moves the thing the morph
+                            // is interpolating towards.
+                            .sumiTransition(
+                                model.openingDetailSourceKey == nil
+                                    ? AnyTransition.scale(scale: 0.96).combined(with: .opacity)
+                                    : AnyTransition.opacity
+                            )
                             .zIndex(2)
                             // Same reason `sectionContent` is gated on the
                             // detail page: the detail page stays mounted
@@ -301,7 +311,11 @@ public struct RootView: View {
                         }
                     }
                     .animation(.smooth(duration: 0.2), value: model.currentNavSection)
-                    .animation(.easeInOut(duration: 0.32), value: model.selectedMediaDetails != nil)
+                    // The morph spring, not a plain ease: this transaction
+                    // carries the poster hand-off as well as the page, and
+                    // the curve it had was slower and flatter than the one
+                    // `SumiMotion.morph` exists to name.
+                    .animation(.sumi(.morph), value: model.selectedMediaDetails != nil)
                     .animation(.easeInOut(duration: 0.32), value: model.personPageStack)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -1243,7 +1257,7 @@ private struct HomeSectionView: View {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Up Next")
-                                .font(.system(size: 19, weight: .semibold))
+                                .font(.sumiHeading(size: 19, weight: .semibold))
                                 .tracking(-0.3)
                                 .foregroundColor(SumiTheme.foreground)
 

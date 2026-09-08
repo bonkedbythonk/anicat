@@ -76,7 +76,7 @@ extension AppModel {
             // leaving poster with nothing to interpolate towards and it
             // simply faded. It is cleared after the animation instead, which
             // is the whole difference between a morph and a cross-fade.
-            withAnimation(.easeInOut(duration: 0.32)) {
+            withAnimation(.sumi(.morph)) {
                 selectedMediaDetails = nil
             } completion: { [weak self] in
                 self?.openingDetailSourceKey = nil
@@ -167,7 +167,7 @@ extension AppModel {
         activeDetailExtrasTask?.cancel()
         // Same reason as `closeDetail`: the source card has to keep its half
         // of the morph pair until the transition finishes.
-        withAnimation(.easeInOut(duration: 0.32)) {
+        withAnimation(.sumi(.morph)) {
             selectedMediaDetails = nil
         } completion: { [weak self] in
             self?.openingDetailSourceKey = nil
@@ -594,9 +594,20 @@ extension AppModel {
     /// under the viewer; without it, the entry's current state is fetched
     /// (one call, once per episode, only on the threshold crossing) and the
     /// mutation is sent directly.
-    func advanceAniListProgress(catalogId: Int64, episode: Int) async {
+    /// `contiguousOnly` refuses the write when the episode is more than one
+    /// past what AniList already has. The next-episode button uses it:
+    /// AniList's progress is cumulative, so sending 20 from a list sitting
+    /// at 5 marks 6 to 19 watched as well. Tapping Next to skip ahead should
+    /// mark the episode being left, not the fifteen it jumped over.
+    func advanceAniListProgress(
+        catalogId: Int64,
+        episode: Int,
+        contiguousOnly: Bool = false
+    ) async {
         if let details = selectedMediaDetails, details.id == catalogId {
-            guard (details.listProgress ?? 0) < episode else { return }
+            let progress = Int(details.listProgress ?? 0)
+            guard progress < episode else { return }
+            guard !contiguousOnly || episode <= progress + 1 else { return }
             await setEpisodeWatched(episode, watched: true)
             return
         }
@@ -607,7 +618,9 @@ extension AppModel {
             // page there is no local copy of the entry, and re-sending a
             // progress the list already passed would drag it backwards on a
             // rewatch.
-            guard Int(detail.listProgress ?? 0) < episode else { return }
+            let listed = Int(detail.listProgress ?? 0)
+            guard listed < episode else { return }
+            guard !contiguousOnly || episode <= listed + 1 else { return }
             let (progress, status) = Self.listEntryUpdate(
                 episode: episode,
                 watched: true,

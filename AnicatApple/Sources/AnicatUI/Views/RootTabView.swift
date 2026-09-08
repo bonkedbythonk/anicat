@@ -372,6 +372,10 @@ private struct NewEpisodeRow: View {
 private struct LibraryTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
+    /// Survives relaunches. `AppModel.libraryStatus` is the live value but it
+    /// resets to CURRENT every launch, so someone who lives in Completed had
+    /// to re-pick it every time they opened the app.
+    @AppStorage("anicat_library_status") private var storedStatus = "CURRENT"
 
     /// The six AniList list statuses, in the order the site itself lists
     /// them. Paired with their labels here rather than reusing
@@ -386,8 +390,10 @@ private struct LibraryTab: View {
         ("DROPPED", "Dropped")
     ]
 
+    /// Reads the stored value, not the model's: the label has to be right
+    /// on the first frame, before the fetch that syncs the model has run.
     private var currentLabel: String {
-        Self.statuses.first { $0.raw == model.libraryStatus }?.label ?? "Watching"
+        Self.statuses.first { $0.raw == storedStatus }?.label ?? "Watching"
     }
 
     var body: some View {
@@ -427,8 +433,11 @@ private struct LibraryTab: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Picker("Status", selection: Binding(
-                            get: { model.libraryStatus },
-                            set: { next in Task { await model.loadLibrary(status: next) } }
+                            get: { storedStatus },
+                            set: { next in
+                                storedStatus = next
+                                Task { await model.loadLibrary(status: next) }
+                            }
                         )) {
                             ForEach(Self.statuses, id: \.raw) { status in
                                 Text(status.label).tag(status.raw)
@@ -447,12 +456,15 @@ private struct LibraryTab: View {
             .refreshable { await model.loadLibrary() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
-        // `refreshAll` only ever fetches `libraryStatus`'s current value, and
-        // the tab is built before that first fetch lands. Without this the
-        // grid stayed empty until the filter was touched.
+        // Two jobs. `refreshAll` only ever fetches whatever `libraryStatus`
+        // already held and the tab is built before that first fetch lands,
+        // so without this the grid stayed empty until the filter was
+        // touched; and the model starts every launch on CURRENT, so the
+        // remembered status has to be pushed into it here.
         .task {
-            if model.libraryItems.isEmpty, model.isSignedIn {
-                await model.loadLibrary()
+            guard model.isSignedIn else { return }
+            if model.libraryStatus != storedStatus || model.libraryItems.isEmpty {
+                await model.loadLibrary(status: storedStatus)
             }
         }
     }

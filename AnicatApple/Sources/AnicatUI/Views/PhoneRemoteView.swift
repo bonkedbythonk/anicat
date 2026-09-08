@@ -38,12 +38,22 @@ struct PhoneRemoteView: View {
                     message(
                         "Not allowed",
                         detail: "\(node.name) refused this iPhone. Approve it there, or clear paired remotes in the Mac's settings and try again.",
-                        symbol: "xmark.shield"
+                        symbol: "xmark.shield",
+                        showsRetry: true
                     )
                 case .failed(let reason):
-                    message("Could not reach \(node.name)", detail: reason, symbol: "exclamationmark.triangle")
+                    message(
+                        "Could not reach \(node.name)",
+                        detail: reason,
+                        symbol: "exclamationmark.triangle",
+                        showsRetry: true
+                    )
                 case .idle:
-                    message("Disconnected", detail: node.name, symbol: "wifi.slash")
+                    // Reached by the Mac sleeping, quitting or dropping off
+                    // the Wi-Fi mid-session. Without the retry the sheet is a
+                    // dead end that has to be closed and reopened, because
+                    // the only dial-out is this view's `task`.
+                    message("Disconnected", detail: node.name, symbol: "wifi.slash", showsRetry: true)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -73,7 +83,7 @@ struct PhoneRemoteView: View {
         VStack(spacing: 28) {
             VStack(spacing: 6) {
                 Text(state.title)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.sumiHeading(size: 22, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(SumiTheme.foreground)
                 Text(state.episodeTitle.isEmpty
@@ -179,7 +189,12 @@ struct PhoneRemoteView: View {
         .disabled(!enabled)
     }
 
-    private func message(_ title: String, detail: String, symbol: String) -> some View {
+    private func message(
+        _ title: String,
+        detail: String,
+        symbol: String,
+        showsRetry: Bool = false
+    ) -> some View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 34))
@@ -191,6 +206,11 @@ struct PhoneRemoteView: View {
                 .font(.system(size: 14))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(SumiTheme.muted)
+            if showsRetry {
+                Button("Try Again") { client.connect(to: node) }
+                    .font(.system(size: 15, weight: .medium))
+                    .padding(.top, 6)
+            }
         }
         .padding(.horizontal, 32)
         .padding(.top, 80)

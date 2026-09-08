@@ -186,7 +186,7 @@ private struct TabHeader<Trailing: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.sumiHeading(size: 32, weight: .bold))
                     .foregroundStyle(SumiTheme.foreground)
                 Spacer(minLength: 8)
                 trailing
@@ -232,7 +232,16 @@ private struct DetailPush: ViewModifier {
 private struct UpNextTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
-    @State private var showRemote = false
+    /// The Mac the open remote sheet is driving, captured when the button is
+    /// pressed rather than read live.
+    ///
+    /// The button itself disappears the moment `discoveredMacNode` goes nil
+    /// -- the Mac sleeping, quitting or leaving the Wi-Fi -- and a `.sheet`
+    /// attached to it would go with it, snapping shut in the middle of
+    /// whatever was on screen. Same shape as the `MpvSurface` note above:
+    /// a view moved out of an `if` branch is torn down, and everything
+    /// hanging off it goes too.
+    @State private var remoteNode: BonjourDiscovery.DiscoveredNode?
 
     var body: some View {
         NavigationStack {
@@ -290,6 +299,12 @@ private struct UpNextTab: View {
             .refreshable { await model.refreshAll() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
+        // On the stack, not on the button: the button is conditional on a
+        // Mac being in range and takes its modifiers with it when that goes.
+        .sheet(item: $remoteNode) { node in
+            PhoneRemoteView(node: node)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     /// The same page for films and series. `cinemaShelves` is whatever TMDB
@@ -331,14 +346,10 @@ private struct UpNextTab: View {
     @ViewBuilder
     private var remoteButton: some View {
         if let node = BonjourDiscovery.shared.discoveredMacNode {
-            Button { showRemote = true } label: {
+            Button { remoteNode = node } label: {
                 Image(systemName: "macbook.and.iphone")
                     .font(.system(size: 21))
                     .foregroundStyle(SumiTheme.muted)
-            }
-            .sheet(isPresented: $showRemote) {
-                PhoneRemoteView(node: node)
-                    .presentationDetents([.medium, .large])
             }
         }
     }

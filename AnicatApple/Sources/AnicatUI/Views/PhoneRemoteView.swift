@@ -99,6 +99,20 @@ struct PhoneRemoteView: View {
 
     private var transport: some View {
         VStack(spacing: 28) {
+            // The poster the Mac is playing, so the sheet says what is on
+            // screen across the room without reading a word of it.
+            if let cover = state.coverUrl.flatMap(URL.init(string:)) {
+                CachedAsyncImage(url: cover, maxPixelSize: 600) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+                .frame(width: 128, height: 182)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                .padding(.top, 20)
+            }
+
             VStack(spacing: 6) {
                 Text(state.title)
                     .font(.sumiHeading(size: 22, weight: .semibold))
@@ -113,7 +127,7 @@ struct PhoneRemoteView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(SumiTheme.muted.opacity(0.7))
             }
-            .padding(.top, 24)
+            .padding(.top, state.coverUrl == nil ? 24 : 0)
 
             scrubber
 

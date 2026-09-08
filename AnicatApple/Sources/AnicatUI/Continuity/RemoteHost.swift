@@ -439,8 +439,23 @@ public final class RemoteHost {
             isBuffering: controller.isBuffering,
             playbackRate: controller.playbackRate,
             autoPlayNextEnabled: controller.autoPlayNextEnabled,
-            skipLabel: Self.skipLabel(for: controller)
+            skipLabel: Self.skipLabel(for: controller),
+            coverUrl: Self.coverURL(for: model)?.absoluteString
         )
+    }
+
+    /// The playing title's cover, resolved the same way the Mac's own Now
+    /// Playing tile resolves it: the open page first, then what the resolve
+    /// carried, then the registry. Sharing that order is the point -- two
+    /// lookups that could disagree would show the phone a different poster
+    /// from the one on the Mac's own lock screen.
+    private static func coverURL(for model: AppModel) -> URL? {
+        guard let catalogId = model.currentPlaybackCatalogId else { return nil }
+        let pageCover = model.selectedMediaDetails?.id == catalogId
+            ? model.selectedMediaDetails?.coverURL
+            : nil
+        return pageCover ?? model.playbackCoverURL
+            ?? model.registryCover(catalog: model.currentPlaybackCatalog, id: catalogId)
     }
 
     /// The offer the Mac's own Skip pill is making, or nil.

@@ -256,6 +256,11 @@ public struct RemoteState: Codable, Sendable {
     /// label rather than the window: the phone draws a button, it does not
     /// need to know where the jump lands.
     public var skipLabel: String?
+    /// The playing title's cover, as the Mac resolved it -- page, registry
+    /// or the resolve itself. Sent as a URL string rather than left for the
+    /// phone to look up by id: the Mac has already done that work for its
+    /// own Now Playing tile, and a second lookup could disagree with it.
+    public var coverUrl: String?
 
     public init(
         hasPlayback: Bool = false,
@@ -272,7 +277,8 @@ public struct RemoteState: Codable, Sendable {
         isBuffering: Bool = false,
         playbackRate: Double = 1,
         autoPlayNextEnabled: Bool = true,
-        skipLabel: String? = nil
+        skipLabel: String? = nil,
+        coverUrl: String? = nil
     ) {
         self.hasPlayback = hasPlayback
         self.isPlaying = isPlaying
@@ -289,6 +295,7 @@ public struct RemoteState: Codable, Sendable {
         self.playbackRate = playbackRate
         self.autoPlayNextEnabled = autoPlayNextEnabled
         self.skipLabel = skipLabel
+        self.coverUrl = coverUrl
     }
 
     /// Decoded field by field with a default for every one, rather than
@@ -318,6 +325,7 @@ public struct RemoteState: Codable, Sendable {
         playbackRate = try c.decodeIfPresent(Double.self, forKey: .playbackRate) ?? 1
         autoPlayNextEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoPlayNextEnabled) ?? true
         skipLabel = try c.decodeIfPresent(String.self, forKey: .skipLabel)
+        coverUrl = try c.decodeIfPresent(String.self, forKey: .coverUrl)
     }
 }
 

@@ -45,6 +45,10 @@ pub struct NovelInfo {
 pub struct NovelChapterContent {
     pub title: String,
     pub text: String,
+    /// Illustrations, each with the index of the paragraph it follows (-1 for
+    /// one before any prose). Always empty for Syosetu, which is a web-novel
+    /// site and serves text.
+    pub images: Vec<(i32, String)>,
 }
 
 pub struct SyosetuClient {
@@ -137,7 +141,7 @@ impl SyosetuClient {
             return Err(format!("syosetu returned no chapter text for {url}"));
         }
         let text = paragraphs.join("\n\n");
-        Ok(NovelChapterContent { title, text })
+        Ok(NovelChapterContent { title, text, images: Vec::new() })
     }
 }
 

@@ -138,6 +138,18 @@ pub struct FfiNovelDownload {
     pub bytes: u64,
 }
 
+/// One illustration, ready to draw.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NovelImage {
+    /// Index of the paragraph it follows; -1 for one before any prose.
+    pub after_paragraph: i32,
+    /// The source's `https` URL, or -- for a downloaded volume -- a plain
+    /// filesystem path. A path and not a `file://` string because Application
+    /// Support has a space in it, and `URL(string:)` answers nil for that;
+    /// the caller checks for the scheme and builds a file URL from the rest.
+    pub url: String,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct NovelInfo {
     pub title: String,
@@ -150,6 +162,7 @@ pub struct NovelInfo {
 pub struct NovelChapterContent {
     pub title: String,
     pub text: String,
+    pub images: Vec<NovelImage>,
 }
 
 impl From<crate::reader::syosetu::NovelChapterRef> for NovelChapterRef {
@@ -171,7 +184,15 @@ impl From<crate::reader::syosetu::NovelInfo> for NovelInfo {
 
 impl From<crate::reader::syosetu::NovelChapterContent> for NovelChapterContent {
     fn from(c: crate::reader::syosetu::NovelChapterContent) -> Self {
-        Self { title: c.title, text: c.text }
+        Self {
+            title: c.title,
+            text: c.text,
+            images: c
+                .images
+                .into_iter()
+                .map(|(after_paragraph, url)| NovelImage { after_paragraph, url })
+                .collect(),
+        }
     }
 }
 
@@ -2826,13 +2847,22 @@ impl AnicatEngine {
             .map_err(|msg| AnicatError::Network { msg })?;
 
         let mut chapters = Vec::with_capacity(refs.len());
-        for chapter in &refs {
+        // Every illustration in the volume, tagged with the chapter it belongs
+        // to, so they can be fetched as one pool rather than four at a time
+        // per chapter with a stall between each.
+        let mut wanted_images: Vec<(usize, usize, i32, String)> = Vec::new();
+        for (position, chapter) in refs.iter().enumerate() {
             let anchor = chapter.url.split('#').nth(1).unwrap_or_default().to_string();
             // A section that fails is stored empty rather than failing the
-            // download. Every volume opens with image-only pages, and one
-            // section refusing must not cost the reader the other fifteen.
+            // download. One section refusing must not cost the reader the
+            // other fifteen.
             let text = match self.lnori.chapter_content(&book_url, &anchor).await {
-                Ok(content) => content.text,
+                Ok(content) => {
+                    for (index, (after, url)) in content.images.iter().enumerate() {
+                        wanted_images.push((position, index, *after, url.clone()));
+                    }
+                    content.text
+                }
                 Err(msg) => {
                     log::warn!("[novel] {} section {anchor} skipped: {msg}", book_url);
                     String::new()
@@ -2842,11 +2872,43 @@ impl AnicatEngine {
                 title: chapter.title.clone(),
                 url: chapter.url.clone(),
                 text,
+                images: Vec::new(),
             });
         }
 
+        // The cover is not in any section, so it comes from its own lookup.
+        // Fetched with the rest and stored under a fixed name, since there is
+        // at most one per volume.
+        let cover_url = self.lnori.volume_cover(&book_url).await.ok().flatten();
+        let catalog_name = Catalog::from(catalog);
+        let (stored_images, image_bytes) = self
+            .novels
+            .store_images(&self.http, catalog_name.as_str(), catalog_id, &book_url, wanted_images)
+            .await;
+        for (chapter, image) in stored_images {
+            if let Some(row) = chapters.get_mut(chapter) {
+                row.images.push(image);
+            }
+        }
+        // Fetched concurrently, so they come back in whatever order the host
+        // answered; a page's illustrations have to be in the order they appear
+        // on it.
+        for chapter in &mut chapters {
+            chapter.images.sort_by_key(|image| (image.after_paragraph, image.file.clone()));
+        }
+
+        let cover = match cover_url {
+            Some(url) => self
+                .novels
+                .store_cover(&self.http, catalog_name.as_str(), catalog_id, &book_url, &url)
+                .await,
+            None => None,
+        };
+
         let volume = crate::reader::novel_offline::StoredNovelVolume {
+            format: crate::reader::novel_offline::FORMAT_VERSION,
             series: series_title,
+            cover,
             title: volume_title.clone(),
             author,
             source_url: book_url.clone(),
@@ -2859,11 +2921,11 @@ impl AnicatEngine {
             });
         }
 
-        let catalog_name = Catalog::from(catalog);
         let bytes = self
             .novels
             .store(catalog_name.as_str(), catalog_id, &book_url, &volume)
-            .map_err(|msg| AnicatError::Storage { msg })?;
+            .map_err(|msg| AnicatError::Storage { msg })?
+            + image_bytes;
 
         self.registry
             .record_offline_chapter(crate::db::service::NewOfflineChapter {
@@ -2924,10 +2986,33 @@ impl AnicatEngine {
         let catalog = Catalog::from(catalog);
         let volume = self.novels.load(catalog.as_str(), catalog_id, &book_url)?;
         let chapter = volume.chapters.iter().find(|c| c.url == chapter_url)?;
-        if chapter.text.trim().is_empty() {
+        // Pictures alone are enough: the colour inserts are a section with no
+        // prose at all, and answering `None` for them sent the reader back to
+        // the network for a chapter it already had.
+        if chapter.text.trim().is_empty() && chapter.images.is_empty() {
             return None;
         }
-        Some(NovelChapterContent { title: chapter.title.clone(), text: chapter.text.clone() })
+        Some(NovelChapterContent {
+            title: chapter.title.clone(),
+            text: chapter.text.clone(),
+            images: chapter
+                .images
+                .iter()
+                .filter_map(|image| {
+                    let path =
+                        self.novels.image_path(catalog.as_str(), catalog_id, &book_url, image);
+                    // A file that has gone is one missing picture, not a
+                    // chapter that fails to open.
+                    if !path.exists() {
+                        return None;
+                    }
+                    Some(NovelImage {
+                        after_paragraph: image.after_paragraph,
+                        url: path.to_string_lossy().to_string(),
+                    })
+                })
+                .collect(),
+        })
     }
 
     /// Writes a downloaded volume out as an EPUB and answers where it landed.
@@ -2973,12 +3058,44 @@ impl AnicatEngine {
             // stacking a second copy beside it.
             identifier: format!("anicat:{}:{catalog_id}:{book_url}", catalog_name.as_str()),
             language: "en".to_string(),
+            cover: stored.cover.as_ref().and_then(|file| {
+                let image = crate::reader::novel_offline::StoredNovelImage {
+                    url: String::new(),
+                    file: file.clone(),
+                    after_paragraph: -1,
+                };
+                let path =
+                    self.novels.image_path(catalog_name.as_str(), catalog_id, &book_url, &image);
+                std::fs::read(path).ok().map(|bytes| (file.clone(), bytes))
+            }),
             chapters: stored
                 .chapters
                 .iter()
                 .map(|c| crate::reader::epub::EpubChapter {
                     title: c.title.clone(),
                     text: c.text.clone(),
+                    // Read off disk here rather than carried through the
+                    // stored volume: the manifest holds file names, and an
+                    // image whose file has gone is one missing picture, not a
+                    // failed export.
+                    images: c
+                        .images
+                        .iter()
+                        .filter_map(|image| {
+                            let path = self.novels.image_path(
+                                catalog_name.as_str(),
+                                catalog_id,
+                                &book_url,
+                                image,
+                            );
+                            let bytes = std::fs::read(path).ok()?;
+                            Some(crate::reader::epub::EpubImage {
+                                after_paragraph: image.after_paragraph,
+                                file: image.file.clone(),
+                                bytes,
+                            })
+                        })
+                        .collect(),
                 })
                 .collect(),
         };

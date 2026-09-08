@@ -342,19 +342,25 @@ fn repeated_title_paragraphs_are_dropped() {
     let body = "Chapter 1: Is This Another World?\n\nChapter 1:\nIs This Another World?\n\nWhen I opened my eyes, the first thing I saw was dazzling light.";
     assert_eq!(
         strip_repeated_title(body, "Chapter 1: Is This Another World?"),
-        "When I opened my eyes, the first thing I saw was dazzling light."
+        ("When I opened my eyes, the first thing I saw was dazzling light.".to_string(), 2)
     );
 }
 
 #[test]
 fn a_title_only_section_keeps_its_one_paragraph() {
-    assert_eq!(strip_repeated_title("Color Inserts", "Color Inserts"), "Color Inserts");
+    assert_eq!(
+        strip_repeated_title("Color Inserts", "Color Inserts"),
+        ("Color Inserts".to_string(), 0)
+    );
 }
 
 #[test]
 fn prose_that_merely_starts_with_the_title_word_survives() {
     let body = "Chapter 1 was the part he remembered.\n\nThe rest he did not.";
-    assert_eq!(strip_repeated_title(body, "Chapter 1: Is This Another World?"), body);
+    assert_eq!(
+        strip_repeated_title(body, "Chapter 1: Is This Another World?"),
+        (body.to_string(), 0)
+    );
 }
 
 #[test]
@@ -370,4 +376,59 @@ fn a_drop_cap_that_is_a_word_on_its_own_keeps_its_space() {
 fn a_drop_cap_that_continues_its_word_is_left_joined() {
     let html = r#"<p><span style="font-size: 3.00em;">W</span><span>hen I opened my eyes.</span></p>"#;
     assert_eq!(html_to_text(html), "When I opened my eyes.");
+}
+
+#[test]
+fn an_illustration_keeps_the_paragraph_it_follows() {
+    // Position and not just presence: most of a volume's images sit inside
+    // chapters, where an illustration belongs to the sentence before it.
+    let html = "<p>First.</p><p>Second.</p><img src=\"https://img.lnori.com/1-09.jpg\"><p>Third.</p>";
+    let prose = html_to_prose(html);
+    assert_eq!(prose.text, "First.\n\nSecond.\n\nThird.");
+    assert_eq!(prose.images, vec![(1, "https://img.lnori.com/1-09.jpg".to_string())]);
+}
+
+#[test]
+fn an_image_before_any_prose_sits_at_minus_one() {
+    let html = "<img src=\"https://img.lnori.com/1-01.jpg\"><p>After.</p>";
+    let prose = html_to_prose(html);
+    assert_eq!(prose.images, vec![(-1, "https://img.lnori.com/1-01.jpg".to_string())]);
+}
+
+#[test]
+fn an_image_only_section_yields_its_images_and_no_prose() {
+    // The Color Inserts page. It read as an empty chapter before, which is
+    // what "the EPUB is missing the inserts" looked like.
+    let html = "<img src=\"https://img.lnori.com/1-02.jpg\"><img src=\"https://img.lnori.com/1-03.jpg\">";
+    let prose = html_to_prose(html);
+    assert!(prose.text.is_empty());
+    assert_eq!(prose.images.len(), 2);
+    assert!(prose.images.iter().all(|(after, _)| *after == -1));
+}
+
+#[test]
+fn the_cover_comes_from_the_pages_structured_metadata() {
+    // Not from an `<img>`: the cover's own tag lives in a `page01` section the
+    // table of contents never links, so no chapter slice reaches it and the
+    // exported book had no cover at all.
+    let html = r#"<script type="application/ld+json">{"id":"12020",
+        "image":"https://img.lnori.com/12020-01.jpg","publisher":{}}</script>
+        <section id="page02"><img src="https://img.lnori.com/12020-02.jpg"></section>"#;
+    assert_eq!(cover_image(html).as_deref(), Some("https://img.lnori.com/12020-01.jpg"));
+}
+
+#[test]
+fn a_page_that_states_no_cover_yields_none_rather_than_the_first_picture() {
+    assert!(cover_image(r#"<section id="page02"><img src="a.jpg"></section>"#).is_none());
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_live_volume_page_has_a_cover() {
+    let client = LnoriClient::new(reqwest::Client::new());
+    let cover = client
+        .volume_cover("https://lnori.com/book/12020/mushoku-tensei-jobless-reincarnation-vol-1")
+        .await;
+    println!("cover = {cover:?}");
+    assert!(cover.unwrap().is_some());
 }

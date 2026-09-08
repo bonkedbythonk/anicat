@@ -21,15 +21,26 @@
 //!   shape the device is, and the device's own serif is the one its rendering
 //!   is tuned for.
 //!
-//! Text only. The source's colour inserts are images this does not carry, and
-//! a section that is nothing but images is left out rather than exported as a
-//! blank page.
+//! **Illustrations are embedded, not linked.** A light novel's colour inserts
+//! and its in-chapter art are part of the book, and an EPUB is read on a
+//! device that may never see the network the images came from -- so the bytes
+//! go in the archive. They are already on disk by the time this runs: a volume
+//! is downloaded before it is exported.
 
 use crate::reader::zip::{self, ZipEntry};
 
 pub struct EpubChapter {
     pub title: String,
     pub text: String,
+    pub images: Vec<EpubImage>,
+}
+
+pub struct EpubImage {
+    /// Index of the paragraph it follows; -1 for one before any prose.
+    pub after_paragraph: i32,
+    /// File name inside the archive's `images/` directory.
+    pub file: String,
+    pub bytes: Vec<u8>,
 }
 
 pub struct EpubBook {
@@ -39,6 +50,12 @@ pub struct EpubBook {
     /// library that deduplicates on identifier.
     pub identifier: String,
     pub language: String,
+    /// The cover image's bytes and file name. Declared two ways in the
+    /// package, because the two generations disagree: EPUB 3 marks the
+    /// manifest item `cover-image`, EPUB 2 names it from a `<meta name="cover">`
+    /// -- and a device that reads only the one it knows shows a blank tile
+    /// otherwise.
+    pub cover: Option<(String, Vec<u8>)>,
     pub chapters: Vec<EpubChapter>,
 }
 
@@ -47,17 +64,25 @@ body { margin: 0 5%; line-height: 1.45; text-align: justify; }
 h1 { font-size: 1.35em; line-height: 1.25; margin: 1.5em 0 1em; text-align: left; page-break-before: always; }
 p { margin: 0; text-indent: 1.2em; widows: 2; orphans: 2; }
 p.opening { text-indent: 0; margin-top: 0.6em; }
+/* Illustrations are full-page scans. Width capped at the page and height at
+   the viewport so a portrait insert is not taller than the screen it is read
+   on, which on an e-ink panel means a page that can only be scrolled past. */
+div.illustration { margin: 1em 0; text-align: center; page-break-inside: avoid; }
+div.illustration img { max-width: 100%; max-height: 100%; }
 "#;
 
 /// The finished archive.
 ///
-/// A chapter with no prose is dropped rather than written: the first entries
-/// of every volume are the cover and the colour inserts, which are images, and
-/// as spine items they would be blank pages the reader has to turn past before
-/// the book starts.
+/// A section with neither prose nor pictures is dropped rather than written:
+/// as a spine item it would be a blank page the reader has to turn past.
 pub fn build(book: &EpubBook) -> Result<Vec<u8>, String> {
-    let chapters: Vec<&EpubChapter> =
-        book.chapters.iter().filter(|c| !c.text.trim().is_empty()).collect();
+    // A section with pictures and no prose is the colour inserts, and it is
+    // part of the book. Only a section with neither is dropped.
+    let chapters: Vec<&EpubChapter> = book
+        .chapters
+        .iter()
+        .filter(|c| !c.text.trim().is_empty() || !c.images.is_empty())
+        .collect();
     if chapters.is_empty() {
         return Err("nothing to export: this volume has no readable text".to_string());
     }
@@ -74,12 +99,21 @@ pub fn build(book: &EpubBook) -> Result<Vec<u8>, String> {
         data: CONTAINER_XML.as_bytes().to_vec(),
     });
     entries.push(ZipEntry { name: "OEBPS/style.css".into(), data: STYLESHEET.as_bytes().to_vec() });
+    if let Some((file, bytes)) = &book.cover {
+        entries.push(ZipEntry { name: format!("OEBPS/images/{file}"), data: bytes.clone() });
+    }
 
     for (index, chapter) in chapters.iter().enumerate() {
         entries.push(ZipEntry {
             name: format!("OEBPS/{}", chapter_file(index)),
             data: chapter_xhtml(chapter).into_bytes(),
         });
+        for image in &chapter.images {
+            entries.push(ZipEntry {
+                name: format!("OEBPS/images/{}", image.file),
+                data: image.bytes.clone(),
+            });
+        }
     }
 
     entries.push(ZipEntry { name: "OEBPS/nav.xhtml".into(), data: nav_xhtml(book, &chapters).into_bytes() });
@@ -103,6 +137,7 @@ fn chapter_file(index: usize) -> String {
 
 fn chapter_xhtml(chapter: &EpubChapter) -> String {
     let mut body = String::new();
+    illustrations(chapter, -1, &mut body);
     for (index, paragraph) in chapter.text.split("\n\n").enumerate() {
         let paragraph = paragraph.trim();
         if paragraph.is_empty() {
@@ -119,6 +154,7 @@ fn chapter_xhtml(chapter: &EpubChapter) -> String {
         // typesetting convention every printed novel follows.
         let class = if index == 0 { " class=\"opening\"" } else { "" };
         body.push_str(&format!("    <p{class}>{inner}</p>\n"));
+        illustrations(chapter, index as i32, &mut body);
     }
 
     format!(
@@ -137,6 +173,27 @@ fn chapter_xhtml(chapter: &EpubChapter) -> String {
         title = escape(&chapter.title),
         body = body
     )
+}
+
+/// The illustrations that follow one paragraph, in order.
+fn illustrations(chapter: &EpubChapter, after: i32, body: &mut String) {
+    for image in chapter.images.iter().filter(|i| i.after_paragraph == after) {
+        body.push_str(&format!(
+            "    <div class=\"illustration\"><img src=\"images/{}\" alt=\"\"/></div>\n",
+            escape(&image.file)
+        ));
+    }
+}
+
+/// What the manifest calls a file, by extension. A reader that does not
+/// recognise the declared type shows a broken image rather than guessing.
+fn media_type(file: &str) -> &'static str {
+    match file.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    }
 }
 
 fn nav_xhtml(book: &EpubBook, chapters: &[&EpubChapter]) -> String {
@@ -214,18 +271,36 @@ fn ncx(book: &EpubBook, chapters: &[&EpubChapter]) -> String {
 }
 
 fn opf(book: &EpubBook, chapters: &[&EpubChapter]) -> String {
-    let manifest = chapters
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            format!(
-                "    <item id=\"ch{index}\" href=\"{file}\" media-type=\"application/xhtml+xml\"/>",
-                index = index,
-                file = chapter_file(index)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut manifest_items = Vec::new();
+    if let Some((file, _)) = &book.cover {
+        manifest_items.push(format!(
+            // The id is literally "cover" because some readers -- the Nook
+            // Color is the one Calibre names -- look the cover up by that id
+            // rather than by the EPUB 3 property or the EPUB 2 meta.
+            "    <item id=\"cover\" href=\"images/{file}\" media-type=\"{media}\" properties=\"cover-image\"/>",
+            file = escape(file),
+            media = media_type(file)
+        ));
+    }
+    for (index, chapter) in chapters.iter().enumerate() {
+        manifest_items.push(format!(
+            "    <item id=\"ch{index}\" href=\"{file}\" media-type=\"application/xhtml+xml\"/>",
+            index = index,
+            file = chapter_file(index)
+        ));
+        for (position, image) in chapter.images.iter().enumerate() {
+            // Every file in the archive has to be declared. An `<img>` whose
+            // target is missing from the manifest is an EPUB error, and the
+            // stricter readers refuse the whole book over it rather than
+            // dropping the one picture.
+            manifest_items.push(format!(
+                "    <item id=\"img{index}_{position}\" href=\"images/{file}\" media-type=\"{media}\"/>",
+                file = escape(&image.file),
+                media = media_type(&image.file)
+            ));
+        }
+    }
+    let manifest = manifest_items.join("\n");
     let spine = chapters
         .iter()
         .enumerate()
@@ -242,7 +317,7 @@ fn opf(book: &EpubBook, chapters: &[&EpubChapter]) -> String {
     <dc:creator>{author}</dc:creator>
     <dc:language>{language}</dc:language>
     <meta property="dcterms:modified">{modified}</meta>
-  </metadata>
+{cover_meta}  </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
@@ -262,6 +337,11 @@ fn opf(book: &EpubBook, chapters: &[&EpubChapter]) -> String {
         // `dcterms:modified` is allowed to take; a fractional or offset
         // timestamp is an EPUB 3 validation error.
         modified = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
+        cover_meta = if book.cover.is_some() {
+            "    <meta name=\"cover\" content=\"cover\"/>\n"
+        } else {
+            ""
+        },
         manifest = manifest,
         spine = spine
     )

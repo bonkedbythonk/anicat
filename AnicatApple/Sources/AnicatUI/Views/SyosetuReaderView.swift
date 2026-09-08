@@ -1,4 +1,5 @@
 import SwiftUI
+import AnicatCoreKit
 
 /// Reads a Syosetu (ncode.syosetu.com) light novel from a pasted URL —
 /// see `AppModel.SyosetuSession`'s comment for why this is a direct-URL
@@ -101,6 +102,10 @@ public struct SyosetuReaderView: View {
         model.syosetuSession?.chapterText.components(separatedBy: "\n\n") ?? []
     }
 
+    private var illustrations: [NovelImage] {
+        model.syosetuSession?.chapterImages ?? []
+    }
+
     @ViewBuilder
     private func readerBody(_ session: AppModel.SyosetuSession) -> some View {
         VStack(spacing: 0) {
@@ -181,15 +186,22 @@ public struct SyosetuReaderView: View {
                     // so the two can be shown together. Deliberately not
                     // built — Syosetu text is the raw Japanese and a wrong
                     // translation reads as a real sentence.
+                    // Before any prose: a colour-inserts section is nothing
+                    // but these, which is why it used to render as a blank
+                    // page.
+                    illustrationStack(after: -1)
                     ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                        Text(paragraph.isEmpty ? " " : paragraph)
-                            .font(typography.font())
-                            .lineSpacing(typography.lineSpacing)
-                            .foregroundColor(typography.theme.foreground)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(index)
-                            .onAppear { markVisible(index, visible: true) }
-                            .onDisappear { markVisible(index, visible: false) }
+                        VStack(alignment: .leading, spacing: typography.paragraphSpacing) {
+                            Text(paragraph.isEmpty ? " " : paragraph)
+                                .font(typography.font())
+                                .lineSpacing(typography.lineSpacing)
+                                .foregroundColor(typography.theme.foreground)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            illustrationStack(after: index)
+                        }
+                        .id(index)
+                        .onAppear { markVisible(index, visible: true) }
+                        .onDisappear { markVisible(index, visible: false) }
                     }
                 }
                 .frame(maxWidth: typography.columnWidth)
@@ -224,6 +236,41 @@ public struct SyosetuReaderView: View {
                 try? await Task.sleep(for: Self.restoreDelay)
             }
         }
+    }
+
+    /// The illustrations that follow one paragraph, in the order the page put
+    /// them in.
+    @ViewBuilder
+    private func illustrationStack(after index: Int) -> some View {
+        let matching = illustrations.filter { Int($0.afterParagraph) == index }
+        if !matching.isEmpty {
+            VStack(spacing: typography.paragraphSpacing) {
+                ForEach(matching, id: \.url) { illustration($0) }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func illustration(_ image: NovelImage) -> some View {
+        // A downloaded volume hands back a plain path, not a `file://`
+        // string: Application Support has a space in it and `URL(string:)`
+        // answers nil for that, so every stored illustration would silently
+        // fail to draw.
+        let url = image.url.hasPrefix("http")
+            ? URL(string: image.url)
+            : URL(fileURLWithPath: image.url)
+        return CachedAsyncImage(url: url, fit: .maxPixelSize(1400)) { rendered in
+            rendered
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+        } placeholder: {
+            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                .fill(typography.theme.foreground.opacity(0.06))
+                .frame(height: 260)
+                .overlay(ProgressView().controlSize(.small))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func markVisible(_ index: Int, visible: Bool) {

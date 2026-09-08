@@ -292,6 +292,7 @@ extension AppModel {
             syosetuSession?.currentChapterIndex = index
             syosetuSession?.chapterTitle = chapter.title
             syosetuSession?.chapterText = chapter.text
+            syosetuSession?.chapterImages = chapter.images
             syosetuSession?.isLoading = false
             NovelPreferences.setLastNovel(
                 url: sourceURL,

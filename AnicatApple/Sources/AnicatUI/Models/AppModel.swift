@@ -1096,6 +1096,11 @@ public final class AppModel {
         public var currentChapterIndex: Int = 0
         public var chapterTitle: String = ""
         public var chapterText: String = ""
+        /// The open chapter's illustrations, each with the paragraph it
+        /// follows. A light novel's colour inserts are a section with no prose
+        /// at all, so this is not decoration on top of the text -- for some
+        /// sections it is the whole page.
+        public var chapterImages: [NovelImage] = []
         public var isLoading = false
         public var errorMessage: String?
     }

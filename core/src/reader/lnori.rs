@@ -195,6 +195,16 @@ impl LnoriClient {
         Ok(chapters)
     }
 
+    /// The volume's cover, if the page carries one.
+    ///
+    /// It sits *before* the first `<section>`, so no chapter slice contains it
+    /// and it is the one image `chapter_content` can never return -- which is
+    /// exactly the image an e-reader's library grid shows.
+    pub async fn volume_cover(&self, book_url: &str) -> Result<Option<String>, String> {
+        let html = self.page(book_url).await?;
+        Ok(cover_image(&html))
+    }
+
     /// One section's text, sliced out of the volume page.
     pub async fn chapter_content(&self, book_url: &str, anchor: &str) -> Result<NovelChapterContent, String> {
         let html = self.page(book_url).await?;
@@ -211,10 +221,19 @@ impl LnoriClient {
             .or_else(|| book_title(&html))
             .unwrap_or_default();
         // An empty body is not an error: the first two entries of every volume
-        // are Cover and Insert, which are image-only sections. Failing them
-        // would make a working book look like a broken source at the exact
-        // point a reader opens it.
-        Ok(NovelChapterContent { text: strip_repeated_title(&html_to_text(slice), &title), title })
+        // are Cover and Insert, which carry illustrations and no prose.
+        let prose = html_to_prose(slice);
+        let (text, dropped) = strip_repeated_title(&prose.text, &title);
+        // The dedupe removes leading paragraphs, so every image positioned
+        // after one of them has moved with it. Left unshifted, a chapter's
+        // first illustration climbed two paragraphs up the page each time the
+        // title block was stripped.
+        let images = prose
+            .images
+            .into_iter()
+            .map(|(after, url)| ((after - dropped).max(-1), url))
+            .collect();
+        Ok(NovelChapterContent { title, text, images })
     }
 }
 
@@ -623,25 +642,42 @@ fn first_heading(html: &str) -> Option<String> {
 /// and digits alone because the two copies punctuate and break differently
 /// ("Chapter 1: Is This Another World?" against "Chapter 1:\nIs This Another
 /// World?").
-fn strip_repeated_title(text: &str, title: &str) -> String {
+/// Returns the trimmed text and how many paragraphs went, so anything
+/// positioned by paragraph index can be moved with it.
+fn strip_repeated_title(text: &str, title: &str) -> (String, i32) {
     let wanted = alphanumeric_key(title);
     if wanted.is_empty() {
-        return text.to_string();
+        return (text.to_string(), 0);
     }
     let mut rest = text;
+    let mut dropped = 0;
     while let Some((head, tail)) = rest.split_once("\n\n") {
         if alphanumeric_key(head) != wanted {
             break;
         }
         rest = tail;
+        dropped += 1;
     }
     // A section that is nothing but its title keeps it, so an image-only
     // Color Inserts page does not read as a chapter that failed to load.
-    if rest.is_empty() { text.to_string() } else { rest.to_string() }
+    if rest.is_empty() { (text.to_string(), 0) } else { (rest.to_string(), dropped) }
 }
 
 fn alphanumeric_key(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
+}
+
+/// The volume's cover.
+///
+/// Read from the page's JSON-LD `"image"`, which is the only place it is
+/// stated as *the cover* rather than as one picture among others. It does
+/// appear as an `<img>` too, inside a `page01` section that the table of
+/// contents does not link -- so no chapter slice reaches it and looking for
+/// the first `<img>` before the first `<section>` finds nothing at all.
+fn cover_image(html: &str) -> Option<String> {
+    let re = Regex::new(r#"(?i)"image"\s*:\s*"([^"]+)""#).unwrap();
+    let url = re.captures(html)?[1].trim().to_string();
+    if url.starts_with("http") { Some(url) } else { None }
 }
 
 fn strip_tags(html: &str) -> String {
@@ -684,9 +720,34 @@ fn decode_entities(s: &str) -> String {
 /// several source lines, so a plain newline inside one is not a line break the
 /// book asked for and joining those back up is what keeps a paragraph a
 /// paragraph. Only `<br>` and a closed block are breaks.
+#[cfg(test)]
 fn html_to_text(html: &str) -> String {
+    html_to_prose(html).text
+}
+
+/// The text of a slice, and the illustrations in it with the paragraph each
+/// one follows.
+///
+/// A position and not just a list: a volume's images are not all front matter.
+/// Of the 21 in Mushoku Tensei volume 1, six are colour inserts and the rest
+/// sit *inside* chapters, where an illustration belongs to the sentence before
+/// it. Collected without positions they would all pile up at the end of the
+/// chapter, which is worse than the blank front-matter pages this replaces.
+///
+/// `after_paragraph` is -1 for an image before any prose -- the whole of a
+/// colour-inserts section.
+pub struct Prose {
+    pub text: String,
+    pub images: Vec<(i32, String)>,
+}
+
+fn html_to_prose(html: &str) -> Prose {
     const LINE_BREAK: char = '\u{1}';
     const PARAGRAPH_BREAK: char = '\u{2}';
+    // Around a URL, so an image survives tag stripping with its place in the
+    // text intact. Control characters no prose contains.
+    const IMAGE_OPEN: char = '\u{3}';
+    const IMAGE_CLOSE: char = '\u{4}';
 
     let script_re = Regex::new(r"(?is)<(script|style)[^>]*>.*?</(script|style)>").unwrap();
     let br_re = Regex::new(r"(?i)<br\s*/?>").unwrap();
@@ -705,24 +766,44 @@ fn html_to_text(html: &str) -> String {
         Regex::new(r"(?is)<(?:span|b|i|em|strong|a)[^>]*>\s*</(?:span|b|i|em|strong|a)>").unwrap();
     let block_re = Regex::new(r"(?i)</(?:p|h[1-6]|div|section|li|blockquote|figcaption)>").unwrap();
 
+    let img_re =
+        Regex::new(r#"(?is)<img[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
+
     let cleaned = script_re.replace_all(html, "");
-    let spaced = empty_re.replace_all(&cleaned, " ");
+    // Before the empty-element pass: an `<img>` has no closing tag, but a
+    // `<span><img ...></span>` would otherwise be seen as empty once the image
+    // is gone.
+    let marked = img_re.replace_all(&cleaned, |caps: &regex_lite::Captures| {
+        format!("{PARAGRAPH_BREAK}{IMAGE_OPEN}{}{IMAGE_CLOSE}{PARAGRAPH_BREAK}", &caps[1])
+    });
+    let spaced = empty_re.replace_all(&marked, " ");
     let with_breaks = br_re.replace_all(&spaced, LINE_BREAK.to_string().as_str());
     let with_blocks = block_re.replace_all(&with_breaks, PARAGRAPH_BREAK.to_string().as_str());
 
-    strip_tags(&with_blocks)
-        .split(PARAGRAPH_BREAK)
-        .map(|paragraph| {
-            paragraph
-                .split(LINE_BREAK)
-                .map(collapse_spaces)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .filter(|paragraph| !paragraph.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut images: Vec<(i32, String)> = Vec::new();
+
+    for block in strip_tags(&with_blocks).split(PARAGRAPH_BREAK) {
+        if let Some(url) = block
+            .trim()
+            .strip_prefix(IMAGE_OPEN)
+            .and_then(|rest| rest.strip_suffix(IMAGE_CLOSE))
+        {
+            images.push((paragraphs.len() as i32 - 1, url.trim().to_string()));
+            continue;
+        }
+        let paragraph = block
+            .split(LINE_BREAK)
+            .map(collapse_spaces)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !paragraph.is_empty() {
+            paragraphs.push(paragraph);
+        }
+    }
+
+    Prose { text: paragraphs.join("\n\n"), images }
 }
 
 #[cfg(test)]

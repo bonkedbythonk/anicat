@@ -507,7 +507,7 @@ private struct SearchTab: View {
 /// layout before iOS 16's `Layout`, and a `LazyVGrid` cannot do it either:
 /// its columns are fixed widths, so short and long terms would sit in the
 /// same column width and the row would read as a table.
-private struct FlowChips: Layout {
+struct FlowChips: Layout {
     let items: [String]
     let onTap: (String) -> Void
 

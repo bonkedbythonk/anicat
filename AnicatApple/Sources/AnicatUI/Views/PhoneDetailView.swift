@@ -18,6 +18,7 @@ struct PhoneDetailView: View {
     }
 
     @State private var section: Section = .episodes
+    @State private var synopsisExpanded = false
 
     var body: some View {
         ScrollView {
@@ -118,25 +119,149 @@ struct PhoneDetailView: View {
 
     @ViewBuilder
     private func about(_ details: HeroBanner.Details) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
+            if let next = details.nextEpisodeText, !next.isEmpty {
+                Text(next.uppercased())
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(SumiTheme.indigo)
+            }
+
+            factRow(details)
+
             if let synopsis = details.synopsis, !synopsis.isEmpty {
-                Text(synopsis)
-                    .font(.system(size: 14))
-                    .foregroundStyle(SumiTheme.foreground)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(synopsis)
+                        .font(.system(size: 14))
+                        .lineSpacing(4)
+                        .foregroundStyle(SumiTheme.foreground.opacity(0.85))
+                        .lineLimit(synopsisExpanded ? nil : 4)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(synopsisExpanded ? "Show less" : "Read more") {
+                        withAnimation(.snappy) { synopsisExpanded.toggle() }
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                }
             }
+
             if !details.genres.isEmpty {
-                Text(details.genres.joined(separator: " · "))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(SumiTheme.muted)
+                VStack(alignment: .leading, spacing: 8) {
+                    metaLabel("GENRES")
+                    FlowChips(items: details.genres) { _ in }
+                }
             }
-            if let studio = details.studio {
-                Text(studio.uppercased())
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(SumiTheme.muted)
+
+            // Every credited studio is a production committee of licensors
+            // and music labels; `isMain` is the animation studio, which is
+            // the only one worth a line on a phone.
+            if let studios = details.studios, !studios.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    metaLabel("STUDIO")
+                    Text(studios.filter(\.isMain).map(\.name).joined(separator: ", "))
+                        .font(.system(size: 13))
+                        .foregroundStyle(SumiTheme.foreground)
+                }
+            } else if let studio = details.studio {
+                VStack(alignment: .leading, spacing: 6) {
+                    metaLabel("STUDIO")
+                    Text(studio)
+                        .font(.system(size: 13))
+                        .foregroundStyle(SumiTheme.foreground)
+                }
+            }
+
+            if details.prequel != nil || details.sequel != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    metaLabel("SEASONS")
+                    if let prequel = details.prequel { relationRow("Previous", prequel) }
+                    if let sequel = details.sequel { relationRow("Next", sequel) }
+                }
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func factRow(_ details: HeroBanner.Details) -> some View {
+        let facts: [(String, String)] = [
+            ("STATUS", details.status.map(Self.humanStatus)),
+            ("FORMAT", details.format),
+            ("EPISODES", details.episodeCount.map(String.init)),
+            ("SCORE", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
+            ("YOUR SCORE", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
+            ("ON YOUR LIST", details.listStatus.map(Self.humanStatus))
+        ].compactMap { name, value in value.map { (name, $0) } }
+
+        if !facts.isEmpty {
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 12) {
+                ForEach(facts, id: \.0) { fact in
+                    VStack(alignment: .leading, spacing: 3) {
+                        metaLabel(fact.0)
+                        Text(fact.1)
+                            .font(.system(size: 13))
+                            .foregroundStyle(SumiTheme.foreground)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func relationRow(_ role: String, _ relation: HeroBanner.Details.Relation) -> some View {
+        Button {
+            Task { await model.openDetail(id: relation.id, title: relation.title, coverURL: relation.coverURL) }
+        } label: {
+            HStack(spacing: 10) {
+                Color.clear
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        CachedAsyncImage(url: relation.coverURL, maxPixelSize: 160) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: { SumiTheme.card }
+                    }
+                    .frame(width: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(role.uppercased())
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(SumiTheme.muted)
+                    Text(relation.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(SumiTheme.foreground)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func metaLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .foregroundStyle(SumiTheme.muted)
+    }
+
+    /// AniList spells these in caps with underscores; nothing else in the
+    /// app shows them raw.
+    static func humanStatus(_ raw: String) -> String {
+        switch raw {
+        case "RELEASING", "CURRENT": return "Airing"
+        case "FINISHED", "COMPLETED": return "Finished"
+        case "NOT_YET_RELEASED": return "Unaired"
+        case "PLANNING": return "Planning"
+        case "PAUSED": return "Paused"
+        case "DROPPED": return "Dropped"
+        case "REPEATING": return "Rewatching"
+        default: return raw.capitalized
+        }
     }
 
     private struct Hero: View {

@@ -23,6 +23,9 @@ struct PhonePlayerView: View {
     @State private var audioTracks: [PlayerTrack] = []
     @State private var subtitleTracks: [PlayerTrack] = []
     @State private var scrubTarget: Double?
+    @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
+    @State private var releaseFailure: String?
+    @State private var isLoadingReleases = false
     @State private var flash: (symbol: String, trailing: Bool)?
 
     var body: some View {
@@ -61,6 +64,13 @@ struct PhonePlayerView: View {
         .task {
             controller.showControlsBriefly()
             fetchTracks()
+        }
+        // The `task` above runs when the view appears, which is before mpv
+        // has opened the file — the track list was empty every time and the
+        // menu showed neither Audio nor Subtitles. A duration means the file
+        // is loaded and its tracks can be enumerated.
+        .onChange(of: controller.duration) { _, duration in
+            if duration > 0 { fetchTracks() }
         }
         .onDisappear { controller.cancelAutohide() }
     }
@@ -129,6 +139,12 @@ struct PhonePlayerView: View {
     @ViewBuilder
     private var tracksMenu: some View {
         Menu {
+            // Same reason as the release submenu: the autohide timer is held
+            // off from the content, never with a gesture on the label.
+            Color.clear
+                .frame(height: 0)
+                .onAppear { controller.cancelAutohide() }
+
             if !audioTracks.isEmpty {
                 Picker("Audio", selection: audioSelection) {
                     ForEach(audioTracks) { track in
@@ -144,6 +160,8 @@ struct PhonePlayerView: View {
                     }
                 }
             }
+            releaseSection
+
             if controller.hasNextEpisode {
                 Button("Next episode") { controller.nextEpisode() }
             }
@@ -157,9 +175,73 @@ struct PhonePlayerView: View {
                 .frame(width: 36, height: 36)
                 .background(.black.opacity(0.35), in: Circle())
         }
-        // A menu that closes on its own the moment the controls auto-hide is
-        // unusable, so the timer is held off while it is open.
-        .onTapGesture { controller.cancelAutohide() }
+
+    }
+
+    /// Which release is being streamed. The engine races candidates and
+    /// picks one; this is how a viewer overrides that — a different group, a
+    /// dub, a better-seeded copy.
+    ///
+    /// A submenu rather than inline items: `onListReleases` goes back out to
+    /// the indexers, so it has a loading state and a failure state, and
+    /// hanging those off the top-level menu would put a spinner next to
+    /// "Next episode".
+    @ViewBuilder
+    private var releaseSection: some View {
+        Menu {
+            // `.onTapGesture` on the `Menu` itself was the first attempt and
+            // it stopped the menu opening at all: the gesture consumed the
+            // tap the menu needed. Menu content is built when it opens, so
+            // the fetch hangs off the content appearing instead.
+            Color.clear
+                .frame(height: 0)
+                .onAppear {
+                    controller.cancelAutohide()
+                    loadReleases()
+                }
+
+            if isLoadingReleases {
+                Text("Searching…")
+            } else if let releaseFailure {
+                Text(releaseFailure)
+            } else if releases.isEmpty {
+                Text("No other releases found")
+            } else {
+                Picker("Release", selection: Binding(
+                    get: { controller.currentReleaseName ?? "" },
+                    set: { name in
+                        guard !name.isEmpty else { return }
+                        // Re-resolves and swaps the stream. `MpvSurface` is
+                        // mounted once above and only its `streamURL` changes,
+                        // so this does not go through the dismantle path.
+                        controller.onSelectRelease?(name)
+                    }
+                )) {
+                    ForEach(releases) { release in
+                        Text(Self.releaseLabel(release)).tag(release.name)
+                    }
+                }
+            }
+        } label: {
+            Label("Release", systemImage: "square.stack.3d.up")
+        }
+    }
+
+    private static func releaseLabel(_ release: MediaDetailView.ReleaseCandidateItem) -> String {
+        let seeds = release.seeders > 0 ? " · \(release.seeders) seeds" : ""
+        return (release.isDub ? "[DUB] " : "") + release.name + seeds
+    }
+
+    private func loadReleases() {
+        guard !isLoadingReleases else { return }
+        isLoadingReleases = true
+        releaseFailure = nil
+        controller.cancelAutohide()
+        controller.onListReleases? { candidates, failure in
+            isLoadingReleases = false
+            releases = candidates
+            releaseFailure = failure
+        }
     }
 
     private var audioSelection: Binding<String> {

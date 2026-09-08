@@ -149,7 +149,15 @@ fi
 #
 #   security find-identity -v -p codesigning     # to find yours
 #   export ANICAT_CODESIGN_IDENTITY="Apple Development: you@example.com (XXXXXXXXXX)"
-SIGN_IDENTITY="${ANICAT_CODESIGN_IDENTITY:--}"
+SIGN_IDENTITY="${ANICAT_CODESIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+    # Auto-detected rather than written down: the identity is personal to the
+    # machine and this file is public. Falls back to ad-hoc, which still runs
+    # but re-asks for folder access after every build.
+    SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [ "$SIGN_IDENTITY" = "-" ]; then
     echo "=== Codesigning executable (ad-hoc) ==="
     echo "package-anicat-macos-app: ad-hoc signed; macOS will re-ask for folder access after every build."
@@ -159,7 +167,10 @@ else
 fi
 xattr -cr "$APP" 2>/dev/null || true
 codesign -s "$SIGN_IDENTITY" --force "$APP/Contents/MacOS/$EXE_NAME"
-codesign -s "$SIGN_IDENTITY" --force "$APP"
+# Explicit identifier: without one the signature is identified by the
+# executable's name plus a hash, which is neither what the bundle claims nor
+# stable across builds -- and TCC keys its folder grants on exactly that.
+codesign -s "$SIGN_IDENTITY" --force --identifier com.anicat.app "$APP"
 
 echo "=== Verifying no remaining Homebrew references ==="
 LEFTOVER=$(find "$APP" -type f \( -perm +111 -o -name "*.dylib" \) -exec otool -L {} + | grep -c /opt/homebrew || true)

@@ -47,4 +47,33 @@ fi
 for t in com.apple.corespotlightitem com.anicat.playback com.anicat.reading; do
     /usr/libexec/PlistBuddy -c "Add :NSUserActivityTypes: string $t" "$PLIST"
 done
+# Signed with a real identity, not ad-hoc.
+#
+# TCC keys a folder grant to the app's designated requirement. Under an ad-hoc
+# signature that requirement is the cdhash, which changes with every build --
+# so each rebuild was a different app to the system and it asked for Downloads
+# and Documents again, every single time. Signing with a development identity
+# makes the requirement identifier + team, which survives rebuilds, and the
+# grant is given once.
+#
+# The identity is auto-detected rather than written down here: it is personal
+# to the machine and this file is public. `ANICAT_CODESIGN_IDENTITY` overrides.
+SIGN_IDENTITY="${ANICAT_CODESIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+    SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
+fi
+if [ -n "$SIGN_IDENTITY" ]; then
+    # Explicit identifier: without one the signature is identified by the
+    # executable's name plus a hash, which is not what the bundle claims and
+    # not stable either.
+    codesign --force --sign "$SIGN_IDENTITY" --identifier com.anicat.app \
+        --timestamp=none dist/Anicat.app >/dev/null 2>&1 \
+        && echo "signed as $SIGN_IDENTITY" \
+        || echo "dev-run: codesign failed; folder prompts will repeat"
+else
+    echo "dev-run: no signing identity found -- macOS will ask for Downloads/Documents on every build."
+    echo "dev-run: set ANICAT_CODESIGN_IDENTITY, or add an Apple Development certificate."
+fi
+
 open dist/Anicat.app

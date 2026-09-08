@@ -84,11 +84,27 @@ struct PhoneSettingsView: View {
                 // redirect URL's fragment, so the whole URL is what the
                 // viewer has to hand; `signIn` takes either that or the bare
                 // token.
-                TextField("Redirect URL or token", text: $tokenInput, axis: .vertical)
-                    .lineLimit(1...4)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(size: 13, design: .monospaced))
+                HStack(spacing: 10) {
+                    TextField("Redirect URL or token", text: $tokenInput, axis: .vertical)
+                        .lineLimit(1...4)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 13, design: .monospaced))
+
+                    // `PasteButton`, not a long press on the field and not a
+                    // `UIPasteboard.general.string` read behind a plain
+                    // button: the gesture is unreliable on a token this long
+                    // (the callout can land off screen with the keyboard up),
+                    // and reading the pasteboard in code raises the system's
+                    // "allow paste" prompt every time. This is the one paste
+                    // affordance that neither asks nor needs the gesture.
+                    PasteButton(payloadType: String.self) { strings in
+                        guard let pasted = strings.first else { return }
+                        tokenInput = pasted
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonBorderShape(.capsule)
+                }
 
                 Button(isConnecting ? "Connecting…" : "Connect") {
                     connect()

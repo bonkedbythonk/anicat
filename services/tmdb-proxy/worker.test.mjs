@@ -36,11 +36,12 @@ test("forwards the endpoints the app actually calls", async () => {
     "/3/search/movie?query=dune",
     "/3/discover/movie?with_genres=28&primary_release_year=1999",
     "/3/genre/tv/list",
+    "/3/person/500",
   ]) {
     const response = await call(path);
     assert.equal(response.status, 200, `${path} should forward`);
   }
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 8);
 });
 
 test("refuses anything else, so it is not an open TMDB account", async () => {
@@ -48,7 +49,7 @@ test("refuses anything else, so it is not an open TMDB account", async () => {
   for (const path of [
     "/3/account/1/favorite",
     "/3/movie/550/lists",
-    "/3/person/500",
+    "/3/person/500/tagged_images",
     "/4/list/1",
     "/",
     "/3/movie/notanumber",

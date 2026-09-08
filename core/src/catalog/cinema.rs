@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::cache::AniListCache;
-use super::tmdb::types::{TmdbMovie, TmdbPage, TmdbSeasonDetail, TmdbSeries};
+use super::tmdb::types::{TmdbMovie, TmdbPage, TmdbPerson, TmdbSeasonDetail, TmdbSeries};
 use super::Catalogs;
 use crate::catalog::anilist::types::MediaItem;
 
@@ -276,7 +276,7 @@ impl Catalogs {
             key,
             "tmdb_detail",
             &format!("/movie/{id}"),
-            &[("append_to_response", "credits,videos,images,recommendations".to_string())],
+            &[("append_to_response", "credits,videos,images,external_ids,recommendations".to_string())],
         )
         .await
     }
@@ -293,8 +293,25 @@ impl Catalogs {
             &format!("/tv/{id}"),
             &[(
                 "append_to_response",
-                "aggregate_credits,videos,images,recommendations".to_string(),
+                "aggregate_credits,videos,images,external_ids,recommendations".to_string(),
             )],
+        )
+        .await
+    }
+
+    /// One person: who they are, and what they are credited on.
+    ///
+    /// `combined_credits` is one array of films and series told apart by
+    /// `media_type`, which is why the caller has to look at that field rather
+    /// than at which endpoint answered.
+    pub async fn cinema_person(&self, person_id: i64) -> Result<TmdbPerson, String> {
+        let id_str = person_id.to_string();
+        let key = AniListCache::key("tmdb_detail", &[("kind", "person"), ("id", &id_str)]);
+        self.tmdb_cached(
+            key,
+            "tmdb_detail",
+            &format!("/person/{person_id}"),
+            &[("append_to_response", "combined_credits,external_ids".to_string())],
         )
         .await
     }

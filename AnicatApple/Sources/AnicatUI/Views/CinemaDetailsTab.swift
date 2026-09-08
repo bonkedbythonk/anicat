@@ -32,6 +32,8 @@ struct CinemaDetailsTabSection: View {
             if !extras.gallery.isEmpty {
                 stills
             }
+
+            links
         }
         .padding(.vertical, 4)
     }
@@ -152,6 +154,26 @@ struct CinemaDetailsTabSection: View {
                 }
                 .padding(.vertical, 2)
             }
+        }
+    }
+
+    /// Out to IMDb and the title's own site. A link and not a rating: IMDb
+    /// publishes no free API, so the score above stays TMDB's.
+    @ViewBuilder
+    private var links: some View {
+        let imdb = extras.imdbUrl.flatMap(URL.init(string:))
+        let homepage = extras.homepage.flatMap(URL.init(string:))
+        if imdb != nil || homepage != nil {
+            HStack(spacing: 14) {
+                if let imdb {
+                    Link("View on IMDb", destination: imdb)
+                }
+                if let homepage {
+                    Link("Official site", destination: homepage)
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(SumiTheme.indigo)
         }
     }
 

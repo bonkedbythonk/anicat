@@ -30,6 +30,7 @@ const ALLOWED = [
   /^\/3\/search\/(movie|tv)$/,
   /^\/3\/discover\/(movie|tv)$/,
   /^\/3\/genre\/(movie|tv)\/list$/,
+  /^\/3\/person\/\d{1,9}$/,
 ];
 
 /** Query parameters forwarded to TMDB. Everything else is dropped.

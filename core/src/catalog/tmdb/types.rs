@@ -103,6 +103,71 @@ impl TmdbEpisode {
 /// Cast and crew, from `append_to_response=credits`. TV uses
 /// `aggregate_credits`, whose cast entries carry `roles` rather than a single
 /// `character`; both are accepted so one struct covers each.
+/// One person, from `/person/{id}`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TmdbPerson {
+    pub id: i64,
+    pub name: Option<String>,
+    pub biography: Option<String>,
+    pub birthday: Option<String>,
+    pub deathday: Option<String>,
+    pub place_of_birth: Option<String>,
+    pub known_for_department: Option<String>,
+    pub profile_path: Option<String>,
+    pub combined_credits: Option<TmdbCombinedCredits>,
+    pub external_ids: Option<TmdbExternalIds>,
+}
+
+impl TmdbPerson {
+    pub fn photo_url(&self) -> Option<String> {
+        image_url(&self.profile_path, "w300")
+    }
+}
+
+/// Everything a person is credited on. `cast` carries films and series in one
+/// array, told apart by `media_type` -- TMDB does not split them.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TmdbCombinedCredits {
+    pub cast: Option<Vec<TmdbCredit>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TmdbCredit {
+    pub id: i64,
+    pub media_type: Option<String>,
+    pub title: Option<String>,
+    pub name: Option<String>,
+    pub character: Option<String>,
+    pub poster_path: Option<String>,
+    pub release_date: Option<String>,
+    pub first_air_date: Option<String>,
+    pub vote_average: Option<f64>,
+    pub popularity: Option<f64>,
+}
+
+impl TmdbCredit {
+    pub fn poster_url(&self) -> Option<String> {
+        image_url(&self.poster_path, "w342")
+    }
+
+    pub fn display_title(&self) -> Option<String> {
+        self.title.clone().or_else(|| self.name.clone())
+    }
+
+    pub fn year(&self) -> Option<i32> {
+        let date = self.release_date.as_ref().or(self.first_air_date.as_ref())?;
+        date.get(..4)?.parse().ok()
+    }
+}
+
+/// From `append_to_response=external_ids`. IMDb is the only one the app
+/// offers, and only as a link: IMDb has no free API, so a rating cannot come
+/// from here.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TmdbExternalIds {
+    pub imdb_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TmdbCredits {
     pub cast: Option<Vec<TmdbCastMember>>,
@@ -236,6 +301,7 @@ pub struct TmdbMovie {
     pub credits: Option<TmdbCredits>,
     pub videos: Option<TmdbVideos>,
     pub images: Option<TmdbImages>,
+    pub external_ids: Option<TmdbExternalIds>,
     pub recommendations: Option<TmdbPage<TmdbMovie>>,
 }
 
@@ -268,6 +334,7 @@ pub struct TmdbSeries {
     pub credits: Option<TmdbCredits>,
     pub videos: Option<TmdbVideos>,
     pub images: Option<TmdbImages>,
+    pub external_ids: Option<TmdbExternalIds>,
     pub recommendations: Option<TmdbPage<TmdbSeries>>,
 }
 

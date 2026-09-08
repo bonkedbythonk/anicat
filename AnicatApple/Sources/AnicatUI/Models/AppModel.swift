@@ -517,6 +517,12 @@ public final class AppModel {
     }
 
     public var cinemaFilter = CinemaFilter()
+    /// The cast member whose page is open, if any. A sheet rather than a
+    /// push onto `personPageStack`: that stack is AniList's and keyed by its
+    /// character ids, which a TMDB person id is not.
+    public var openCinemaPersonId: Int64?
+    public var openCinemaPersonName: String = ""
+
     /// The open cinema page's local list status, and the list itself.
     /// Local because there is nowhere else: AniList has no entry for a TMDB
     /// title, so this is the registry's `local_library` and this device.

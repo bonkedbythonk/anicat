@@ -480,6 +480,18 @@ extension AppModel {
         selectedMediaDetails = Self.cinemaDetails(from: d)
     }
 
+    /// One cast member, for the sheet. Cached by the engine for a day, so
+    /// reopening the same face costs nothing.
+    public func cinemaPerson(id: Int64) async -> CinemaPerson? {
+        guard let engine, cinemaAvailable else { return nil }
+        return try? await engine.cinemaPerson(personId: id)
+    }
+
+    public func openCinemaPerson(id: Int64, name: String) {
+        openCinemaPersonName = name
+        openCinemaPersonId = id
+    }
+
     /// Plays one episode of the open cinema title, or the film itself.
     public func playCinemaEpisode(_ number: Int) async {
         guard let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }

@@ -201,7 +201,18 @@ public struct RootView: View {
                                     )
                                 },
                                 onExportAppleBooks: {},
-                                onSelectCharacter: { model.openCharacter(id: $0) },
+                                onSelectCharacter: { id in
+                                    // A cinema page's cast are TMDB people;
+                                    // `openCharacter` is AniList's and would
+                                    // look this id up in the wrong catalog.
+                                    if model.currentDetailCatalog == .anilist {
+                                        model.openCharacter(id: id)
+                                    } else {
+                                        let name = model.selectedCharacters
+                                            .first { $0.id == id }?.name ?? ""
+                                        model.openCinemaPerson(id: id, name: name)
+                                    }
+                                },
                                 onSelectThread: { model.openThread(id: $0) },
                                 // Not wrapped in `withAnimation` here:
                                 // `closeDetail()` animates its own mutation
@@ -335,6 +346,23 @@ public struct RootView: View {
                 OnboardingView(model: model)
                     .zIndex(80)
                     .transition(.opacity)
+            }
+
+            // A cast member's page, over the detail page it was opened from.
+            if let personId = model.openCinemaPersonId {
+                CinemaPersonView(
+                    model: model,
+                    personId: personId,
+                    fallbackName: model.openCinemaPersonName,
+                    onDismiss: { model.openCinemaPersonId = nil }
+                )
+                .frame(maxWidth: 720, maxHeight: 640)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(SumiTheme.border, lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 30, y: 10)
+                .padding(40)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .zIndex(45)
             }
 
             // Keyboard shortcuts overlay. Above palette and modal views.

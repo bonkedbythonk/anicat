@@ -263,8 +263,39 @@ pub struct CinemaExtras {
     /// Backdrops then posters, capped -- the stills strip.
     pub gallery: Vec<String>,
     pub homepage: Option<String>,
+    /// A link, not a rating: IMDb publishes no free API, so the score on the
+    /// page stays TMDB's own.
+    pub imdb_url: Option<String>,
     /// `(season number, episode count)`, specials excluded, in order.
     pub seasons: Vec<CinemaSeason>,
+}
+
+/// A person, as the cinema cast page draws them.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CinemaPerson {
+    pub id: i64,
+    pub name: String,
+    pub biography: Option<String>,
+    pub photo_url: Option<String>,
+    pub birthday: Option<String>,
+    pub deathday: Option<String>,
+    pub place_of_birth: Option<String>,
+    pub known_for: Option<String>,
+    /// Their credits, best known first.
+    pub credits: Vec<CinemaCredit>,
+    /// A link, not a rating: IMDb has no free API, so nothing but the URL
+    /// can come from here.
+    pub imdb_url: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CinemaCredit {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub title: String,
+    pub character: Option<String>,
+    pub cover_image: Option<String>,
+    pub year: Option<i32>,
 }
 
 /// One row of the local list.
@@ -1175,6 +1206,72 @@ impl AnicatEngine {
             .collect())
     }
 
+    /// One member of the cast, with their credits.
+    ///
+    /// TMDB person ids are TMDB's own -- they are not AniList character ids,
+    /// and this is the page that makes a cast portrait worth pressing.
+    pub async fn cinema_person(&self, person_id: i64) -> FfiResult<CinemaPerson> {
+        let person = self
+            .catalogs
+            .cinema_person(person_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+
+        let mut credits: Vec<_> = person
+            .combined_credits
+            .as_ref()
+            .and_then(|c| c.cast.as_ref())
+            .map(|rows| rows.iter().collect())
+            .unwrap_or_default();
+        // Best known first: TMDB returns these in no useful order, and a
+        // filmography that opens on a walk-on part reads as the wrong person.
+        credits.sort_by(|a, b| {
+            b.popularity
+                .unwrap_or(0.0)
+                .partial_cmp(&a.popularity.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(CinemaPerson {
+            id: person.id,
+            name: person.name.clone().unwrap_or_default(),
+            biography: person.biography.clone().filter(|b| !b.trim().is_empty()),
+            photo_url: person.photo_url(),
+            birthday: person.birthday.clone(),
+            deathday: person.deathday.clone(),
+            place_of_birth: person.place_of_birth.clone(),
+            known_for: person.known_for_department.clone(),
+            credits: credits
+                .into_iter()
+                // Anything that is neither a film nor a series -- TMDB files
+                // some credits with no media_type at all -- has no page here
+                // to open, so it is not offered.
+                .filter_map(|c| {
+                    let catalog = match c.media_type.as_deref()? {
+                        "movie" => FfiCatalog::TmdbMovie,
+                        "tv" => FfiCatalog::TmdbTv,
+                        _ => return None,
+                    };
+                    Some(CinemaCredit {
+                        catalog,
+                        catalog_id: c.id,
+                        title: c.display_title()?,
+                        character: c.character.clone().filter(|s| !s.is_empty()),
+                        cover_image: c.poster_url(),
+                        year: c.year(),
+                    })
+                })
+                .take(40)
+                .collect(),
+            imdb_url: person
+                .external_ids
+                .as_ref()
+                .and_then(|e| e.imdb_id.clone())
+                .filter(|id| !id.is_empty())
+                .map(|id| format!("https://www.imdb.com/name/{id}/")),
+        })
+    }
+
     /// The facts a cinema page shows that `MediaDetail` has no field for.
     pub async fn cinema_extras(
         &self,
@@ -1211,6 +1308,12 @@ impl AnicatEngine {
                     .collect(),
                 gallery: crate::catalog::tmdb::types::gallery_urls(m.images.as_ref()),
                 homepage: m.homepage.clone().filter(|h| !h.is_empty()),
+                imdb_url: m
+                    .external_ids
+                    .as_ref()
+                    .and_then(|e| e.imdb_id.clone())
+                    .filter(|id| !id.is_empty())
+                    .map(|id| format!("https://www.imdb.com/title/{id}/")),
                 seasons: vec![],
             });
         }
@@ -1230,6 +1333,12 @@ impl AnicatEngine {
             companies: s.networks.iter().flatten().filter_map(|c| c.name.clone()).collect(),
             gallery: crate::catalog::tmdb::types::gallery_urls(s.images.as_ref()),
             homepage: s.homepage.clone().filter(|h| !h.is_empty()),
+            imdb_url: s
+                .external_ids
+                .as_ref()
+                .and_then(|e| e.imdb_id.clone())
+                .filter(|id| !id.is_empty())
+                .map(|id| format!("https://www.imdb.com/title/{id}/")),
             seasons: s
                 .season_map()
                 .into_iter()

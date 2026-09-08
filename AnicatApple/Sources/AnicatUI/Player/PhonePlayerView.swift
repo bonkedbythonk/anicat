@@ -95,11 +95,16 @@ struct PhonePlayerView: View {
     // MARK: Controls
 
     private func toggleControls() {
-        print("[taps] toggleControls visible=\(controller.areControlsVisible)")
         withAnimation(.easeOut(duration: 0.2)) {
             if controller.areControlsVisible {
+                // NOT `cancelAutohide()` here, however much it reads like the
+                // right call: it ends with `areControlsVisible = true`,
+                // because on macOS it means "hold the controls up while a
+                // menu is open". Calling it after setting false put the value
+                // straight back, so the chrome could be summoned and never
+                // dismissed. Leaving the pending task alone is harmless — all
+                // it does when it fires is hide something already hidden.
                 controller.areControlsVisible = false
-                controller.cancelAutohide()
             } else {
                 controller.showControlsBriefly()
             }
@@ -115,10 +120,7 @@ struct PhonePlayerView: View {
             // dismissed, and only the 3.5s timer ever put them away.
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    print("[taps] chrome layer tapped")
-                    toggleControls()
-                }
+                .onTapGesture { toggleControls() }
 
             // Scrims rather than a flat dim: white glyphs over a bright frame
             // are unreadable without one, and dimming the whole picture to
@@ -496,7 +498,6 @@ struct PhonePlayerView: View {
     }
 
     private func seek(by delta: Double) {
-        print("[taps] seek \(delta)")
         controller.seekRelative(by: delta)
         controller.showControlsBriefly()
     }

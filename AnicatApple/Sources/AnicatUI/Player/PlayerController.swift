@@ -806,7 +806,6 @@ public final class PlayerController {
     }
 
     public func showControlsBriefly() {
-        print("[taps] showControlsBriefly called")
         if !areControlsVisible {
             areControlsVisible = true
         }

@@ -169,6 +169,19 @@ private struct UpNextTab: View {
             .background(SumiTheme.background)
             .navigationTitle("Up Next")
             .refreshable { await model.refreshAll() }
+            // Settings lives behind this button rather than in a fourth tab:
+            // it is opened once to sign in and then rarely, which is not what
+            // a tab slot is for. It is also the only route back to
+            // "Connect AniList" once onboarding has been dismissed.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        PhoneSettingsView(model: model)
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                }
+            }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
     }

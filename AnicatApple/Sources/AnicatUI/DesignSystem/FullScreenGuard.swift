@@ -30,16 +30,30 @@ public enum FullScreenGuard {
         inTransition = false
         wanted = nil
         let center = NotificationCenter.default
-        let begin: (Notification) -> Void = { _ in armTransitionTimeout() }
-        let end: (Notification) -> Void = { note in
-            inTransition = false
-            lastSettledAt = CFAbsoluteTimeGetCurrent()
-            PlayerLog.write("[fullscreen] \(note.name.rawValue) pending \(wanted.map { $0 ? "enter" : "exit" } ?? "none")")
-            FullScreenState.shared.isFullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
-            NotificationCenter.default.post(name: FullScreenGuard.transitionEndedNotification, object: nil)
-            // Never toggled from here: AppKit drops a toggle sent this soon
-            // after a transition ends. The drain timer owns re-issuing.
-            if wanted != nil { scheduleDrain() }
+        // `@Sendable` with `assumeIsolated` inside, rather than plain
+        // main-actor closures: `addObserver` wants a `@Sendable` block, and
+        // every one of these is registered with `queue: .main`, so the body
+        // is already on the main actor's executor. Passing the closures bare
+        // compiles here and is rejected by CI's older toolchain.
+        let begin: @Sendable (Notification) -> Void = { _ in
+            MainActor.assumeIsolated { armTransitionTimeout() }
+        }
+        let end: @Sendable (Notification) -> Void = { note in
+            // The name is read out here rather than inside: `Notification`
+            // itself is not Sendable, so carrying it into the isolated block
+            // is the data race the compiler is objecting to. The string is.
+            let name = note.name.rawValue
+            MainActor.assumeIsolated {
+                inTransition = false
+                lastSettledAt = CFAbsoluteTimeGetCurrent()
+                PlayerLog.write("[fullscreen] \(name) pending \(wanted.map { $0 ? "enter" : "exit" } ?? "none")")
+                FullScreenState.shared.isFullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
+                NotificationCenter.default.post(name: FullScreenGuard.transitionEndedNotification, object: nil)
+                // Never toggled from here: AppKit drops a toggle sent this
+                // soon after a transition ends. The drain timer owns
+                // re-issuing.
+                if wanted != nil { scheduleDrain() }
+            }
         }
         observers = [
             center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main, using: begin),

@@ -128,6 +128,37 @@ extension FfiStaffMediaCredit: @unchecked Sendable {}
 extension FfiStudioDetail: @unchecked Sendable {}
 extension FfiStudioRef: @unchecked Sendable {}
 extension FfiThreadComment: @unchecked Sendable {}
+
+// The rest of the generated surface, declared in one go for the same reason:
+// every record above was added after a CI run named it, one per push, and the
+// list of types the UI awaits on the main actor only grows. These cover the
+// cinema, download, reader and playback records plus `AnicatError`, which a
+// throwing engine call has to carry across the same boundary.
+extension AnicatError: @unchecked Sendable {}
+extension CinemaCredit: @unchecked Sendable {}
+extension CinemaExtras: @unchecked Sendable {}
+extension CinemaPerson: @unchecked Sendable {}
+extension CinemaSeason: @unchecked Sendable {}
+extension EpisodeRow: @unchecked Sendable {}
+extension FfiCinemaGenre: @unchecked Sendable {}
+extension FfiDownloadStatus: @unchecked Sendable {}
+extension FfiDownloadedEpisode: @unchecked Sendable {}
+extension FfiLocalEntry: @unchecked Sendable {}
+extension FfiNovelDownload: @unchecked Sendable {}
+extension FfiOfflineChapter: @unchecked Sendable {}
+extension FfiOfflineKind: @unchecked Sendable {}
+extension FfiReadingProgress: @unchecked Sendable {}
+extension FfiReadingRow: @unchecked Sendable {}
+extension FfiResolvedRelease: @unchecked Sendable {}
+extension FfiTitleHint: @unchecked Sendable {}
+extension NovelChapterContent: @unchecked Sendable {}
+extension NovelChapterRef: @unchecked Sendable {}
+extension NovelImage: @unchecked Sendable {}
+extension NovelInfo: @unchecked Sendable {}
+extension RelatedTitle: @unchecked Sendable {}
+extension StreamHandle: @unchecked Sendable {}
+extension StreamRequest: @unchecked Sendable {}
+extension ViewerProfile: @unchecked Sendable {}
 extension FfiTitleCount: @unchecked Sendable {}
 extension FfiTorrentChoice: @unchecked Sendable {}
 extension FfiTrackPreference: @unchecked Sendable {}

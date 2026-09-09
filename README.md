@@ -63,29 +63,40 @@ or later. Click the Apple menu, then About This Mac, if you are not sure.
    and download the file ending in **`.dmg`**.
 2. Open it. A window appears with the Anicat icon and a folder called
    Applications. Drag the icon onto the folder.
-3. Open your Applications folder, **right-click Anicat and choose Open**. A
-   warning appears; click Open again.
+3. Open your Applications folder and double-click Anicat. macOS refuses to
+   open it and says it cannot check the app for malicious software. That is
+   expected — click Done.
+4. Open **System Settings**, go to **Privacy & Security**, and scroll to the
+   bottom. There is a line saying Anicat was blocked, with an **Open Anyway**
+   button next to it. Click it, confirm with your password or Touch ID, and
+   click **Open Anyway** once more.
 
-Step 3 is only needed the first time. After that, Anicat opens like any other
-app.
+Steps 3 and 4 are only needed the first time. After that, Anicat opens like any
+other app.
 
-**Why the warning?** Apple charges a yearly fee to have an app certified, and
-this one is not. macOS therefore says it cannot verify who made it. Right-click
-and Open is macOS's own way of saying "I know where this came from, let it
-run". Nothing else about the app is different.
+**Why does macOS block it?** Apple charges a yearly fee to have an app
+certified, and this one has not paid it, so macOS says it cannot verify who
+made the app. Open Anyway is Apple's own way of saying "I know where this came
+from, let it run". Nothing else about the app is different.
+
+Note that older advice to right-click the app and choose Open no longer works:
+Apple removed that shortcut in macOS Sequoia, and Open Anyway in Settings
+replaced it.
 
 <details>
 <summary>If you prefer the Terminal</summary>
 
-One line downloads the latest version, puts it in `/Applications` and opens it:
+One line downloads the latest version, puts it in `/Applications` and opens
+it — and because it clears the quarantine flag itself, the blocked-app dance
+above never happens:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
 A `.zip` is published beside the `.dmg` for anyone who would rather unpack it
-themselves. The bundle is ad-hoc signed and not notarized, so if you install by
-hand and would rather not use right-click-Open:
+themselves. The bundle is ad-hoc signed and not notarized, so if you install by hand and
+would rather skip the Settings step:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Anicat.app
@@ -95,62 +106,8 @@ xattr -dr com.apple.quarantine /Applications/Anicat.app
 
 Anything on the Releases page numbered 5.x is the old version of Anicat, which
 was a different program that happened to share the name. Start with the newest
-release.
-
-### If you had the old Anicat
-
-**You do not need to uninstall anything.** Both versions are called Anicat and
-live in the same place, so installing this one replaces the old one. Your
-AniList account comes along with it.
-
-What stays behind is the old version's leftover files — around 90 MB of them,
-sitting in a folder you would never open. They do nothing. Nothing breaks if
-you leave them there forever.
-
-If you want the space back, paste this into the Terminal app and press Return.
-It puts the leftovers in your Trash, where you can fish them back out if you
-change your mind:
-
-```bash
-mv ~/Library/Application\ Support/Anicat/{registry.db,registry.json,covers} ~/Library/Caches/com.anicat.app/WebKit ~/Library/WebKit/com.anicat.app ~/.Trash/ 2>/dev/null; true
-```
-
-There is also a script that lists everything with its size and asks before
-touching anything:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/cleanup_legacy_macos.sh
-bash cleanup_legacy_macos.sh
-```
-
-Either way, your AniList login, your library and anything you have downloaded
-in the new version are left alone.
-
-<details>
-<summary>The individual files, if you would rather drag them to the Trash yourself</summary>
-
-In Finder press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, paste each path,
-and drag what you find to the Trash:
-
-| Path | What it is |
-|---|---|
-| `~/Library/Application Support/Anicat/registry.db` | the 5.x watch log — 6.x keeps its own in `registry.sqlite`, so this is only worth keeping if you might go back |
-| `~/Library/Application Support/Anicat/registry.json` | an even older library file |
-| `~/Library/Application Support/Anicat/covers` | cover art the 5.x app cached |
-| `~/Library/Caches/com.anicat.app/WebKit` | the web view the 5.x app drew its whole interface in — usually the big one |
-| `~/Library/WebKit/com.anicat.app` | the rest of that web view |
-
-Leave `config.toml` and `config.json` where they are: your AniList sign-in is
-in them, and the new version reads both. Everything else in that folder
-(`registry.sqlite`, `catalog-cache.sqlite`, `torrent-streams`,
-`offline-manga`) belongs to the new app.
-
-One exception to "nothing to uninstall": if you ever dragged a copy of the old
-Anicat into the Applications folder inside your *home* folder rather than the
-main one, that copy is still there and still opens the old app. Drag it to the
-Trash.
-
-</details>
+release; installing it replaces an older one in place, with nothing to
+uninstall first.
 
 ---
 

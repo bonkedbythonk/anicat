@@ -20,6 +20,12 @@ invalid. Open the `.dmg` from this page and drag Anicat to Applications
 yourself instead; that replaces the app cleanly. The 5.x app is retired either
 way and nothing further is coming for it.
 
+**Opening it the first time.** macOS blocks the app and says it cannot check
+it for malicious software. Click Done, then open System Settings, go to Privacy
+& Security, scroll to the bottom, and click Open Anyway next to the line about
+Anicat. Right-clicking the app and choosing Open does *not* work any more --
+Apple removed that shortcut in Sequoia.
+
 There is nothing to uninstall first. Both versions are called Anicat, carry
 the same bundle identifier and install to `/Applications/Anicat.app`, so 6.0.0
 replaces the 5.x app in place. What it does not replace is the 5.x data, and

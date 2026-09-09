@@ -6,8 +6,10 @@
 #   bash scripts/publish-release.sh            # draft release
 #   bash scripts/publish-release.sh --publish  # public release
 #
-# The bundle is ad-hoc signed and not notarized; the notes carry the
-# right-click Open instruction for that reason. Never run this while an
+# The bundle is ad-hoc signed and not notarized, so the notes carry the
+# Privacy & Security unblock instructions. Not right-click-Open: macOS Sequoia
+# removed that shortcut for exactly this class of app, and the advice sends
+# people to a menu item that no longer does anything. Never run this while an
 # Anicat is playing: the package step rebuilds dist/Anicat.app underneath a
 # copy launched from there.
 set -euo pipefail
@@ -70,7 +72,9 @@ fi
     echo
     echo "Open the .dmg and drag Anicat to Applications, or unzip the .zip and move"
     echo "Anicat.app there yourself. The build is ad-hoc signed, not notarized:"
-    echo "right-click the app and choose Open the first time, or run"
+    echo "macOS blocks it the first time: click Done, then System Settings >"
+    echo "Privacy & Security > Open Anyway (right-click-Open stopped working in"
+    echo "Sequoia). Or clear the quarantine flag yourself with"
     echo '`xattr -dr com.apple.quarantine /Applications/Anicat.app`.'
 } >> "$NOTES"
 

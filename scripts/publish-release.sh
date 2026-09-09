@@ -77,12 +77,16 @@ fi
     echo
     echo "### Install"
     echo
-    echo "Open the .dmg and drag Anicat to Applications, or unzip the .zip and move"
-    echo "Anicat.app there yourself. The build is ad-hoc signed, not notarized:"
-    echo "macOS blocks it the first time: click Done, then System Settings >"
-    echo "Privacy & Security > Open Anyway (right-click-Open stopped working in"
-    echo "Sequoia). Or clear the quarantine flag yourself with"
-    echo '`xattr -dr com.apple.quarantine /Applications/Anicat.app`.'
+    echo "Open the .dmg and drag Anicat to Applications. The .zip holds the same"
+    echo "app for anyone who would rather move it themselves."
+    echo
+    echo "The build is ad-hoc signed and not notarized, so macOS blocks it the"
+    echo "first time: click Done, then open System Settings > Privacy & Security,"
+    echo "scroll to the bottom and click Open Anyway. Right-clicking the app and"
+    echo "choosing Open has not worked since macOS Sequoia. If you would rather do"
+    echo "it in one line:"
+    echo
+    echo '    `xattr -dr com.apple.quarantine /Applications/Anicat.app`'
     if [ -f "$IPA" ]; then
         echo
         echo "The .ipa is the iPhone build. iPhones install only from the App Store"

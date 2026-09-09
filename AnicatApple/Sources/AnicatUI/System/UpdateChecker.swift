@@ -51,7 +51,19 @@ public enum UpdateChecker {
            !forced.isEmpty {
             return forced
         }
-        return (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
+        return bundleVersion ?? "0"
+    }
+
+    /// The bundle's version, or nil when there is no readable Info.plist --
+    /// a binary run straight out of `.build`, or a bundle a packaging step
+    /// left without the key. `currentVersion` still answers "0" for the
+    /// User-Agent and the Settings row, but "0" is a version every release
+    /// ever published is newer than, so the update check treated an unknown
+    /// build as maximally out of date and opened a prompt offering to
+    /// "update" it to something older than itself.
+    static var bundleVersion: String? {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// Compares dotted numeric versions without `import` of anything.
@@ -105,9 +117,14 @@ public enum UpdateChecker {
             let last = defaults.double(forKey: lastCheckKey)
             if last > 0, Date().timeIntervalSince1970 - last < checkInterval { return nil }
         }
+        // Nothing to compare against, so nothing to offer. `ANICAT_FAKE_VERSION`
+        // still gets through: it is set precisely to exercise this path.
+        let running = ProcessInfo.processInfo.environment["ANICAT_FAKE_VERSION"]
+            .flatMap { $0.isEmpty ? nil : $0 } ?? bundleVersion
+        guard let running else { return nil }
         guard let release = await latestRelease() else { return nil }
         defaults.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
-        guard isNewer(release.version, than: currentVersion) else { return nil }
+        guard isNewer(release.version, than: running) else { return nil }
         return release
     }
 }

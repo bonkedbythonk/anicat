@@ -670,6 +670,15 @@ public struct PlayerView: View {
 
     private var glowFrame: AmbientFrame? {
         guard ambientGlowEnabled, !reduceTransparency else { return nil }
+        // Not while the picture is turned on its side. The glow samples the
+        // frame's edges and paints each one into the letterbox bar next to
+        // it, and sideways mode rotates the picture inside the window with a
+        // `transpose` video filter -- so the colours taken from what is now
+        // the top of the picture get painted down the side of the window,
+        // and the bars they are meant to fill are on the other axis. There
+        // is no orientation to correct for either: the sampler reads the
+        // rendered frame, which mpv has already rotated.
+        guard controller.sidewaysState == 0 else { return nil }
         #if os(macOS)
         // On in a window too since 2026-09-07: the objection to it there
         // (a distraction in thin bars) was the blurred-image version's

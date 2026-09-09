@@ -968,7 +968,14 @@ public struct MpvSurface {
                         sampler.videoAspect = { [weak self] in self?.controller.videoAspectRatio }
                         sampler.onThumbnail = { [weak self] image, inset in
                             guard let self else { return }
+                            // Sideways for the same reason the view drops the
+                            // glow there: the picture is rotated inside the
+                            // window, so an edge of the frame is no longer the
+                            // edge of the window it would be painted into.
+                            // Gated here as well so the sampled frames are not
+                            // handed over to be thrown away.
                             guard UserDefaults.standard.object(forKey: "anicat_ambient_glow") as? Bool ?? true,
+                                  self.controller.sidewaysState == 0,
                                   !self.controller.awaitingNewFile else { return }
                             self.controller.setAmbientFrame(image, inset: inset)
                         }

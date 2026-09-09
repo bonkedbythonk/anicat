@@ -1509,6 +1509,12 @@ public struct MediaDetailView: View {
             .animation(.bouncy, value: details.isFavourite)
             }
 
+            // AniList only. A TMDB title is on no AniList list and never was
+            // -- cinema keeps its watchlist in the local registry, and the
+            // status menu a few lines up already offers "Remove from list"
+            // for it. This menu named the wrong service, and its one item was
+            // permanently disabled there because a film has no list entry id.
+            if details.mediaCatalog == .anilist {
             Menu {
                 Button(role: .destructive, action: onRemoveFromList) {
                     Label("Remove from AniList", systemImage: "trash")
@@ -1530,6 +1536,7 @@ public struct MediaDetailView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            }
 
             Spacer(minLength: 0)
         }

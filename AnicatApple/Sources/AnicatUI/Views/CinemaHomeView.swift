@@ -45,19 +45,6 @@ struct CinemaHomeView: View {
         }
     }
 
-    /// Films and Series carry the same filter row Search has, defaulted to
-    /// their own kind: the rows above are a fixed selection, and this is how
-    /// you get past it to "action, 1999, top rated".
-    private var showsFilterRow: Bool {
-        page == .films || page == .series || (page == .search && !isSearching)
-    }
-
-    /// The Films/Series segment, which only Search has any use for. On the
-    /// Films section it was a control that argued with the rail: flipping it
-    /// left the section titled Films showing series, and the way back was the
-    /// sidebar, not the segment. Those two sections *are* the choice.
-    private var showsKindPicker: Bool { page == .search }
-
     /// Cinema's search lives on the Search section, the way the anime rail's
     /// does. Drawn on all five sections it was the same field five times,
     /// each with its own idea of what the page below it was showing.
@@ -85,7 +72,6 @@ struct CinemaHomeView: View {
                     if !isSearching { filterRow }
                     resultsGrid
                 } else if page == .films || page == .series {
-                    filterRow
                     ForEach(shelves) { shelf in
                         shelfRow(shelf)
                     }
@@ -198,31 +184,33 @@ struct CinemaHomeView: View {
                 }
             }
 
+            // The next page fetches itself when the foot of the grid comes
+            // into view, instead of asking to be asked. A "Load more" button
+            // is a click that only ever has one answer, and the grid it sits
+            // under is `LazyVGrid` -- the rows below the viewport are not
+            // built until they are scrolled to anyway, so the page boundary
+            // was visible for no reason.
             if model.cinemaSearchHasMore {
-                Button {
-                    Task {
-                        await model.searchCinema(
-                            model.searchQuery,
-                            page: model.cinemaSearchPage + 1,
-                            append: true
-                        )
-                    }
-                } label: {
-                    Text(model.isLoadingMoreCinema ? "Loading…" : "Load more")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(SumiTheme.indigo)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8).stroke(SumiTheme.border, lineWidth: 1)
-                        )
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading more")
+                        .sumiTabularMono(size: 11)
+                        .foregroundColor(SumiTheme.muted)
                 }
-                .buttonStyle(.sumiPressable)
-                .disabled(model.isLoadingMoreCinema)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+                .padding(.vertical, 12)
+                // Keyed on the page number: `task(id:)` re-runs when the id
+                // changes, so each arriving page arms the next fetch, and a
+                // row that scrolls away and back does not fetch twice.
+                .task(id: model.cinemaSearchPage) {
+                    guard !model.isLoadingMoreCinema else { return }
+                    await model.searchCinema(
+                        model.searchQuery,
+                        page: model.cinemaSearchPage + 1,
+                        append: true
+                    )
+                }
             }
         }
     }
@@ -233,55 +221,59 @@ struct CinemaHomeView: View {
     /// search runs instead, and TMDB ignores the filters there rather than
     /// combining them.
     private var filterRow: some View {
+        // `SumiSegmentedControl` and `SumiFilterDropdown`, not bare `Picker`s.
+        // A plain Picker renders as AppKit's own segmented control and pop-up
+        // buttons -- system blue, system corner radius, system font -- which
+        // is why this row read as a different app's from the shelves under it.
+        // The anime side's filters have been these controls since they
+        // existed; cinema was the one screen still on the defaults.
         HStack(spacing: 10) {
-            if showsKindPicker {
-                Picker("", selection: Binding(
-                    get: { model.cinemaFilter.isSeries },
-                    set: { next in model.applyCinemaFilter { $0.isSeries = next } }
-                )) {
-                    Text("Films").tag(false)
-                    Text("Series").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-            }
+            // The kind segment lives on Search alone: on the Films section it
+            // was a control that argued with the rail, since flipping it left
+            // a section titled Films showing series.
+            SumiSegmentedControl(
+                options: [("films", "Films"), ("series", "Series")],
+                selection: Binding(
+                    get: { model.cinemaFilter.isSeries ? "series" : "films" },
+                    set: { next in model.applyCinemaFilter { $0.isSeries = (next == "series") } }
+                )
+            )
 
-            Picker("", selection: Binding(
-                get: { model.cinemaFilter.genreId ?? -1 },
-                set: { next in model.applyCinemaFilter { $0.genreId = next == -1 ? nil : next } }
-            )) {
-                Text("Any genre").tag(Int64(-1))
-                ForEach(model.cinemaGenres, id: \.id) { genre in
-                    Text(genre.name).tag(genre.id)
-                }
-            }
-            .frame(maxWidth: 170)
+            // The dropdowns speak strings and treat "" as no filter, so the
+            // ids go through as text and come back parsed.
+            SumiFilterDropdown(
+                label: "Genre",
+                options: [("", "Any")] + model.cinemaGenres.map { (String($0.id), $0.name) },
+                selected: Binding(
+                    get: { model.cinemaFilter.genreId.map(String.init) ?? "" },
+                    set: { next in model.applyCinemaFilter { $0.genreId = Int64(next) } }
+                )
+            )
 
-            Picker("", selection: Binding(
-                get: { model.cinemaFilter.year ?? -1 },
-                set: { next in model.applyCinemaFilter { $0.year = next == -1 ? nil : next } }
-            )) {
-                Text("Any year").tag(-1)
-                ForEach(Self.years, id: \.self) { year in
-                    Text(String(year)).tag(year)
-                }
-            }
-            .frame(maxWidth: 130)
+            SumiFilterDropdown(
+                label: "Year",
+                options: [("", "Any")] + Self.years.map { (String($0), String($0)) },
+                selected: Binding(
+                    get: { model.cinemaFilter.year.map(String.init) ?? "" },
+                    set: { next in model.applyCinemaFilter { $0.year = Int(next) } }
+                )
+            )
 
-            Picker("", selection: Binding(
-                get: { model.cinemaFilter.sort },
-                set: { next in model.applyCinemaFilter { $0.sort = next } }
-            )) {
-                Text("Popular").tag("popularity.desc")
-                Text("Top rated").tag("vote_average.desc")
-                Text("Newest").tag("primary_release_date.desc")
-            }
-            .frame(maxWidth: 140)
+            SumiFilterDropdown(
+                label: "Sort",
+                options: [
+                    ("popularity.desc", "Popular"),
+                    ("vote_average.desc", "Top rated"),
+                    ("primary_release_date.desc", "Newest"),
+                ],
+                selected: Binding(
+                    get: { model.cinemaFilter.sort },
+                    set: { next in model.applyCinemaFilter { $0.sort = next.isEmpty ? "popularity.desc" : next } }
+                )
+            )
 
             Spacer(minLength: 0)
         }
-        .font(.system(size: 12))
-        .foregroundColor(SumiTheme.foreground)
     }
 
     /// Back to the first year TMDB has much of anything for. Listing every
@@ -401,12 +393,13 @@ struct CinemaHomeView: View {
             // Two lists, not one: what was started and what was saved for
             // later answer different questions, and a film sitting in both
             // would otherwise appear twice with no way to tell why.
-            Picker("", selection: $watchingTab) {
-                Text("Continue").tag(WatchingTab.continueWatching)
-                Text("Watchlist").tag(WatchingTab.list)
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
+            SumiSegmentedControl(
+                options: [("continue", "Continue"), ("list", "Watchlist")],
+                selection: Binding(
+                    get: { watchingTab == .list ? "list" : "continue" },
+                    set: { watchingTab = ($0 == "list") ? .list : .continueWatching }
+                )
+            )
 
             if watchingTab == .list {
                 watchlist
@@ -424,20 +417,23 @@ struct CinemaHomeView: View {
     @ViewBuilder
     private var watchlist: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: Binding(
-                get: { model.cinemaWatchlistFilter },
-                set: { next in
-                    model.cinemaWatchlistFilter = next
-                    Task { await model.loadCinemaWatchlist() }
-                }
-            )) {
-                Text("Planning").tag("PLANNING")
-                Text("Watching").tag("CURRENT")
-                Text("Completed").tag("COMPLETED")
-                Text("Dropped").tag("DROPPED")
-            }
-            .frame(maxWidth: 160)
-            .font(.system(size: 12))
+            // The same tab bar the Library's status filter uses: four
+            // statuses is a row of words, not a dropdown to open.
+            SumiTabBar(
+                tabs: [
+                    ("PLANNING", "Planning"),
+                    ("CURRENT", "Watching"),
+                    ("COMPLETED", "Completed"),
+                    ("DROPPED", "Dropped"),
+                ],
+                selection: Binding(
+                    get: { model.cinemaWatchlistFilter },
+                    set: { next in
+                        model.cinemaWatchlistFilter = next
+                        Task { await model.loadCinemaWatchlist() }
+                    }
+                )
+            )
 
             if model.cinemaWatchlist.isEmpty {
                 Text("Nothing on this list yet. Add a film or series from its page.")

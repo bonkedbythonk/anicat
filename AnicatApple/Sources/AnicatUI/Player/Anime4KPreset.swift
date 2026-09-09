@@ -36,7 +36,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     /// Resolves the shader files into absolute path string format expected by mpv (`path1:path2:...`)
     public func resolveMpvShaderString(bundle: Bundle? = nil) -> String {
         guard self != .off else { return "" }
-        let activeBundle = bundle ?? Self.resolveDefaultBundle()
+        let activeBundle = bundle ?? Bundle.anicatResources
         let paths = shaderFileNames.compactMap { name -> String? in
             let baseName = (name as NSString).deletingPathExtension
             let ext = (name as NSString).pathExtension
@@ -52,26 +52,6 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
         #else
         return paths.joined(separator: ":")
         #endif
-    }
-
-    /// `Bundle.module`'s generated accessor only ever checks `Bundle.main`'s
-    /// bundle root (correct for a bare `swift run` executable, where that
-    /// root *is* the directory next to the binary) or the `.build` tree — it
-    /// has no case for a real signed `Anicat.app`, and would fatalError
-    /// there before any of this function's own fallbacks ran. A signed app
-    /// bundle can only hold the resource bundle under `Contents/Resources`
-    /// (codesign refuses anything else sitting loose at the bundle root:
-    /// "unsealed contents present in the bundle root"), so check that first
-    /// and only fall through to `Bundle.module` — for `swift run` / tests —
-    /// once it's confirmed not to be the crashing case.
-    private static func resolveDefaultBundle() -> Bundle {
-        let resourcesPath = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Resources/AnicatApple_AnicatUI.bundle")
-            .path
-        if let bundle = Bundle(path: resourcesPath) {
-            return bundle
-        }
-        return Bundle.module
     }
 }
 

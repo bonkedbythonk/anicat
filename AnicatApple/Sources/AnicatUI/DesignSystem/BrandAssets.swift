@@ -14,8 +14,8 @@ public enum BrandAssets {
 
         // 1. Try pre-bundled multi-resolution TIFF containing both 1x and 2x Retina representations
         let tiffCandidates = [
-            Bundle.module.url(forResource: "anicat_menu_icon", withExtension: "tiff"),
-            Bundle.module.url(forResource: "anicat_menu_icon", withExtension: "tiff", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "tiff"),
+            Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "tiff", subdirectory: "Images"),
         ]
         for case let url? in tiffCandidates {
             if let img = NSImage(contentsOf: url) {
@@ -32,8 +32,8 @@ public enum BrandAssets {
         let repNames = ["anicat_menu_icon", "anicat_menu_icon@2x", "anicat_menu_icon@3x"]
         for name in repNames {
             let urls = [
-                Bundle.module.url(forResource: name, withExtension: "png"),
-                Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Images"),
+                Bundle.anicatResources.url(forResource: name, withExtension: "png"),
+                Bundle.anicatResources.url(forResource: name, withExtension: "png", subdirectory: "Images"),
             ]
             for case let url? in urls {
                 if let data = try? Data(contentsOf: url),
@@ -53,10 +53,10 @@ public enum BrandAssets {
 
         // 3. Fallback to tray_icon or anicat_logo
         let fallbacks = [
-            Bundle.module.url(forResource: "tray_icon", withExtension: "png"),
-            Bundle.module.url(forResource: "tray_icon", withExtension: "png", subdirectory: "Images"),
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png"),
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "tray_icon", withExtension: "png"),
+            Bundle.anicatResources.url(forResource: "tray_icon", withExtension: "png", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
         ]
         for case let url? in fallbacks {
             if let img = NSImage(contentsOf: url) {
@@ -68,10 +68,10 @@ public enum BrandAssets {
         return nil
         #else
         let candidates = [
-            Bundle.module.url(forResource: "anicat_menu_icon", withExtension: "png"),
-            Bundle.module.url(forResource: "anicat_menu_icon", withExtension: "png", subdirectory: "Images"),
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png"),
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "png"),
+            Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "png", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
         ]
         for case let url? in candidates {
             if let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {

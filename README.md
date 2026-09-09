@@ -14,18 +14,26 @@
 
 ---
 
-Anicat is a native macOS app for AniList users who want to watch, read, and track without touching a browser. It is a SwiftUI app over a Rust engine, with libmpv rendering video inside the window, an embedded torrent engine for anime, and full two-way AniList sync so your library, progress and scores stay current automatically.
+Anicat is an app for your Mac that plays anime, reads manga and light novels,
+and keeps your [AniList](https://anilist.co) profile up to date while you do
+it. You search for something, press play, and it starts. No browser tabs, no
+choosing between sites, nothing to download and wait for first.
 
-It covers four kinds of media, and they do not share a backend:
+Four kinds of thing, all in the one app:
 
-| Mode | Catalog | Source | State |
-|---|---|---|---|
-| Anime | AniList | Torrents, streamed while they download | working |
-| Manga | AniList | MangaDex, MangaKatana fallback | working |
-| Light novels | AniList | Lnori for official volumes, Syosetu for web novels | working |
-| Film and TV | TMDB | Torrents, streamed while they download | working |
+| | Where it comes from | Works today |
+|---|---|---|
+| **Anime** | Fan-subtitled releases, which start playing while the rest is still arriving | Yes |
+| **Manga** | MangaDex, and a second site for titles MangaDex cannot show | Yes |
+| **Light novels** | Official volumes, and Japanese web novels | Yes |
+| **Films and TV** | The same way anime works | Yes |
 
-The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping product. An iPhone target exists and runs, but it still wears the desktop layout and no phone build is distributed.
+Video plays inside the app itself, the way a normal video player does. Nothing
+finishes downloading before it starts: the file arrives while you watch it, and
+skipping ahead pulls that part down next.
+
+Everything you watch or read is reported back to AniList automatically, so your
+lists, progress and scores stay right without you touching them.
 
 > **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
@@ -34,7 +42,7 @@ The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping p
 ## Table of Contents
 
 - [Install](#install)
-- [First-run Setup](#first-run-setup)
+- [Setting it up](#setting-it-up)
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Building from Source](#building-from-source)
@@ -47,45 +55,82 @@ The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping p
 
 ## Install
 
-Apple silicon, macOS 15 or later. Download
-`Anicat-<version>-macos-arm64.dmg` from the
-[Releases page](https://github.com/bonkedbythonk/anicat/releases), open it and
-drag Anicat into the Applications folder in the same window. The `.zip` beside
-it holds the same app for anyone who would rather move it themselves. Or let
-the installer do it:
+**You need:** a Mac with Apple silicon — any Mac sold since late 2020, or
+anything whose chip is called M1, M2, M3 or newer — running macOS 15 (Sequoia)
+or later. Click the Apple menu, then About This Mac, if you are not sure.
+
+1. Go to the [Releases page](https://github.com/bonkedbythonk/anicat/releases)
+   and download the file ending in **`.dmg`**.
+2. Open it. A window appears with the Anicat icon and a folder called
+   Applications. Drag the icon onto the folder.
+3. Open your Applications folder, **right-click Anicat and choose Open**. A
+   warning appears; click Open again.
+
+Step 3 is only needed the first time. After that, Anicat opens like any other
+app.
+
+**Why the warning?** Apple charges a yearly fee to have an app certified, and
+this one is not. macOS therefore says it cannot verify who made it. Right-click
+and Open is macOS's own way of saying "I know where this came from, let it
+run". Nothing else about the app is different.
+
+<details>
+<summary>If you prefer the Terminal</summary>
+
+One line downloads the latest version, puts it in `/Applications` and opens it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
-The build is ad-hoc signed, not notarized. On first launch right-click the
-app and choose Open, or clear the quarantine flag:
+A `.zip` is published beside the `.dmg` for anyone who would rather unpack it
+themselves. The bundle is ad-hoc signed and not notarized, so if you install by
+hand and would rather not use right-click-Open:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Anicat.app
 ```
 
-Releases up to v5.8.0 are the retired Tauri app and are not upgrades to
-6.x — see [RELEASE_NOTES.md](RELEASE_NOTES.md) for what carries over.
+</details>
 
-### Coming from 5.x
+Anything on the Releases page numbered 5.x is the old version of Anicat, which
+was a different program that happened to share the name. Start with the newest
+release.
 
-There is nothing to uninstall. Both versions are called Anicat, carry the
-same bundle identifier and live at `/Applications/Anicat.app`, so installing
-6.x replaces the old app in place. Its data stays behind though — on a
-machine that ran 5.x for a while the dead web view cache alone is around
-90 MB. To list what is left and move it to the Trash:
+### If you had the old Anicat
+
+**You do not need to uninstall anything.** Both versions are called Anicat and
+live in the same place, so installing this one replaces the old one. Your
+AniList account comes along with it.
+
+What stays behind is the old version's leftover files — around 90 MB of them,
+sitting in a folder you would never open. They do nothing. Nothing breaks if
+you leave them there forever.
+
+If you want the space back, paste this into the Terminal app and press Return.
+It puts the leftovers in your Trash, where you can fish them back out if you
+change your mind:
+
+```bash
+mv ~/Library/Application\ Support/Anicat/{registry.db,registry.json,covers} ~/Library/Caches/com.anicat.app/WebKit ~/Library/WebKit/com.anicat.app ~/.Trash/ 2>/dev/null; true
+```
+
+There is also a script that lists everything with its size and asks before
+touching anything:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/cleanup_legacy_macos.sh
 bash cleanup_legacy_macos.sh
 ```
 
-It asks before touching anything, moves to the Trash rather than deleting,
-and leaves your AniList token, your 6.x library and your downloads alone.
+Either way, your AniList login, your library and anything you have downloaded
+in the new version are left alone.
 
-Prefer to do it by hand? In Finder press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>,
-paste each path, and drag what you find to the Trash:
+<details>
+<summary>The individual files, if you would rather drag them to the Trash yourself</summary>
+
+In Finder press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>, paste each path,
+and drag what you find to the Trash:
 
 | Path | What it is |
 |---|---|
@@ -96,47 +141,118 @@ paste each path, and drag what you find to the Trash:
 | `~/Library/WebKit/com.anicat.app` | the rest of that web view |
 
 Leave `config.toml` and `config.json` where they are: your AniList sign-in is
-in them, and 6.x reads both. Everything else in that folder
+in them, and the new version reads both. Everything else in that folder
 (`registry.sqlite`, `catalog-cache.sqlite`, `torrent-streams`,
 `offline-manga`) belongs to the new app.
 
-There is no old app to drag out of Applications. Both versions are called
-Anicat and install to the same place, so the new one has already replaced it —
-unless you once dragged a copy into your *home* Applications folder
-(`~/Applications`), which the installer does not touch.
+One exception to "nothing to uninstall": if you ever dragged a copy of the old
+Anicat into the Applications folder inside your *home* folder rather than the
+main one, that copy is still there and still opens the old app. Drag it to the
+Trash.
+
+</details>
 
 ---
 
-## First-run Setup
+## Setting it up
 
-On first launch Anicat walks you through setup:
+The first time you open Anicat it asks you to connect your
+[AniList](https://anilist.co) account. AniList is a free website that keeps
+track of what you have watched and read; Anicat uses it as your library.
 
-1. Connect your AniList account: Settings opens the AniList authorization page in your browser, and you paste the redirect URL (or the token in it) back into the app. The token is kept on this Mac and is never sent anywhere but AniList.
-2. Your library loads and the home screen populates.
+1. Anicat opens AniList in your browser and asks you to approve it.
+2. AniList sends you to a page whose address contains a long code. Copy that
+   whole address and paste it back into Anicat.
+3. Your lists appear, and the home screen fills up.
 
-AniList is only used for tracking. Playback and the episode list do not require an account.
+That is the whole setup. From then on, anything you watch or read updates
+AniList on its own.
+
+You can skip this and still watch and read everything — you just will not have
+a library, and nothing gets tracked. Your AniList login stays on this Mac and
+is never sent anywhere except AniList itself.
 
 ---
 
 ## Features
 
-- **Up Next** — One "continue where you left off" queue across every show in progress, a "Pick for me" random-episode button, and a customizable home layout (Trending, Newly Releasing, Seasonal, Planning).
-- **Playback** — libmpv drawn inside the window through Metal, at the display's full refresh rate. Anime4K upscaling, AniSkip intro and outro skip keyed to the file's real length, resume position, auto-next with the next episode preloaded at 75%, a corner mini-player so the rest of the app stays usable, sideways mode for a rotated screen, and the display kept awake while a stream plays. Streams come straight from the swarm while they download: candidates are gathered from SubsPlease, AnimeTosho, Nyaa and SeaDex in one pass, the best two raced against each other, and the release that won is remembered for next time.
-- **Player info popover** — Audio and subtitle tracks listed by language and title, a Sub/Dub switch that keeps full subtitles, a release switcher that resumes at the same position, speed, and an optional keyboard backlight dimmer for night watching.
-- **Detail pages** — Episodes with thumbnails and air dates, cast with in-app character, voice actor and staff pages, relations and recommendations, AniList forum threads read in the app, and a "Start over" beside Resume. Browser-style back and forward, two-finger swipe included, with the poster morphing from the card you opened and the hero banner settling into a compact header as you scroll.
-- **Films and TV** — A TMDB-backed catalog beside the anime one, with the same
-  streaming path behind it: a film is matched on title and year, an episode on
-  SxxEyy, and both play in the same in-window player.
-- **Manga reader** — Single page, two-page spread, vertical scroll, RTL and LTR, tap zones and trackpad page turns, AniList progress sync. MangaDex first, MangaKatana when a title has been pulled from MangaDex.
-- **Light novels** — In-app reader for official volumes and for Syosetu web novels, with typography controls and per-chapter progress. Volumes can be kept offline and exported as EPUB.
-- **AniList sync** — Progress, scores and list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85%. Inline editing from the detail page; Planning shelves on the manga and novel pages.
-- **Library** — Every AniList status as a grid or table, anime and manga.
-- **Downloads and History** — Keep an episode's torrent for offline playback with Play, Reveal in Finder and Remove per row; a local watch log you can open, prune or clear.
-- **Schedule** — 7-day airing calendar, everything airing or just your watching list.
-- **Search** — Genre, year, season, format, score, status and sort filters.
-- **Continuity** — Handoff of playback and reading between Macs on the same Apple ID, Bonjour discovery of other instances.
-- **Discord Rich Presence** — Optional, off with one switch.
-- **Keyboard-driven** — A command palette and shortcuts for every view, with a built-in cheat sheet (`?`).
+**Watching**
+
+- **Up Next** — everything you are part-way through, in one list, with a
+  "Pick for me" button when you cannot decide.
+- **Press play and it plays.** Anicat finds the episode itself and starts it
+  within a few seconds. There is no list of mirrors to pick from and no file to
+  download first.
+- **It remembers where you stopped**, plays the next episode when one finishes,
+  and can skip openings and endings for you.
+- **Sharper picture** — an optional upscaler that makes older or lower-quality
+  episodes look better on a big screen.
+- **Mini player** — shrink the video into the corner and keep browsing.
+- **Subtitles and dubs** — pick any audio or subtitle track the release
+  includes, and tell Anicat you prefer dubs so it looks for one first.
+
+**Reading**
+
+- **Manga** — one page, two pages, or a continuous scroll; left-to-right or
+  right-to-left; your place is saved and sent to AniList.
+- **Light novels** — official volumes and Japanese web novels, with control
+  over the typeface and size. A volume can be saved for offline reading or
+  exported as an ebook file for a Kindle or Kobo.
+
+**Keeping track**
+
+- **Your AniList library** — every list, as covers or as a table, editable
+  without leaving the app.
+- **Automatic progress** — an episode counts as watched once you pass 85% of
+  it. Scores and list changes sync both ways.
+- **Schedule** — what airs this week, either everything or just your shows.
+- **History and downloads** — what you have watched, and episodes kept for
+  offline playback.
+
+**Extras**
+
+- **Films and TV** as well as anime, from the same app.
+- **Carry on across Macs** — start an episode on one Mac and pick it up on
+  another.
+- **Discord** can show what you are watching. Off unless you turn it on.
+- **Keyboard shortcuts** for everything, with a cheat sheet on `?`.
+
+<details>
+<summary>The same list, for people who want the technical version</summary>
+
+- **Playback** — libmpv drawn inside the window through Metal, at the display's
+  full refresh rate. Anime4K upscaling, AniSkip intro and outro skip keyed to
+  the file's real length, resume position, auto-next with the next episode
+  preloaded at 75%, a corner mini-player, sideways mode for a rotated screen,
+  and the display kept awake while a stream plays.
+- **Sources** — candidates are gathered from SubsPlease, AnimeTosho, Nyaa and
+  SeaDex in one pass, the best two raced against each other, and the release
+  that won an episode is remembered and tried first next time. Playback is a
+  local HTTP range server over the torrent, so a seek moves the download.
+- **Player info popover** — audio and subtitle tracks listed by language and
+  title, a Sub/Dub switch that keeps full subtitles, a release switcher that
+  resumes at the same position, speed, and an optional keyboard backlight
+  dimmer for night watching.
+- **Detail pages** — episodes with thumbnails and air dates, cast with in-app
+  character, voice actor and staff pages, relations and recommendations,
+  AniList forum threads, browser-style back and forward including a two-finger
+  swipe, a poster that morphs out of the card you opened, and a hero banner
+  that settles into a compact header as you scroll.
+- **Films and TV** — a TMDB-backed catalog beside the AniList one. A film is
+  matched on title and year and an episode on SxxEyy, neither of which the
+  anime search has a notion of, so they take their own path into the same
+  player.
+- **Manga** — MangaDex first, MangaKatana for titles MangaDex has matched but
+  cannot serve.
+- **Light novels** — official volumes sliced out of one HTML page per volume,
+  plus ncode.syosetu.com web novels; offline storage as JSON and EPUB export
+  written without a zip dependency.
+- **AniList sync** — progress reported continuously while you watch, watched at
+  85%, inline list editing, Planning shelves on the manga and novel pages.
+- **Continuity** — Handoff of playback and reading between Macs on the same
+  Apple ID, Bonjour discovery of other instances.
+
+</details>
 
 ---
 
@@ -153,9 +269,8 @@ AniList is only used for tracking. Playback and the episode list do not require 
 </div>
 
 The screenshots come from a build run with `ANICAT_SCREENSHOT_MODE=1`, which
-swaps the personal data (lists, history, profile, statistics) for fixtures
-built from the trending catalog, so they show layout rather than anyone's
-watch history.
+swaps the personal data (lists, history, profile, statistics) for fixtures built
+from the trending catalog — they show the layout, not anyone's watch history.
 
 ---
 

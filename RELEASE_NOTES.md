@@ -59,10 +59,6 @@ deleted. Leave `config.toml` alone — 6.0.0 still keeps your token there.
   the release that won an episode is remembered and tried first next time.
   Measured resolve time: 2750ms cold, 955ms for a remembered release, 798ms
   from a complete cached file.
-- **An iPhone build**, as an `.ipa` for sideloading (see the README for what
-  that involves). It has a phone layout of its own rather than the Mac one on a
-  small screen, plays and reads the same things, and doubles as a remote for
-  Anicat running on a Mac on the same Wi-Fi.
 - **Films and TV** — the TMDB catalog plays as well as browses. A film is
   matched on title and year and an episode on SxxEyy, neither of which the
   anime search has a notion of, so they take their own path into the same
@@ -87,8 +83,7 @@ Full feature list in the [README](https://github.com/bonkedbythonk/anicat#featur
 - Apple silicon only, macOS 15 or later. There is no Intel build.
 - Light novels come from one source for official volumes and Syosetu for web
   novels; other novel sites are not ported yet.
-- The iPhone build is sideload-only, and unsigned. Apple does not allow apps
-  from outside the App Store without a computer and a tool like AltStore or
-  Sideloadly to re-sign the `.ipa` with your own Apple ID -- and on a free
-  Apple ID that signature lasts seven days before the app has to be installed
-  again.
+- macOS only for now. An iPhone build exists, with a phone layout of its own,
+  but it is not part of this release: an iPhone installs apps from outside the
+  App Store only through a sideloading tool on a computer, and on a free Apple
+  ID the result stops working after a week.

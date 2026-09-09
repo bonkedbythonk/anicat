@@ -42,7 +42,6 @@ lists, progress and scores stay right without you touching them.
 ## Table of Contents
 
 - [Install](#install)
-- [On an iPhone](#on-an-iphone)
 - [Setting it up](#setting-it-up)
 - [Features](#features)
 - [Screenshots](#screenshots)
@@ -109,30 +108,6 @@ Anything on the Releases page numbered 5.x is the old version of Anicat, which
 was a different program that happened to share the name. Start with the newest
 release; installing it replaces an older one in place, with nothing to
 uninstall first.
-
-### On an iPhone
-
-There is an iPhone version, and it is on the Releases page as the file ending
-in **`.ipa`**. Installing it is not as simple as the Mac, and that is Apple's
-doing rather than the app's: iPhones only install apps from the App Store,
-unless you go around it.
-
-Going around it means a program on your computer — **AltStore** or
-**Sideloadly** are the usual two — which takes the `.ipa` file, signs it with
-your own Apple ID, and puts it on your phone over a cable. Both are free and
-both have their own setup guides, which are better than anything repeated here.
-
-Two things worth knowing before you start:
-
-- With a free Apple ID, the app **stops working after seven days** and has to
-  be re-installed. A paid Apple developer account (99 USD a year) extends that
-  to a year.
-- You need a computer for this. There is no way to do it from the phone alone.
-
-The iPhone version has its own layout rather than the Mac one squeezed onto a
-small screen, and does the same things: your lists, playback, the readers and
-AniList tracking. It can also act as a remote control for Anicat running on a
-Mac on the same Wi-Fi.
 
 ---
 

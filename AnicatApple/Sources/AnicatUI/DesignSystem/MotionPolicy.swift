@@ -161,13 +161,26 @@ public extension Animation {
         case .morph:
             return .spring(response: 0.38 * scale, dampingFraction: 0.86)
         case .morphReturn:
-            // A duration, not a response, and it has to stay equal to
-            // `RootView.detailFadeOut`: the page carrying this poster is
-            // removed when that fade ends, so a morph still moving at that
-            // moment is cut off rather than finished. A spring has no
-            // duration to match against, which is what made the old
-            // `response: 0.32` version land after the page had already gone.
-            return .smooth(duration: 0.26 * scale)
+            // Deliberately shorter than `RootView.detailFadeOut` (0.26), not
+            // equal to it. The poster travels inside the page that fade is
+            // removing, and the card it is flying back to is fully opaque
+            // underneath the whole time -- the feed is not pushed back during
+            // a morph. Matched durations therefore spend the last third of
+            // the travel at almost no opacity, over a card that is already
+            // there, which reads as the poster skipping the end and the card
+            // snapping into place.
+            //
+            // Landing first fixes it: the poster arrives while it can still
+            // be seen, and the opacity it has left is spent cross-fading
+            // into a card it is now exactly on top of, where fading is
+            // invisible.
+            //
+            // 0.15 rather than something just under 0.26, because the fade
+            // is an ease-in-out and most of it happens in the middle: at
+            // 0.18 the poster still landed at about a fifth of its opacity,
+            // which is not much more visible than not landing at all. At
+            // 0.15 it arrives at roughly 0.38 and the arrival is legible.
+            return .smooth(duration: 0.15 * scale)
         }
     }
 }

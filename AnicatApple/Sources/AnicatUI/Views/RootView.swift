@@ -1207,9 +1207,9 @@ public struct RootView: View {
     /// are: an unscaled 0.26s fade against an 8x spring shows the poster
     /// vanishing mid-flight at every setting, which is an artefact of the
     /// instrument rather than the transition.
-    /// Equal to `.sumi(.morphReturn)`'s duration, and has to stay that way:
-    /// the poster morphing back into its card lives inside the page this
-    /// fade removes.
+    /// Longer than `.sumi(.morphReturn)`, and has to stay that way: the
+    /// poster morphing back into its card lives inside the page this fade
+    /// removes, so it has to land before the fade has taken its opacity.
     static let detailFadeOut: Double = 0.26 * MotionPolicy.slowMotion
 
     private var detailTransition: AnyTransition {

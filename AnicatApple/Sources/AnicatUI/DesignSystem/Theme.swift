@@ -138,8 +138,8 @@ public enum SumiFontManager {
 
         for file in fontFiles {
             let candidates: [URL?] = [
-                Bundle.module.url(forResource: file, withExtension: nil),
-                Bundle.module.url(forResource: file, withExtension: nil, subdirectory: "Fonts"),
+                Bundle.anicatResources.url(forResource: file, withExtension: nil),
+                Bundle.anicatResources.url(forResource: file, withExtension: nil, subdirectory: "Fonts"),
                 Bundle.main.url(forResource: file, withExtension: nil),
                 Bundle.main.url(forResource: file, withExtension: nil, subdirectory: "Fonts"),
                 Bundle.main.resourceURL?.appendingPathComponent("Fonts/\(file)"),

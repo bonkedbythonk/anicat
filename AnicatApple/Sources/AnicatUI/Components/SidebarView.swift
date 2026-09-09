@@ -424,8 +424,8 @@ struct SumiLogoMark: View {
 
     private static let mark: Image? = {
         let candidates = [
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png"),
-            Bundle.module.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png"),
+            Bundle.anicatResources.url(forResource: "anicat_logo", withExtension: "png", subdirectory: "Images"),
         ]
         for case let url? in candidates {
             if let data = try? Data(contentsOf: url), let image = PlatformImage(data: data) {

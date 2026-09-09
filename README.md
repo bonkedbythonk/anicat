@@ -48,9 +48,11 @@ The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping p
 ## Install
 
 Apple silicon, macOS 15 or later. Download
-`Anicat-<version>-macos-arm64.zip` from the
-[Releases page](https://github.com/bonkedbythonk/anicat/releases), unzip it
-and move `Anicat.app` to `/Applications`. Or let the installer do it:
+`Anicat-<version>-macos-arm64.dmg` from the
+[Releases page](https://github.com/bonkedbythonk/anicat/releases), open it and
+drag Anicat into the Applications folder in the same window. The `.zip` beside
+it holds the same app for anyone who would rather move it themselves. Or let
+the installer do it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
@@ -109,7 +111,7 @@ unless you once dragged a copy into your *home* Applications folder
 
 On first launch Anicat walks you through setup:
 
-1. Connect your AniList account: Settings opens the AniList authorization page in your browser, and you paste the redirect URL (or the token in it) back into the app. The token is stored in the local Keychain.
+1. Connect your AniList account: Settings opens the AniList authorization page in your browser, and you paste the redirect URL (or the token in it) back into the app. The token is kept on this Mac and is never sent anywhere but AniList.
 2. Your library loads and the home screen populates.
 
 AniList is only used for tracking. Playback and the episode list do not require an account.

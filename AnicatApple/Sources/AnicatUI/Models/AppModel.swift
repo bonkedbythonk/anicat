@@ -753,11 +753,17 @@ public final class AppModel {
             object: UserDefaults.standard,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            let enabled = AppModel.isDiscordPresenceEnabled
-            guard enabled != self.lastDiscordPresenceEnabled else { return }
-            self.lastDiscordPresenceEnabled = enabled
-            self.applyDiscordPresenceSetting(enabled)
+            // Registered with `queue: .main`, so this block runs on the main
+            // actor's own executor and the assumption holds. Swift 6.3 works
+            // that out on its own; the toolchain CI runs does not, and the
+            // build was green here and red there until this was spelled out.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let enabled = AppModel.isDiscordPresenceEnabled
+                guard enabled != self.lastDiscordPresenceEnabled else { return }
+                self.lastDiscordPresenceEnabled = enabled
+                self.applyDiscordPresenceSetting(enabled)
+            }
         }
     }
 

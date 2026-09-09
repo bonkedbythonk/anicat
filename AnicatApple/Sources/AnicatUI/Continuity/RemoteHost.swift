@@ -97,18 +97,22 @@ public final class RemoteHost {
     private func receive(_ session: Session, key: ObjectIdentifier) {
         session.connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
             [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                let frames = session.framer.ingest(data)
-                Task { @MainActor in
+            // The connection is started on `.main` (see `Session`), so this
+            // callback is already on the main actor's executor -- but only
+            // Swift 6.3 works that out unaided, and CI's toolchain refused
+            // the call back into `receive` without it being said out loud.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let data, !data.isEmpty {
+                    let frames = session.framer.ingest(data)
                     for frame in frames { self.handle(frame, from: session, key: key) }
                 }
+                if isComplete || error != nil {
+                    self.drop(key)
+                    return
+                }
+                self.receive(session, key: key)
             }
-            if isComplete || error != nil {
-                Task { @MainActor in self.drop(key) }
-                return
-            }
-            self.receive(session, key: key)
         }
     }
 

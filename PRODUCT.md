@@ -8,7 +8,7 @@ native (macOS now; iOS is the stated goal of the Swift rewrite)
 
 ## Users
 
-Anime/manga viewers with an AniList account who want to watch, read, and track without a browser. Public GitHub repo; 6.0.0 is the first packaged release of the Swift app, and everything published up to v5.8.0 is the retired Tauri build. The audience today is the developer on a MacBook and, once it compiles for iOS, a sideloaded iPhone. First-run clarity still matters because the repo is public.
+Anime/manga viewers with an AniList account who want to watch, read, and track without a browser. Public GitHub repo; 6.0.0 is the first packaged release of the Swift app, and everything published up to v5.8.0 is the retired Tauri build. The audience today is the developer on a MacBook; the iPhone build runs but is held back from the release, since installing it needs a sideloading tool on a computer and lasts a week on a free Apple ID. First-run clarity still matters because the repo is public.
 
 ## Product Purpose
 
@@ -26,7 +26,7 @@ First run: theme/preference setup, AniList authorization (browser page, token pa
 
 - macOS only today, built from source. iOS is declared in Package.swift but AnicatUI still depends on AppKit; that gap is the main open engineering item.
 - No hosted content — scrapes public third-party sites / streams from torrent swarms; legal exposure is the user's own (see DISCLAIMER.md).
-- Anime comes from torrents only. Manga comes from MangaDex with MangaKatana as fallback, both in the Rust engine. Light novels are Syosetu only; more providers are a someday item, not a current goal.
+- Anime comes from torrents only. Manga comes from MangaDex with MangaKatana as fallback, both in the Rust engine. Light novels come from Lnori for official volumes and Syosetu for web novels; the remaining providers in `scraper/` are a someday item, not a current goal.
 - Cinema (TMDB) has a catalog but no playback path in the Swift build yet.
 - libmpv is the only player, rendered inside the window.
 - Keyboard: command palette, shortcuts overlay, Escape dismissal hierarchy. The web app's spatial-navigation focus system was not ported.

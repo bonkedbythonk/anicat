@@ -80,3 +80,23 @@ echo "The app should open now."
 echo "If not, open your Applications folder and click Anicat."
 echo ""
 echo "Connect your AniList account from Settings to sync your library."
+
+# An upgrade from the 5.x Tauri app needs no uninstall step -- same name, same
+# bundle id, same path, so the copy above overwrote it -- but its data stays
+# behind, and on a machine that ran 5.x for a while the dead web view cache
+# alone is around 90 MB. Say so here rather than in the README, where nobody
+# who ran a one-line installer will look.
+LEGACY_TOTAL="$(du -sck \
+    "$HOME/Library/Application Support/Anicat/registry.db" \
+    "$HOME/Library/Application Support/Anicat/registry.json" \
+    "$HOME/Library/Application Support/Anicat/covers" \
+    "$HOME/Library/Caches/com.anicat.app/WebKit" \
+    "$HOME/Library/WebKit/com.anicat.app" \
+    2>/dev/null | tail -1 | cut -f1)"
+if [ -n "$LEGACY_TOTAL" ] && [ "$LEGACY_TOTAL" -gt 1024 ]; then
+    echo ""
+    echo "The old version left about $((LEGACY_TOTAL / 1024)) MB of data behind."
+    echo "Nothing needs it. To list it and move it to the Trash, run:"
+    echo "  curl -fsSLO https://raw.githubusercontent.com/$REPO/master/scripts/cleanup_legacy_macos.sh"
+    echo "  bash cleanup_legacy_macos.sh"
+fi

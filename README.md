@@ -22,10 +22,10 @@ It covers four kinds of media, and they do not share a backend:
 |---|---|---|---|
 | Anime | AniList | Torrents, streamed while they download | working |
 | Manga | AniList | MangaDex, MangaKatana fallback | working |
-| Light novels | AniList | Syosetu | early |
+| Light novels | AniList | Lnori for official volumes, Syosetu for web novels | working |
 | Film and TV | TMDB | Torrents | catalog only, playback not wired yet |
 
-The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping product; an iPhone target builds and runs on the simulator, and the phone layout is still to come.
+The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping product. An iPhone target exists and runs, but it still wears the desktop layout and no phone build is distributed.
 
 > **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
@@ -66,6 +66,22 @@ xattr -dr com.apple.quarantine /Applications/Anicat.app
 Releases up to v5.8.0 are the retired Tauri app and are not upgrades to
 6.x — see [RELEASE_NOTES.md](RELEASE_NOTES.md) for what carries over.
 
+### Coming from 5.x
+
+There is nothing to uninstall. Both versions are called Anicat, carry the
+same bundle identifier and live at `/Applications/Anicat.app`, so installing
+6.x replaces the old app in place. Its data stays behind though — on a
+machine that ran 5.x for a while the dead web view cache alone is around
+90 MB. To list what is left and move it to the Trash:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/cleanup_legacy_macos.sh
+bash cleanup_legacy_macos.sh
+```
+
+It asks before touching anything, moves to the Trash rather than deleting,
+and leaves your AniList token, your 6.x library and your downloads alone.
+
 ---
 
 ## First-run Setup
@@ -86,7 +102,7 @@ AniList is only used for tracking. Playback and the episode list do not require 
 - **Player info popover** — Audio and subtitle tracks listed by language and title, a Sub/Dub switch that keeps full subtitles, a release switcher that resumes at the same position, speed, and an optional keyboard backlight dimmer for night watching.
 - **Detail pages** — Episodes with thumbnails and air dates, cast with in-app character, voice actor and staff pages, relations and recommendations, AniList forum threads read in the app, and a "Start over" beside Resume. Browser-style back and forward, two-finger swipe included, with the poster morphing from the card you opened and the hero banner settling into a compact header as you scroll.
 - **Manga reader** — Single page, two-page spread, vertical scroll, RTL and LTR, tap zones and trackpad page turns, AniList progress sync. MangaDex first, MangaKatana when a title has been pulled from MangaDex.
-- **Light novels** — In-app reader for Syosetu web novels with typography controls and per-chapter progress.
+- **Light novels** — In-app reader for official volumes and for Syosetu web novels, with typography controls and per-chapter progress. Volumes can be kept offline and exported as EPUB.
 - **AniList sync** — Progress, scores and list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85%. Inline editing from the detail page; Planning shelves on the manga and novel pages.
 - **Library** — Every AniList status as a grid or table, anime and manga.
 - **Downloads and History** — Keep an episode's torrent for offline playback with Play, Reveal in Finder and Remove per row; a local watch log you can open, prune or clear.

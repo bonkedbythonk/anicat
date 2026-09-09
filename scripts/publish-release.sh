@@ -24,7 +24,12 @@ if git -C "$ROOT" rev-parse "$TAG" >/dev/null 2>&1; then
     exit 1
 fi
 
-bash "$ROOT/scripts/package-anicat-macos-app.sh" release zip
+# Ad-hoc, never the machine's own identity. The package script auto-detects an
+# "Apple Development" certificate when none is given, and that signature carries
+# the developer's name, email and Team ID into a zip anybody can `codesign -dv`.
+# A development certificate also expires in a year and is not a distribution
+# certificate, so it buys the download nothing in exchange.
+ANICAT_CODESIGN_IDENTITY="-" bash "$ROOT/scripts/package-anicat-macos-app.sh" release zip
 
 NOTES="$(mktemp)"
 if [ -f "$ROOT/RELEASE_NOTES.md" ]; then

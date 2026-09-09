@@ -208,6 +208,17 @@ public struct UpNextQueueView: View {
                             .ifLet(namespace) { view, namespace in
                                 view.matchedGeometryEffect(id: entry.id, in: namespace)
                             }
+                            // The row goes empty for as long as it is the
+                            // morph source. Both halves of the pair draw, so
+                            // leaving this one up put a still copy of the
+                            // thumbnail in the row while a second copy grew
+                            // out of the same spot -- read as a poster
+                            // arriving from above rather than this one
+                            // leaving, which is the whole point of the morph.
+                            // A shelf card gets away with it because the page
+                            // has covered it by the time it has travelled far
+                            // enough to notice; this row is 65pt away.
+                            .opacity(namespace == nil ? 1 : 0)
                             .ifLet(morphSource) { view, source in
                                 view.matchedGeometryEffect(id: source.key, in: source.namespace)
                             }

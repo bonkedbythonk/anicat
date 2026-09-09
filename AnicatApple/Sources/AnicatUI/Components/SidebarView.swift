@@ -184,6 +184,11 @@ public struct SidebarView: View {
     /// here so the rail stays a view of its inputs.
     public let modeCaption: String
     public let switchModeCaption: String?
+    /// Cinema exists in this build but has no TMDB credential to read with.
+    /// The mark stays a control and says so: hidden, it was indistinguishable
+    /// from a decorative logo, and the one report this produced was "the
+    /// toggle doesn't work" for a toggle that was never drawn.
+    public let switchModeLocked: Bool
     public let onSwitchMode: () -> Void
     @Namespace private var sidebarNavNamespace
     @State private var isModeHovered = false
@@ -191,8 +196,12 @@ public struct SidebarView: View {
     public init(
         currentView: Binding<NavSection>,
         mode: AppModel.AppMode = .anime,
-        modeCaption: String = "Anime and manga",
+        // Not "Anime and manga": this mode is also where the light novels
+        // are, and a caption that lists two of the three reads as a promise
+        // that the third is somewhere else.
+        modeCaption: String = "Anime",
         switchModeCaption: String? = nil,
+        switchModeLocked: Bool = false,
         onSwitchMode: @escaping () -> Void = {},
         onOpenSearchPalette: @escaping () -> Void
     ) {
@@ -200,6 +209,7 @@ public struct SidebarView: View {
         self.mode = mode
         self.modeCaption = modeCaption
         self.switchModeCaption = switchModeCaption
+        self.switchModeLocked = switchModeLocked
         self.onSwitchMode = onSwitchMode
         self.onOpenSearchPalette = onOpenSearchPalette
     }
@@ -231,17 +241,16 @@ public struct SidebarView: View {
                 // different drawing at a different weight and reads as a
                 // placeholder next to the real logo.
                 Group {
-                    if switchModeCaption != nil {
+                    if switchModeCaption != nil || switchModeLocked {
                         Button(action: onSwitchMode) { modeMark }
                             .buttonStyle(.sumiPressable)
                             #if os(macOS)
                             .onHover { isModeHovered = $0 }
                             #endif
-                            .help("Switch to \(switchModeCaption ?? "")")
+                            .help(switchModeLocked
+                                  ? "Cinema needs a TMDB key — open Settings"
+                                  : "Switch to \(switchModeCaption ?? "")")
                     } else {
-                        // No TMDB credential, no second world to switch to:
-                        // the mark stays the watermark it has always been
-                        // rather than a control that answers nothing.
                         modeMark
                     }
                 }
@@ -385,18 +394,38 @@ public struct SidebarView: View {
 
 
 extension SidebarView {
+    /// The caption under the mark: the mode showing, or -- on hover -- what a
+    /// press does, which for a build with no TMDB credential is going to
+    /// Settings rather than switching.
+    var hoverCaption: String {
+        guard isModeHovered else { return modeCaption }
+        if switchModeLocked { return "Cinema needs a key" }
+        return switchModeCaption.map { "Switch to \($0)" } ?? modeCaption
+    }
+
     /// The mark and the caption under it. The caption names which of the two
     /// worlds the app is in; on hover it names the one a press would move to,
     /// because a logo that is also a switch says nothing about being one.
+    ///
+    /// Nothing here may change the block's size. The caption is the longer
+    /// string on hover ("Switch to cinema" against "Anime"), and left to lay
+    /// itself out it wrapped to a second line inside the 200pt rail -- the
+    /// VStack grew, the mark slid up, and the whole foot of the sidebar
+    /// jumped on every pass of the cursor. One line, its own fixed height,
+    /// and the swap crossfades in place.
     @ViewBuilder
     var modeMark: some View {
         VStack(spacing: 6) {
             SumiLogoMark()
                 .frame(height: 80)
                 .opacity(isModeHovered ? 1.6 : 1)
-            Text(isModeHovered ? (switchModeCaption.map { "Switch to \($0)" } ?? modeCaption) : modeCaption)
+            Text(hoverCaption)
                 .sumiTabularMono(size: 9)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(height: 11)
                 .foregroundColor(isModeHovered ? SumiTheme.foreground : SumiTheme.muted)
+                .contentTransition(.opacity)
         }
         .animation(.snappy(duration: 0.2), value: isModeHovered)
         .contentShape(Rectangle())

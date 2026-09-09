@@ -42,10 +42,6 @@ targets:
         product: AnicatUI
       - package: AnicatApple
         product: AnicatCoreKit
-      # Embeds the widget extension. Without this line the extension builds
-      # and is never copied into the .app, so the Live Activity request
-      # fails at runtime with nothing to render it.
-      - target: AnicatRemoteWidget
     info:
       path: Generated/Info.plist
       properties:
@@ -78,13 +74,15 @@ targets:
         # pre-iPhone-X app and letterboxes it inside black bars.
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
-        # How cinema mode reaches TMDB, taken from the environment at
-        # generate time exactly as scripts/package-anicat-macos-app.sh takes
-        # it at package time. Neither is ever committed — the repo is public.
-        # Both empty reads as "no TMDB", and the mode toggle stays hidden
-        # rather than offering a switch that cannot load anything.
-        ANICATTMDBProxy: ${ANICAT_TMDB_PROXY}
-        ANICATTMDBKey: ${ANICAT_TMDB_KEY}
+        # How cinema mode reaches TMDB. The literal URL, not ${ANICAT_TMDB_PROXY}:
+        # xcodegen leaves an unset variable in the plist verbatim, so every
+        # build generated without that export shipped a proxy base URL of
+        # "${ANICAT_TMDB_PROXY}" -- cinema mode read as available and every
+        # request went to a hostname that does not exist. No key ships with
+        # it; the key lives on the worker (services/tmdb-proxy), which is the
+        # only arrangement where a public repo and a working cinema mode are
+        # the same build. A viewer's own key still wins, from Settings.
+        ANICATTMDBProxy: https://anicat-tmdb.anicat.workers.dev
         # Without these the phone build is unreachable from outside itself:
         # `anicat://title/<id>` is refused by LaunchServices, and Handoff
         # from the Mac arrives as an activity type the app never claimed.
@@ -120,48 +118,3 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
-  # The Live Activity's lock-screen and Dynamic Island face. A remote cannot
-  # hold the Now Playing slot -- iOS gives that to whichever app owns an
-  # active audio session, and this one plays no audio; claiming it would mean
-  # looping a silent track and taking audio focus from whatever the person is
-  # actually listening to.
-  AnicatRemoteWidget:
-    type: app-extension
-    platform: iOS
-    sources:
-      - path: Sources/AnicatRemoteWidget
-      # The app's faces, carried again. A font registered by the app is
-      # registered in the app's process; the widget is a different one, and
-      # without its own copies the lock screen falls back to the system
-      # sans-serif -- which is exactly the "doesn't look like Anicat" the
-      # stamped mono register exists to avoid.
-      - path: Sources/AnicatUI/Resources/Fonts
-        buildPhase: resources
-    dependencies:
-      # Only the shared attribute types, never AnicatUI: linking that would
-      # pull mpv, FFmpeg and their whole xcframework closure into a process
-      # that draws a progress bar.
-      - package: AnicatApple
-        product: AnicatRemoteActivity
-    info:
-      path: Generated/WidgetInfo.plist
-      properties:
-        CFBundleDisplayName: Anicat Remote
-        # Declared as well as registered at runtime: `UIAppFonts` is what
-        # makes the files visible to `Bundle.main` inside an extension.
-        UIAppFonts:
-          - Geist.ttf
-          - IBMPlexMono-Regular.ttf
-          - IBMPlexMono-Medium.ttf
-          - IBMPlexMono-SemiBold.ttf
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios.remotewidget
-        TARGETED_DEVICE_FAMILY: "1"
-        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
-        CODE_SIGN_STYLE: Automatic
-        SWIFT_VERSION: "6.0"
-        GENERATE_INFOPLIST_FILE: NO
-        SKIP_INSTALL: YES

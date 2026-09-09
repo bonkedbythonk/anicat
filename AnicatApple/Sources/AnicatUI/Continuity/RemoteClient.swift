@@ -85,7 +85,6 @@ public final class RemoteClient {
         framer = RemoteFramer()
         state = RemoteState()
         #if os(iOS)
-        RemoteLiveActivity.shared.end()
         #endif
         hostVersion = 0
         hostFeatures = []
@@ -344,7 +343,6 @@ public final class RemoteClient {
             #if os(iOS)
             // Every frame, not only the ones the sheet is open for: the whole
             // point of the activity is being reachable with the app closed.
-            RemoteLiveActivity.shared.sync(state: incoming, hostName: hostName)
             #endif
         case .syncReply(let rows):
             RemoteSync.merge(rows)

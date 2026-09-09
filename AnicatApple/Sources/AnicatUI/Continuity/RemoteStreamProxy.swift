@@ -21,13 +21,38 @@ final class RemoteStreamProxy {
     /// nothing else, so a request for an unknown path is a 404 rather than
     /// an attempt to reach the Mac.
     private var grants: [String: (grant: StreamGrant, node: BonjourDiscovery.DiscoveredNode)] = [:]
+    /// The ranges currently in flight.
+    ///
+    /// Held because nothing else does. Every callback inside a pump captures
+    /// `self` weakly -- it has to, or the pump and its connection would
+    /// retain each other -- so a pump nobody stores is deallocated the moment
+    /// `run()` returns, and the `.ready` handler that sends the Mac its
+    /// `helloData` finds `self` already gone. The Mac is then never told what
+    /// to send, and the player waits out its own read timeout on a socket
+    /// that will never speak.
+    private var pumps: [ObjectIdentifier: RemoteStreamPump] = [:]
 
     private init() {}
 
+    /// Waiters for the port, from calls made before the listener is ready.
+    private var readyWaiters: [CheckedContinuation<UInt16?, Never>] = []
+
     /// Starts the server if it is not already up and returns its port.
+    ///
+    /// Awaits `.ready` rather than reading `listener.port` straight after
+    /// `start()`: the port is not assigned until then, so the old
+    /// synchronous read handed back 0 and the player was pointed at
+    /// `http://127.0.0.1:0/...`, which ffmpeg rejects with "Port missing in
+    /// uri". Non-nil-but-useless is the worst answer this can give -- the
+    /// caller falls back to a local resolve on nil, and 0 sailed past that.
     @discardableResult
-    func start() -> UInt16? {
+    func start() async -> UInt16? {
         if let port { return port }
+        // A start already in flight: wait on the same `.ready` rather than
+        // binding a second listener.
+        if listener != nil {
+            return await withCheckedContinuation { readyWaiters.append($0) }
+        }
         do {
             let params = NWParameters.tcp
             // Loopback, explicitly. Without this the listener answers on
@@ -43,10 +68,15 @@ final class RemoteStreamProxy {
                 Task { @MainActor in
                     switch state {
                     case .ready:
-                        self?.port = listener.port?.rawValue
+                        // A rawValue of 0 is not a port anything can be
+                        // opened on; treat it as a failure to bind.
+                        let bound = listener.port?.rawValue
+                        self?.port = (bound ?? 0) == 0 ? nil : bound
+                        self?.flushWaiters()
                     case .failed, .cancelled:
                         self?.port = nil
                         self?.listener = nil
+                        self?.flushWaiters()
                     default:
                         break
                     }
@@ -54,16 +84,23 @@ final class RemoteStreamProxy {
             }
             listener.start(queue: .main)
             self.listener = listener
-            return listener.port?.rawValue
+            return await withCheckedContinuation { readyWaiters.append($0) }
         } catch {
             print("[RemoteStream] proxy could not bind loopback: \(error)")
             return nil
         }
     }
 
+    /// Hands every waiting caller whatever the listener settled on.
+    private func flushWaiters() {
+        let waiting = readyWaiters
+        readyWaiters.removeAll()
+        for continuation in waiting { continuation.resume(returning: port) }
+    }
+
     /// Registers a grant and returns the URL to hand mpv.
-    func url(for grant: StreamGrant, on node: BonjourDiscovery.DiscoveredNode) -> URL? {
-        guard let port = start() ?? port else { return nil }
+    func url(for grant: StreamGrant, on node: BonjourDiscovery.DiscoveredNode) async -> URL? {
+        guard let port = await start() else { return nil }
         grants[grant.token] = (grant, node)
         return URL(string: "http://127.0.0.1:\(port)/s/\(grant.token)")
     }
@@ -111,7 +148,10 @@ final class RemoteStreamProxy {
             return respond(connection, status: 405)
         }
         let token = String(parts[1].split(separator: "/").last ?? "")
-        guard let entry = grants[token] else { return respond(connection, status: 404) }
+        guard let entry = grants[token] else {
+            print("[RemoteStream] no grant for token \(token); answering 404")
+            return respond(connection, status: 404)
+        }
 
         let total = entry.grant.totalLength
         let (start, end) = Self.range(from: lines, total: total)
@@ -129,15 +169,27 @@ final class RemoteStreamProxy {
             )
         }
 
-        RemoteStreamPump(
+        // The node as Bonjour knows it *now*, not as it was when the grant
+        // was made. The Mac picks a fresh control port on every launch, so a
+        // Mac restarted between the resolve and the first range left the
+        // pump dialling a port nothing was listening on any more.
+        let live = BonjourDiscovery.shared.discoveredMacNode
+        let node = (live?.id == entry.node.id ? live : nil) ?? entry.node
+
+        let pump = RemoteStreamPump(
             player: connection,
-            node: entry.node,
+            node: node,
             token: token,
             start: start,
             end: end,
             total: total,
             contentType: entry.grant.contentType
-        ).run()
+        )
+        pumps[ObjectIdentifier(pump)] = pump
+        pump.onFinish = { [weak self] finished in
+            self?.pumps.removeValue(forKey: ObjectIdentifier(finished))
+        }
+        pump.run()
     }
 
     /// `Range: bytes=a-b`, with both halves optional, defaulted to the whole
@@ -201,7 +253,17 @@ private final class RemoteStreamPump {
     private let total: Int64
     private let contentType: String
 
+    /// Told when this range is done, so the proxy can stop holding it.
+    var onFinish: ((RemoteStreamPump) -> Void)?
+
     private var host: NWConnection?
+    /// Escapes `.preparing`. A TCP connect to a port nothing listens on --
+    /// a Mac restarted since the grant -- sits there forever: Network
+    /// framework reports neither `.ready` nor `.failed`, so the player waited
+    /// on a socket that was never going to speak. This is the only thing that
+    /// ends that wait.
+    private var connectDeadline: Task<Void, Never>?
+    private static let connectTimeout: Duration = .seconds(5)
     private var framer = RemoteFramer()
     /// Set the moment the Mac's `dataHeader` lands. Everything the socket
     /// delivers after that newline is video, and feeding it to the framer
@@ -232,6 +294,7 @@ private final class RemoteStreamPump {
             host: NWEndpoint.Host(node.host),
             port: NWEndpoint.Port(rawValue: node.controlPort) ?? .any
         )
+        print("[RemoteStream] dialling host \(node.host):\(node.controlPort) for \(start)-\(end)")
         let host = NWConnection(to: endpoint, using: .tcp)
         self.host = host
         host.stateUpdateHandler = { [weak self] state in
@@ -239,13 +302,20 @@ private final class RemoteStreamPump {
                 guard let self else { return }
                 switch state {
                 case .ready:
+                    self.connectDeadline?.cancel()
+                    self.connectDeadline = nil
                     host.sendFrame(.helloData(
                         deviceId: RemoteClient.deviceId,
                         token: self.token,
                         start: self.start,
                         end: self.end
                     ))
-                case .failed, .cancelled:
+                case .failed(let error):
+                    print("[RemoteStream] host connection failed: \(error)")
+                    self.tearDown()
+                case .waiting(let error):
+                    print("[RemoteStream] host connection waiting: \(error)")
+                case .cancelled:
                     self.tearDown()
                 default:
                     break
@@ -253,6 +323,15 @@ private final class RemoteStreamPump {
             }
         }
         host.start(queue: .main)
+        connectDeadline = Task { [weak self] in
+            try? await Task.sleep(for: Self.connectTimeout)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.connectDeadline != nil else { return }
+                print("[RemoteStream] host did not answer in \(Self.connectTimeout); giving up")
+                self.tearDown()
+            }
+        }
         receiveFromHost()
     }
 
@@ -268,6 +347,9 @@ private final class RemoteStreamPump {
             Task { @MainActor in
                 guard let self else { return }
                 if isComplete || error != nil {
+                    if error != nil {
+                        print("[RemoteStream] host read ended: \(String(describing: error))")
+                    }
                     self.tearDown()
                     return
                 }
@@ -337,10 +419,31 @@ private final class RemoteStreamPump {
         })
     }
 
+    /// Ends both sides.
+    ///
+    /// A teardown before the 206 header went out is a failure the player has
+    /// no way to see: mpv is still waiting for a response line, and cancelling
+    /// underneath it reads as a stall rather than an error. Answering 502
+    /// first is what turns an endless spinner into a playback error the app
+    /// already knows how to show.
+    private var isFinished = false
+
     private func tearDown() {
+        guard !isFinished else { return }
+        isFinished = true
+        connectDeadline?.cancel()
+        connectDeadline = nil
         host?.cancel()
         host = nil
-        player.cancel()
+        if !isRaw {
+            let head = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            player.send(content: Data(head.utf8), completion: .contentProcessed { [player] _ in
+                player.cancel()
+            })
+        } else {
+            player.cancel()
+        }
+        onFinish?(self)
     }
 }
 #endif

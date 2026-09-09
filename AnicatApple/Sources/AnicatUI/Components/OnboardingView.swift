@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// First run, as a short guided setup rather than a single wall.
 ///
@@ -43,11 +46,12 @@ public struct OnboardingView: View {
     private static let authorizeURL = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")!
 
     private enum Step: Int, CaseIterable {
-        case connect, watching, picture, alerts, look
+        case connect, mode, watching, picture, alerts, look
 
         var title: String {
             switch self {
             case .connect: return "Connect AniList"
+            case .mode: return "Where to start"
             case .watching: return "How you watch"
             case .picture: return "Picture"
             case .alerts: return "Alerts and presence"
@@ -59,6 +63,8 @@ public struct OnboardingView: View {
             switch self {
             case .connect:
                 return "Your list is the source of truth for what you are watching and how far in you are."
+            case .mode:
+                return "Both are always here. This only decides which one opens."
             case .watching:
                 return "Defaults for every episode. Changeable per title later."
             case .picture:
@@ -71,8 +77,16 @@ public struct OnboardingView: View {
         }
     }
 
-    private var step: Step { Step(rawValue: stepIndex) ?? .connect }
-    private var isLastStep: Bool { stepIndex == Step.allCases.count - 1 }
+    /// The steps this run actually shows. The mode step is dropped when the
+    /// build has no TMDB credential: offering Cinema there would land a first
+    /// launch on eight shelves that cannot load, which is the same thing
+    /// `AppModel.initialize` already refuses to restore into.
+    private var steps: [Step] {
+        Step.allCases.filter { $0 != .mode || model.cinemaAvailable }
+    }
+
+    private var step: Step { steps.indices.contains(stepIndex) ? steps[stepIndex] : .connect }
+    private var isLastStep: Bool { stepIndex >= steps.count - 1 }
 
     public var body: some View {
         ZStack {
@@ -132,10 +146,10 @@ public struct OnboardingView: View {
     private var footer: some View {
         VStack(spacing: 14) {
             HStack(spacing: 6) {
-                ForEach(Step.allCases, id: \.rawValue) { s in
+                ForEach(Array(steps.enumerated()), id: \.element.rawValue) { index, _ in
                     Capsule()
-                        .fill(s.rawValue == stepIndex ? SumiTheme.indigo : SumiTheme.muted.opacity(0.3))
-                        .frame(width: s.rawValue == stepIndex ? 18 : 6, height: 6)
+                        .fill(index == stepIndex ? SumiTheme.indigo : SumiTheme.muted.opacity(0.3))
+                        .frame(width: index == stepIndex ? 18 : 6, height: 6)
                         .animation(.snappy, value: stepIndex)
                 }
             }
@@ -200,7 +214,7 @@ public struct OnboardingView: View {
 
     private func advance() {
         withAnimation(.smooth(duration: 0.28)) {
-            stepIndex = min(stepIndex + 1, Step.allCases.count - 1)
+            stepIndex = min(stepIndex + 1, steps.count - 1)
         }
     }
 
@@ -210,6 +224,7 @@ public struct OnboardingView: View {
     private var content: some View {
         switch step {
         case .connect: connectStep
+        case .mode: modeStep
         case .watching: watchingStep
         case .picture: pictureStep
         case .alerts: alertsStep
@@ -343,6 +358,26 @@ public struct OnboardingView: View {
     }
 
     @ViewBuilder
+    private var modeStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            choiceRow(
+                title: "Opens on",
+                // Not "anime and manga": the same mode carries the light
+                // novels, and naming two of the three reads as a promise that
+                // the third lives somewhere else.
+                caption: "Anime covers series, manga and light novels from AniList. Cinema covers films and TV from TMDB. The mark at the foot of the sidebar switches between them at any time.",
+                options: [AppModel.AppMode.anime.onboardingLabel, AppModel.AppMode.cinema.onboardingLabel],
+                selection: Binding(
+                    get: { model.appMode.onboardingLabel },
+                    set: { label in
+                        model.setAppMode(label == AppModel.AppMode.cinema.onboardingLabel ? .cinema : .anime)
+                    }
+                )
+            )
+        }
+    }
+
+    @ViewBuilder
     private var watchingStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             choiceRow(
@@ -374,9 +409,14 @@ public struct OnboardingView: View {
                             .padding(.bottom, 6)
                             .transition(.opacity)
                         }
-                        Text(subDub == "Dubbed" ? "I told you, this castle is no place for you." : "この城はお前の来る場所じゃない")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white)
+                        // Subtitled is Japanese audio read in English, so
+                        // the line under the picture is the English one. It
+                        // was the other way round: picking Subtitled drew
+                        // Japanese text, which is what a dub viewer would
+                        // never see and a sub viewer never reads.
+                        Text(subDub == "Dubbed" ? "English audio" : "I told you, this castle is no place for you.")
+                            .font(.system(size: 10, weight: subDub == "Dubbed" ? .semibold : .medium))
+                            .foregroundColor(subDub == "Dubbed" ? .white.opacity(0.75) : .white)
                             .shadow(color: .black.opacity(0.8), radius: 2)
                             .padding(.bottom, 12)
                     }
@@ -389,6 +429,11 @@ public struct OnboardingView: View {
     private var pictureStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             toggleRow("Anime4K upscaling", "Sharpens a 1080p release toward your display. Costs GPU; turn it off on battery.", $gpuUpscaling)
+            if gpuUpscaling {
+                note(displayIsAtMost1080p
+                     ? "This screen is 1080p, so there is not much for it to do: a 1080p episode already fills it."
+                     : "It has the most to do on screens above 1080p. On a 1080p one an episode already fills the screen, so there is little to see.")
+            }
             toggleRow("Ambient glow", "Spills the picture's own colour around the player.", $ambientGlow)
 
             preview {
@@ -476,6 +521,39 @@ public struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// An aside under a control: something worth knowing, not something
+    /// wrong. Drawn in the muted text colour with an info glyph rather than
+    /// the amber triangle it started with -- nothing here is a failure, and a
+    /// caution card in the middle of first run reads as one.
+    private func note(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10))
+                .foregroundColor(SumiTheme.muted.opacity(0.8))
+                .padding(.top, 1)
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundColor(SumiTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Whether the display has no room above a 1080p release. Anime4K
+    /// upscales toward the panel, so on a 1080p panel it renders the shaders
+    /// and lands on the size the file already was -- the toggle looks like it
+    /// is doing something and is not. Measured in backing pixels, not points:
+    /// a Retina laptop is 1600pt tall and 3200px, and reading points alone
+    /// would warn on every Mac.
+    private var displayIsAtMost1080p: Bool {
+        #if os(macOS)
+        guard let screen = NSScreen.main else { return false }
+        return screen.frame.height * screen.backingScaleFactor <= 1080
+        #else
+        return false
+        #endif
     }
 
     private func toggleRow(_ title: String, _ caption: String, _ binding: Binding<Bool>) -> some View {
@@ -705,12 +783,15 @@ private struct MockPresence: View {
 /// both read `ThemeStore.shared`, so the selection is the same one.
 private struct OnboardingThemeRow: View {
     @State private var store = ThemeStore.shared
-    // `maximum` pinned to the swatch width: left open it defaults to
-    // `.infinity` and each swatch floats centred in an oversized cell.
-    private let columns = [GridItem(.adaptive(minimum: 72, maximum: 72), spacing: 12, alignment: .topLeading)]
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+        // A centred row, not a `LazyVGrid`. Adaptive columns size themselves
+        // to the 460pt step, which fits five 72pt cells; three skins filled
+        // the first three of them and `alignment: .center` centred the row
+        // inside a grid that was already full width, so the swatches sat left
+        // of the paragraph under them. Every skin fits on one row -- if that
+        // stops being true, wrap this, do not go back to adaptive columns.
+        HStack(alignment: .top, spacing: 12) {
             ForEach(SumiSkin.allCases) { skin in
                 let isSelected = store.skin == skin
                 Button {
@@ -750,7 +831,9 @@ private struct OnboardingThemeRow: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .help(skin.caption)
+                .frame(width: 72)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 }

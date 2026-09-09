@@ -38,7 +38,7 @@ public extension AppModel {
         )
         do {
             let grant = try await RemoteClient.shared.resolveOnHost(ask, on: node)
-            guard let url = RemoteStreamProxy.shared.url(for: grant, on: node) else {
+            guard let url = await RemoteStreamProxy.shared.url(for: grant, on: node) else {
                 RemoteClient.shared.releaseStream(token: grant.token)
                 return nil
             }

@@ -61,6 +61,23 @@ extension AppModel {
         )
     }
 
+    /// Hands a key typed in Settings to the live engine.
+    ///
+    /// `cinemaAvailable` was read once, at construction, from a client that
+    /// held whatever the constructor was given -- so pasting a key changed
+    /// nothing at all until the next launch, and the Settings card had to
+    /// carry "Restart to apply" to explain it. An empty field falls back to
+    /// the build's own credential, which is why this re-reads
+    /// `hasTmdbKey()` rather than assuming the paste succeeded.
+    public func applyTmdbKey() {
+        guard let engine else { return }
+        engine.setTmdbKey(key: TmdbCredential.key)
+        cinemaAvailable = engine.hasTmdbKey()
+        // A key taken away while cinema is showing leaves the rail pointed at
+        // shelves nothing can fill.
+        if !cinemaAvailable, appMode == .cinema { setAppMode(.anime) }
+    }
+
     /// Switches worlds. The home page each mode lands on is loaded on the
     /// way in rather than on first draw, so the switch is not a blank page
     /// followed by shelves appearing one by one.
@@ -198,6 +215,28 @@ extension AppModel {
             }
             await searchCinema(searchQuery, page: 1, append: false)
         }
+    }
+
+    /// Opens the Films or Series section on its own browse.
+    ///
+    /// Not `applyCinemaFilter` plus a search: that one fires its own
+    /// `searchCinema(searchQuery)` from a detached task, so arriving at
+    /// Series with "dune" still in the search field raced a keyword search
+    /// against this browse and the keyword one landed last -- the Series
+    /// section drew the Dune results. The kind is set here and exactly one
+    /// request follows it.
+    public func openCinemaBrowse(isSeries: Bool) async {
+        let kindChanged = cinemaFilter.isSeries != isSeries
+        cinemaFilter.isSeries = isSeries
+        if kindChanged {
+            // Film genres and series genres are different lists, and a genre
+            // id from one means something else in the other.
+            cinemaFilter.genreId = nil
+            await loadCinemaGenres()
+        } else if cinemaGenres.isEmpty {
+            await loadCinemaGenres()
+        }
+        await searchCinema("", page: 1, append: false)
     }
 
     /// The palette's own search: a handful of matches, no state written.

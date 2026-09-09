@@ -105,6 +105,10 @@ struct PhoneSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.system(size: 13, design: .monospaced))
+                    // Handed to the live engine; it reads the key once at
+                    // construction, so without this the field did nothing
+                    // until the app was started again.
+                    .onChange(of: tmdbKey) { _, _ in AppModel.shared?.applyTmdbKey() }
 
                     // `PasteButton`, not a long press on the field and not a
                     // `UIPasteboard.general.string` read behind a plain
@@ -274,9 +278,7 @@ struct PhoneSettingsView: View {
                 .labelStyle(.iconOnly)
                 .buttonBorderShape(.capsule)
             }
-            // The engine reads the key once, when it is constructed, so a key
-            // added here does not reach it until the app is started again.
-            Text("Restart Anicat after changing this.")
+            Text("Takes effect as you type it.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
         }

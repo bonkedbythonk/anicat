@@ -68,17 +68,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>${COMMIT}</string>
     <key>AnicatBuiltAt</key>
     <string>${BUILT_AT}</string>
-    <!-- How cinema mode reaches TMDB, taken from the environment at package
-         time: a packaged .app has no environment of its own to read at launch.
-         Prefer the proxy (services/tmdb-proxy): with it, no credential ships
-         at all, and this plist is plain text that `plutil -p` prints for
-         anyone who has the app. A key here is public the moment it is
-         distributed -- treat it as rotatable, not secret, and set it only for
-         a build with no proxy behind it. Both empty reads as "no TMDB", which
-         hides cinema mode rather than shipping something credential-shaped
-         and blank. -->
+    <!-- How cinema mode reaches TMDB: a packaged .app has no environment of
+         its own to read at launch, so it is written in here. The proxy
+         (services/tmdb-proxy) is the default rather than an export the
+         packager has to remember, because forgetting it is silent -- both
+         shipped 6.0.0 bundles carry an empty key and an empty proxy, and the
+         only symptom is that cinema mode is not there. With the proxy no
+         credential ships at all, which matters because this plist is plain
+         text that `plutil -p` prints for anyone who has the app. A key here
+         is public the moment it is distributed -- treat it as rotatable, not
+         secret, and set ANICAT_TMDB_KEY only for a build with no proxy. -->
     <key>ANICATTMDBProxy</key>
-    <string>${ANICAT_TMDB_PROXY:-}</string>
+    <string>${ANICAT_TMDB_PROXY:-https://anicat-tmdb.anicat.workers.dev}</string>
     <key>ANICATTMDBKey</key>
     <string>${ANICAT_TMDB_KEY:-}</string>
     <key>LSMinimumSystemVersion</key>

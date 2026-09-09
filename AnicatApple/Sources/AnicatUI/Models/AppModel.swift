@@ -398,6 +398,9 @@ public final class AppModel {
     // One speculative resolve of the next episode per episode session, see
     // `nextEpisodePreloadPct`.
     var hasPreloadedNextEpisode = false
+    /// When the file currently loaded started playing, for the completion
+    /// rules above. Reset with the other per-episode state.
+    var playbackSessionStartedAt: Date?
     // Where in the current episode the next one is resolved ahead of time.
     // Far enough from the end that a cold resolve (search, race, pre-buffer;
     // 2 to 10 s, more on a slow swarm) has landed before auto-next fires at
@@ -418,6 +421,25 @@ public final class AppModel {
     // underneath here). Watching position against duration, the same fix
     // used there, works regardless.
     static let autoAdvanceRemainingSeconds: Double = 2.0
+
+    /// The shortest thing that can plausibly be an episode or a film.
+    ///
+    /// A stream mpv cannot actually read -- a torrent whose header never
+    /// arrived, a range server that answered nothing -- still reports a
+    /// duration, and it is a fraction of a second. Position then sits at
+    /// "the end" of it, which is 100% of nothing, and every completion rule
+    /// below fires at once: the episode is marked watched and auto-next
+    /// moves to the following one, which fails the same way. That is how a
+    /// broken stream burned through a season in seconds.
+    static let minimumCredibleDurationSeconds: Double = 60.0
+
+    /// How long a file must actually have been playing before any of those
+    /// rules may fire.
+    ///
+    /// Duration alone is not enough: a partly-read file can report an honest
+    /// two-hour length and still hand back an instant end-of-file. Nothing
+    /// counts as watched inside the first few seconds of opening it.
+    static let minimumPlaybackBeforeCompletionSeconds: Double = 15.0
 
     // Manga Reading Session
     public struct MangaReadingSession: Identifiable, Sendable {
@@ -572,6 +594,16 @@ public final class AppModel {
     public enum AppMode: String, Sendable, CaseIterable {
         case anime
         case cinema
+
+        /// What onboarding calls each world. "Anime" rather than "Anime and
+        /// manga": the light novels are in the same mode, and a label naming
+        /// two of the three reads as a promise that the third is elsewhere.
+        public var onboardingLabel: String {
+            switch self {
+            case .anime: return "Anime"
+            case .cinema: return "Cinema"
+            }
+        }
     }
 
     static let appModeDefaultsKey = "anicat_app_mode"
@@ -894,6 +926,18 @@ public final class AppModel {
             // which is exactly the kind of repeated traffic that queues up
             // behind AniList's own proactive rate-limit backoff and starts
             // surfacing as data that just stops loading.
+            // `refreshAll` fills the anime world only. Cinema's shelves are
+            // loaded by `setAppMode` on the way in, and a launch that
+            // *restores* cinema mode never calls it -- the page had nobody to
+            // fill it and sat on its spinner until the viewer switched to
+            // Anime and back. Before `refreshAll` rather than after: in
+            // cinema mode this is the page on screen, and AniList's five
+            // calls are not what it is waiting for.
+            if appMode == .cinema, cinemaAvailable {
+                if cinemaShelves.isEmpty, !isCinemaLoading { await loadCinemaHome() }
+                await loadCinemaLibrary()
+            }
+
             let homeCacheAge = HomeCache.ageInSeconds()
             let homeCacheIsFresh = cachedHome != nil && homeCacheAge.map { $0 < Self.detailFreshnessWindow } == true
             if !homeCacheIsFresh {

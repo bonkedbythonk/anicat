@@ -734,6 +734,34 @@ extension AppModel {
                 }
             }
         }
+
+        // A film or a series has no AniList entry, and its id is TMDB's.
+        // Sending it to `updateListEntry` anyway asked AniList about a title
+        // number that means something else there, or nothing at all --
+        // `{"message":"Not Found."}, "Media": null` -- and the viewer got
+        // "Could not update AniList" for ticking a box on a series AniList
+        // has never heard of. The registry is the only place a cinema watch
+        // was ever recorded, so clearing or setting it there is the whole
+        // operation.
+        guard playbackCatalogForOpenDetail == .anilist else {
+            if watched, let engine {
+                let catalog = playbackCatalogForOpenDetail
+                await withCheckedContinuation { continuation in
+                    engineIOQueue.async {
+                        try? engine.markEpisodeCompleted(
+                            catalog: catalog,
+                            catalogId: details.id,
+                            episodeNumber: Int64(episode)
+                        )
+                        continuation.resume()
+                    }
+                }
+            }
+            await refreshCinemaDetailAfterPlayback(id: details.id)
+            loadWatchStats()
+            await loadCinemaLibrary()
+            return
+        }
         await updateListEntry(status: status, progress: Int64(progress))
     }
 

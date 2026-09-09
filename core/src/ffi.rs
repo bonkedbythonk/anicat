@@ -1332,6 +1332,19 @@ impl AnicatEngine {
             .map_err(|e| AnicatError::Storage { msg: e })
     }
 
+    /// Paste a TMDB key in without rebuilding the engine.
+    ///
+    /// The engine is constructed at launch, and a key typed in Settings
+    /// afterwards used to reach nothing at all: the client held whatever the
+    /// constructor was given, so cinema mode stayed hidden until the next
+    /// launch and the key looked like it had been ignored. `None` drops back
+    /// to the build's own credential, which is a proxy when it ships one.
+    pub fn set_tmdb_key(&self, key: Option<String>) {
+        self.catalogs
+            .tmdb
+            .set_token(key.filter(|k| !k.trim().is_empty()));
+    }
+
     /// Whether cinema mode has a TMDB credential to read with.
     ///
     /// The mode is hidden without one rather than shown broken: every call

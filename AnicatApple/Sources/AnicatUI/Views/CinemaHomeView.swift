@@ -52,6 +52,17 @@ struct CinemaHomeView: View {
         page == .films || page == .series || (page == .search && !isSearching)
     }
 
+    /// The Films/Series segment, which only Search has any use for. On the
+    /// Films section it was a control that argued with the rail: flipping it
+    /// left the section titled Films showing series, and the way back was the
+    /// sidebar, not the segment. Those two sections *are* the choice.
+    private var showsKindPicker: Bool { page == .search }
+
+    /// Cinema's search lives on the Search section, the way the anime rail's
+    /// does. Drawn on all five sections it was the same field five times,
+    /// each with its own idea of what the page below it was showing.
+    private var showsSearchField: Bool { page == .search }
+
     @FocusState private var searchFocused: Bool
 
     enum WatchingTab: Hashable { case continueWatching, list }
@@ -68,7 +79,7 @@ struct CinemaHomeView: View {
         GeometryReader { viewport in
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                searchField
+                if showsSearchField { searchField }
 
                 if page == .search {
                     if !isSearching { filterRow }
@@ -81,8 +92,6 @@ struct CinemaHomeView: View {
                     if !model.cinemaSearchResults.isEmpty {
                         resultsGrid
                     }
-                } else if isSearching {
-                    resultsGrid
                 } else if page == .home, !model.cinemaUpNext.isEmpty {
                     upNext
                     ForEach(shelves) { shelf in
@@ -116,15 +125,18 @@ struct CinemaHomeView: View {
         .task {
             if model.cinemaShelves.isEmpty { await model.loadCinemaHome() }
             if page == .watching || page == .home { await model.loadCinemaLibrary() }
-            if showsFilterRow {
-                // Films and Series set the kind on arrival, so the filter row
-                // and the browse under it agree with the section you are in.
-                if page == .films || page == .series {
-                    model.applyCinemaFilter { $0.isSeries = (page == .series) }
-                }
+            // Each section refills the grid on arrival, unconditionally rather
+            // than "if it is empty": one array holds both the keyword results
+            // and the discover browse, so a search for "Dune" was still
+            // sitting under Films until something else replaced it. TMDB's
+            // responses are cached, so re-asking costs a cache read.
+            if page == .films || page == .series {
+                // Sets the kind and browses in one step -- see
+                // `openCinemaBrowse` for why this is not `applyCinemaFilter`.
+                await model.openCinemaBrowse(isSeries: page == .series)
+            } else if page == .search {
                 if model.cinemaGenres.isEmpty { await model.loadCinemaGenres() }
-                // The section opens on a browse rather than on nothing.
-                if model.cinemaSearchResults.isEmpty { await model.searchCinema("") }
+                await model.searchCinema(model.searchQuery)
             }
             if focusSearchOnAppear { searchFocused = true }
         }
@@ -222,15 +234,17 @@ struct CinemaHomeView: View {
     /// combining them.
     private var filterRow: some View {
         HStack(spacing: 10) {
-            Picker("", selection: Binding(
-                get: { model.cinemaFilter.isSeries },
-                set: { next in model.applyCinemaFilter { $0.isSeries = next } }
-            )) {
-                Text("Films").tag(false)
-                Text("Series").tag(true)
+            if showsKindPicker {
+                Picker("", selection: Binding(
+                    get: { model.cinemaFilter.isSeries },
+                    set: { next in model.applyCinemaFilter { $0.isSeries = next } }
+                )) {
+                    Text("Films").tag(false)
+                    Text("Series").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
 
             Picker("", selection: Binding(
                 get: { model.cinemaFilter.genreId ?? -1 },

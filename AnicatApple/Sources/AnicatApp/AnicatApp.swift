@@ -440,7 +440,6 @@ struct AnicatApp: App {
                     // left running by a previous launch is already on the
                     // lock screen, and its buttons reach this process the
                     // moment it exists.
-                    RemoteLiveActivity.shared.installIntentHandler()
                     await model.initialize()
                     model.drainPendingDeepLink()
                     if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {

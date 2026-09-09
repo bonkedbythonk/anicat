@@ -63,14 +63,19 @@ public enum TmdbCredential {
         clean(UserDefaults.standard.string(forKey: userKeyDefaultsKey)) != nil
     }
 
-    /// A blank string is not a key. Both the defaults entry and the Info.plist
-    /// entry exist even when nothing filled them in -- the packaging script
-    /// writes the plist key unconditionally -- so an empty value has to read
-    /// as absent or the engine is handed "" and every TMDB call fails on a
-    /// credential that looks present.
+    /// A blank string is not a key, and neither is a shell variable that was
+    /// never expanded. Both the defaults entry and the Info.plist entry exist
+    /// even when nothing filled them in -- the packaging script writes the
+    /// plist key unconditionally -- so an empty value has to read as absent or
+    /// the engine is handed "" and every TMDB call fails on a credential that
+    /// looks present. `xcodegen` is worse than empty: with the variable unset
+    /// it copies "${ANICAT_TMDB_PROXY}" into the plist verbatim, so cinema
+    /// mode read as available and every request went to a hostname that does
+    /// not exist.
     private static func clean(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty else { return nil }
+              !trimmed.isEmpty,
+              !trimmed.hasPrefix("$") else { return nil }
         return trimmed
     }
 }

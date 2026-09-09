@@ -989,7 +989,7 @@ private struct AccountTabSection: View {
             SettingsCard(title: "Cinema (TMDB)") {
                 SettingField(
                     label: "Your own TMDB key",
-                    description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. Restart to apply."
+                    description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. It takes effect as you type it."
                 ) {
                     SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
                         .textFieldStyle(.plain)
@@ -1004,6 +1004,11 @@ private struct AccountTabSection: View {
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                         .frame(maxWidth: 340)
+                        // The engine holds the key in memory, so a paste has
+                        // to be handed over; before this it reached nothing
+                        // until the next launch and cinema mode stayed
+                        // hidden with the key sitting right there.
+                        .onChange(of: tmdbKeyInput) { _, _ in AppModel.shared?.applyTmdbKey() }
                 }
 
                 // Required by TMDB's API terms wherever their data is used,

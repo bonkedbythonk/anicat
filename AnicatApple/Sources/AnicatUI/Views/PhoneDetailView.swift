@@ -132,7 +132,19 @@ struct PhoneDetailView: View {
                         EpisodeRow(episode: episode)
                     }
                     .buttonStyle(.plain)
-                    .contextMenu { playOnMac(episode.number) }
+                    .contextMenu {
+                        playOnMac(episode.number)
+                        // The phone had no way to take a watch back. A
+                        // stream that failed on open still recorded one, and
+                        // the only undo lived in the Mac's History view.
+                        Button {
+                            Task { await model.setEpisodeWatched(episode.number, watched: !episode.isWatched) }
+                        } label: {
+                            episode.isWatched
+                                ? Label("Mark as Unwatched", systemImage: "minus.circle")
+                                : Label("Mark as Watched", systemImage: "checkmark.circle")
+                        }
+                    }
                     Divider().overlay(SumiTheme.border)
                 }
             }
@@ -165,6 +177,11 @@ struct PhoneDetailView: View {
         model.activeResolveTask = Task {
             do {
                 _ = try await model.resolveAndPlay(
+                    // Without this the phone resolved every film and series
+                    // against AniList: `catalog` defaults to `.anilist`, and
+                    // a TMDB id handed to the anime catalog matches nothing,
+                    // so a press of Play on a film did nothing at all.
+                    catalog: model.playbackCatalogForOpenDetail,
                     catalogId: details.id,
                     episode: Int64(number),
                     title: details.title

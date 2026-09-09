@@ -31,6 +31,7 @@ extension AppModel {
         hasAdvancedAniListForCurrentEpisode = false
         hasAutoAdvancedEpisode = false
         hasPreloadedNextEpisode = false
+        playbackSessionStartedAt = Date()
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
         // silently disable auto-next for the rest of the binge.
@@ -588,6 +589,15 @@ extension AppModel {
         let stopTime = dur > 0 ? min(rawStop, dur) : rawStop
         guard stopTime >= 0 else { return }
 
+        // Whether anything here is allowed to call this episode finished.
+        // A stream that never really opened reports a sliver of a duration
+        // and an instant end, and without this every rule below fires on it
+        // at once -- marking the episode watched and auto-advancing into the
+        // next one, which fails identically. A season went by in seconds.
+        let playedFor = playbackSessionStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let completionRulesApply = duration >= Self.minimumCredibleDurationSeconds
+            && playedFor >= Self.minimumPlaybackBeforeCompletionSeconds
+
         let isPaused = !playerController.isPlaying
         let pauseEdgeChanged = isPaused != lastDiscordPaused
         if pauseEdgeChanged {
@@ -602,7 +612,8 @@ extension AppModel {
         // watch-history registry (and so the resume offer) advanced on every
         // episode played. The two tracked different things and the resume
         // offer could point well past whatever AniList actually showed.
-        if currentPlaybackCatalog == .anilist, !hasAdvancedAniListForCurrentEpisode, dur > 0 {
+        if currentPlaybackCatalog == .anilist, !hasAdvancedAniListForCurrentEpisode,
+           completionRulesApply {
             let percent = Double(stopTime) / Double(dur) * 100
             if percent >= Self.watchedThresholdPct {
                 hasAdvancedAniListForCurrentEpisode = true
@@ -624,7 +635,7 @@ extension AppModel {
         // took. The result is not read here; the real play hits the reuse
         // path in `TorrentManager::resolve`. `preload: true` keeps it from
         // taking the playing-file pin off the episode mpv is reading.
-        if currentPlaybackCatalog != .tmdbMovie, !hasPreloadedNextEpisode, dur > 0,
+        if currentPlaybackCatalog != .tmdbMovie, !hasPreloadedNextEpisode, completionRulesApply,
            playerController.hasNextEpisode,
            Double(stopTime) / Double(dur) * 100 >= Self.nextEpisodePreloadPct {
             hasPreloadedNextEpisode = true
@@ -672,7 +683,7 @@ extension AppModel {
         // Claiming `hasAutoAdvancedEpisode` is what stops it below. Not
         // gated on `autoPlayNextEnabled` -- the episode ends either way, and
         // this is about the machine going to sleep, not about advancing.
-        if sleepTimer == .afterEpisode, !hasAutoAdvancedEpisode, dur > 0,
+        if sleepTimer == .afterEpisode, !hasAutoAdvancedEpisode, completionRulesApply,
            Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds {
             hasAutoAdvancedEpisode = true
             sleepTimer = .off
@@ -681,7 +692,7 @@ extension AppModel {
         }
 
         if !hasAutoAdvancedEpisode, !playerController.nextEpisodeCountdown.isResolved,
-           dur > 0, Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds,
+           completionRulesApply, Double(dur) - currentTime <= Self.autoAdvanceRemainingSeconds,
            playerController.autoPlayNextEnabled, playerController.hasNextEpisode {
             hasAutoAdvancedEpisode = true
             Task { await self.playAdjacentEpisode(offset: 1) }

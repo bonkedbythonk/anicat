@@ -19,10 +19,6 @@ let package = Package(
         .library(
             name: "AnicatUI",
             targets: ["AnicatUI"]
-        ),
-        .library(
-            name: "AnicatRemoteActivity",
-            targets: ["AnicatRemoteActivity"]
         )
     ],
     dependencies: [
@@ -50,18 +46,10 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         ),
-        // The Live Activity's shared vocabulary and nothing else. Depends
-        // on nothing so the widget extension can link it without dragging
-        // mpv and FFmpeg into a process that draws a progress bar.
-        .target(
-            name: "AnicatRemoteActivity",
-            path: "Sources/AnicatRemoteActivity"
-        ),
         .target(
             name: "AnicatUI",
             dependencies: [
                 "AnicatCoreKit",
-                "AnicatRemoteActivity",
                 .product(name: "MPVKit-GPL", package: "MPVKit")
             ],
             path: "Sources/AnicatUI",

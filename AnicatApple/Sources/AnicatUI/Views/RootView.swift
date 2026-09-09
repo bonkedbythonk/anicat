@@ -63,13 +63,24 @@ public struct RootView: View {
                         }
                     ),
                     mode: model.appMode,
-                    modeCaption: model.appMode == .cinema ? "Films and series" : "Anime and manga",
+                    modeCaption: model.appMode == .cinema ? "Films and series" : "Anime",
                     // nil hides the switch entirely: with no TMDB key there is
                     // no second world to move to.
                     switchModeCaption: model.cinemaAvailable
                         ? (model.appMode == .cinema ? "anime" : "cinema")
                         : nil,
+                    // With no key the mark is still a control, and pressing it
+                    // lands on the card that asks for one. Drawn as a plain
+                    // watermark instead, the switch was reported as broken by
+                    // someone who had no way to tell it was never there.
+                    switchModeLocked: !model.cinemaAvailable,
                     onSwitchMode: {
+                        guard model.cinemaAvailable else {
+                            model.clearPersonPages()
+                            model.clearDetail()
+                            model.currentNavSection = .settings
+                            return
+                        }
                         withAnimation(.smooth(duration: 0.3)) {
                             model.setAppMode(model.appMode == .cinema ? .anime : .cinema)
                         }

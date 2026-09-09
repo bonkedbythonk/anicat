@@ -37,12 +37,14 @@ public struct UpNextQueueView: View {
 
     public let items: [QueueEntry]
     public let namespace: Namespace.ID?
-    // No `openingSourceKey`/`shelfKey` here. They used to be stored and
-    // never read: the row below hard-codes `namespace: nil`, so no row in
-    // this view is ever half of a poster morph. Keeping them made the
-    // callers set `AppModel.openingDetailSourceKey` for an open that has
-    // nothing to morph, and everything gated on "is a morph running" —
-    // the page's own scale, the feed push-back — switched itself off.
+    /// Which row (if any) is the poster-morph source, as "upnext:<id>".
+    /// Nil for a caller that does not morph -- the Reading and Cinema
+    /// queues, whose detail pages are not wired to this namespace. Setting
+    /// it for one of those would tell the rest of the app a morph is
+    /// running when nothing has a second half to interpolate towards, and
+    /// everything gated on that (the page's own scale, the feed push-back)
+    /// would switch itself off for an open with no morph in it.
+    public let openingSourceKey: String?
     /// The second namespace, for the thumbnail-to-video morph a Play press
     /// starts. Distinct from `namespace` above because the two morphs have
     /// different destinations and different lifetimes — see
@@ -59,9 +61,18 @@ public struct UpNextQueueView: View {
         "upnext:\(catalogId):\(episode)"
     }
 
+    /// The poster morph's key. Deliberately not the bare id: the same show
+    /// sits in this queue and in the Watching shelf at once, and two live
+    /// `matchedGeometryEffect` sources for one id in one namespace is the
+    /// undefined case documented on `AppModel.openingDetailSourceKey`.
+    public nonisolated static func detailMorphKey(catalogId: Int64) -> String {
+        "upnext:\(catalogId)"
+    }
+
     public init(
         items: [QueueEntry],
         namespace: Namespace.ID? = nil,
+        openingSourceKey: String? = nil,
         playerNamespace: Namespace.ID? = nil,
         playerSourceKey: String? = nil,
         onSelect: @escaping (QueueEntry) -> Void,
@@ -69,6 +80,7 @@ public struct UpNextQueueView: View {
     ) {
         self.items = items
         self.namespace = namespace
+        self.openingSourceKey = openingSourceKey
         self.playerNamespace = playerNamespace
         self.playerSourceKey = playerSourceKey
         self.onSelect = onSelect
@@ -89,14 +101,20 @@ public struct UpNextQueueView: View {
                 RowView(
                     entry: entry,
                     isFirst: index == 0,
-                    // Never a real namespace here, deliberately: the
-                    // thumbnail is a 104x60 landscape rect and the detail
-                    // page's poster is portrait — matchedGeometryEffect
-                    // interpolates the frame linearly, so that morph reads
-                    // as a visible squash/stretch rather than a clean grow.
-                    // Same call as `WeekStrip`, which never had a thumbnail
-                    // wired up to it in the first place.
-                    namespace: nil,
+                    // The thumbnail is a 104x60 landscape window and the
+                    // detail poster is a 192x288 portrait, but they are the
+                    // same image: `thumbnailURL` is the show's `coverImage`,
+                    // center-cropped by `aspectRatio(.fill)`. So growing the
+                    // frame does not squash the art, it uncrops it -- the
+                    // poster the row was only showing a slice of opens out
+                    // into the whole thing. That only holds while the frame
+                    // below is the single size declaration in the stack; a
+                    // fixed frame on the image itself pins it at 104x60
+                    // while its container grows, which is the squash this
+                    // used to be avoiding.
+                    namespace: openingSourceKey == Self.detailMorphKey(catalogId: entry.id)
+                        ? namespace
+                        : nil,
                     // The player morph has no such mismatch: this 104x60
                     // still is landscape and so is the video frame it grows
                     // into, so the linear frame interpolation that made the
@@ -143,36 +161,56 @@ public struct UpNextQueueView: View {
                 // Clickable Body: Thumbnail + Text
                 Button(action: onSelect) {
                     HStack(spacing: 16) {
-                        // 104x60 Thumbnail
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(SumiTheme.card)
-                                .frame(width: 104, height: 60)
-
-                            CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 208) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 104, height: 60)
-                                    .clipped()
-                            } placeholder: {
-                                Rectangle()
-                                    .fill(SumiTheme.background)
-                                    .overlay(
-                                        Image(systemName: "photo")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(SumiTheme.muted)
-                                    )
+                        // 104x60 window onto the show's cover. Shaped like
+                        // `MediaDetailView.poster` on purpose -- one frame,
+                        // on the outside, and nothing inside it that names a
+                        // size -- because the poster morph animates that
+                        // frame and the art has to follow it out.
+                        Color.clear
+                            .frame(width: 104, height: 60)
+                            .overlay {
+                                CachedAsyncImage(
+                                    url: entry.thumbnailURL,
+                                    // The detail poster's size, not this
+                                    // row's: the morph hands this already
+                                    // decoded bitmap over to a 192x288 view,
+                                    // and at 208 it arrived soft and snapped
+                                    // sharp when the detail's own decode
+                                    // landed. Both views ask for the same URL
+                                    // at the same size, so the open now takes
+                                    // a cache hit it did not have before.
+                                    maxPixelSize: 600
+                                ) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Rectangle()
+                                        .fill(SumiTheme.background)
+                                        .overlay(
+                                            Image(systemName: "photo")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(SumiTheme.muted)
+                                        )
+                                }
                             }
-                        }
-                        .frame(width: 104, height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .ifLet(namespace) { view, namespace in
-                            view.matchedGeometryEffect(id: entry.id, in: namespace)
-                        }
-                        .ifLet(morphSource) { view, source in
-                            view.matchedGeometryEffect(id: source.key, in: source.namespace)
-                        }
+                            .clipped()
+                            // The destination's radius while this row is the
+                            // one morphing. `matchedGeometryEffect` carries
+                            // frame and nothing else, so a corner that
+                            // disagrees with the poster's pops at the far
+                            // end -- unnoticeable across a shelf card's
+                            // travel, a third of the movement across this
+                            // one's 65pt.
+                            .clipShape(RoundedRectangle(
+                                cornerRadius: namespace == nil ? 4 : SumiTheme.radiusXl
+                            ))
+                            .ifLet(namespace) { view, namespace in
+                                view.matchedGeometryEffect(id: entry.id, in: namespace)
+                            }
+                            .ifLet(morphSource) { view, source in
+                                view.matchedGeometryEffect(id: source.key, in: source.namespace)
+                            }
 
                         // Info Column
                         VStack(alignment: .leading, spacing: 0) {

@@ -1203,7 +1203,11 @@ public struct RootView: View {
     /// because the page's fade, its travel and the feed's push-back all have
     /// to land on the same frame; three separate literals is how they drifted
     /// apart in the first place.
-    static let detailFadeOut: Double = 0.26
+    /// Scaled by `MotionPolicy.slowMotion` for the same reason the springs
+    /// are: an unscaled 0.26s fade against an 8x spring shows the poster
+    /// vanishing mid-flight at every setting, which is an artefact of the
+    /// instrument rather than the transition.
+    static let detailFadeOut: Double = 0.26 * MotionPolicy.slowMotion
 
     private var detailTransition: AnyTransition {
         // Asymmetric, because the two directions have opposite problems.
@@ -1213,7 +1217,7 @@ public struct RootView: View {
         // page blink out. It goes at nearly twice the length on the way out,
         // which is long enough to read as receding and still short enough
         // that the overlap never becomes a dissolve.
-        let arrive = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+        let arrive = AnyTransition.opacity.animation(.easeOut(duration: 0.14 * MotionPolicy.slowMotion))
         let leave = AnyTransition.opacity.animation(.easeInOut(duration: Self.detailFadeOut))
         guard model.openingDetailSourceKey == nil else {
             return .asymmetric(insertion: arrive, removal: leave)
@@ -1493,10 +1497,17 @@ private struct HomeSectionView: View {
                         UpNextQueueView(
                             items: upNextExpanded ? model.upNextItems : Array(model.upNextItems.prefix(Self.upNextCollapsedCount)),
                             namespace: namespace,
+                            openingSourceKey: model.openingDetailSourceKey,
                             playerNamespace: playerNamespace,
                             playerSourceKey: model.openingPlayerSourceKey,
                             onSelect: { entry in
-                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", nil)
+                                onOpenDetail(
+                                    entry.id,
+                                    entry.title,
+                                    entry.thumbnailURL,
+                                    entry.unit == "CH",
+                                    UpNextQueueView.detailMorphKey(catalogId: entry.id)
+                                )
                             },
                             onPlay: { entry in
                                 if entry.unit == "CH" {

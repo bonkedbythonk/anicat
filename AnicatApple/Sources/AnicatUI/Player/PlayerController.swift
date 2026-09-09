@@ -457,6 +457,14 @@ public final class PlayerController {
     /// each of which waits on mpv's core lock; done inline on the main
     /// thread that was a visible hitch on every press of the Sub/Dub row.
     public var onSelectAudioLanguage: (@Sendable (_ preferDub: Bool, _ completion: @escaping @Sendable @MainActor (Bool) -> Void) -> Void)?
+
+    /// Fetch this same episode again, looking for a release in the other
+    /// language. Offered only when `onSelectAudioLanguage` has just reported
+    /// that the playing file carries no track in the language asked for:
+    /// most nyaa releases are single-audio, so on those the Sub/Dub row could
+    /// do nothing but change what the *next* episode searches for -- which
+    /// reads as a switch that does not work.
+    public var onReloadForAudioLanguage: (@MainActor (_ preferDub: Bool) -> Void)?
     
     // Autohide controls timer & state
     public var areControlsVisible: Bool = true

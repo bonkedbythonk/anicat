@@ -53,6 +53,10 @@ public struct PlayerView: View {
     /// searches with — but this episode's audio did not, and saying nothing
     /// is how the old control read as broken.
     @State private var audioSwitchNote: String?
+    /// Set alongside the note when the playing file has no track in the
+    /// language just asked for, so the note can offer to go and find a
+    /// release that does.
+    @State private var audioSwitchReloadTo: Bool?
     /// Latched once per playback session, never reset: neither signal behind
     /// it is one-shot on its own. `isBuffering` goes true again on every
     /// mid-playback `paused-for-cache` stall and `awaitingNewFile` on every
@@ -111,6 +115,15 @@ public struct PlayerView: View {
     /// player's own 0.32s fade already is the plain-fade fallback.
     private var isFlyingIn: Bool {
         morphSource != nil && !hasShownFirstFrame && !reduceMotion
+    }
+
+    /// The size of the still shown while the first frame is on its way: a
+    /// 16:9 card a third of the window wide, clamped so it stays a card on a
+    /// 6K display and still readable in a small window. Deliberately near the
+    /// 1024px the thumbnail is decoded at, so it is never upscaled.
+    static func placeholderCardSize(in window: CGSize) -> CGSize {
+        let width = min(max(window.width * 0.30, 240), 460)
+        return CGSize(width: width, height: (width * 9 / 16).rounded())
     }
 
     /// One curve for the whole minimize/restore transition, read by both the
@@ -255,8 +268,21 @@ public struct PlayerView: View {
                 } placeholder: {
                     Color.black
                 }
-                .frame(width: videoRect.width, height: videoRect.height)
+                // A card in the middle, not the whole video rect. The still
+                // is an episode thumbnail decoded at 1024px; blown up to a
+                // 3000px-wide window it was a soft, banded banner filling
+                // the screen for the length of the pre-buffer, which reads
+                // as the stream having started badly rather than as
+                // something still loading.
+                .frame(width: Self.placeholderCardSize(in: windowSize).width,
+                       height: Self.placeholderCardSize(in: windowSize).height)
                 .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.5), radius: 26, y: 10)
                 .matchedGeometryEffect(id: morphSource.key, in: morphSource.namespace)
                 // Same reasoning as the detail page's poster:
                 // matchedGeometryEffect only animates the frame, so without
@@ -353,6 +379,12 @@ public struct PlayerView: View {
                             .sumiTabularMono(size: 12)
                             .foregroundColor(PlayerChrome.muted)
                     }
+                    // Below the still's card while one is up, centred when
+                    // there is none — printed over the card, the spinner sat
+                    // on the artwork it is meant to be waiting beneath.
+                    .offset(y: isFlyingIn
+                            ? Self.placeholderCardSize(in: windowSize).height / 2 + 34
+                            : 0)
                     .transition(.opacity)
                 }
 
@@ -578,6 +610,24 @@ public struct PlayerView: View {
         // same 0.32s the player's own entrance uses (`resolveAndPlay`), so
         // the still handing over to the picture reads as one move with the
         // dim rather than a second, faster thing happening on top of it.
+        // The track lists, filled as the episode loads rather than when the
+        // menu is opened. `refreshTracks` on the menu's own button was the
+        // only reader, and mpv reports no tracks at all until the file is
+        // decoding -- so opening Audio or Subtitles in the first seconds of
+        // an episode found two empty, disabled rows, and the lists appeared
+        // (and the popover grew) only if the menu happened to still be open
+        // when a later read landed. Polls because there is no track-list
+        // event to wait on: `mpv_get_property` is a local read, the loop
+        // stops the moment either list answers, and it is bounded so a file
+        // that genuinely has no tracks does not poll for the whole episode.
+        .task(id: streamURL) {
+            for _ in 0..<20 {
+                readTracks()
+                if !audioTracks.isEmpty || !subtitleTracks.isEmpty { return }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+            }
+        }
         .onChange(of: firstFrameLanded) { _, landed in
             guard landed, !hasShownFirstFrame else { return }
             withAnimation(.easeInOut(duration: 0.32)) {
@@ -1069,6 +1119,15 @@ public struct PlayerView: View {
 
     // MARK: - Info Menu
     private var infoMenu: some View {
+        // Fixed size, content scrolling inside it. A popover sizes itself to
+        // its content when it is presented and does not grow afterwards, so
+        // unfolding the Audio list clipped it to whatever slack the first
+        // layout happened to leave -- one row, cut in half, drawn over the
+        // Subtitles row under it. 360 rather than 300 because the values here
+        // are release strings ("English (Full Subtitles [FTW])") in a mono
+        // face, and at 300 every one of them, and half the speed labels,
+        // truncated.
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(controller.title)
@@ -1130,12 +1189,14 @@ public struct PlayerView: View {
                             storedSubDub = option
                             guard let select = controller.onSelectAudioLanguage else {
                                 audioSwitchNote = nil
+                                audioSwitchReloadTo = nil
                                 return
                             }
                             select(wantsDub) { switched in
                                 audioSwitchNote = switched
                                     ? nil
-                                    : "No \(wantsDub ? "English" : "Japanese") audio track in this release — applies from the next episode."
+                                    : "No \(wantsDub ? "English" : "Japanese") audio track in this release."
+                                audioSwitchReloadTo = switched ? nil : wantsDub
                                 refreshTracks()
                             }
                         } label: {
@@ -1150,11 +1211,34 @@ public struct PlayerView: View {
                         .buttonStyle(.sumiPressable)
                     }
                 }
-                if let audioSwitchNote {
-                    Text(audioSwitchNote)
-                        .font(.system(size: 10.5))
-                        .foregroundColor(SumiTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let note = audioSwitchNote {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(note)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(SumiTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // The switch used to end here, which is why it read
+                        // as broken: a single-audio release is the common
+                        // case on nyaa, and changing what the *next* episode
+                        // searches for is not what pressing Dub during an
+                        // episode is asking for. This goes back to the
+                        // indexers for this episode, resuming where the
+                        // current file is.
+                        if let wantsDub = audioSwitchReloadTo {
+                            Button {
+                                audioSwitchNote = nil
+                                audioSwitchReloadTo = nil
+                                showInfoMenu = false
+                                controller.onReloadForAudioLanguage?(wantsDub)
+                            } label: {
+                                Text("Find \(wantsDub ? "a dub" : "a sub") of this episode")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(SumiTheme.indigo)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+                    }
                 }
             }
 
@@ -1186,7 +1270,10 @@ public struct PlayerView: View {
             }
         }
         .padding(16)
-        .frame(width: 300)
+        .frame(width: 360, alignment: .leading)
+        }
+        .frame(width: 360, height: 460)
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     /// The same releases the detail page's "Stream Servers" popover lists,
@@ -1344,9 +1431,12 @@ public struct PlayerView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
                     Spacer(minLength: 8)
-                    Text(current?.label ?? "-")
+                    // "-" for an empty list read as "this release has no
+                    // audio tracks", which is never true of one that is
+                    // playing; it only ever meant mpv had not answered yet.
+                    Text(current?.label ?? (rows.isEmpty ? "Loading…" : "-"))
                         .sumiTabularMono(size: 12)
-                        .foregroundColor(SumiTheme.foreground)
+                        .foregroundColor(rows.isEmpty ? SumiTheme.muted : SumiTheme.foreground)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")

@@ -59,44 +59,41 @@ lists, progress and scores stay right without you touching them.
 anything whose chip is called M1, M2, M3 or newer — running macOS 15 (Sequoia)
 or later. Click the Apple menu, then About This Mac, if you are not sure.
 
-1. Go to the [Releases page](https://github.com/bonkedbythonk/anicat/releases)
-   and download the file ending in **`.dmg`**.
-2. Open it. A window appears with the Anicat icon and a folder called
-   Applications. Drag the icon onto the folder.
-3. Open your Applications folder and double-click Anicat. macOS refuses to
-   open it and says it cannot check the app for malicious software. That is
-   expected — click Done.
-4. Open **System Settings**, go to **Privacy & Security**, and scroll to the
-   bottom. There is a line saying Anicat was blocked, with an **Open Anyway**
-   button next to it. Click it, confirm with your password or Touch ID, and
-   click **Open Anyway** once more.
-
-Steps 3 and 4 are only needed the first time. After that, Anicat opens like any
-other app.
-
-**Why does macOS block it?** Apple charges a yearly fee to have an app
-certified, and this one has not paid it, so macOS says it cannot verify who
-made the app. Open Anyway is Apple's own way of saying "I know where this came
-from, let it run". Nothing else about the app is different.
-
-Note that older advice to right-click the app and choose Open no longer works:
-Apple removed that shortcut in macOS Sequoia, and Open Anyway in Settings
-replaced it.
-
-<details>
-<summary>If you prefer the Terminal</summary>
-
-One line downloads the latest version, puts it in `/Applications` and opens
-it — and because it clears the quarantine flag itself, the blocked-app dance
-above never happens:
+Open the **Terminal** app (press <kbd>Cmd</kbd>+<kbd>Space</kbd>, type
+`terminal`, press Return), paste this line, and press Return:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
 ```
 
-A `.zip` is published beside the `.dmg` for anyone who would rather unpack it
-themselves. The bundle is ad-hoc signed and not notarized, so if you install by hand and
-would rather skip the Settings step:
+It downloads the latest version, puts Anicat in your Applications folder and
+opens it. That is the whole install.
+
+This is the recommended way, and not only because it is one step: macOS blocks
+apps it cannot verify, and downloading by hand means clearing that block
+yourself through System Settings. The installer takes care of it, so Anicat
+just opens.
+
+<details>
+<summary>Or install it by hand</summary>
+
+1. Download `Anicat-<version>-macos-arm64.dmg` from the
+   [Releases page](https://github.com/bonkedbythonk/anicat/releases). The
+   `.zip` beside it holds the same app for anyone who would rather unpack it
+   themselves.
+2. Open it and drag Anicat onto the Applications folder in the same window.
+3. Open your Applications folder and double-click Anicat. macOS refuses and
+   says it cannot check the app for malicious software. Click Done.
+4. Open **System Settings**, go to **Privacy & Security**, scroll to the
+   bottom, and click **Open Anyway** next to the line about Anicat. Confirm
+   with your password or Touch ID, then click Open Anyway once more.
+
+Steps 3 and 4 are only needed the first time.
+
+Apple charges a yearly fee to have an app certified and this one has not paid
+it, which is all that warning means. Right-clicking the app and choosing Open
+used to skip it; Apple removed that shortcut in macOS Sequoia, and Open Anyway
+in Settings replaced it. To skip the whole dance in one line instead:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Anicat.app

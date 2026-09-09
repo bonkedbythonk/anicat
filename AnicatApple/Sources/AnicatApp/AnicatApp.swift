@@ -115,7 +115,14 @@ struct WindowConfigurator: NSViewRepresentable {
     private func configure(_ window: NSWindow?) {
         guard let window else { return }
         _ = ScrollPocketWorkaround.disableScrollPocketsOnce
-        AppWindow.main = window
+        // Never move the pointer off the window a stream is playing in.
+        // `configure` runs for any window SwiftUI lands a view in -- a second
+        // one from state restoration, or from a build where File > New Window
+        // still exists -- and the fullscreen exit that closing the player
+        // issues goes to whatever this names.
+        if !(AppWindow.isPlaybackActive && AppWindow.main != nil && AppWindow.main !== window) {
+            AppWindow.main = window
+        }
         FullScreenGuard.attach(to: window)
         window.delegate = AnicatWindowDelegate.shared
         window.acceptsMouseMovedEvents = true
@@ -230,7 +237,18 @@ struct AnicatApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // `Window`, not `WindowGroup`: a group hands out File > New Window
+        // (and Cmd-N) for free, and a second window is not a second app. Both
+        // windows mount `RootView` over the one `AppModel`, so a stream
+        // playing in the first was mounted again in the new one -- two
+        // `MpvSurface`s over one mpv handle -- and `WindowConfigurator` points
+        // `AppWindow.main` at whichever window was configured last, so closing
+        // the player exited fullscreen on the *new* window while the one
+        // holding the picture stayed fullscreen with a frozen frame in it.
+        // That is the "stuck after pressing exit" report. `Window` keeps
+        // File > Close; removing the New Window command by hand took the whole
+        // File menu, Cmd-W included, with it.
+        Window("Anicat", id: "main") {
             ThemedRoot { RootView(model: model) }
                 // The detail page's studio buttons and "More from" shelf
                 // reach the model through here rather than through
@@ -255,6 +273,17 @@ struct AnicatApp: App {
                 .background(SystemIntegrationObserver(model: model))
         }
         .windowStyle(.hiddenTitleBar)
+        // A `Window` scene publishes no File menu at all -- and Cmd-W went
+        // with it, which the single-window change was never meant to take.
+        // The group replaced is `saveItem`, not `newItem`: replacing the
+        // latter leaves SwiftUI's own Close in place and the menu then reads
+        // "Close, Close, Close All".
+        .commands {
+            CommandGroup(replacing: .saveItem) {
+                Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                    .keyboardShortcut("w", modifiers: .command)
+            }
+        }
         // First launch, before any autosaved frame exists; after that the
         // autosaved frame wins, so resizing once is enough. 1440x900 read
         // as too big on a 14-inch panel, 1080x820 as a square, and 1280x820

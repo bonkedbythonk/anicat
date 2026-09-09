@@ -190,6 +190,16 @@ public struct MediaCard: View, Equatable {
                 .ifLet(namespace) { view, namespace in
                     view.matchedGeometryEffect(id: item.id, in: namespace)
                 }
+                // Empty while this card is the morph source. Both halves of
+                // the pair draw, so the card kept a still copy of the poster
+                // underneath the one flying to or from the detail page --
+                // two copies of the same art, overlapping, converging. Over
+                // a long travel they are only on top of each other at the
+                // very end, by which point the page has faded over them;
+                // when the card is already near where the poster is going,
+                // they overlap for the whole transition and it reads as the
+                // image coming apart rather than moving.
+                .opacity(namespace == nil ? 1 : 0)
                 // `.card-glow:hover` (index.css:377-382): lift 2px and deepen
                 // the shadow on hover/focus — the poster's own scale/dim
                 // covered the "something responded" read but not the "this

@@ -114,6 +114,25 @@ public enum MotionPolicy {
     /// rather than `nil`: dropping the animation entirely makes state changes
     /// snap, which reads as a glitch rather than as calm.
     public static let reducedFade: Animation = .easeInOut(duration: 0.2)
+
+    /// A multiplier on every house curve: whatever `anicat_slow_motion` is
+    /// set to, and 1 otherwise. It is here rather than in a branch
+    /// somebody re-adds by hand each time because a 0.26s close cannot be
+    /// judged by eye: five sessions in a row changed a curve, shipped it, and
+    /// asked the owner whether it was better. Anything that times itself
+    /// against a house curve has to scale with it (see
+    /// `RootView.detailFadeOut`), or slow motion pulls the pair apart and
+    /// shows a defect that does not exist at 1x.
+    /// `defaults write com.anicat.app anicat_slow_motion 8` and relaunch; any
+    /// value below 1 is ignored. `UserDefaults` rather than an environment
+    /// variable because the app is normally started by Launch Services (the
+    /// Dock, `open`, `dev-run.sh`), which does not forward one -- an
+    /// `ANICAT_SLOW_MOTION=1 open -n Anicat.app` runs at full speed and looks
+    /// like the transition is fine.
+    public static let slowMotion: Double = {
+        let factor = UserDefaults.standard.double(forKey: "anicat_slow_motion")
+        return factor > 1 ? factor : 1
+    }()
 }
 
 // MARK: - House curves
@@ -131,21 +150,24 @@ public extension Animation {
     /// curve, which still ticks.
     static func sumi(_ kind: SumiMotion) -> Animation {
         guard !MotionPolicy.reduce else { return MotionPolicy.reducedFade }
+        let scale = MotionPolicy.slowMotion
         switch kind {
         case .tab:
-            return .snappy(duration: 0.25, extraBounce: 0)
+            return .snappy(duration: 0.25 * scale, extraBounce: 0)
         case .page:
-            return .smooth(duration: 0.35)
+            return .smooth(duration: 0.35 * scale)
         case .pop:
-            return .spring(response: 0.30, dampingFraction: 0.82)
+            return .spring(response: 0.30 * scale, dampingFraction: 0.82)
         case .morph:
-            return .spring(response: 0.38, dampingFraction: 0.86)
+            return .spring(response: 0.38 * scale, dampingFraction: 0.86)
         case .morphReturn:
-            // Shorter response than `.morph` as well as flat: it has to land
-            // with the page fade it travels with (`RootView.detailFadeOut`),
-            // and a critically damped spring spends its last third barely
-            // moving.
-            return .spring(response: 0.32, dampingFraction: 1.0)
+            // A duration, not a response, and it has to stay equal to
+            // `RootView.detailFadeOut`: the page carrying this poster is
+            // removed when that fade ends, so a morph still moving at that
+            // moment is cut off rather than finished. A spring has no
+            // duration to match against, which is what made the old
+            // `response: 0.32` version land after the page had already gone.
+            return .smooth(duration: 0.26 * scale)
         }
     }
 }

@@ -999,6 +999,13 @@ public struct MediaDetailView: View {
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             .ifLet(namespace) { view, namespace in
+                // Both halves are sources on purpose, despite what the
+                // modifier's documentation implies. `isSource: false` here
+                // does not mean "follow the card while the transition runs",
+                // it means "take the source's frame for as long as a source
+                // exists" -- and the card behind an open page never goes
+                // away, so the poster stayed pinned at the card's position
+                // and size for the whole time the page was up.
                 view.matchedGeometryEffect(id: details.id, in: namespace)
             }
             // Same reasoning as `MediaCard`: matchedGeometryEffect only

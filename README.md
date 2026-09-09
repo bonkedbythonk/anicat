@@ -23,7 +23,7 @@ It covers four kinds of media, and they do not share a backend:
 | Anime | AniList | Torrents, streamed while they download | working |
 | Manga | AniList | MangaDex, MangaKatana fallback | working |
 | Light novels | AniList | Lnori for official volumes, Syosetu for web novels | working |
-| Film and TV | TMDB | Torrents | catalog only, playback not wired yet |
+| Film and TV | TMDB | Torrents, streamed while they download | working |
 
 The app was rewritten from Tauri/React to Swift in 2026. macOS is the shipping product. An iPhone target exists and runs, but it still wears the desktop layout and no phone build is distributed.
 
@@ -124,6 +124,9 @@ AniList is only used for tracking. Playback and the episode list do not require 
 - **Playback** — libmpv drawn inside the window through Metal, at the display's full refresh rate. Anime4K upscaling, AniSkip intro and outro skip keyed to the file's real length, resume position, auto-next with the next episode preloaded at 75%, a corner mini-player so the rest of the app stays usable, sideways mode for a rotated screen, and the display kept awake while a stream plays. Streams come straight from the swarm while they download: candidates are gathered from SubsPlease, AnimeTosho, Nyaa and SeaDex in one pass, the best two raced against each other, and the release that won is remembered for next time.
 - **Player info popover** — Audio and subtitle tracks listed by language and title, a Sub/Dub switch that keeps full subtitles, a release switcher that resumes at the same position, speed, and an optional keyboard backlight dimmer for night watching.
 - **Detail pages** — Episodes with thumbnails and air dates, cast with in-app character, voice actor and staff pages, relations and recommendations, AniList forum threads read in the app, and a "Start over" beside Resume. Browser-style back and forward, two-finger swipe included, with the poster morphing from the card you opened and the hero banner settling into a compact header as you scroll.
+- **Films and TV** — A TMDB-backed catalog beside the anime one, with the same
+  streaming path behind it: a film is matched on title and year, an episode on
+  SxxEyy, and both play in the same in-window player.
 - **Manga reader** — Single page, two-page spread, vertical scroll, RTL and LTR, tap zones and trackpad page turns, AniList progress sync. MangaDex first, MangaKatana when a title has been pulled from MangaDex.
 - **Light novels** — In-app reader for official volumes and for Syosetu web novels, with typography controls and per-chapter progress. Volumes can be kept offline and exported as EPUB.
 - **AniList sync** — Progress, scores and list status. Progress is reported continuously while you watch, and an episode registers as watched once playback passes 85%. Inline editing from the detail page; Planning shelves on the manga and novel pages.

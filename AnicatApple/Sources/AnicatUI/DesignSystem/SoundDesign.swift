@@ -87,81 +87,94 @@ public enum AppSounds: String, CaseIterable, Sendable {
     /// were the two most recognisable sounds on macOS, so the app's own
     /// feedback was the part of it that sounded like every other app.
     var recipe: SoundRecipe {
+        // Retuned 2026-09-09. The first set was a paper-and-card model:
+        // loud noise transients (0.45 of the mix on a tab change), a hard
+        // contact and almost no body. Close up that reads as a pen tick on a
+        // desk, which is exactly what it was designed as -- and next to the
+        // system's own feedback it reads as dry and thin. This set keeps the
+        // struck-object model and the inharmonic partials but moves the
+        // balance the other way: the contact drops to a tenth of the mix, the
+        // body carries the sound, and the low end is warmer. Still bound by
+        // `FeedbackTests`: nothing over 220ms, nothing over 0.35 peak, and
+        // everything spent to under 8% by 120ms -- which is what caps the
+        // decay constants below at about 45ms.
         switch self {
-        // A card tab flicked: almost all contact, a short bright ring over it.
+        // A soft wooden tock. The old one was 45% noise; the ring under it
+        // was never what you heard.
         case .tabChange:
             return SoundRecipe(
                 partials: [
-                    Partial(frequency: 1_180, amplitude: 0.30, decay: 0.022),
-                    Partial(frequency: 1_791, amplitude: 0.10, decay: 0.013)
+                    Partial(frequency: 620, amplitude: 0.42, decay: 0.030),
+                    Partial(frequency: 877, amplitude: 0.12, decay: 0.018)
                 ],
-                noise: NoiseBurst(amplitude: 0.45, decay: 0.005),
-                cutoff: 5_200,
-                duration: 0.060,
-                peak: 0.20
+                noise: NoiseBurst(amplitude: 0.10, decay: 0.006),
+                cutoff: 3_400,
+                duration: 0.120,
+                peak: 0.15
             )
-        // A drawer pulled open: low body, slight upward lean from the second
-        // partial outlasting the first.
+        // Opening: a warm low body with a second partial that outlasts the
+        // first, so it leans upward without ever becoming a chord.
         case .playerOpen:
             return SoundRecipe(
                 partials: [
-                    Partial(frequency: 196, amplitude: 0.55, decay: 0.040),
-                    Partial(frequency: 297, amplitude: 0.26, decay: 0.036),
-                    Partial(frequency: 451, amplitude: 0.08, decay: 0.018)
+                    Partial(frequency: 233, amplitude: 0.55, decay: 0.045),
+                    Partial(frequency: 331, amplitude: 0.22, decay: 0.040),
+                    Partial(frequency: 505, amplitude: 0.07, decay: 0.020)
                 ],
-                noise: NoiseBurst(amplitude: 0.20, decay: 0.010),
-                cutoff: 2_400,
-                duration: 0.150,
-                peak: 0.26
+                noise: NoiseBurst(amplitude: 0.08, decay: 0.010),
+                cutoff: 2_600,
+                duration: 0.200,
+                peak: 0.22
             )
-        // The same drawer pushed shut: lower, and the upper partial dies first
-        // so it leans down instead of up.
+        // Closing: the same object lower, and the upper partial dies first so
+        // the shape falls instead of rising.
         case .playerClose:
             return SoundRecipe(
                 partials: [
-                    Partial(frequency: 165, amplitude: 0.55, decay: 0.036),
-                    Partial(frequency: 249, amplitude: 0.22, decay: 0.022)
+                    Partial(frequency: 196, amplitude: 0.55, decay: 0.042),
+                    Partial(frequency: 279, amplitude: 0.20, decay: 0.028)
                 ],
-                noise: NoiseBurst(amplitude: 0.22, decay: 0.008),
-                cutoff: 2_000,
-                duration: 0.130,
-                peak: 0.26
+                noise: NoiseBurst(amplitude: 0.08, decay: 0.009),
+                cutoff: 2_200,
+                duration: 0.190,
+                peak: 0.21
             )
-        // A sheet sliding off a stack: noise with barely any pitch in it, so
-        // it can fire on every back-swipe without becoming a note.
+        // A back-swipe fires constantly, so this stays the quietest thing in
+        // the set and the only one still mostly air.
         case .swipeBack:
             return SoundRecipe(
-                partials: [Partial(frequency: 523, amplitude: 0.10, decay: 0.030)],
-                noise: NoiseBurst(amplitude: 0.42, decay: 0.030),
-                cutoff: 3_100,
-                duration: 0.100,
-                peak: 0.17
+                partials: [Partial(frequency: 392, amplitude: 0.18, decay: 0.030)],
+                noise: NoiseBurst(amplitude: 0.16, decay: 0.018),
+                cutoff: 2_800,
+                duration: 0.130,
+                peak: 0.13
             )
-        // A stamp hitting paper: hard contact, one short ring, nothing after.
+        // Marking an episode watched: the one moment worth a bright note, so
+        // it sits higher than the rest and rings a little longer than a tick.
         case .watchedTick:
             return SoundRecipe(
                 partials: [
-                    Partial(frequency: 903, amplitude: 0.34, decay: 0.020),
-                    Partial(frequency: 1_367, amplitude: 0.13, decay: 0.010)
+                    Partial(frequency: 784, amplitude: 0.34, decay: 0.032),
+                    Partial(frequency: 1_109, amplitude: 0.12, decay: 0.018)
                 ],
-                noise: NoiseBurst(amplitude: 0.50, decay: 0.004),
-                cutoff: 4_400,
-                duration: 0.055,
-                peak: 0.22
+                noise: NoiseBurst(amplitude: 0.10, decay: 0.004),
+                cutoff: 4_000,
+                duration: 0.140,
+                peak: 0.17
             )
-        // A knuckle on a desk. Low and dull rather than loud: an error the
-        // user can hear from the next room is a punishment, not a signal.
+        // Low and dull rather than loud: an error the user can hear from the
+        // next room is a punishment, not a signal.
         case .error:
             return SoundRecipe(
                 partials: [
-                    Partial(frequency: 146, amplitude: 0.60, decay: 0.045),
-                    Partial(frequency: 221, amplitude: 0.28, decay: 0.030),
-                    Partial(frequency: 311, amplitude: 0.10, decay: 0.018)
+                    Partial(frequency: 174, amplitude: 0.55, decay: 0.045),
+                    Partial(frequency: 247, amplitude: 0.24, decay: 0.032),
+                    Partial(frequency: 379, amplitude: 0.08, decay: 0.016)
                 ],
-                noise: NoiseBurst(amplitude: 0.30, decay: 0.007),
+                noise: NoiseBurst(amplitude: 0.10, decay: 0.007),
                 cutoff: 1_700,
-                duration: 0.160,
-                peak: 0.28
+                duration: 0.210,
+                peak: 0.24
             )
         }
     }

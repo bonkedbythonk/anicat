@@ -332,6 +332,13 @@ public struct SumiPressableButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? SumiPressFeedback.scale : 1.0)
             .opacity(configuration.isPressed ? SumiPressFeedback.opacity : 1.0)
             .animation(.snappy, value: configuration.isPressed)
+            // Every button in the app answers under the finger, rather than
+            // the handful of controls that remembered to ask. On the press
+            // edge, not the action: the tick belongs to the press being
+            // registered, and plenty of these actions are async.
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { SumiHaptics.selection() }
+            }
     }
 }
 
@@ -408,10 +415,31 @@ public extension View {
 // MARK: - Haptic Feedback
 
 public enum SumiHaptics {
+    /// The tick under a press that changes something.
+    ///
+    /// `.levelChange`, not `.alignment`. AppKit's alignment pattern is the
+    /// faint one meant for a guide snapping under a drag, and fired at click
+    /// time it is barely there -- the app read as having no trackpad feedback
+    /// at all even where this was already being called. `.alignment` stays in
+    /// `AppHaptics.swipeThreshold`, which is the case it was designed for.
+    ///
+    /// `.drawCompleted` rather than `.now`: the tap lands with the frame that
+    /// shows the change instead of a beat before it.
+    /// The last tick, so two sources firing for one press are felt as one.
+    /// `.sumiPressable` fires on the press edge and a good number of call
+    /// sites also call this from their action; 80ms apart those are a double
+    /// tap under the finger, which reads as a stutter rather than a click.
+    @MainActor
+    private static var lastFired: CFAbsoluteTime = 0
+
     @MainActor
     public static func selection() {
+        guard FeedbackDefaults.hapticsEnabled else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastFired > 0.08 else { return }
+        lastFired = now
         #if os(macOS)
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .drawCompleted)
         #elseif canImport(UIKit)
         let generator = UISelectionFeedbackGenerator()
         generator.selectionChanged()

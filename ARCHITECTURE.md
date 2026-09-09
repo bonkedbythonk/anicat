@@ -14,7 +14,14 @@ were removed in September 2026; the `legacy/tauri` tag marks their last commit.
 app through SwiftPM plus `scripts/package-anicat-macos-app.sh`, and the iPhone
 app through the `AnicatApple/project.yml` target that `xcodegen` generates.
 AppKit and UIKit differences live in `DesignSystem/Platform.swift` and a few
-`#if os` islands.
+`#if os` islands. The phone is not the Mac's layout on a smaller screen:
+`RootTabView` gives it a tab bar and its own shelves, where the Mac has a
+200pt rail. Only the macOS build is released; there is no distributed `.ipa`.
+
+CI builds both on `macos-26`. The runner's Xcode is load-bearing rather than
+incidental: on `macos-15` the older Swift refuses main-actor writes inside
+`queue: .main` callbacks that the newer one accepts, and `glassEffect` is
+absent from its SDK whatever `if #available` says.
 
 ## Layers
 

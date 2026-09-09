@@ -24,10 +24,10 @@ First run: theme/preference setup, AniList authorization (browser page, token pa
 
 ## Capabilities and Constraints
 
-- macOS only today, built from source. iOS is declared in Package.swift but AnicatUI still depends on AppKit; that gap is the main open engineering item.
+- macOS is the shipping product, downloaded from the Releases page rather than built from source. The iPhone app builds, runs and has a layout of its own, but no `.ipa` is distributed: an iPhone installs an app from outside the App Store only through a sideloading tool on a computer, and a free Apple ID's signature lasts a week.
 - No hosted content — scrapes public third-party sites / streams from torrent swarms; legal exposure is the user's own (see DISCLAIMER.md).
 - Anime comes from torrents only. Manga comes from MangaDex with MangaKatana as fallback, both in the Rust engine. Light novels come from Lnori for official volumes and Syosetu for web novels; the remaining providers in `scraper/` are a someday item, not a current goal.
-- Cinema (TMDB) has a catalog but no playback path in the Swift build yet.
+- Cinema (TMDB) browses and plays, on both the Mac and the phone. A film is matched on title and year and an episode on SxxEyy, neither of which the anime search has a notion of, so they take their own path into the same player.
 - libmpv is the only player, rendered inside the window.
 - Keyboard: command palette, shortcuts overlay, Escape dismissal hierarchy. The web app's spatial-navigation focus system was not ported.
 

@@ -19,6 +19,13 @@ VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
 TAG="v$VERSION"
 ZIP="$ROOT/AnicatApple/dist/Anicat-${VERSION}-macos-arm64.zip"
 DMG="$ROOT/AnicatApple/dist/Anicat-${VERSION}-macos-arm64.dmg"
+# The iPhone build is attached when one has been made. It is not built here:
+# it needs xcodegen and a device SDK, and a Mac release should not fail because
+# the phone half did not compile. Run scripts/package-anicat-ios-ipa.sh first
+# when the release is meant to carry it.
+IPA="$ROOT/AnicatApple/dist/Anicat-${VERSION}-ios.ipa"
+ASSETS=("$ZIP" "$DMG")
+[ -f "$IPA" ] && ASSETS+=("$IPA")
 DRAFT="--draft"
 [ "${1:-}" = "--publish" ] && DRAFT=""
 
@@ -76,10 +83,16 @@ fi
     echo "Privacy & Security > Open Anyway (right-click-Open stopped working in"
     echo "Sequoia). Or clear the quarantine flag yourself with"
     echo '`xattr -dr com.apple.quarantine /Applications/Anicat.app`.'
+    if [ -f "$IPA" ]; then
+        echo
+        echo "The .ipa is the iPhone build. iPhones install only from the App Store"
+        echo "unless you sideload: AltStore or Sideloadly on a computer re-signs it"
+        echo "with your own Apple ID, and on a free account that lasts seven days."
+    fi
 } >> "$NOTES"
 
 git -C "$ROOT" tag -a "$TAG" -m "Anicat $VERSION"
 git -C "$ROOT" push origin "$TAG"
-gh release create "$TAG" "$ZIP" "$DMG" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
+gh release create "$TAG" "${ASSETS[@]}" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
 rm -f "$NOTES"
 echo "publish-release: $TAG ${DRAFT:+(draft) }created"

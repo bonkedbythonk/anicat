@@ -193,9 +193,17 @@ impl TmdbClient {
                 request = request.bearer_auth(token);
             }
             Route::Direct(token) => params.push(("api_key".into(), token.clone())),
-            // Nothing is attached: the proxy holds the key and adds it on the
-            // far side, which is the entire point of having one.
-            Route::Proxy(_) | Route::Nothing => {}
+            // No credential is attached: the proxy holds the key and adds it
+            // on the far side, which is the entire point of having one. The
+            // header is not a credential either -- it ships in the app and a
+            // `plutil -p` recovers it -- it only says "this came from Anicat",
+            // so the worker can rate limit or refuse everything that did not.
+            // The proxy's URL is in a public repo; without this, a scraper
+            // that finds it spends the quota real installs need.
+            Route::Proxy(_) => {
+                request = request.header("x-anicat-client", CLIENT_HEADER_VALUE);
+            }
+            Route::Nothing => {}
         }
 
         // This client is shared with the proxy's streaming client (state.rs),
@@ -263,6 +271,12 @@ fn request_url(route: &Route, path: &str) -> String {
         _ => format!("{}{}", TMDB_URL, path),
     }
 }
+
+/// Sent with every proxied request. Matched by `services/tmdb-proxy`, which
+/// only enforces it once `ANICAT_CLIENT_TOKEN` is set on the worker -- an
+/// older release that predates this header has to keep working until it is
+/// no longer out there.
+const CLIENT_HEADER_VALUE: &str = "anicat";
 
 /// A proxy URL has to be an origin we can build `/3/...` onto. A blank entry
 /// (the packaging script writes the key unconditionally, so it is often
@@ -405,6 +419,13 @@ mod tests {
         assert!(request.starts_with("get /3/movie/550?"), "wrong path: {request}");
         assert!(!request.contains("api_key"), "the key must not reach the URL");
         assert!(!request.contains("authorization"), "no credential header either");
+        // Not a credential -- it is public the moment the app ships -- but the
+        // worker refuses unheadered traffic once its own token is set, so a
+        // release that stops sending this loses cinema mode entirely.
+        assert!(
+            request.contains("x-anicat-client: anicat"),
+            "the proxy has to be able to tell an Anicat request from a scraper: {request}"
+        );
     }
 
     #[tokio::test]

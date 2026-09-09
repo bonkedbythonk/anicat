@@ -85,6 +85,23 @@ export default {
       return deny(404, "Not a proxied TMDB endpoint.");
     }
 
+    // The app sends `x-anicat-client`; nothing else does. It is not a secret
+    // -- it ships in a public repo and inside every build -- so it proves
+    // nothing about who is calling. What it does is separate traffic that
+    // came from Anicat from traffic that found this URL, which is what makes
+    // a rate limit or an outright refusal possible at all.
+    //
+    // Enforced only when ANICAT_CLIENT_TOKEN is set, and left unset until no
+    // release that predates the header is still in use: turning it on early
+    // takes cinema mode away from installs that cannot send it, and they
+    // would see the same silent empty shelves this whole arrangement exists
+    // to avoid.
+    if (env.ANICAT_CLIENT_TOKEN) {
+      if (request.headers.get("x-anicat-client") !== env.ANICAT_CLIENT_TOKEN) {
+        return deny(403, "Not an Anicat client.");
+      }
+    }
+
     const upstream = new URL(`https://api.themoviedb.org${url.pathname}`);
     for (const [key, value] of url.searchParams) {
       if (ALLOWED_PARAMS.has(key)) upstream.searchParams.set(key, value);

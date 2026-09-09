@@ -118,3 +118,35 @@ test("an upstream 429 keeps its Retry-After, which the app backs off on", async 
   assert.equal(response.status, 429);
   assert.equal(response.headers.get("retry-after"), "7");
 });
+
+test("the client header is ignored until the worker is given a token", async () => {
+  stubFetch();
+  // Every 6.0.0 install predates the header. Enforcing it before those are
+  // gone takes cinema mode away from them, so an unset token means anyone
+  // still gets served.
+  const response = await worker.fetch(
+    new Request("https://proxy.example/3/movie/550"),
+    { TMDB_KEY: "0123456789abcdef0123456789abcdef" }
+  );
+  assert.equal(response.status, 200);
+});
+
+test("with a token set, only requests carrying it are served", async () => {
+  stubFetch();
+  const env = { TMDB_KEY: "0123456789abcdef0123456789abcdef", ANICAT_CLIENT_TOKEN: "anicat" };
+
+  const bare = await worker.fetch(new Request("https://proxy.example/3/movie/550"), env);
+  assert.equal(bare.status, 403, "a scraper that found the URL gets nothing");
+
+  const wrong = await worker.fetch(
+    new Request("https://proxy.example/3/movie/550", { headers: { "x-anicat-client": "nope" } }),
+    env
+  );
+  assert.equal(wrong.status, 403);
+
+  const app = await worker.fetch(
+    new Request("https://proxy.example/3/movie/550", { headers: { "x-anicat-client": "anicat" } }),
+    env
+  );
+  assert.equal(app.status, 200);
+});

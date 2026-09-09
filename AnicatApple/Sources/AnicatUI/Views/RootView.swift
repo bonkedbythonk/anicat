@@ -1207,10 +1207,13 @@ public struct RootView: View {
     /// are: an unscaled 0.26s fade against an 8x spring shows the poster
     /// vanishing mid-flight at every setting, which is an artefact of the
     /// instrument rather than the transition.
-    /// Longer than `.sumi(.morphReturn)`, and has to stay that way: the
-    /// poster morphing back into its card lives inside the page this fade
-    /// removes, so it has to land before the fade has taken its opacity.
-    static let detailFadeOut: Double = 0.26 * MotionPolicy.slowMotion
+    /// Longer than `.sumi(.morphReturn)`, and by the ratio documented
+    /// there -- roughly 0.58 -- not merely longer: the poster morphing back
+    /// into its card lives inside the page this fade removes, so it has to
+    /// land while the fade has left it enough opacity to be seen arriving.
+    /// Lengthening one of the two alone is what makes the card look like it
+    /// snaps into place.
+    static let detailFadeOut: Double = 0.33 * MotionPolicy.slowMotion
 
     private var detailTransition: AnyTransition {
         // Asymmetric, because the two directions have opposite problems.

@@ -175,12 +175,14 @@ public extension Animation {
             // into a card it is now exactly on top of, where fading is
             // invisible.
             //
-            // 0.15 rather than something just under 0.26, because the fade
-            // is an ease-in-out and most of it happens in the middle: at
-            // 0.18 the poster still landed at about a fifth of its opacity,
-            // which is not much more visible than not landing at all. At
-            // 0.15 it arrives at roughly 0.38 and the arrival is legible.
-            return .smooth(duration: 0.15 * scale)
+            // What matters is the *ratio* to the fade, not this number: the
+            // fade is an ease-in-out and spends itself in the middle, so
+            // landing at 0.58 of it puts the poster down at roughly 0.38
+            // opacity, where the arrival is legible. At 0.7 of it the poster
+            // still arrived at about a fifth and it read as not arriving at
+            // all. Change the pair together or the arrival goes back to
+            // being invisible.
+            return .smooth(duration: 0.19 * scale)
         }
     }
 }

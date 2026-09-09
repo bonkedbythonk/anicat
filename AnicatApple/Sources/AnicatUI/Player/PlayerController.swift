@@ -64,16 +64,27 @@ public final class PlayerController {
     /// reads elsewhere) — separate from `title`, which is the show's.
     public var episodeTitle: String = ""
 
-    // Decoded video size (post-rotation, post-pixel-aspect-ratio), reported
-    // by mpv once the file's opened. The overlay chrome needs this to
+    // Displayed video size, after the filter chain as well as rotation and
+    // pixel aspect ratio, reported by mpv once the file's opened. The overlay chrome needs this to
     // position itself against the actual letterboxed video rect rather than
     // the whole window — a MacBook's screen aspect ratio rarely matches the
     // video's, so anything padded from the window's own edges (rather than
     // the video's) sits partly over a black bar instead of over the frame.
     public var videoDisplayWidth: Double?
     public var videoDisplayHeight: Double?
+    /// The decoder's own size, before the filter chain. Only a fallback:
+    /// `video-out-params` is what is actually on screen and is what the
+    /// chrome has to lay out against, but nothing guarantees a given vo
+    /// populates it, and a nil aspect puts the chrome back on the window's
+    /// edges instead of the picture's. Worth one extra observed property to
+    /// not depend on that.
+    public var decodedDisplayWidth: Double?
+    public var decodedDisplayHeight: Double?
     public var videoAspectRatio: Double? {
-        guard let w = videoDisplayWidth, let h = videoDisplayHeight, h > 0 else { return nil }
+        if let w = videoDisplayWidth, let h = videoDisplayHeight, w > 0, h > 0 {
+            return w / h
+        }
+        guard let w = decodedDisplayWidth, let h = decodedDisplayHeight, w > 0, h > 0 else { return nil }
         return w / h
     }
 

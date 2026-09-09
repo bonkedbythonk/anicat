@@ -166,6 +166,8 @@ extension AppModel {
         aniSkipAwaitingDuration = false
         playerController.videoDisplayWidth = nil
         playerController.videoDisplayHeight = nil
+        playerController.decodedDisplayWidth = nil
+        playerController.decodedDisplayHeight = nil
 
         var initialTime = 0.0
         var initialDuration = 0.0

@@ -1122,11 +1122,21 @@ public struct MpvSurface {
             mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 4, "paused-for-cache", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 5, "cache-buffering-state", MPV_FORMAT_INT64)
-            // Decoded display size (post-rotation, post-pixel-aspect-ratio) —
-            // what the overlay chrome needs to know where the letterboxed
-            // video rect actually sits, as opposed to the window's own size.
-            mpv_observe_property(handle, 6, "video-params/dw", MPV_FORMAT_INT64)
-            mpv_observe_property(handle, 7, "video-params/dh", MPV_FORMAT_INT64)
+            // Displayed size — what the overlay chrome needs to know where
+            // the letterboxed video rect actually sits, as opposed to the
+            // window's own size.
+            //
+            // `video-out-params`, not `video-params`: the latter is the
+            // decoder's output, before the filter chain. Sideways mode
+            // rotates the picture with a `vf` transpose, so under
+            // `video-params` a 16:9 file still reported 16:9 while a 9:16
+            // picture was on screen -- the chrome laid its bars out across
+            // the middle of the turned picture and called the tall black
+            // margins beside it part of the frame.
+            mpv_observe_property(handle, 6, "video-out-params/dw", MPV_FORMAT_INT64)
+            mpv_observe_property(handle, 7, "video-out-params/dh", MPV_FORMAT_INT64)
+            mpv_observe_property(handle, 8, "video-params/dw", MPV_FORMAT_INT64)
+            mpv_observe_property(handle, 9, "video-params/dh", MPV_FORMAT_INT64)
 
             startEventLoop()
 
@@ -1936,12 +1946,18 @@ public struct MpvSurface {
                                 self.controller.duration = dur
                                 self.controller.onPositionChange?(self.controller.currentTime, dur)
                             }
-                        } else if name == "video-params/dw", let data = prop.data {
+                        } else if name == "video-out-params/dw", let data = prop.data {
                             let w = data.assumingMemoryBound(to: Int64.self).pointee
                             await MainActor.run { self.controller.videoDisplayWidth = Double(w) }
-                        } else if name == "video-params/dh", let data = prop.data {
+                        } else if name == "video-out-params/dh", let data = prop.data {
                             let h = data.assumingMemoryBound(to: Int64.self).pointee
                             await MainActor.run { self.controller.videoDisplayHeight = Double(h) }
+                        } else if name == "video-params/dw", let data = prop.data {
+                            let w = data.assumingMemoryBound(to: Int64.self).pointee
+                            await MainActor.run { self.controller.decodedDisplayWidth = Double(w) }
+                        } else if name == "video-params/dh", let data = prop.data {
+                            let h = data.assumingMemoryBound(to: Int64.self).pointee
+                            await MainActor.run { self.controller.decodedDisplayHeight = Double(h) }
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {

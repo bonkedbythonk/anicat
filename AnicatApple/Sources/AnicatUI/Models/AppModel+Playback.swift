@@ -1013,6 +1013,8 @@ extension AppModel {
         // the new one.
         self.playerController.videoDisplayWidth = nil
         self.playerController.videoDisplayHeight = nil
+        self.playerController.decodedDisplayWidth = nil
+        self.playerController.decodedDisplayHeight = nil
 
         // Restore any existing progress from SQLite or media metadata
         var initialDuration: Double = 0.0

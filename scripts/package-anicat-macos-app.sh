@@ -132,7 +132,13 @@ fi
 if [ -d "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/AnicatApple_AnicatUI.bundle"
 else
-    echo "package-anicat-macos-app: warning: no resource bundle at $RESOURCE_BUNDLE — Anime4K shaders will be missing" >&2
+    # Not just missing shaders: Theme, BrandAssets, SidebarView and
+    # TMDBAttribution all read straight from Bundle.module, whose generated
+    # accessor fatalErrors the moment it can't find this bundle -- so a
+    # package built without it doesn't run with degraded art, it crashes on
+    # launch. Shipping that is worse than failing the build here.
+    echo "package-anicat-macos-app: no resource bundle at $RESOURCE_BUNDLE — this app would crash on launch" >&2
+    exit 1
 fi
 
 # Ad-hoc unless told otherwise. macOS keys the privacy database to the code

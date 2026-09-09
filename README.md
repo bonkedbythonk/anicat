@@ -82,6 +82,27 @@ bash cleanup_legacy_macos.sh
 It asks before touching anything, moves to the Trash rather than deleting,
 and leaves your AniList token, your 6.x library and your downloads alone.
 
+Prefer to do it by hand? In Finder press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>,
+paste each path, and drag what you find to the Trash:
+
+| Path | What it is |
+|---|---|
+| `~/Library/Application Support/Anicat/registry.db` | the 5.x watch log — 6.x keeps its own in `registry.sqlite`, so this is only worth keeping if you might go back |
+| `~/Library/Application Support/Anicat/registry.json` | an even older library file |
+| `~/Library/Application Support/Anicat/covers` | cover art the 5.x app cached |
+| `~/Library/Caches/com.anicat.app/WebKit` | the web view the 5.x app drew its whole interface in — usually the big one |
+| `~/Library/WebKit/com.anicat.app` | the rest of that web view |
+
+Leave `config.toml` and `config.json` where they are: your AniList sign-in is
+in them, and 6.x reads both. Everything else in that folder
+(`registry.sqlite`, `catalog-cache.sqlite`, `torrent-streams`,
+`offline-manga`) belongs to the new app.
+
+There is no old app to drag out of Applications. Both versions are called
+Anicat and install to the same place, so the new one has already replaced it —
+unless you once dragged a copy into your *home* Applications folder
+(`~/Applications`), which the installer does not touch.
+
 ---
 
 ## First-run Setup

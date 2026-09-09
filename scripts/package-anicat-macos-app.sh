@@ -193,6 +193,28 @@ if [ "$INSTALL" = "zip" ]; then
     echo "package-anicat-macos-app: wrote $ZIP ($(du -h "$ZIP" | cut -f1))"
 fi
 
+# `dmg` writes the drag-to-Applications disk image beside the zip. It is the
+# format a first-time downloader expects: a window with the app and an
+# Applications alias, rather than an archive whose contents they have to know
+# to move. UDZO is the compressed read-only format; an unspecified `hdiutil
+# create` leaves a read-write image that mounts writable and can be edited
+# after the fact.
+if [ "$INSTALL" = "dmg" ]; then
+    DMG="$SRC/dist/Anicat-${VERSION}-macos-arm64.dmg"
+    STAGE="$(mktemp -d)"
+    trap 'rm -rf "$STAGE"' EXIT
+    ditto "$APP" "$STAGE/Anicat.app"
+    # The alias is what makes the drag land in /Applications rather than
+    # wherever the volume happens to be; without it the window is one icon
+    # and no instruction.
+    ln -s /Applications "$STAGE/Applications"
+    rm -f "$DMG"
+    hdiutil create -quiet -volname "Anicat" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+    rm -rf "$STAGE"
+    trap - EXIT
+    echo "package-anicat-macos-app: wrote $DMG ($(du -h "$DMG" | cut -f1))"
+fi
+
 if [ "$INSTALL" = "install" ]; then
     DEST="/Applications/Anicat.app"
     echo "=== Installing to $DEST ==="

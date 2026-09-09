@@ -16,6 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
 TAG="v$VERSION"
 ZIP="$ROOT/AnicatApple/dist/Anicat-${VERSION}-macos-arm64.zip"
+DMG="$ROOT/AnicatApple/dist/Anicat-${VERSION}-macos-arm64.dmg"
 DRAFT="--draft"
 [ "${1:-}" = "--publish" ] && DRAFT=""
 
@@ -30,6 +31,11 @@ fi
 # A development certificate also expires in a year and is not a distribution
 # certificate, so it buys the download nothing in exchange.
 ANICAT_CODESIGN_IDENTITY="-" bash "$ROOT/scripts/package-anicat-macos-app.sh" release zip
+# Both formats, because they answer different questions: the zip is what
+# `install_macos.sh` resolves out of the API by name, and the dmg is what a
+# person downloading by hand expects to drag. The second run reuses the same
+# build directory, so it repackages rather than recompiling.
+ANICAT_CODESIGN_IDENTITY="-" bash "$ROOT/scripts/package-anicat-macos-app.sh" release dmg
 
 NOTES="$(mktemp)"
 if [ -f "$ROOT/RELEASE_NOTES.md" ]; then
@@ -62,13 +68,14 @@ fi
     echo
     echo "### Install"
     echo
-    echo "Unzip, move Anicat.app to /Applications. The build is ad-hoc signed, not notarized:"
+    echo "Open the .dmg and drag Anicat to Applications, or unzip the .zip and move"
+    echo "Anicat.app there yourself. The build is ad-hoc signed, not notarized:"
     echo "right-click the app and choose Open the first time, or run"
     echo '`xattr -dr com.apple.quarantine /Applications/Anicat.app`.'
 } >> "$NOTES"
 
 git -C "$ROOT" tag -a "$TAG" -m "Anicat $VERSION"
 git -C "$ROOT" push origin "$TAG"
-gh release create "$TAG" "$ZIP" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
+gh release create "$TAG" "$ZIP" "$DMG" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
 rm -f "$NOTES"
 echo "publish-release: $TAG ${DRAFT:+(draft) }created"

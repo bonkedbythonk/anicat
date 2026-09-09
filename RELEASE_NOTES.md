@@ -12,6 +12,14 @@ Your AniList account carries over — the app reads the token the 5.x build
 left in `~/Library/Application Support/Anicat/config.toml`, and your library,
 progress and scores come back from AniList itself on first sync.
 
+Do not use the 5.x app's own Update button for this one. It will find the
+disk image and install it, but it copies the new app *over* the old bundle
+instead of replacing it, so the retired app's files stay inside -- measured at
+245 MB against 102 MB, with `codesign` then reporting the bundle's seal
+invalid. Open the `.dmg` from this page and drag Anicat to Applications
+yourself instead; that replaces the app cleanly. The 5.x app is retired either
+way and nothing further is coming for it.
+
 There is nothing to uninstall first. Both versions are called Anicat, carry
 the same bundle identifier and install to `/Applications/Anicat.app`, so 6.0.0
 replaces the 5.x app in place. What it does not replace is the 5.x data, and

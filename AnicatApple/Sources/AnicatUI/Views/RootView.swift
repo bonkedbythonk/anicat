@@ -1500,17 +1500,10 @@ private struct HomeSectionView: View {
                         UpNextQueueView(
                             items: upNextExpanded ? model.upNextItems : Array(model.upNextItems.prefix(Self.upNextCollapsedCount)),
                             namespace: namespace,
-                            openingSourceKey: model.openingDetailSourceKey,
                             playerNamespace: playerNamespace,
                             playerSourceKey: model.openingPlayerSourceKey,
                             onSelect: { entry in
-                                onOpenDetail(
-                                    entry.id,
-                                    entry.title,
-                                    entry.thumbnailURL,
-                                    entry.unit == "CH",
-                                    UpNextQueueView.detailMorphKey(catalogId: entry.id)
-                                )
+                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", nil)
                             },
                             onPlay: { entry in
                                 if entry.unit == "CH" {

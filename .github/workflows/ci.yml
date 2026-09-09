@@ -33,7 +33,15 @@ jobs:
 
   apple:
     name: Swift package
-    runs-on: macos-15
+    # macos-26, not macos-15: the image's Xcode decides the Swift version, and
+    # macos-15 tops out a generation behind what this project is developed,
+    # packaged and released on. The gap is not academic -- 6.3 infers that a
+    # `queue: .main` callback is the main actor and the older compiler does
+    # not, so main-actor writes, generated uniffi records and notification
+    # closures were all rejected here while every local build was green. CI
+    # that disagrees with the toolchain the release is cut with reports on a
+    # build nobody ships.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 

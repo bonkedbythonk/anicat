@@ -266,6 +266,16 @@ pub struct EpisodeRow {
     pub synopsis: Option<String>,
     /// From AniZip, `YYYY-MM-DD`. Same caveat as `synopsis`.
     pub air_date: Option<String>,
+    /// Whether this episode exists yet.
+    ///
+    /// AniList fills `episodes` with the whole announced run as soon as it is
+    /// known, so a currently-airing show lists twelve while ten have aired.
+    /// The page still shows all twelve -- the schedule is worth seeing -- but
+    /// nothing may *play* one that has not aired: auto-next walked straight
+    /// into episode 11 of a ten-episode-so-far show, the resolve could only
+    /// fail, and the player kept the finished episode on screen under the new
+    /// number.
+    pub is_aired: bool,
 }
 
 /// The facts a cinema page shows that `MediaDetail` has no field for.
@@ -2465,6 +2475,10 @@ impl AnicatEngine {
         // episode.
         let list_progress = m.media_list_entry.as_ref().and_then(|e| e.progress);
 
+        // The first episode that has *not* aired. `None` once a show has
+        // finished airing, which makes every episode of it aired.
+        let next_airing = m.next_airing_episode.as_ref().and_then(|n| n.episode);
+
         // AniList streaming_episodes often lists episodes in reverse order (e.g. Ep 12 down to 1).
         // Map each streaming episode by parsing the episode number from its title:
         // "Episode 12 - First Love with Him" -> 12.
@@ -2547,6 +2561,7 @@ impl AnicatEngine {
                 runtime_minutes,
                 synopsis: az.and_then(|a| a.overview.clone()),
                 air_date: az.and_then(|a| a.air_date.clone()),
+                is_aired: next_airing.is_none_or(|next| number < next),
             });
         }
 
@@ -4070,6 +4085,9 @@ impl AnicatEngine {
                     runtime_minutes: ep.runtime_minutes,
                     synopsis: ep.overview.clone(),
                     air_date: ep.air_date.clone(),
+                    // TMDB's season detail lists episodes that exist, so
+                    // anything here has aired.
+                    is_aired: true,
                 });
             }
         } else {
@@ -4090,6 +4108,7 @@ impl AnicatEngine {
                 runtime_minutes: item.duration,
                 synopsis: item.description.clone(),
                 air_date: detail.movie.as_ref().and_then(|m| m.release_date.clone()),
+                is_aired: true,
             });
         }
 

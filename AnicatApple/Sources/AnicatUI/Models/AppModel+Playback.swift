@@ -38,6 +38,44 @@ extension AppModel {
         playerController.nextEpisodeCountdown.reset()
     }
 
+    /// Puts back the episode identity `resolveAndPlay` wrote on its way in,
+    /// after a resolve that never produced a stream.
+    ///
+    /// The per-episode dedup flags are *claimed*, not reset: the episode
+    /// still on screen is the one that was already advanced on AniList,
+    /// already preloaded from, and already auto-advanced out of. Left clear,
+    /// the next position tick (a second later, still past the auto-next mark
+    /// because the file never changed) fired auto-next again, and again, for
+    /// as long as the episode ran.
+    func restorePlaybackIdentity(
+        _ previous: (
+            catalog: FfiCatalog,
+            catalogId: Int64?,
+            episode: Int64?,
+            title: String?,
+            playerTitle: String,
+            episodeNumber: Int,
+            episodeTitle: String,
+            releaseName: String?,
+            wasPlaying: Bool
+        )
+    ) {
+        guard previous.wasPlaying else { return }
+        currentPlaybackCatalog = previous.catalog
+        currentPlaybackCatalogId = previous.catalogId
+        currentPlaybackEpisode = previous.episode
+        currentPlaybackTitle = previous.title
+        playerController.title = previous.playerTitle
+        playerController.episodeNumber = previous.episodeNumber
+        playerController.episodeTitle = previous.episodeTitle
+        playerController.currentReleaseName = previous.releaseName
+        hasAdvancedAniListForCurrentEpisode = true
+        hasAutoAdvancedEpisode = true
+        hasPreloadedNextEpisode = true
+        updateEpisodeNavigationState()
+        syncPlaybackSession()
+    }
+
     /// The catalog name Handoff carries. A bare id names three different
     /// titles across the catalogs, so the receiving device needs this to know
     /// which one was playing.
@@ -86,6 +124,9 @@ extension AppModel {
         playerController.onRecordTrackMemory = { [weak self] memory in
             Task { @MainActor in self?.recordTrackMemory(memory) }
         }
+        playerController.onReloadForAudioLanguage = { [weak self] preferDub in
+            self?.reloadCurrentEpisodeForAudioLanguage(preferDub: preferDub)
+        }
         playerController.onSelectRelease = { [weak self] name in
             // Through `activeResolveTask`, like the detail page's own play
             // path: the "Finding a stream" overlay this raises has a Cancel
@@ -122,6 +163,17 @@ extension AppModel {
     /// Replays the current episode from a different release, where the
     /// viewer had got to.
     public func switchRelease(to releaseName: String) async {
+        await swapPlayingFile(chosenName: releaseName, forceNewFile: false)
+    }
+
+    /// Puts a different file behind the player without closing it.
+    ///
+    /// Shared by the release picker and by the Sub/Dub row's "find a dub of
+    /// this episode": both are the same move -- resolve this episode again
+    /// under different terms and hand mpv the new URL. The player view stays
+    /// mounted throughout (`activeStreamURL` never goes nil), so this is a
+    /// file swap, not a close and reopen.
+    private func swapPlayingFile(chosenName: String?, forceNewFile: Bool) async {
         guard let engine, let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode else { return }
         let previousURL = activeStreamURL
@@ -155,7 +207,8 @@ extension AppModel {
                 catalogId: catalogId,
                 episode: episode,
                 title: currentPlaybackTitle,
-                chosenName: releaseName
+                chosenName: chosenName,
+                forceNewFile: forceNewFile
             )
             // A chosen release that resolves back to the stream already
             // playing hands `MpvSurface.loadFile` a URL it has, so it opens
@@ -170,6 +223,33 @@ extension AppModel {
         } catch {
             errorMessage = "Failed to switch release: \(error.localizedDescription)"
             playFeedback(.error)
+        }
+    }
+
+    /// Re-fetches the playing episode in the other language.
+    ///
+    /// Pressing Dub during an episode whose release carries only Japanese
+    /// audio could previously do nothing but change what the *next* episode
+    /// searched for -- the switch read as broken. The Sub/Dub row offers this
+    /// when, and only when, `onSelectAudioLanguage` reports that the file has
+    /// no track in the language asked for.
+    ///
+    /// `anicat_sub_dub` is already written by the row itself and
+    /// `resolveAndPlay` reads it, so the search asks for the new language.
+    /// The engine's remembered release and its resolved-stream cache are both
+    /// keyed on `prefer_dub`, so neither hands back the file that was just
+    /// rejected.
+    public func reloadCurrentEpisodeForAudioLanguage(preferDub: Bool) {
+        guard currentPlaybackCatalogId != nil, currentPlaybackEpisode != nil else { return }
+        activeResolveTask?.cancel()
+        activeResolveTask = Task { [weak self] in
+            guard let self else { return }
+            await self.swapPlayingFile(chosenName: nil, forceNewFile: true)
+            // `swapPlayingFile` reports its own failures as "Failed to switch
+            // release", which says nothing about what was asked for here.
+            if self.errorMessage != nil {
+                self.errorMessage = "No \(preferDub ? "dub" : "sub") found for this episode."
+            }
         }
     }
 
@@ -297,6 +377,14 @@ extension AppModel {
         let targetIndex = index + offset
         guard sorted.indices.contains(targetIndex) else { return }
         let target = sorted[targetIndex]
+        // Belt to `updateEpisodeNavigationState`'s braces: the phone's remote
+        // and the player's own Next both land here, and an episode that has
+        // not aired has nothing to resolve.
+        guard target.isAired else {
+            errorMessage = "Episode \(target.number) has not aired yet."
+            playFeedback(.error)
+            return
+        }
         // Leaving an episode forwards is the viewer saying they are done
         // with it. Nothing else ever said so: the 85% rule fires only from a
         // playback tick, so pressing Next part-way through left the episode
@@ -376,7 +464,13 @@ extension AppModel {
             playerController.hasPreviousEpisode = false
             return
         }
+        // An unaired episode is not somewhere to go. AniList lists a whole
+        // announced run the moment it is known, so a show ten episodes into a
+        // twelve-episode order offered Next after the tenth, auto-next took
+        // it, and the only possible answer was "No HD torrent found for
+        // episode 11".
         playerController.hasNextEpisode = sorted.indices.contains(index + 1)
+            && sorted[index + 1].isAired
         playerController.hasPreviousEpisode = sorted.indices.contains(index - 1)
         refreshNowPlayingMetadata()
     }
@@ -641,7 +735,8 @@ extension AppModel {
             hasPreloadedNextEpisode = true
             let sorted = playbackEpisodes
             if let index = sorted.firstIndex(where: { $0.number == Int(episode) }),
-               sorted.indices.contains(index + 1) {
+               sorted.indices.contains(index + 1),
+               sorted[index + 1].isAired {
                 let next = Int64(sorted[index + 1].number)
                 let req = StreamRequest(
                     catalog: currentPlaybackCatalog,
@@ -962,7 +1057,8 @@ extension AppModel {
         episode: Int64,
         title: String? = nil,
         chosenName: String? = nil,
-        fromStart: Bool = false
+        fromStart: Bool = false,
+        forceNewFile: Bool = false
     ) async throws -> URL {
         // A reader open over the player is a reader over the picture. Both
         // sit above it by design -- opening a chapter while an episode plays
@@ -1001,6 +1097,28 @@ extension AppModel {
             && currentPlaybackCatalogId == catalogId
             && currentPlaybackEpisode == episode
             && chosenName == nil
+            // A language switch is the second exception, for the same reason
+            // a named release is: same episode, different file. Left out, the
+            // gate stayed open and the outgoing file's ticks were handled as
+            // the new one's.
+            && !forceNewFile
+        // What is playing right now, kept so a resolve that fails can put it
+        // back. Everything below is written before the engine is asked for a
+        // stream -- the resolve card needs a title and a number to show -- so
+        // a failure used to leave the chrome describing an episode that never
+        // loaded while the previous one carried on playing underneath it.
+        // "It autoplays 10 again but under the name episode 11" was that.
+        let previous = (
+            catalog: self.currentPlaybackCatalog,
+            catalogId: self.currentPlaybackCatalogId,
+            episode: self.currentPlaybackEpisode,
+            title: self.currentPlaybackTitle,
+            playerTitle: self.playerController.title,
+            episodeNumber: self.playerController.episodeNumber,
+            episodeTitle: self.playerController.episodeTitle,
+            releaseName: self.playerController.currentReleaseName,
+            wasPlaying: self.activeStreamURL != nil
+        )
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode
@@ -1135,10 +1253,12 @@ extension AppModel {
             // No new file is coming; whatever is still playing owns the
             // position again.
             self.playerController.awaitingNewFile = false
+            restorePlaybackIdentity(previous)
             throw error
         }
         guard let streamURL = URL(string: handleURL) else {
             self.playerController.awaitingNewFile = false
+            restorePlaybackIdentity(previous)
             throw NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handleURL)"])
         }
 

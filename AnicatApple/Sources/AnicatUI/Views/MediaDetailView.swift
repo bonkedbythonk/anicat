@@ -70,6 +70,16 @@ public struct MediaDetailView: View {
         public let synopsis: String?
         public let airDate: String?
         public let runtimeMinutes: Int?
+        /// Whether the episode exists yet. An airing show lists its whole
+        /// announced run, so the last few rows are a schedule, not something
+        /// that can be played -- see `EpisodeRow.is_aired`.
+        ///
+        /// Stored optional and read through `isAired` because this is
+        /// `Codable` and `DetailCache` is on disk: a synthesized decoder
+        /// throws on a key that a snapshot written by an older build does not
+        /// have, which would have made every cached page fail to load once.
+        private let isAiredRaw: Bool?
+        public var isAired: Bool { isAiredRaw ?? true }
 
         public init(
             id: Int64,
@@ -80,11 +90,13 @@ public struct MediaDetailView: View {
             progressPercent: Double? = nil,
             synopsis: String? = nil,
             airDate: String? = nil,
-            runtimeMinutes: Int? = nil
+            runtimeMinutes: Int? = nil,
+            isAired: Bool = true
         ) {
             self.synopsis = synopsis
             self.airDate = airDate
             self.runtimeMinutes = runtimeMinutes
+            self.isAiredRaw = isAired
             self.id = id
             self.number = number
             self.title = title

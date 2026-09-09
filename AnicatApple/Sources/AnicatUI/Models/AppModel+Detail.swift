@@ -19,7 +19,8 @@ extension AppModel {
                 progressPercent: e.progressPercent,
                 synopsis: e.synopsis,
                 airDate: e.airDate,
-                runtimeMinutes: e.runtimeMinutes.map(Int.init)
+                runtimeMinutes: e.runtimeMinutes.map(Int.init),
+                isAired: e.isAired
             )
         }
         .sorted { $0.number < $1.number }

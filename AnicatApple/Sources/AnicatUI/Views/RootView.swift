@@ -355,12 +355,17 @@ public struct RootView: View {
                 // the housing. Hence: ignored in a window, honoured in
                 // fullscreen.
                 .ignoresSafeArea(edges: FullScreenState.shared.isFullScreen ? [] : .all)
-                // In: fade up from 96%, the window's fullscreen zoom taking
-                // over as it lands (see the delayed `FullScreenGuard.set`).
-                // Out: plain fade; a shrink on the way out fought the
-                // detail page morphing back underneath it.
+                // In: nothing. The fade-from-96% that used to be here scaled
+                // and cross-faded a view whose content is a `CAMetalLayer`
+                // mpv is already drawing into, and 0.38s later the window's
+                // own fullscreen zoom started on top of it -- two scales over
+                // the same picture, which is what "the entrance is broken"
+                // was. The player is what the press asked for; it can simply
+                // be there.
+                // Out: plain fade; a shrink on the way out fought the detail
+                // page morphing back underneath it.
                 .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                    insertion: .identity,
                     removal: .opacity
                 ))
                 .zIndex(30)
@@ -1356,6 +1361,17 @@ private func playEpisode(
     morphKey: String? = nil,
     morphThumbnailURL: URL? = nil
 ) {
+    // An episode AniList has announced but not aired has nothing behind it,
+    // and every path into it -- the page's rows, Up Next, the phone -- comes
+    // through here. Said plainly rather than as a two-minute search ending in
+    // "No HD torrent found".
+    if model.selectedMediaDetails?.id == catalogId,
+       let row = model.selectedEpisodes.first(where: { $0.number == episode }),
+       !row.isAired {
+        model.errorMessage = "Episode \(episode) has not aired yet."
+        model.playFeedback(.error)
+        return
+    }
     model.openingPlayerSourceKey = morphKey
     model.openingPlayerThumbnailURL = morphThumbnailURL
     // A file already on the disk beats the swarm. Without this the only

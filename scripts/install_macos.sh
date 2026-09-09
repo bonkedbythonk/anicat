@@ -61,12 +61,44 @@ if [ ! -d "$TMP_DIR/extracted/$APP_NAME" ]; then
     exit 1
 fi
 
+# A plain `rm -rf` can leave files behind without saying so -- one locked or
+# root-owned leftover from a previous botched install (the 5.x app's own
+# updater is known to copy its new bundle *over* the old one instead of
+# replacing it) is enough, and the ditto below would then land the new app
+# on top of the remainder instead of a clean directory, reproducing the same
+# merged, invalid bundle. Confirm removal actually worked before trusting it.
 rm -rf "$INSTALL_PATH"
+if [ -e "$INSTALL_PATH" ]; then
+    echo "Could not fully remove the existing $INSTALL_PATH -- some of its files" >&2
+    echo "would have been left behind and merged with the new install, which is" >&2
+    echo "the exact corruption an old, broken update can cause. Remove it by hand" >&2
+    echo "first, e.g.:" >&2
+    echo "  sudo rm -rf \"$INSTALL_PATH\"" >&2
+    exit 1
+fi
 ditto "$TMP_DIR/extracted/$APP_NAME" "$INSTALL_PATH"
 
 # The bundle is ad-hoc signed, not notarized, so without this macOS refuses to
 # open it and offers only "Move to Trash".
 xattr -r -d com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
+
+# A merged/corrupted bundle from a bad previous install, or a download that
+# lost the SwiftPM resource bundle in transit, crashes on launch with an
+# obscure NSBundle.module assertion instead of failing here where it is easy
+# to explain. Checking for it beats opening a fresh crash report.
+if [ ! -d "$INSTALL_PATH/Contents/Resources/AnicatApple_AnicatUI.bundle" ]; then
+    echo "The installed app is missing Contents/Resources/AnicatApple_AnicatUI.bundle" >&2
+    echo "and will crash on launch. The download may have been interrupted --" >&2
+    echo "delete $INSTALL_PATH and run this installer again." >&2
+    exit 1
+fi
+if ! codesign --verify "$INSTALL_PATH" 2>/dev/null; then
+    echo "The installed app's signature doesn't verify, which usually means its" >&2
+    echo "bundle has stray files mixed in from a previous install. Remove it by" >&2
+    echo "hand and run this installer again:" >&2
+    echo "  rm -rf \"$INSTALL_PATH\"" >&2
+    exit 1
+fi
 
 echo "Step 4: Opening Anicat..."
 open "$INSTALL_PATH"

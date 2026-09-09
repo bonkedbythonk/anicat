@@ -265,8 +265,15 @@ public final class NowPlayingBridge: @unchecked Sendable {
             // controller is main-actor state. `event` is not `Sendable`
             // but never leaves this thread, so the box is honest.
             let boxed = UncheckedSendable(event)
+            // The weak reference is boxed for the same reason and no other:
+            // reaching it from inside `assumeIsolated` counts as sending it,
+            // which CI's toolchain rejects ("sending 'self' risks causing
+            // data races") where the local one works it out.
+            let boxedSelf = UncheckedSendable(self)
             return MainActor.assumeIsolated {
-                guard let controller = self?.controller else { return .noActionableNowPlayingItem }
+                guard let controller = boxedSelf.value?.controller else {
+                    return .noActionableNowPlayingItem
+                }
                 return handler(controller, boxed.value)
             }
         }

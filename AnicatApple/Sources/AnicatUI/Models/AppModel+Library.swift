@@ -781,34 +781,8 @@ extension AppModel {
         isSignedIn = profile != nil
         viewer = profile
         watchingItems = watching.map(Self.card)
-
-        // AniList's `watching` list comes back in whatever order the API
-        // defaults to (not recency) — `upNextItems.first` is what the menu
-        // bar's "Continue Watching" reads as the most-recently-watched
-        // title, so leaving this unsorted meant it showed whichever show
-        // happened to sit first in AniList's own list order, not whatever
-        // was actually last touched.
-        let sortedWatching = watching.sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
-        upNextItems = sortedWatching.compactMap { s in
-            let progress = Int(s.progress ?? 0)
-            let total = Int(s.episodes ?? 0)
-            // Same fallback caveat as Self.card: nextEpisode is nil once a
-            // show stops airing, and MediaSummary has no separate airing
-            // status to tell finished apart from mid-season, so only trust
-            // nextEpisode itself as the "new episode" signal.
-            let released = s.nextEpisode.map { Int($0) - 1 } ?? -1
-            return UpNextQueueView.QueueEntry(
-                id: s.catalogId,
-                title: s.title,
-                thumbnailURL: URL(string: s.coverImage),
-                nextEpisodeOrChapter: progress + 1,
-                totalCount: total,
-                progressPercent: total > 0 ? Double(progress) / Double(total) * 100 : 0,
-                watchedTimeAgo: s.updatedAt.map(Self.relativeTime),
-                hasNewEpisode: progress < released,
-                unit: "EP"
-            )
-        }
+        watchingSummaries = watching
+        rebuildUpNext()
 
         // Only shows AniList actually has an airing time for. A show with no
         // `nextAiringEpisode` is not on the schedule; it is finished, or
@@ -844,6 +818,66 @@ extension AppModel {
     }
 
     /// "6h ago", "3d ago" — the same buckets `relativeDay` uses on the web.
+    /// Builds the Up Next queue from `watchingSummaries`, ordered by the
+    /// later of AniList's `updatedAt` and this device's last watch.
+    ///
+    /// AniList's `updatedAt` only moves when the list entry does, which is
+    /// at the 85% mark. Watching half an episode and closing the player left
+    /// the title where it was in the queue, still "2d ago", while History
+    /// already had it on top.
+    func rebuildUpNext() {
+        var lastWatched: [Int64: Int64] = [:]
+        for row in activity {
+            guard let date = Self.watchedAtParser.date(from: row.watchedAt) else { continue }
+            let seconds = Int64(date.timeIntervalSince1970)
+            lastWatched[row.catalogId] = max(lastWatched[row.catalogId] ?? 0, seconds)
+        }
+        func touched(_ s: MediaSummary) -> Int64? {
+            switch (s.updatedAt, lastWatched[s.catalogId]) {
+            case let (remote?, local?): return max(remote, local)
+            case let (remote, local): return remote ?? local
+            }
+        }
+        // AniList's `watching` list comes back in whatever order the API
+        // defaults to (not recency) — `upNextItems.first` is what the menu
+        // bar's "Continue Watching" reads as the most-recently-watched
+        // title, so leaving this unsorted meant it showed whichever show
+        // happened to sit first in AniList's own list order, not whatever
+        // was actually last touched.
+        let sortedWatching = watchingSummaries.sorted { (touched($0) ?? 0) > (touched($1) ?? 0) }
+        upNextItems = sortedWatching.map { s in
+            let progress = Int(s.progress ?? 0)
+            let total = Int(s.episodes ?? 0)
+            // Same fallback caveat as Self.card: nextEpisode is nil once a
+            // show stops airing, and MediaSummary has no separate airing
+            // status to tell finished apart from mid-season, so only trust
+            // nextEpisode itself as the "new episode" signal.
+            let released = s.nextEpisode.map { Int($0) - 1 } ?? -1
+            return UpNextQueueView.QueueEntry(
+                id: s.catalogId,
+                title: s.title,
+                thumbnailURL: URL(string: s.coverImage),
+                nextEpisodeOrChapter: progress + 1,
+                totalCount: total,
+                progressPercent: total > 0 ? Double(progress) / Double(total) * 100 : 0,
+                watchedTimeAgo: touched(s).map(Self.relativeTime),
+                hasNewEpisode: progress < released,
+                unit: "EP"
+            )
+        }
+    }
+
+    /// SQLite's `datetime('now')`: `YYYY-MM-DD HH:MM:SS`, UTC, no zone marker.
+    /// Read in the local zone it put a just-watched title hours away from
+    /// AniList's Unix `updatedAt`, in whichever direction the zone points.
+    private static let watchedAtParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
     static func relativeTime(_ unixSeconds: Int64) -> String {
         let seconds = Date().timeIntervalSince1970 - TimeInterval(unixSeconds)
         let hours = Int(seconds / 3600)

@@ -1006,6 +1006,13 @@ extension AppModel {
         if let engine {
             Task.detached(priority: .utility) { await engine.playbackStopped() }
         }
+        // mpv only stops in `dismantleNSView`, which SwiftUI runs after the
+        // close fade has finished, so the episode kept talking for about a
+        // second over the page it closed to. Mute, not pause: pause flips
+        // the observed `pause` property and runs the play-state handlers
+        // for a player that is already gone. The flag dies with the core,
+        // and a new surface applies `isMuted` at setup.
+        playerController.onSetMuted?(true)
         self.activeStreamURL = nil
         if wasPlaying {
             playFeedback(.playerClose)
@@ -1044,8 +1051,19 @@ extension AppModel {
         // cancel it, and stopping then immediately opening another title
         // had the old title's fetch land on the new page.
         activeDetailTask?.cancel()
-        let refresh = Task { @MainActor in
+        let refresh = Task { @MainActor [engineIOQueue] in
+            // Waits out the final `recordProgress` queued above. Read before
+            // it landed, the engine's resume position was the previous tick's.
+            await withCheckedContinuation { continuation in
+                engineIOQueue.async { continuation.resume() }
+            }
             await loadHistory()
+            // Up Next is otherwise rebuilt only by a list edit or a full
+            // refresh, and closing mid-episode is neither.
+            if !watchingSummaries.isEmpty {
+                rebuildUpNext()
+                persistHomeCache()
+            }
             guard let currentDetails = selectedMediaDetails else { return }
             // Refreshed through the catalog the page belongs to. `loadDetail`
             // is AniList's, and a cinema page's id is TMDB's: closing the
@@ -1053,7 +1071,10 @@ extension AppModel {
             // replaced the page with whatever anime happened to carry it --
             // which is what "leaving a stream lands on a random title" was.
             if currentDetailCatalog == .anilist {
-                await loadDetail(id: currentDetails.id, isManga: Self.isMangaFormat(currentDetails.format))
+                // Forced: the page was usually opened or refreshed within
+                // `detailFreshnessWindow` of pressing play, so the snapshot
+                // was served and Resume kept the time from before this watch.
+                await loadDetail(id: currentDetails.id, isManga: Self.isMangaFormat(currentDetails.format), forceRefresh: true)
             } else {
                 await refreshCinemaDetailAfterPlayback(id: currentDetails.id)
             }

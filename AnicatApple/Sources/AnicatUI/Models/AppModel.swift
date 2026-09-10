@@ -549,6 +549,10 @@ public final class AppModel {
     /// `RootTabView` clears it when it opens the sheet.
     public var wantsRemoteSheet = false
     public var upNextItems: [UpNextQueueView.QueueEntry] = []
+    /// The watching list `upNextItems` was last built from, kept so closing
+    /// the player can reorder the queue by local watches without another
+    /// `loadInitialCatalog`, which also writes `viewer` and `isSignedIn`.
+    var watchingSummaries: [MediaSummary] = []
     // `didSet` keeps `knownTitles` a plain stored read instead of a fan-out
     // computed property: HistoryView's body used to read all six arrays
     // below every time it rendered, so any of them changing while History
@@ -1062,6 +1066,7 @@ public final class AppModel {
         viewer = nil
         watchingItems = []
         upNextItems = []
+        watchingSummaries = []
         scheduleItems = []
         libraryItems = []
         mangaReading = []

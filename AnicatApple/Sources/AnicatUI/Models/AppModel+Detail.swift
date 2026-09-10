@@ -563,6 +563,7 @@ extension AppModel {
             // watching list; the background re-read below confirms it.
             if let status, status != "CURRENT", status != "REPEATING" {
                 upNextItems.removeAll { $0.id == details.id }
+                watchingSummaries.removeAll { $0.catalogId == details.id }
                 watchingItems.removeAll { $0.id == details.id }
             }
             refreshListsAfterEdit()
@@ -615,6 +616,7 @@ extension AppModel {
             try await engine.removeFromList(listEntryId: entryId)
             await recordAniListSuccess()
             upNextItems.removeAll { $0.id == details.id }
+            watchingSummaries.removeAll { $0.catalogId == details.id }
             watchingItems.removeAll { $0.id == details.id }
             refreshListsAfterEdit()
             // Not `openDetail(id:)` — see the identical fix on

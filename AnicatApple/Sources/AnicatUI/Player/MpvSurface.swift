@@ -146,6 +146,10 @@ public final class MpvMetalView: NSView {
     }
 
     private var pendingDrawableSync: DispatchWorkItem?
+    private var pendingDrawableReport: DispatchWorkItem?
+    /// The size last handed to `onDrawableSizeChanged`; see the work item in
+    /// `syncDrawableSize`.
+    private var lastReportedDrawableSize: CGSize = .zero
 
     /// Fired after a settled resize has been applied to the layer. mpv's
     /// MoltenVK context reads the layer's size only when the video
@@ -178,9 +182,41 @@ public final class MpvMetalView: NSView {
         pendingDrawableSync?.cancel()
         let target = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.metalLayer.drawableSize != target else { return }
-            self.metalLayer.drawableSize = target
-            self.onDrawableSizeChanged?(target)
+            guard let self else { return }
+            if self.metalLayer.drawableSize != target {
+                self.metalLayer.drawableSize = target
+            }
+            // Against the last size reported, not the layer's own: while a
+            // picture is playing MoltenVK rebuilds its swapchain and writes
+            // `drawableSize` itself, so the layer already read `target` by the
+            // time this ran and the report was skipped. A minimize while
+            // playing logged the drawable stepping down to 639x359 with no
+            // "[nudge] drawable now" at all and the size check still comparing
+            // against 2500x1560; the mini-player showed the top-left of the
+            // full picture, and a restore after a paused minimize stayed at
+            // 320x180 in the corner. Only a paused resize, where nothing
+            // renders, ever reached mpv.
+            // Fullscreen applies the drawable on every layout pass (below), so
+            // the report gets a trailing 50ms of its own there. Minimizing or
+            // restoring the fullscreen player re-lays this view out about 70
+            // times, and each report was a nudge; paused, each nudge is a
+            // refresh seek. The player log of a paused restore ended with the
+            // vo at 640x360 in a 3024x1898 layer and the size check out of
+            // attempts; with this, one report each way, reconfigured in
+            // 0.12s.
+            self.pendingDrawableReport?.cancel()
+            let report = DispatchWorkItem { [weak self] in
+                guard let self, self.lastReportedDrawableSize != target else { return }
+                self.lastReportedDrawableSize = target
+                self.onDrawableSizeChanged?(target)
+            }
+            self.pendingDrawableReport = report
+            let fullScreen = self.window?.styleMask.contains(.fullScreen) ?? false
+            if fullScreen && self.lastReportedDrawableSize.width > 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: report)
+            } else {
+                report.perform()
+            }
         }
         pendingDrawableSync = work
         // Debounce is only for the mini-player minimize spring, which
@@ -1170,17 +1206,29 @@ public struct MpvSurface {
         /// thousand: a different rational for mpv, one pixel across a 1920
         /// wide picture for the eye. The 1.0 / 1.5 detour it replaces was a
         /// visible squeeze for however long it lasted.
-        func nudgeVideoReconfig() {
+        /// Returns whether a detour went out now; false when there is no
+        /// handle or the nudge was deferred behind one still held.
+        @discardableResult
+        func nudgeVideoReconfig() -> Bool {
             let debug = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
             guard mpv != nil else {
                 if debug { PlayerLog.write("[nudge] skipped: no handle") }
-                return
+                return false
             }
             nudgeLock.lock()
             defer { nudgeLock.unlock() }
             guard restoreAspectOverride == nil else {
-                if debug { PlayerLog.write("[nudge] skipped: restore pending") }
-                return
+                // Deferred, not dropped: `scheduleNudgeRestore` runs it once
+                // the pending detour is back. The mini-player restore that
+                // left the picture at 320x180 in the top-left of the full
+                // player logged the drawable applied about thirty times in
+                // 600ms (640x360 up to 2521x1574 and back down to 2501x1561,
+                // a step every 30-40ms on a loaded main thread), so most of
+                // the size changes landed inside another nudge's window, and
+                // the ones that did were skipped.
+                nudgeRequestedWhilePending = true
+                if debug { PlayerLog.write("[nudge] deferred: restore pending") }
+                return false
             }
             let current = stringProperty("video-aspect-override") ?? "-1"
             // Written as steps: the one-expression version of this chain
@@ -1205,17 +1253,28 @@ public struct MpvSurface {
             let detour = abs((Double(current) ?? -1) - up) < 0.0001 ? down : up
             restoreAspectOverride = (Double(current) ?? 1) <= 0 ? current : "-2"
             nudgeOSDBefore = stringProperty("osd-dimensions/w")
+            // Paused, no frame is coming, so mpv carries the detour to the vo
+            // with a refresh seek that re-decodes from a keyframe over the
+            // stream. Restored at 250ms, the original went back before that
+            // frame arrived and nothing reconfigured: a paused minimize at
+            // 2:05 logged three nudges "reconfigured no" and gave up with the
+            // vo at 3024x1898 in a 640x360 layer. Held up to 2s, the same
+            // minimize reconfigured on the first nudge.
+            nudgeTimeout = stringProperty("pause") == "yes" ? 2.0 : 0.25
             if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
                 PlayerLog.write(String(format: "[nudge] override %@ -> %.6f, osd/w %@", current, detour, nudgeOSDBefore ?? "-"))
             }
             runCommand(["set", "video-aspect-override", String(format: "%.6f", detour)])
             scheduleNudgeRestore(after: 0.03)
+            return true
         }
 
         private let nudgeLock = NSLock()
+        private var nudgeRequestedWhilePending = false
         private var restoreAspectOverride: String?
         private var nudgeOSDBefore: String?
         private var nudgeWaitedFor: Double = 0
+        private var nudgeTimeout: Double = 0.25
 
         /// Polls for the reconfig the detour was meant to cause, then puts
         /// the original override back. Polling rather than waiting for
@@ -1238,7 +1297,7 @@ public struct MpvSurface {
                 self.nudgeWaitedFor += delay
                 let reconfigured = self.stringProperty("osd-dimensions/w") != self.nudgeOSDBefore
                     || self.nudgeOSDBefore == nil
-                if !reconfigured && self.nudgeWaitedFor < 0.25 {
+                if !reconfigured && self.nudgeWaitedFor < self.nudgeTimeout {
                     self.nudgeLock.unlock()
                     self.scheduleNudgeRestore(after: 0.03)
                     return
@@ -1246,11 +1305,20 @@ public struct MpvSurface {
                 self.restoreAspectOverride = nil
                 let waited = self.nudgeWaitedFor
                 self.nudgeWaitedFor = 0
+                let again = self.nudgeRequestedWhilePending
+                self.nudgeRequestedWhilePending = false
                 self.nudgeLock.unlock()
                 if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
-                    PlayerLog.write(String(format: "[nudge] restore to %@ after %.2fs, reconfigured %@", original, waited, reconfigured ? "yes" : "no"))
+                    PlayerLog.write(String(format: "[nudge] restore to %@ after %.2fs, reconfigured %@%@", original, waited, reconfigured ? "yes" : "no", again ? ", running the deferred one" : ""))
                 }
                 self.runCommand(["set", "video-aspect-override", original])
+                if again {
+                    // Off this block: `nudgeVideoReconfig` reads properties
+                    // through the handle lock this closure is still holding.
+                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                        self?.nudgeVideoReconfig()
+                    }
+                }
             }
         }
 
@@ -1267,7 +1335,20 @@ public struct MpvSurface {
             lastDrawableSize = size
             reconfigAttemptsForSize = 0
             nudgeVideoReconfig()
+            // And once more after the size has held still. A nudge only
+            // reconfigures when a frame next passes through mpv's filters,
+            // and `verifyVideoSizeIfDue` cannot catch a nudge that did
+            // nothing: `osd-dimensions` already read the new size on the
+            // restore that worked ("osd/w 2500" before its nudge) and on the
+            // one that did not, so the check matched while the swapchain
+            // stayed small.
+            settleNudge?.cancel()
+            let settle = DispatchWorkItem { [weak self] in self?.nudgeVideoReconfig() }
+            settleNudge = settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: settle)
         }
+
+        private var settleNudge: DispatchWorkItem?
 
         /// A fullscreen transition just ended. Whatever the debounced layout
         /// path did or did not deliver during the animation, this is the one
@@ -1331,9 +1412,13 @@ public struct MpvSurface {
                 PlayerLog.write(String(format: "[libmpv] size check: osd %.0fx%.0f margins t%@ b%@ l%@ r%@ dwidth/dheight %@x%@ aspect-override %@ layer %.0fx%.0f", w, h, mt, mb, ml, mr, dw, dh, aspect, wanted.width, wanted.height))
             }
             if abs(w - wanted.width) > 1 || abs(h - wanted.height) > 1 {
+                // Counted only when a detour went out. A check that lands
+                // while one is still held only defers, and counting those is
+                // how the paused fullscreen restore ran out of attempts with
+                // the vo still at 640x360 in a 3024x1898 layer.
+                guard nudgeVideoReconfig() else { return }
                 reconfigAttemptsForSize += 1
                 PlayerLog.write(String(format: "[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize))
-                nudgeVideoReconfig()
             }
         }
 

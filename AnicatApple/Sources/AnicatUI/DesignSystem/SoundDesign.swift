@@ -72,6 +72,25 @@ public enum AppSounds: String, CaseIterable, Sendable {
     /// synthesises it, later ones reuse the decoded player.
     @MainActor
     public static func play(_ sound: AppSounds) {
+        #if os(iOS)
+        // Under the haptics switch, not the sounds one: sounds default to
+        // off, and a haptic gated on them would never fire on a phone that
+        // had not been to Settings. A phone in a pocket hears no tick, so
+        // the watched mark and the error are the two moments that need to
+        // be felt; the player open is the one the finger is already on.
+        if FeedbackDefaults.hapticsEnabled {
+            switch sound {
+            case .watchedTick:
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case .error:
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            case .playerOpen:
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            case .tabChange, .playerClose, .swipeBack:
+                break
+            }
+        }
+        #endif
         guard FeedbackDefaults.soundsEnabled else { return }
         SoundBank.shared.play(sound, volume: FeedbackDefaults.soundVolume)
     }

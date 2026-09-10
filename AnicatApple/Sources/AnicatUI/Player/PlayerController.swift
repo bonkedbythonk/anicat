@@ -442,6 +442,27 @@ public final class PlayerController {
     /// races candidates inside the engine and nothing reports back which
     /// one won, so there is no honest row to tick.
     public var currentReleaseName: String?
+    /// The release the engine remembers winning this episode's last resolve
+    /// (`resolved_releases`), which it tries first without saying so. Filled
+    /// with the release list, not per row: it is a registry read per call,
+    /// and the popover re-renders its rows on every hover.
+    public var rememberedReleaseName: String?
+    /// What the engine is doing between Play and the first frame, as one
+    /// short line ("Searching indexers", "Connecting to <release>",
+    /// "Buffering at 2.1 MB/s"). `nil` outside a resolve, so the buffering
+    /// label falls back to mpv's own percentage during a mid-episode stall.
+    public var resolveStatus: String?
+    /// Whole seconds since the resolve started, set only once it has run
+    /// past two of them: a spinner with the same line under it for longer
+    /// than that reads as frozen, and the count is what says it is not.
+    public var resolveElapsedSeconds: Int?
+    /// "Searching indexers  4s": the line with the count behind it, or the
+    /// bare line while the count is still nil. Here rather than in each
+    /// chrome so the Mac and the phone cannot format it two ways.
+    public static func withElapsed(_ line: String, _ seconds: Int?) -> String {
+        guard let seconds else { return line }
+        return "\(line)  \(seconds)s"
+    }
     /// Picks the audio track matching a Sub/Dub choice on the *loaded* file.
     /// Distinct from `onSelectAudioTrack`: `alang` only applies at file
     /// load, so switching the preference mid-episode has to select the

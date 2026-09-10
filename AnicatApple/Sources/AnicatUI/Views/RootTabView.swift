@@ -78,10 +78,63 @@ public struct RootTabView: View {
             // pre-buffered, all before there is a frame to show. The desktop
             // has raised this card since its play path was written; the phone
             // never did.
-            if let startedAt = model.resolveStartedAt {
-                ResolvingCard(startedAt: startedAt) {
-                    model.activeResolveTask?.cancel()
-                    model.resolveStartedAt = nil
+            //
+            // The same receipt `RootView` draws bottom-trailing shares the
+            // card's stack above the tab bar: at one inset, drawn as two
+            // layers, the card covered the notice and its Undo. The notice
+            // stays out while the player covers the screen: an auto-advance
+            // fires while the episode is full screen, and the phone player's
+            // own chrome is where a line drawn over video would have to be
+            // designed for; here it waits for the close.
+            let showsNotice = model.noticeMessage != nil && model.activeStreamURL == nil
+            // Behind an `if` for the same reason as the desktop's: this layer
+            // is above the player's zIndex and should exist only while it has
+            // something on it.
+            if showsNotice || model.resolveStartedAt != nil {
+                VStack(spacing: 10) {
+                    if showsNotice, let notice = model.noticeMessage {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle")
+                                .foregroundColor(SumiTheme.muted)
+                                .font(.system(size: 13))
+                            Text(notice)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            if let action = model.noticeAction {
+                                Button(action: action.run) {
+                                    Text(action.label)
+                                        .sumiTabularMono(size: 11.5)
+                                        .foregroundColor(SumiTheme.indigo)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.3), radius: 10, y: 3)
+                        .onTapGesture { model.dismissNotice() }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    if let startedAt = model.resolveStartedAt {
+                        // `cancelResolve`, not a bare task cancel: it also stops
+                        // the status poller, which otherwise wrote the line back
+                        // until the engine's resolve returned.
+                        ResolvingCard(startedAt: startedAt, status: model.playerController.resolveStatus) {
+                            model.cancelResolve()
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 92)
@@ -91,6 +144,7 @@ public struct RootTabView: View {
             }
         }
         .animation(.snappy, value: model.resolveStartedAt)
+        .animation(.snappy, value: model.noticeMessage)
         .tint(SumiTheme.indigo)
         // A deep link (`anicat://title/<id>`) and a notification tap both go
         // straight to `openDetail` on the model, with no row tapped to have
@@ -949,6 +1003,9 @@ extension FlowChips: View {
 /// makes the same point — treating it as an alarming dialog was wrong.
 private struct ResolvingCard: View {
     let startedAt: Date
+    /// See `ResolvingStreamCard.status` on the Mac: the only place the
+    /// engine's phase can show before the player mounts.
+    let status: String?
     let onCancel: () -> Void
 
     var body: some View {
@@ -956,9 +1013,11 @@ private struct ResolvingCard: View {
             ProgressView()
                 .tint(SumiTheme.indigo)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Finding a stream…")
+                Text(status ?? "Finding a stream…")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(1)
+                    .animation(.smooth, value: status)
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     Text("\(max(0, Int(context.date.timeIntervalSince(startedAt))))s")
                         .font(.system(size: 10.5, design: .monospaced))

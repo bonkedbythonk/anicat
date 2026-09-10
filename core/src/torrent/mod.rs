@@ -155,6 +155,63 @@ pub struct ResolveTarget<'a> {
     pub remembered: Option<RememberedRelease>,
 }
 
+/// Where an in-flight `resolve` has got to, for the player to say so.
+///
+/// Polled, not a channel: the host reads it a few times a second for the
+/// length of a play start, and a callback interface across the prelinked
+/// FFI boundary is more machinery than four words of status deserve.
+///
+/// One entry per (media, episode), not one slot. The N+1 preload, the launch
+/// preresolve and a download all run through `resolve` beside the play the
+/// viewer is waiting on. With one slot checked against its key only when
+/// cleared, their "Connecting to ..." lines landed on that play's status and
+/// whichever resolve ended first blanked it for the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvePhase {
+    /// Trying last time's release before any search.
+    Remembered,
+    /// The indexer wave and SeaDex are in flight.
+    Searching,
+    /// A candidate is being added and its peers awaited.
+    Connecting,
+    /// Peers connected; bytes are being measured against the bar.
+    Buffering,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolveProgress {
+    pub media: crate::media::MediaKey,
+    pub episode: i64,
+    pub phase: ResolvePhase,
+    /// The release currently being tried, once one is.
+    pub release: Option<String>,
+    /// Pool size after search, 0 before.
+    pub candidates: u32,
+    /// Candidates started so far, counting the remembered one.
+    pub attempt: u32,
+    /// Throughput of the current attempt's swarm, 0 until measured.
+    pub bytes_per_second: u64,
+}
+
+/// The app's own (media, absolute episode) a resolve is for: what its
+/// progress entry is keyed on.
+type ProgressKey = (crate::media::MediaKey, i64);
+
+/// Ends a resolve's progress entry however `resolve` exits. Nothing else
+/// removes an entry once it is keyed per episode, so a resolve future the
+/// host dropped mid-flight, or a panic inside it, would otherwise leave that
+/// episode reading "Connecting" for the rest of the session.
+struct ProgressGuard<'a> {
+    manager: &'a TorrentManager,
+    key: ProgressKey,
+}
+
+impl Drop for ProgressGuard<'_> {
+    fn drop(&mut self) {
+        self.manager.end_progress(self.key);
+    }
+}
+
 /// What every candidate in one resolve is judged against. Constant across the
 /// candidate loop, so it is built once and lent to each `try_candidate` rather
 /// than passed as six repeated arguments.
@@ -173,6 +230,9 @@ struct CandidateContext<'a> {
     /// Stamped onto the `Resolved` this attempt produces, so the reuse
     /// early-return can tell which preference picked it.
     prefer_dub: bool,
+    /// Where this attempt's progress writes go. Not `episode` above, which
+    /// is the files' numbering rather than the one the host polls with.
+    progress_key: ProgressKey,
 }
 
 /// Elapsed time of each stage of one candidate's attempt, logged as a single
@@ -324,6 +384,11 @@ pub struct TorrentManager {
     /// no queue to resume, only a status the episode row polls while it's
     /// open.
     downloads: tokio::sync::Mutex<HashMap<(usize, usize), EpisodeDownloadStatus>>,
+    /// See `ResolveProgress`. Each entry carries how many resolves are
+    /// writing it. A std mutex: written from inside the racing candidate
+    /// futures and read from a synchronous FFI call, neither of which may
+    /// await.
+    progress: std::sync::Mutex<HashMap<ProgressKey, (ResolveProgress, u32)>>,
 }
 
 /// Status of one "Download Episode" — see `TorrentManager::spawn_episode_download`.
@@ -431,6 +496,58 @@ impl TorrentManager {
             playing_file: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
             downloads: tokio::sync::Mutex::new(HashMap::new()),
+            progress: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The status of the resolve in flight for this episode, if one is.
+    pub fn resolve_progress(&self, media: crate::media::MediaKey, episode: i64) -> Option<ResolveProgress> {
+        self.progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(media, episode))
+            .map(|(p, _)| p.clone())
+    }
+
+    /// Opens this resolve's entry, or joins the one already open: the launch
+    /// preresolve of the first Up Next entry and the viewer pressing Play on
+    /// that entry are two resolves under one key, and the first to finish
+    /// must not remove the entry the other is still writing.
+    fn begin_progress(&self, key: ProgressKey, phase: ResolvePhase) -> ProgressGuard<'_> {
+        self.progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(key)
+            .and_modify(|(_, writers)| *writers += 1)
+            .or_insert_with(|| {
+                let progress = ResolveProgress {
+                    media: key.0,
+                    episode: key.1,
+                    phase,
+                    release: None,
+                    candidates: 0,
+                    attempt: 0,
+                    bytes_per_second: 0,
+                };
+                (progress, 1)
+            });
+        ProgressGuard { manager: self, key }
+    }
+
+    fn update_progress(&self, key: ProgressKey, f: impl FnOnce(&mut ResolveProgress)) {
+        if let Some((p, _)) = self.progress.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key) {
+            f(p);
+        }
+    }
+
+    /// Through `ProgressGuard` only.
+    fn end_progress(&self, key: ProgressKey) {
+        let mut map = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, writers)) = map.get_mut(&key) {
+            *writers = writers.saturating_sub(1);
+            if *writers == 0 {
+                map.remove(&key);
+            }
         }
     }
 
@@ -718,6 +835,22 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
+        let (media, episode) = (target.media, target.episode);
+        let phase = if target.remembered.is_some() && target.chosen_name.is_none() {
+            ResolvePhase::Remembered
+        } else {
+            ResolvePhase::Searching
+        };
+        let _progress = self.begin_progress((media, episode), phase);
+        self.resolve_inner(client, target, proxy_port).await
+    }
+
+    async fn resolve_inner(
+        &self,
+        client: &reqwest::Client,
+        target: ResolveTarget<'_>,
+        proxy_port: u16,
+    ) -> Result<String, String> {
         let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered } = target;
         let criteria = search::ReleaseCriteria {
             episode,
@@ -807,7 +940,7 @@ impl TorrentManager {
         if let (Some(rem), None) = (remembered.as_ref(), chosen_name.as_ref()) {
             const REMEMBERED_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
             let cand = rem.to_candidate();
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub };
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode) };
             let added = std::sync::Mutex::new(None);
             let attempt = tokio::time::timeout(
                 REMEMBERED_BUDGET,
@@ -848,6 +981,11 @@ impl TorrentManager {
                 self.selected_files.lock().await.remove(&id);
             }
             stage = std::time::Instant::now();
+            self.update_progress((media, episode), |p| {
+                p.phase = ResolvePhase::Searching;
+                p.release = None;
+                p.bytes_per_second = 0;
+            });
         }
 
         // SeaDex is a different host answering a different question (which
@@ -943,6 +1081,7 @@ impl TorrentManager {
             search_ms,
             candidates.first().map(|c| c.name.as_str()).unwrap_or("-")
         );
+        self.update_progress((media, episode), |p| p.candidates = candidates.len() as u32);
         if candidates.is_empty() {
             return Err(if movie.is_some() || series_criteria.is_some() {
                 format!("No torrent found for '{}'", titles[0])
@@ -970,7 +1109,7 @@ impl TorrentManager {
         // bounded by whichever candidate actually works, not by however long
         // the first pick takes to fail.
         if let [cand_a, cand_b, ..] = shortlist[..] {
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub };
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode) };
             let added_a = std::sync::Mutex::new(None);
             let added_b = std::sync::Mutex::new(None);
             let fut_a = self.try_candidate(client, &session, cand_a, &ctx, &added_a);
@@ -1050,7 +1189,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode) },
                     // Sequential: each attempt is awaited to completion, so its
                     // own error path cleans up after it and nothing is left for
                     // the caller to tear down.
@@ -1095,7 +1234,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode) },
                     &std::sync::Mutex::new(None),
                 )
                 .await
@@ -1457,6 +1596,7 @@ impl TorrentManager {
         file_id: usize,
         stages: &mut CandidateStages,
         resume_fraction: Option<f64>,
+        progress_key: ProgressKey,
     ) -> Result<(), String> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt};
         // Was 6MB: on a slow-but-alive swarm this alone was the wait (a
@@ -1641,6 +1781,10 @@ impl TorrentManager {
                     .unwrap_or(0)
                     .saturating_sub(fetched_at_prebuffer_start);
                 let bps = fetched as f64 / waited.as_secs_f64();
+                self.update_progress(progress_key, |p| {
+                    p.phase = ResolvePhase::Buffering;
+                    p.bytes_per_second = bps as u64;
+                });
                 if bps >= required_bps {
                     stages.prebuffer_ms = stages.take();
                     log::info!(
@@ -1899,6 +2043,14 @@ impl TorrentManager {
         stages: &mut CandidateStages,
         added: &std::sync::Mutex<Option<usize>>,
     ) -> Result<Resolved, String> {
+        // Two racers write this in turn; the entry names whichever started
+        // last, which is fine for a status line and wrong for anything else.
+        self.update_progress(ctx.progress_key, |p| {
+            p.phase = ResolvePhase::Connecting;
+            p.release = Some(cand.name.clone());
+            p.attempt += 1;
+            p.bytes_per_second = 0;
+        });
         // Prefer the .torrent file (instant metadata) over the magnet.
         let torrent_bytes: Option<bytes::Bytes> = if let Some(ref url) = cand.torrent_url {
             let b = client
@@ -2160,7 +2312,7 @@ impl TorrentManager {
         // it means mpv starts reading into already-downloaded data instead of
         // spinning on byte 0. Reading the start also forces the first pieces,
         // which for these releases is where the container header lives.
-        if let Err(e) = self.prebuffer(&handle, file_id, stages, ctx.resume_fraction).await {
+        if let Err(e) = self.prebuffer(&handle, file_id, stages, ctx.resume_fraction, ctx.progress_key).await {
             let _ = session.delete(torrent_id.into(), false).await;
             self.selected_files.lock().await.remove(&torrent_id);
             return Err(e);
@@ -2527,6 +2679,44 @@ mod tests {
     use super::*;
     use crate::media::MediaKey;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    #[test]
+    fn a_preload_finishing_does_not_blank_the_real_plays_status() {
+        // The N+1 preload and the real play both run through `resolve`, and
+        // the preload usually finishes first. An unconditional clear at its
+        // end wiped the status line of the play the viewer was watching
+        // start.
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-progress-test"));
+        let real = MediaKey::anilist(1);
+        let play = manager.begin_progress((real, 3), ResolvePhase::Searching);
+        manager.update_progress((real, 3), |p| p.candidates = 7);
+        let preload = manager.begin_progress((real, 4), ResolvePhase::Searching);
+        // A candidate of the preload's must not land on the real play's line:
+        // one slot key-checked only at clear put "Connecting to <next
+        // episode's release>" under the episode just pressed Play on.
+        manager.update_progress((real, 4), |p| p.release = Some("next episode".into()));
+        drop(preload);
+        let live = manager.resolve_progress(real, 3).expect("the real play's entry survives");
+        assert_eq!(live.candidates, 7);
+        assert_eq!(live.release, None);
+        drop(play);
+        assert!(manager.resolve_progress(real, 3).is_none());
+    }
+
+    #[test]
+    fn two_resolves_of_one_episode_keep_its_status_until_both_end() {
+        // The launch preresolve of the first Up Next entry and the viewer
+        // pressing Play on that entry resolve under one key. Whichever
+        // finished first used to remove the entry the other was writing.
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-progress-test"));
+        let key = (MediaKey::anilist(1), 5);
+        let preresolve = manager.begin_progress(key, ResolvePhase::Remembered);
+        let play = manager.begin_progress(key, ResolvePhase::Searching);
+        drop(preresolve);
+        assert!(manager.resolve_progress(key.0, key.1).is_some());
+        drop(play);
+        assert!(manager.resolve_progress(key.0, key.1).is_none());
+    }
 
     #[test]
     fn a_zero_download_limit_means_unlimited() {
@@ -3587,6 +3777,7 @@ mod tests {
                 episode,
                 episode_count: Some(28),
                 allow_episodeless: false,
+                progress_key: (MediaKey::anilist(1), episode),
                 resume_fraction: None,
                 prefer_dub: false,
             };

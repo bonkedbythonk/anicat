@@ -196,6 +196,39 @@ impl From<crate::reader::syosetu::NovelChapterContent> for NovelChapterContent {
     }
 }
 
+/// See `torrent::ResolveProgress`. Polled by the player while a play
+/// starts; the key fields let it ignore the slot a preload is writing.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ResolveProgress {
+    pub catalog: FfiCatalog,
+    pub catalog_id: i64,
+    pub episode: i64,
+    pub phase: ResolvePhase,
+    pub release: Option<String>,
+    pub candidates: u32,
+    pub attempt: u32,
+    pub bytes_per_second: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ResolvePhase {
+    Remembered,
+    Searching,
+    Connecting,
+    Buffering,
+}
+
+impl From<crate::torrent::ResolvePhase> for ResolvePhase {
+    fn from(p: crate::torrent::ResolvePhase) -> Self {
+        match p {
+            crate::torrent::ResolvePhase::Remembered => ResolvePhase::Remembered,
+            crate::torrent::ResolvePhase::Searching => ResolvePhase::Searching,
+            crate::torrent::ResolvePhase::Connecting => ResolvePhase::Connecting,
+            crate::torrent::ResolvePhase::Buffering => ResolvePhase::Buffering,
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct StreamHandle {
     /// What the player opens: a loopback range URL served by this engine. The
@@ -1260,6 +1293,48 @@ impl AnicatEngine {
             torrent_id: torrent_id as u64,
             file_id: file_id as u64,
         })
+    }
+
+    /// Where the resolve for this episode has got to, or None when none is
+    /// in flight. Synchronous and cheap (one mutex), meant to be polled a
+    /// few times a second for the length of a play start. Keyed, because the
+    /// N+1 preload and the launch preresolve resolve beside the play the
+    /// caller is waiting on; see `torrent::ResolveProgress`.
+    pub fn resolve_progress(&self, catalog: FfiCatalog, catalog_id: i64, episode: i64) -> Option<ResolveProgress> {
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        self.torrents.resolve_progress(media, episode).map(|p| ResolveProgress {
+            catalog: p.media.catalog.into(),
+            catalog_id: p.media.id,
+            episode: p.episode,
+            phase: p.phase.into(),
+            release: p.release,
+            candidates: p.candidates,
+            attempt: p.attempt,
+            bytes_per_second: p.bytes_per_second,
+        })
+    }
+
+    /// The release that won this episode's last resolve on this device, if
+    /// any. What `resolve_stream` tries first, surfaced so the release
+    /// picker can say which row that is; the reuse path is otherwise
+    /// invisible and a fast play looks like luck.
+    ///
+    /// Filtered on Sub/Dub the way `resolve_stream` filters it: after a flip
+    /// the release remembered under the other language is not the one the
+    /// next play tries, and tagging it "Played last time" said it was.
+    pub fn remembered_release_name(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        prefer_dub: bool,
+    ) -> Option<String> {
+        self.registry
+            .remembered_release(catalog.into(), catalog_id, episode)
+            .ok()
+            .flatten()
+            .filter(|r| r.prefer_dub == prefer_dub)
+            .map(|r| r.name)
     }
 
     /// Bytes the torrent stream cache is holding on disk.

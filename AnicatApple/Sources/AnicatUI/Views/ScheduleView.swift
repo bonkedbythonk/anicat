@@ -95,6 +95,19 @@ public struct ScheduleView: View {
             .sorted(by: { ($0.items.first?.airingAt ?? 0) < ($1.items.first?.airingAt ?? 0) })
     }
 
+    /// The filter and the list it produces change in one transaction. The
+    /// list used to be rebuilt from an `onChange` on the next update, outside
+    /// the toggle's `withAnimation`, so the pill slid while every card
+    /// popped in place. Cards keep their identity across the filter, so
+    /// inside the transaction a survivor slides to its new slot and the
+    /// section it left collapses under it.
+    private func setWatchingOnly(_ value: Bool) {
+        withAnimation(.sumi(.page)) {
+            watchingOnly = value
+            recomputeGroups()
+        }
+    }
+
     public var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
@@ -118,9 +131,7 @@ public struct ScheduleView: View {
                         Button(action: {
                             if watchingOnly {
                                 SumiHaptics.selection()
-                                withAnimation(.sumiSpring) {
-                                    watchingOnly = false
-                                }
+                                setWatchingOnly(false)
                             }
                         }) {
                             HStack(spacing: 6) {
@@ -145,9 +156,7 @@ public struct ScheduleView: View {
                         Button(action: {
                             if !watchingOnly {
                                 SumiHaptics.selection()
-                                withAnimation(.sumiSpring) {
-                                    watchingOnly = true
-                                }
+                                setWatchingOnly(true)
                             }
                         }) {
                             HStack(spacing: 6) {
@@ -211,6 +220,7 @@ public struct ScheduleView: View {
                             timeFormat: timeFormat,
                             onSelectItem: onSelectItem
                         )
+                        .sumiTransition(.opacity)
                     }
                 }
             }
@@ -219,7 +229,6 @@ public struct ScheduleView: View {
         .background(SumiTheme.background)
         .onAppear { recomputeGroups() }
         .onChange(of: items) { _, _ in recomputeGroups() }
-        .onChange(of: watchingOnly) { _, _ in recomputeGroups() }
         // Asked for on every entry into the calendar tab and on every page,
         // not once on appear: the month cache is keyed per month, so the
         // request that is already answered is dropped by the model rather
@@ -252,6 +261,11 @@ private struct ScheduleDaySection: View {
                         timeFormat: timeFormat,
                         onSelect: { onSelectItem(item) }
                     )
+                    // A card that leaves the filter shrinks out where it
+                    // stood; one that joins grows in. Without a transition a
+                    // removed card vanished on the first frame while its
+                    // neighbours were still travelling into its space.
+                    .sumiTransition(.opacity.combined(with: .scale(scale: 0.94)))
                 }
             }
             .padding(.horizontal, SumiTheme.spaceMd)

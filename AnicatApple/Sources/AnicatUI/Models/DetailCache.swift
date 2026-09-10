@@ -98,6 +98,47 @@ enum DetailCache {
         )
     }
 
+    /// The name and poster alone, decoded through a two-field mirror of the
+    /// snapshot rather than `Snapshot` itself. This runs for every History
+    /// row no shelf has named -- up to a few hundred on a long-lived
+    /// install -- and a full `Snapshot` decode is the episode list, the
+    /// characters and the discussions of each, for one string. No mtime
+    /// touch, for `peekFacts`'s reason.
+    static func peekTitle(
+        id: Int64,
+        isManga: Bool,
+        catalog: MediaCard.CardCatalog = .anilist
+    ) -> (title: String, coverURL: URL?)? {
+        struct TitleOnly: Decodable {
+            struct Details: Decodable {
+                let title: String
+                let coverURL: URL?
+            }
+            let details: Details
+        }
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: isManga, catalog: catalog)),
+              let peeked = try? JSONDecoder().decode(TitleOnly.self, from: data),
+              !peeked.details.title.isEmpty else { return nil }
+        return (peeked.details.title, peeked.details.coverURL)
+    }
+
+    /// Whether `episode` exists yet, as far as the snapshot knows: the row's
+    /// own `isAired` when the list has the row, the episode count when it
+    /// does not, and `nil` when there is no snapshot to ask. `nil` is a
+    /// distinct answer from `true` -- the launch-time preresolve treats it
+    /// as "check the list totals instead", not as permission.
+    static func peekAired(id: Int64, episode: Int) -> Bool? {
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: false)),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return nil }
+        if let row = snapshot.episodes.first(where: { $0.number == episode }) {
+            return row.isAired
+        }
+        if let count = snapshot.details.episodeCount, count > 0 {
+            return episode <= count
+        }
+        return nil
+    }
+
     /// Seconds since this snapshot was written, read *before* `load()` touches
     /// the mtime for LRU purposes — call this first if both are needed.
     static func ageInSeconds(id: Int64, isManga: Bool, catalog: MediaCard.CardCatalog = .anilist) -> TimeInterval? {

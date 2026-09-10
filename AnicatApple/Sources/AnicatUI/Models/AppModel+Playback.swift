@@ -12,8 +12,29 @@ extension AppModel {
     public func cancelResolve() {
         activeResolveTask?.cancel()
         activeResolveTask = nil
+        // Not left to `resolveAndPlay`'s own exit: the FFI call it waits on
+        // cannot be cancelled (uniffi's Swift bridge polls the Rust future to
+        // completion), so that exit comes whenever the engine returns, and
+        // until then the poller wrote the line straight back under a spinner
+        // the viewer had just dismissed.
+        activeResolvePoller?.cancel()
+        activeResolvePoller = nil
         resolveStartedAt = nil
         isLoading = false
+        playerController.resolveStatus = nil
+        playerController.resolveElapsedSeconds = nil
+    }
+
+    /// Whether a position may be written to the local watch row. False only
+    /// past the watched line of an episode whose automatic mark the viewer
+    /// undid: every write there sets the row's sticky `completed` flag again,
+    /// and an Undo at 21:00 of 23:37 was taken back by the tick a second
+    /// later -- AniList went back to 5 while the page kept episode 6 checked
+    /// and offered episode 7. Below the line positions are written as usual,
+    /// so a viewer who undid the mark and rewound still resumes from there.
+    func localProgressWriteAllowed(stopTime: Int64, duration: Int64) -> Bool {
+        guard watchedMarkUndoneForCurrentEpisode, duration > 0 else { return true }
+        return Double(stopTime) / Double(duration) * 100 < Self.watchedThresholdPct
     }
 
     // These four dedup flags only mean anything scoped to "the episode
@@ -31,6 +52,7 @@ extension AppModel {
         hasAdvancedAniListForCurrentEpisode = false
         hasAutoAdvancedEpisode = false
         hasPreloadedNextEpisode = false
+        watchedMarkUndoneForCurrentEpisode = false
         playbackSessionStartedAt = Date()
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
@@ -155,6 +177,17 @@ extension AppModel {
             episode: episode,
             title: currentPlaybackTitle
         )
+        // Read once here, beside the list it tags, and only if the episode
+        // is still the one the list was asked for: the search above is a
+        // live wave across three indexers, and Next can land mid-flight.
+        if currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == episode {
+            playerController.rememberedReleaseName = engine.rememberedReleaseName(
+                catalog: currentPlaybackCatalog,
+                catalogId: catalogId,
+                episode: episode,
+                preferDub: UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+            )
+        }
         return choices.map {
             MediaDetailView.ReleaseCandidateItem(name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub)
         }
@@ -187,7 +220,9 @@ extension AppModel {
         // front of the read; written inline on this actor instead, a tick
         // queued a moment ago could land after it and rewind the switch to
         // wherever that tick had been.
-        if resumeAt > 0 {
+        // Same gate as the tick's: a release switch after an Undo past the
+        // watched line would otherwise write the mark straight back.
+        if resumeAt > 0, localProgressWriteAllowed(stopTime: resumeAt, duration: duration) {
             await withCheckedContinuation { continuation in
                 engineIOQueue.async {
                     try? engine.recordProgress(
@@ -221,7 +256,10 @@ extension AppModel {
         } catch is CancellationError {
             // Cancel on the resolve overlay, not a failure.
         } catch {
-            errorMessage = "Failed to switch release: \(error.localizedDescription)"
+            // No "Failed to switch release:" lead: `resolveAndPlay` throws a
+            // `PlaybackFailure` whose description is already the sentence
+            // to show, and a second lead in front of it read as two errors.
+            errorMessage = error.localizedDescription
             playFeedback(.error)
         }
     }
@@ -362,7 +400,7 @@ extension AppModel {
                 episode: Int64(number)
             )
         } catch {
-            errorMessage = "Failed to load episode \(number): \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
             playFeedback(.error)
         }
     }
@@ -419,7 +457,7 @@ extension AppModel {
                 episode: Int64(target.number)
             )
         } catch {
-            errorMessage = "Failed to load episode \(target.number): \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
             playFeedback(.error)
         }
     }
@@ -813,6 +851,7 @@ extension AppModel {
             ?? (currentPlaybackCatalog == .tmdbMovie ? title : "")
         let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
         let catalog = currentPlaybackCatalog
+        let recordsProgress = localProgressWriteAllowed(stopTime: stopTime, duration: dur)
         // Read here rather than inside the closure: the queue runs behind
         // whatever a stalled Discord write is doing, so a value read there
         // is the setting as of whenever that unblocks, not as of this tick.
@@ -831,13 +870,15 @@ extension AppModel {
                 )
             }
             if secondChanged {
-                try? engine.recordProgress(
-                    catalog: catalog,
-                    catalogId: catalogId,
-                    episodeNumber: episode,
-                    stopTime: stopTime,
-                    duration: dur
-                )
+                if recordsProgress {
+                    try? engine.recordProgress(
+                        catalog: catalog,
+                        catalogId: catalogId,
+                        episodeNumber: episode,
+                        stopTime: stopTime,
+                        duration: dur
+                    )
+                }
                 if !isPaused, discordEnabled {
                     engine.discordSetPresence(
                         title: title,
@@ -943,14 +984,17 @@ extension AppModel {
             let rawStop = Int64(playerController.currentTime)
             let stopTime = dur > 0 ? min(rawStop, dur) : rawStop
             let catalog = currentPlaybackCatalog
+            let recordsProgress = localProgressWriteAllowed(stopTime: stopTime, duration: dur)
             engineIOQueue.async {
-                try? engine.recordProgress(
-                    catalog: catalog,
-                    catalogId: catalogId,
-                    episodeNumber: episode,
-                    stopTime: stopTime,
-                    duration: dur
-                )
+                if recordsProgress {
+                    try? engine.recordProgress(
+                        catalog: catalog,
+                        catalogId: catalogId,
+                        episodeNumber: episode,
+                        stopTime: stopTime,
+                        duration: dur
+                    )
+                }
                 engine.discordClearPresence()
             }
         } else if let engine {
@@ -980,6 +1024,9 @@ extension AppModel {
         playerController.hasNextEpisode = false
         playerController.hasPreviousEpisode = false
         playerController.episodeList = []
+        playerController.rememberedReleaseName = nil
+        playerController.resolveStatus = nil
+        playerController.resolveElapsedSeconds = nil
         playbackEpisodes = []
         playbackEpisodesCatalogId = nil
         playbackCoverURL = nil
@@ -1127,6 +1174,9 @@ extension AppModel {
         // in its list; an ordinary play is whatever the engine's own race
         // landed on, which it does not report back.
         self.playerController.currentReleaseName = chosenName
+        // Belongs to the episode whose list it was read with; the next
+        // list read refills it.
+        self.playerController.rememberedReleaseName = nil
         ensurePlaybackEpisodes(for: catalogId, engine: engine, catalog: catalog)
         self.currentPlaybackTitle = effectiveTitle
         // A fresh play always opens full-screen, not stuck minimized from
@@ -1210,8 +1260,50 @@ extension AppModel {
         // except how long it's been waiting. And with no ceiling at all, a
         // stalled search or a dead swarm hung here indefinitely — three
         // minutes staring at a spinner with no way out, not a fast failure.
-        resolveStartedAt = Date()
-        defer { resolveStartedAt = nil }
+        let startedAt = Date()
+        resolveStartedAt = startedAt
+        // Only this resolve's own mark. A cancelled resolve's FFI call keeps
+        // running and returns whenever the engine does; an unconditional
+        // clear then took the card away from the play started after it.
+        defer { if resolveStartedAt == startedAt { resolveStartedAt = nil } }
+        // The engine publishes what each resolve is doing (`resolveProgress`,
+        // a cheap synchronous read keyed by episode, so the N+1 preload and
+        // the launch preresolve cannot speak for this play) and this turns it
+        // into the line under the spinner, four times a second. Held on the
+        // model so Cancel can stop it; see `cancelResolve`.
+        activeResolvePoller?.cancel()
+        let progressPoller = Task { @MainActor [weak self] in
+            defer {
+                // A newer resolve owns the line once it has started; clearing
+                // it from here blanked that one's first reading.
+                if let self, self.resolveStartedAt == nil || self.resolveStartedAt == startedAt {
+                    self.playerController.resolveStatus = nil
+                    self.playerController.resolveElapsedSeconds = nil
+                }
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, let self, self.resolveStartedAt == startedAt else { return }
+                let line = engine.resolveProgress(catalog: catalog, catalogId: catalogId, episode: episode)
+                    .map { Self.resolveStatusLine($0) }
+                // Written only on a change: the same value four times a second
+                // is four invalidations of every view reading the controller,
+                // the full player's body among them.
+                if self.playerController.resolveStatus != line {
+                    self.playerController.resolveStatus = line
+                }
+                let elapsed = Int(Date().timeIntervalSince(startedAt))
+                let shown = elapsed > 2 ? elapsed : nil
+                if self.playerController.resolveElapsedSeconds != shown {
+                    self.playerController.resolveElapsedSeconds = shown
+                }
+            }
+        }
+        activeResolvePoller = progressPoller
+        defer {
+            progressPoller.cancel()
+            if activeResolvePoller == progressPoller { activeResolvePoller = nil }
+        }
         // 120s, not the original 45: `torrent/mod.rs`'s own `PREBUFFER_TIMEOUT`
         // is 40s *per candidate*, and a legitimate resolve can burn through
         // several tiers of fallback (the raced pair, the sequential rest of
@@ -1225,6 +1317,18 @@ extension AppModel {
         // entirely and went straight to a release that worked, instantly.
         let handleURL: String
         do {
+            // The launch preresolve of this very episode may still be
+            // searching; pressing Play on the first Up Next entry straight
+            // after launch is the likeliest first click. A second resolve
+            // beside it ran the indexer wave again and raced it for the same
+            // swarm. Waiting hands this one the reuse path instead, and the
+            // card shows the preresolve's own progress meanwhile, since that
+            // is keyed to this episode.
+            if chosenName == nil, catalog == .anilist, let inFlight = preresolveInFlight,
+               inFlight.catalogId == catalogId, inFlight.episode == episode {
+                await inFlight.task.value
+                guard !Task.isCancelled else { throw CancellationError() }
+            }
             #if os(iOS)
             // A Mac on the same Wi-Fi resolves and serves this instead,
             // when there is one and it has approved this phone. The phone
@@ -1254,13 +1358,31 @@ extension AppModel {
             // position again.
             self.playerController.awaitingNewFile = false
             restorePlaybackIdentity(previous)
-            throw error
+            // A cancel is the viewer's own doing and every caller matches
+            // it by type; wrapping it would turn Cancel into an error toast.
+            if error is CancellationError { throw error }
+            throw PlaybackFailure(error, catalog: catalog, episode: episode)
         }
         guard let streamURL = URL(string: handleURL) else {
             self.playerController.awaitingNewFile = false
             restorePlaybackIdentity(previous)
-            throw NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handleURL)"])
+            throw PlaybackFailure(
+                NSError(domain: "Anicat", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid stream URL: \(handleURL)"]),
+                catalog: catalog,
+                episode: episode
+            )
         }
+
+        // Re-read after every resolve rather than left nil for the release
+        // menu to refill: that menu caches its list per title and episode,
+        // and a release switch changes neither, so after a switch no row
+        // carried the tag for the rest of the episode.
+        self.playerController.rememberedReleaseName = engine.rememberedReleaseName(
+            catalog: catalog,
+            catalogId: catalogId,
+            episode: episode,
+            preferDub: preferDub
+        )
 
         // Read here, above the assignment that hands mpv the URL — see
         // `loadTrackMemory` for why the ordering is the whole point.
@@ -1343,8 +1465,128 @@ extension AppModel {
 
         return streamURL
     }
+
+    /// The engine's resolve progress as the line under the spinner.
+    nonisolated static func resolveStatusLine(_ progress: ResolveProgress) -> String {
+        switch progress.phase {
+        case .remembered:
+            return "Checking last release"
+        case .searching:
+            return progress.candidates > 0
+                ? "Found \(progress.candidates) release\(progress.candidates == 1 ? "" : "s")"
+                : "Searching indexers"
+        case .connecting:
+            guard let release = progress.release, !release.isEmpty else { return "Connecting" }
+            return "Connecting to \(abbreviateReleaseName(release))"
+        case .buffering:
+            let rate = progress.bytesPerSecond
+            if rate == 0 { return "Waiting for peers" }
+            if rate >= 1_048_576 {
+                return String(format: "Buffering at %.1f MB/s", Double(rate) / 1_048_576)
+            }
+            return "Buffering at \(rate / 1024) KB/s"
+        }
+    }
+
+    /// Release names run to 80-odd characters and the discriminating part
+    /// (group at the front, resolution and codec at the back) sits at both
+    /// ends, so the middle is what goes.
+    nonisolated static func abbreviateReleaseName(_ name: String, limit: Int = 40) -> String {
+        guard name.count > limit else { return name }
+        let head = name.prefix(limit - 16)
+        let tail = name.suffix(15)
+        return "\(head)…\(tail)"
+    }
 }
 
+/// What a failed play says to the viewer.
+///
+/// The engine's errors are written for the person reading stderr ("All
+/// torrent candidates failed (last error: swarm too slow: 532 KB/s, needs
+/// 568 KB/s to plausibly keep up)"), and shown as-is they told a viewer
+/// what broke but never what to do about it. `localizedDescription` is the
+/// sentence to show, with one implied action; the engine's own text is kept
+/// on `rawEngineText` and printed once, so nothing leaves the log.
+public struct PlaybackFailure: LocalizedError, CustomDebugStringConvertible {
+    public enum Kind: Equatable, Sendable {
+        case nothingFound
+        case swarmTooSlow
+        case aniListDown
+        case other
+    }
+
+    public let kind: Kind
+    public let catalog: FfiCatalog
+    public let episode: Int64
+    public let rawEngineText: String
+
+    public init(_ error: Error, catalog: FfiCatalog, episode: Int64) {
+        let raw = Self.engineText(of: error)
+        self.rawEngineText = raw
+        self.catalog = catalog
+        self.episode = episode
+        self.kind = Self.classify(raw)
+        print("[play] \(catalog) episode \(episode) failed: \(raw)")
+    }
+
+    /// A film is played as its catalog's episode 1, so the anime wording
+    /// told a viewer who pressed Play on Dune "Nothing found for episode 1
+    /// yet. Releases usually appear within a day of airing."
+    private var subject: String {
+        catalog == .tmdbMovie ? "this film" : "episode \(episode)"
+    }
+
+    public var errorDescription: String? {
+        switch kind {
+        case .nothingFound:
+            if catalog == .tmdbMovie {
+                return "No release of this film was found. Recent films can take a while to appear."
+            }
+            return "Nothing found for episode \(episode) yet. Releases usually appear within a day of airing."
+        case .swarmTooSlow:
+            return "Every release is too slow right now. Try again in a minute, or pick a release from the player menu."
+        case .aniListDown:
+            return "AniList is having an outage. Playback still works from the episode list once it is back."
+        case .other:
+            return "Could not start \(subject). \(rawEngineText)"
+        }
+    }
+
+    public var debugDescription: String {
+        "PlaybackFailure(\(kind), \(catalog) episode \(episode)): \(rawEngineText)"
+    }
+
+    /// The message the engine wrote, without the `AnicatError.NotFound(msg:
+    /// ...)` wrapper `String(reflecting:)` puts around it -- that wrapper
+    /// is what the generated `localizedDescription` returns, and it was
+    /// the first thing on screen in every error toast.
+    static func engineText(of error: Error) -> String {
+        if let engineError = error as? AnicatError {
+            switch engineError {
+            case let .Network(msg), let .NotFound(msg), let .Storage(msg), let .Internal(msg):
+                return msg
+            }
+        }
+        return error.localizedDescription
+    }
+
+    static func classify(_ raw: String) -> Kind {
+        let text = raw.lowercased()
+        if text.contains("anilist_down:") { return .aniListDown }
+        if text.hasPrefix("no torrent found") || text.hasPrefix("no hd torrent found")
+            || text.hasPrefix("no title to search") {
+            return .nothingFound
+        }
+        // "All torrent candidates failed (last error: ...)" wraps whichever
+        // per-candidate reason came last; every one of them is a swarm that
+        // did not deliver, so the wrapper alone is enough to classify.
+        if text.contains("all torrent candidates failed") || text.contains("no seeders")
+            || text.contains("swarm too slow") || text.contains("pre-buffer timed out") {
+            return .swarmTooSlow
+        }
+        return .other
+    }
+}
 
 extension AppModel {
     /// Test hook: plays a local file straight into the player, no resolve.

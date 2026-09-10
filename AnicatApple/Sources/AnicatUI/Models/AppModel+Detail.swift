@@ -188,10 +188,22 @@ extension AppModel {
     func loadDetail(id: Int64, title: String? = nil, coverURL: URL? = nil, isManga: Bool, forceRefresh: Bool = false) async {
         guard let engine, !Task.isCancelled else { return }
         loadingCatalogId = id
+        detailGeneration += 1
         // Episode numbers repeat across titles, so a stale entry here would
         // show as "downloaded"/"downloading" on the wrong show's episode 1
         // the moment the detail page switches.
         downloadStates = [:]
+        // cinemaExtras is TMDB-only state; left set from a previous Cinema
+        // page it survived the switch to an AniList page and rendered a
+        // "Details" tab with the old title's season count on every anime
+        // opened afterward. Bumping detailGeneration above is what stops a
+        // still-in-flight Cinema extras task from writing it right back:
+        // its own guard checks the generation it captured at its own start,
+        // not `selectedMediaDetails`, which this function can legitimately
+        // leave untouched (the `alreadyShowing` fast path below) while its
+        // own fetch is still in flight.
+        cinemaExtras = nil
+        isCinemaExtrasLoading = false
 
         // Read before `.load()` touches the file's mtime for its own LRU
         // purposes, or every read would measure as "just saved".
@@ -641,7 +653,12 @@ extension AppModel {
             let progress = Int(details.listProgress ?? 0)
             guard progress < episode else { return }
             guard !contiguousOnly || episode <= progress + 1 else { return }
+            let previousStatus = details.listStatus
             await setEpisodeWatched(episode, watched: true)
+            // `setEpisodeWatched` reports nothing back and shows its own
+            // error banner on failure; the notice is raised on the same
+            // optimistic footing the checkbox itself is drawn on.
+            noticeWatched(catalogId: catalogId, episode: episode, previousProgress: progress, previousStatus: previousStatus)
             return
         }
         guard let engine else { return }
@@ -668,8 +685,105 @@ extension AppModel {
             )
             await recordAniListSuccess()
             refreshListsAfterEdit()
+            noticeWatched(catalogId: catalogId, episode: episode, previousProgress: listed, previousStatus: detail.listStatus)
         } catch {
             await recordAniListFailure(error)
+        }
+    }
+
+    /// Every row up to `progress` watched and the rest not, ahead of the
+    /// AniList mutation that will confirm it. `isAired` is carried across:
+    /// the rebuild used to leave it out, and the initializer's default read
+    /// an unaired row as aired, and playable, until the re-fetch landed.
+    func markEpisodesWatchedOptimistically(upTo progress: Int) {
+        selectedEpisodes = selectedEpisodes.map { ep in
+            let shouldBeWatched = ep.number <= progress
+            guard ep.isWatched != shouldBeWatched else { return ep }
+            return MediaDetailView.EpisodeItem(
+                id: ep.id,
+                number: ep.number,
+                title: ep.title,
+                thumbnailURL: ep.thumbnailURL,
+                isWatched: shouldBeWatched,
+                progressPercent: ep.progressPercent,
+                synopsis: ep.synopsis,
+                airDate: ep.airDate,
+                runtimeMinutes: ep.runtimeMinutes,
+                isAired: ep.isAired
+            )
+        }
+    }
+
+    /// "Episode N marked watched", with Undo. Only the playback path raises
+    /// it: the checkbox is the viewer's own click and needs no receipt.
+    private func noticeWatched(catalogId: Int64, episode: Int, previousProgress: Int, previousStatus: String?) {
+        showNotice(
+            "Episode \(episode) marked watched",
+            action: ("Undo", { [weak self] in
+                guard let self else { return }
+                Task {
+                    await self.undoPlaybackWatchedMark(
+                        catalogId: catalogId,
+                        episode: episode,
+                        previousProgress: previousProgress,
+                        previousStatus: previousStatus
+                    )
+                }
+            })
+        )
+    }
+
+    /// Takes back the 85% auto-advance for one episode by putting the list
+    /// entry back to the progress and status it had before, not to N-1. The
+    /// mark is not always a step of one -- without `contiguousOnly` a list
+    /// at 3 goes to 7, and N-1 left it at 6 -- and on a final episode it
+    /// also set COMPLETED, which a progress write alone left in place.
+    ///
+    /// `hasAdvancedAniListForCurrentEpisode` is deliberately left set: the
+    /// player is still past 85% of this episode, and clearing the flag
+    /// would let the very next position tick mark it watched again.
+    public func undoPlaybackWatchedMark(
+        catalogId: Int64,
+        episode: Int,
+        previousProgress: Int,
+        previousStatus: String?
+    ) async {
+        dismissNotice()
+        guard let engine else { return }
+        // Before the clear below, which is queued behind any tick already on
+        // `engineIOQueue`: from here on, ticks past the watched line are not
+        // written back (`localProgressWriteAllowed`).
+        if currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == Int64(episode) {
+            watchedMarkUndoneForCurrentEpisode = true
+        }
+        // The local watch row as well, on both paths, as the checkbox's own
+        // un-check does: see `setEpisodeWatched` for the row past 85% that
+        // pinned the box checked whatever AniList said.
+        await withCheckedContinuation { continuation in
+            engineIOQueue.async {
+                try? engine.clearProgressFrom(catalog: .anilist, catalogId: catalogId, episodeNumber: Int64(episode))
+                continuation.resume()
+            }
+        }
+        if let details = selectedMediaDetails, details.id == catalogId {
+            // The checkbox's own instant flip; without it the boxes on the
+            // open page stayed checked until the mutation and re-fetch landed.
+            markEpisodesWatchedOptimistically(upTo: previousProgress)
+            await updateListEntry(status: previousStatus, progress: Int64(previousProgress))
+            return
+        }
+        do {
+            try await engine.updateListEntry(
+                catalogId: catalogId,
+                status: previousStatus,
+                score: nil,
+                progress: Int64(previousProgress)
+            )
+            await recordAniListSuccess()
+            refreshListsAfterEdit()
+        } catch {
+            await recordAniListFailure(error)
+            errorMessage = "Could not undo on AniList: \(error.localizedDescription)"
         }
     }
 
@@ -695,21 +809,7 @@ extension AppModel {
         // Flipping locally first (same progress-cutoff rule the server uses)
         // makes the toggle feel instant; the re-fetch still lands afterward
         // and corrects this if the server's answer differs.
-        selectedEpisodes = selectedEpisodes.map { ep in
-            let shouldBeWatched = ep.number <= progress
-            guard ep.isWatched != shouldBeWatched else { return ep }
-            return MediaDetailView.EpisodeItem(
-                id: ep.id,
-                number: ep.number,
-                title: ep.title,
-                thumbnailURL: ep.thumbnailURL,
-                isWatched: shouldBeWatched,
-                progressPercent: ep.progressPercent,
-                synopsis: ep.synopsis,
-                airDate: ep.airDate,
-                runtimeMinutes: ep.runtimeMinutes
-            )
-        }
+        markEpisodesWatchedOptimistically(upTo: progress)
         // An un-check has to forget the local watch record too, not just move
         // AniList's progress down. `episode_is_watched` is
         // `local_percent >= 85.0 || number <= anilist_progress`, so a history

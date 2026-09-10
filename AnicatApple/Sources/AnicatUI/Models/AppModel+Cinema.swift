@@ -100,9 +100,21 @@ extension AppModel {
             Task {
                 if cinemaShelves.isEmpty { await loadCinemaHome() }
                 await loadCinemaLibrary()
+                redirectHomeIfCinemaQueueEmpty()
             }
         }
         loadWatchStats()
+    }
+
+    /// Cinema's Home is a continue-watching queue plus discovery shelves
+    /// underneath, mirroring anime's Up Next -- but Films/Series show those
+    /// same shelves too (Home draws from the same unfiltered
+    /// `cinemaShelves`), so with no queue Home has nothing on it that isn't
+    /// already duplicated verbatim on Films or Series. Land on Films instead
+    /// rather than show that duplicate.
+    func redirectHomeIfCinemaQueueEmpty() {
+        guard appMode == .cinema, currentNavSection == .upNext, cinemaUpNext.isEmpty else { return }
+        currentNavSection = .manga
     }
 
     /// Fills the cinema home rows.
@@ -278,12 +290,15 @@ extension AppModel {
         activeDetailTask?.cancel()
         activeDetailExtrasTask?.cancel()
         loadingCatalogId = id
+        detailGeneration += 1
+        let generation = detailGeneration
 
         // Render the last snapshot before the fetch, exactly as the AniList
         // path does. Without it every open of a title already seen was a
         // spinner for as long as TMDB took, which is what made cinema feel
         // slower than anime rather than any difference in the animations.
         cinemaExtras = nil
+        isCinemaExtrasLoading = true
         cinemaListStatus = try? engine.cinemaListStatus(
             catalog: catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, catalogId: id
         )
@@ -326,6 +341,8 @@ extension AppModel {
         defer { loadingCatalogId = nil }
         guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else {
             isDetailLoading = false
+            // No extras task will start to settle it.
+            isCinemaExtrasLoading = false
             // A snapshot on screen is better than an error over it: the page
             // is already readable and the fetch was only a refresh.
             if cached == nil { errorMessage = "Could not load this title from TMDB." }
@@ -359,7 +376,18 @@ extension AppModel {
             async let extrasTask = engine.cinemaExtras(catalog: ffiCatalog, catalogId: id)
             let cast = (try? await castTask) ?? []
             let extras = try? await extrasTask
+            // Settled whichever way the fetch went, but only by the load that
+            // started it: a newer page owns the flag once it has begun.
+            if self.detailGeneration == generation {
+                self.isCinemaExtrasLoading = false
+            }
+            // currentDetailCatalog/selectedMediaDetails?.id alone are not
+            // enough: loadDetail's own "already showing this id" fast path
+            // can leave both looking unchanged while a new (possibly
+            // AniList) load is already in flight, so a stale generation
+            // number is the only thing this task can trust.
             guard !Task.isCancelled,
+                  self.detailGeneration == generation,
                   self.currentDetailCatalog == catalog,
                   self.selectedMediaDetails?.id == id else { return }
             withAnimation(.smooth(duration: 0.25)) {
@@ -563,8 +591,14 @@ extension AppModel {
                 episode: Int64(number),
                 title: details.title
             )
+        } catch is CancellationError {
+            // The viewer pressed Cancel on the resolving card. Caught with
+            // everything else, it raised "Could not play <title>" and the
+            // error sound for their own click.
         } catch {
-            errorMessage = "Could not play \(details.title): \(error.localizedDescription)"
+            // No "Could not play <title>:" lead: `resolveAndPlay` throws a
+            // `PlaybackFailure` whose description is already the sentence.
+            errorMessage = error.localizedDescription
             playFeedback(.error)
         }
     }

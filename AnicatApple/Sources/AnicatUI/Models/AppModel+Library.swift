@@ -451,6 +451,7 @@ extension AppModel {
             return
         }
         activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
+        resolveMissingTitles(activity.map(\.catalogId))
         viewer = try? await engine.viewerProfile()
         isSignedIn = viewer != nil
     }
@@ -468,6 +469,202 @@ extension AppModel {
             return
         }
         activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
+        resolveMissingTitles(activity.map(\.catalogId))
+    }
+
+    /// How many AniList detail fetches one pass may issue. The History log
+    /// is 500 rows deep and a long-lived registry has dozens of ids on no
+    /// current shelf; firing one `mediaDetail` per id on every `refreshAll`
+    /// is the burst that puts the client into its own rate-limit backoff and
+    /// makes the next real page open queue behind it. Ids past the cap are
+    /// not marked pending, so the next pass picks them up.
+    nonisolated static let titleLookupsPerPass = 20
+
+    /// Names the ids among `ids` that no loaded list has named, writing the
+    /// answers into `knownTitles`/`knownCovers` through `resolvedTitles`.
+    /// The registry stores a `catalog_id` and nothing else, so a row for a
+    /// title on no current shelf drew "Media 17729" in History and on the
+    /// Downloads page for as long as it sat there.
+    ///
+    /// Idempotent: an id already known or already in flight is skipped, so
+    /// `refreshAll` calling this on every history reload costs nothing for
+    /// the ids the last pass answered. The on-disk detail snapshot is asked
+    /// first -- a title watched on this device was almost always opened on
+    /// it -- and AniList only for the rest. All of it off the main actor:
+    /// the snapshot peek is a file read per id, and twenty of them on the
+    /// actor before History could draw was a visible stall.
+    ///
+    /// `preferManga` picks which AniList type is asked first. `mediaDetail`
+    /// queries one type and a manga id asked for as ANIME is "no such
+    /// media", so the reading log's titles were never named that way; the
+    /// other type is always tried after a NotFound.
+    func resolveMissingTitles(_ ids: some Collection<Int64>, preferManga: Bool = false) {
+        guard let engine else { return }
+        var wanted: [Int64] = []
+        var seen = Set<Int64>()
+        for id in ids where knownTitles[id] == nil && !pendingTitleLookups.contains(id)
+            && !unresolvableTitleIds.contains(id) && !seen.contains(id) {
+            seen.insert(id)
+            wanted.append(id)
+        }
+        guard !wanted.isEmpty else { return }
+        pendingTitleLookups.formUnion(wanted)
+
+        Task.detached(priority: .utility) { [weak self] in
+            var titles: [Int64: String] = [:]
+            var covers: [Int64: URL] = [:]
+            var unresolved: [Int64] = []
+            var gone: [Int64] = []
+            for id in wanted {
+                if let peeked = DetailCache.peekTitle(id: id, isManga: preferManga)
+                    ?? DetailCache.peekTitle(id: id, isManga: !preferManga) {
+                    titles[id] = peeked.title
+                    if let cover = peeked.coverURL { covers[id] = cover }
+                } else {
+                    unresolved.append(id)
+                }
+            }
+
+            // Four at a time rather than the whole pass at once: twenty
+            // concurrent requests is the same burst `titleLookupsPerPass`
+            // exists to keep off the client, just compressed into one moment.
+            let fetched = Array(unresolved.prefix(Self.titleLookupsPerPass))
+            for start in stride(from: 0, to: fetched.count, by: 4) {
+                let batch = fetched[start..<min(start + 4, fetched.count)]
+                await withTaskGroup(of: (Int64, TitleLookup).self) { group in
+                    for id in batch {
+                        group.addTask {
+                            (id, await Self.lookUpTitle(id, preferManga: preferManga, engine: engine))
+                        }
+                    }
+                    for await (id, lookup) in group {
+                        switch lookup {
+                        case .found(let detail):
+                            titles[id] = detail.title
+                            if let cover = URL(string: detail.coverImage) { covers[id] = cover }
+                        case .gone:
+                            gone.append(id)
+                        case .failed:
+                            break
+                        }
+                    }
+                }
+            }
+
+            await MainActor.run { [titles, covers, gone] in
+                guard let self else { return }
+                self.resolvedTitles.merge(titles) { _, new in new }
+                self.resolvedCovers.merge(covers) { _, new in new }
+                // Every id this pass took leaves `pending`, answered or not.
+                // A network failure (AniList down) is retried by the next
+                // pass, and the tail past the cap was never this pass's to
+                // hold. "No such media" under both types is not retried: an
+                // entry deleted from AniList 404'd on every `refreshAll` for
+                // as long as its History row lived.
+                self.pendingTitleLookups.subtract(wanted)
+                self.unresolvableTitleIds.formUnion(gone)
+                self.syncKnownTitles()
+                self.applyResolvedDownloadTitles()
+            }
+        }
+    }
+
+    enum TitleLookup: Sendable {
+        case found(MediaDetail)
+        /// AniList has no media with this id under either type.
+        case gone
+        /// Anything else, network included; worth asking again later.
+        case failed
+    }
+
+    nonisolated static func lookUpTitle(_ id: Int64, preferManga: Bool, engine: AnicatEngine) async -> TitleLookup {
+        for isManga in [preferManga, !preferManga] {
+            do {
+                return .found(try await engine.mediaDetail(catalogId: id, isManga: isManga))
+            } catch AnicatError.NotFound {
+                continue
+            } catch {
+                return .failed
+            }
+        }
+        return .gone
+    }
+
+    /// Whether the launch-time preresolve is on. Read here and nowhere
+    /// else; Settings carries no control for it yet.
+    static let preresolveUpNextKey = "anicat_preresolve_up_next"
+
+    /// One speculative resolve of the first Up Next entry, once per launch.
+    ///
+    /// The 75% N+1 preload (`handlePlaybackPositionChange`) already proves
+    /// the mechanism: a `preload: true` resolve fills the second
+    /// selected-file slot and the real play hits the reuse path in
+    /// `TorrentManager::resolve`. That only helps from the second episode of
+    /// an evening on; the first play of a session was still a cold resolve,
+    /// measured at 2750ms against ~800ms from an already-resolved file. The
+    /// queue's first entry is the title touched most recently, and its next
+    /// episode is the one play a launch can predict.
+    ///
+    /// Refused when a stream is already up (a Handoff or a deep link can
+    /// start playback before this runs, and the preload must not compete
+    /// with it for the swarm) and when the episode has not aired: an airing
+    /// show with the viewer caught up has a next episode the indexers do
+    /// not have yet, and a search for it either finds nothing or a wrong
+    /// match with the same number from a different season.
+    func preresolveUpNextIfIdle() {
+        guard !hasPreresolvedUpNext else { return }
+        hasPreresolvedUpNext = true
+        guard UserDefaults.standard.object(forKey: Self.preresolveUpNextKey) as? Bool ?? true,
+              let engine, activeStreamURL == nil, resolveStartedAt == nil,
+              let entry = upNextItems.first, entry.unit == "EP" else { return }
+        let next = entry.nextEpisodeOrChapter
+        // The schedule is built from the same watching list: a row naming
+        // this title with an episode number at or below the one wanted is
+        // AniList saying it has not aired.
+        if scheduleItems.contains(where: { $0.id == entry.id && $0.episodeNumber <= next }) { return }
+        let request = StreamRequest(
+            catalog: .anilist,
+            catalogId: entry.id,
+            episode: Int64(next),
+            title: entry.title,
+            preferDub: UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed",
+            chosenName: nil,
+            resumeFraction: nil,
+            preload: true
+        )
+        let total = entry.totalCount
+        let entryId = entry.id
+        // On the main actor, with only the file read sent off it: the idle
+        // recheck and the in-flight bookkeeping below both read model state.
+        let task = Task(priority: .utility) { @MainActor [weak self] in
+            defer { self?.preresolveInFlight = nil }
+            // The snapshot's own row, when there is one; the list's episode
+            // count otherwise.
+            let aired = await Task.detached(priority: .utility) {
+                DetailCache.peekAired(id: entryId, episode: next)
+            }.value
+            switch aired {
+            case .some(false):
+                return
+            case .none where total > 0 && next > total:
+                return
+            default:
+                break
+            }
+            // Idle is checked again right before the search, not only at the
+            // top: the peek is long enough for a Handoff or the viewer's first
+            // click to have started a play, and a preload begun after it
+            // competes with that play for its swarm.
+            guard let self, self.activeStreamURL == nil, self.resolveStartedAt == nil else { return }
+            do {
+                _ = try await engine.resolveStream(req: request)
+            } catch {
+                // Nothing visible depends on this: the real play resolves
+                // cold exactly as it did before.
+                print("[preload] up next episode \(next) of \(entry.id) not preresolved: \(error)")
+            }
+        }
+        preresolveInFlight = (entry.id, Int64(next), task)
     }
 
     /// The registry records every catalog in one table and `watch_activity`

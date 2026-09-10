@@ -98,21 +98,17 @@ extension AppModel {
         // The log names titles out of `knownTitles`, which is filled from
         // whatever shelves have loaded -- a manga read months ago may be on
         // none of them.
-        for row in readingActivity where knownTitles[row.catalogId] == nil {
-            ensureKnownTitle(row.catalogId)
-        }
+        // Manga first: these are reading rows, and asked for as ANIME, which
+        // this used to do, a manga id is "no such media" and was never named.
+        resolveMissingTitles(readingActivity.map(\.catalogId), preferManga: true)
     }
 
+    /// One id from the stats panels, which show anime and manga alike. The
+    /// same path as History's, so it gets the other type on a NotFound, the
+    /// session's negative set, and a pending entry that is cleared when the
+    /// lookup ends; this one used to leave a failed id pending for good.
     @MainActor
     public func ensureKnownTitle(_ id: Int64) {
-        guard let engine, knownTitles[id] == nil, !pendingTitleLookups.contains(id) else { return }
-        pendingTitleLookups.insert(id)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let detail = try? await engine.mediaDetail(catalogId: id, isManga: false) else { return }
-            self.resolvedTitles[id] = detail.title
-            if let cover = URL(string: detail.coverImage) { self.resolvedCovers[id] = cover }
-            self.syncKnownTitles()
-        }
+        resolveMissingTitles([id])
     }
 }

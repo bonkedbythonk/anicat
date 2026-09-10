@@ -7,6 +7,19 @@ import AppKit
 public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
+
+    /// How far above the window's bottom edge the notice and resolving-card
+    /// stack sits. Clear of the mini-player, which is parked in that corner,
+    /// and above the full-size player's bottom bar: at a flat 24pt the notice
+    /// for an 85% auto-advance landed on the transport controls of the
+    /// episode being watched. The bar's minimum height, since its real height
+    /// follows a letterbox this view does not measure; a deeper letterbox
+    /// makes the bar taller than this.
+    private var cornerStackBottomInset: CGFloat {
+        guard model.activeStreamURL != nil else { return 24 }
+        if model.isPlayerMinimized { return 24 + PlayerView.miniSize.height + 12 }
+        return PlayerView.minBottomBarHeight + 12
+    }
     // Shared between every card grid and the detail page so tapping a card
     // grows its poster into the detail page's poster rather than crossfading
     // two separate images. Which card (if any) actually gets tagged with
@@ -517,19 +530,67 @@ public struct RootView: View {
             // screen for something this routine (every single play press
             // shows it, if only for a moment) read as far more alarming than
             // it is, and blocked seeing/using anything else while it waited.
-            if let startedAt = model.resolveStartedAt {
-                VStack {
+            //
+            // Notice, the error banner's quieter sibling, shares the card's
+            // stack: a line for something the app did on its own ("Episode 7
+            // marked watched") and one action to take it back. Bottom-trailing
+            // rather than the error's top slot, so the two never stack, and no
+            // warning colour anywhere on it -- a receipt, not an alarm. As two
+            // layers at one inset the card sat exactly on the notice and hid
+            // its Undo whenever an auto-next resolve began inside the notice's
+            // six seconds. The inset lifts both clear of the mini-player,
+            // which is parked in that same corner and covered them otherwise.
+            // Behind an `if`, not an always-present stack: this layer can sit
+            // zIndex 70 over the full-size player and its event catcher, and
+            // it should be there only while it has something to show.
+            if model.noticeMessage != nil || model.resolveStartedAt != nil {
+                VStack(alignment: .trailing, spacing: 10) {
                     Spacer()
-                    HStack {
-                        Spacer()
+                    if let notice = model.noticeMessage {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle")
+                                .foregroundColor(SumiTheme.muted)
+                                .font(.system(size: 13))
+                            Text(notice)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            if let action = model.noticeAction {
+                                Button(action: action.run) {
+                                    Text(action.label)
+                                        .sumiTabularMono(size: 11.5)
+                                        .foregroundColor(SumiTheme.indigo)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(SumiTheme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.3), radius: 10, y: 3)
+                        .onTapGesture { model.dismissNotice() }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    if let startedAt = model.resolveStartedAt {
                         ResolvingStreamCard(
                             startedAt: startedAt,
+                            status: model.playerController.resolveStatus,
                             onCancel: { model.cancelResolve() }
                         )
-                        .padding(.trailing, 24)
-                        .padding(.bottom, 24)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 24)
+                .padding(.bottom, cornerStackBottomInset)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(70)
             }
@@ -1031,6 +1092,7 @@ public struct RootView: View {
                             isLoading: model.isDetailLoading,
                             tracksOnAniList: model.currentDetailCatalog == .anilist,
                             cinemaExtras: model.cinemaExtras,
+                            isCinemaExtrasLoading: model.isCinemaExtrasLoading,
                             cinemaListStatus: model.cinemaListStatus,
                             chapterOfflineStates: model.chapterOfflineStates,
                             onDownloadChapter: { model.downloadChapter($0) },
@@ -1401,7 +1463,7 @@ private func playEpisode(
             // The viewer hit Cancel on the "Finding a stream…" overlay —
             // not a real failure.
         } catch {
-            model.errorMessage = "Failed to play episode \(episode): \(error.localizedDescription)"
+            model.errorMessage = error.localizedDescription
             model.errorRetryAction = { [weak model] in
                 model?.errorMessage = nil
                 guard let model else { return }
@@ -2104,7 +2166,12 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
 
             // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), T (Stats), D (Downloads)
-            if let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar, mode: model.appMode) {
+            // Not while the full-size player is up: L navigated the hidden
+            // sidebar to Library behind the picture and swallowed the key
+            // the player's J/L seek monitor was waiting for. The mini-player
+            // is browsing, so it keeps them.
+            let playerCoversScreen = model.activeStreamURL != nil && !model.isPlayerMinimized
+            if !playerCoversScreen, let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar, mode: model.appMode) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }
@@ -2217,6 +2284,10 @@ private struct HomeCustomizeSheet: View {
 /// disappears.
 private struct ResolvingStreamCard: View {
     let startedAt: Date
+    /// The engine's own phase ("Searching indexers", "Connecting to ...").
+    /// The player is not mounted until the resolve returns, so on a first
+    /// play this card is the only place that line can show.
+    let status: String?
     let onCancel: () -> Void
 
     var body: some View {
@@ -2231,9 +2302,12 @@ private struct ResolvingStreamCard: View {
                 .tint(SumiTheme.indigo)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Finding a stream…")
+                Text(status ?? "Finding a stream…")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
+                    .animation(.smooth, value: status)
 
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))

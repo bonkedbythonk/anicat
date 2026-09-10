@@ -55,10 +55,6 @@ public struct KeyboardShortcutsOverlay: View {
                             : item
                     }
                 return ShortcutSection(id: section.id, title: section.title, items: items)
-            case "player":
-                // Anime4K is an anime upscaler by name and by training set.
-                let items = section.items.filter { $0.id != "anime4k" }
-                return ShortcutSection(id: section.id, title: section.title, items: items)
             default:
                 return section
             }
@@ -86,12 +82,24 @@ public struct KeyboardShortcutsOverlay: View {
         ShortcutSection(
             id: "player",
             title: "Player",
+            // Every key here is wired: Space, the arrows, M, F, N, P and
+            // Shift+V in `RootView.handleKeyDown`, Return/S and J/L in
+            // `PlayerKeyMonitor`. Ctrl+1 for Anime4K was listed for a
+            // release with nothing reading it -- the row was the only
+            // place the chord existed.
             items: [
                 ShortcutItem(id: "playpause", label: "Play / pause", keys: ["Space"]),
                 ShortcutItem(id: "seekback", label: "Seek backward 10s", keys: ["←"]),
                 ShortcutItem(id: "seekfwd", label: "Seek forward 10s", keys: ["→"]),
+                ShortcutItem(id: "seekback30", label: "Seek backward 30s (60s with Shift)", keys: ["J"]),
+                ShortcutItem(id: "seekfwd30", label: "Seek forward 30s (60s with Shift)", keys: ["L"]),
+                ShortcutItem(id: "volume", label: "Volume up / down", keys: ["↑", "↓"]),
+                ShortcutItem(id: "mute", label: "Mute", keys: ["M"]),
+                ShortcutItem(id: "fullscreen", label: "Fullscreen", keys: ["F"]),
+                ShortcutItem(id: "nextepisode", label: "Next episode", keys: ["N"]),
                 ShortcutItem(id: "prevepisode", label: "Previous episode", keys: ["P"]),
-                ShortcutItem(id: "anime4k", label: "Toggle Anime4K upscaling", keys: ["Ctrl", "1"])
+                ShortcutItem(id: "skip", label: "Skip intro / outro", keys: ["Return", "S"]),
+                ShortcutItem(id: "rotate", label: "Rotate video", keys: ["Shift", "V"])
             ]
         ),
         ShortcutSection(

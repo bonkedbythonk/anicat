@@ -75,7 +75,7 @@ public struct PlayerView: View {
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = true
 
-    private static let miniSize = CGSize(width: 320, height: 180)
+    static let miniSize = CGSize(width: 320, height: 180)
 
     public init(
         controller: PlayerController,
@@ -581,6 +581,9 @@ public struct PlayerView: View {
                 }
                 return true
             }
+            keyMonitor.onSeek = { seconds in
+                controller.seekRelative(by: seconds)
+            }
             keyMonitor.start()
         }
         #endif
@@ -591,6 +594,9 @@ public struct PlayerView: View {
         // straight into the mini-player never changes this value.
         .onChange(of: isMinimized, initial: true) { _, minimized in
             controller.isMiniPlayerActive = minimized
+            #if os(macOS)
+            keyMonitor.isSuspended = minimized
+            #endif
         }
         // The always-present base for the ambient glow, and the whole of it
         // on any machine or build where frame sampling turns out not to be
@@ -657,10 +663,16 @@ public struct PlayerView: View {
     // core, not something the player can shorten — showing a percentage
     // (once mpv has reported one) is what keeps that wait from reading as hung.
     private var bufferingLabel: String {
+        // During a resolve (Next, Previous, a release switch) the engine's
+        // own phase is the honest line; mpv has no file yet, so its
+        // percentage is the outgoing episode's or nothing.
+        if let status = controller.resolveStatus {
+            return PlayerController.withElapsed(status, controller.resolveElapsedSeconds)
+        }
         if let percent = controller.bufferingPercent, percent > 0 {
             return "Buffering \(percent)%"
         }
-        return "Buffering…"
+        return PlayerController.withElapsed("Buffering…", controller.resolveElapsedSeconds)
     }
 
     /// The thumbnail the letterbox bars are lit from right now, or nil when
@@ -1349,6 +1361,20 @@ public struct PlayerView: View {
                                         Text("\(release.seeders) seeders")
                                             .sumiTabularMono(size: 10)
                                             .foregroundColor(SumiTheme.muted)
+                                        // The engine tries this one first
+                                        // on every play of the episode and
+                                        // never said so; a viewer choosing
+                                        // between two rows should know
+                                        // which one already worked here.
+                                        if release.name == controller.rememberedReleaseName {
+                                            Text("Played last time")
+                                                .sumiTabularMono(size: 9.5)
+                                                .foregroundColor(SumiTheme.muted)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(SumiTheme.foregroundWash)
+                                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        }
                                     }
                                 }
                                 .padding(.horizontal, 8)

@@ -105,8 +105,14 @@ public struct DownloadsView: View {
         var order: [String] = []
         var byTitle: [String: [AppModel.LibraryDownload]] = [:]
         for row in rows {
-            if byTitle[row.title] == nil { order.append(row.title) }
-            byTitle[row.title, default: []].append(row)
+            // A row restored without a name is renamed in place once the
+            // lookup lands (`applyResolvedDownloadTitles`); the map is the
+            // shortcut for an AniList id a shelf has named since.
+            let title = row.catalog == .anilist && row.title == AppModel.placeholderTitle(row.catalogId)
+                ? (titles[row.catalogId] ?? row.title)
+                : row.title
+            if byTitle[title] == nil { order.append(title) }
+            byTitle[title, default: []].append(row)
         }
         return order.map { title in
             // Episodes in their own order inside a show, whatever order they

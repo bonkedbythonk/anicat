@@ -220,17 +220,15 @@ public struct SidebarView: View {
             Color.clear
                 .frame(height: 38)
 
-            // Scrollable Nav Groups
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Group: Browse
-                    navGroup(title: "Browse", items: NavSection.browseItems(for: mode))
+            // Nav Groups
+            VStack(alignment: .leading, spacing: 0) {
+                // Group: Browse
+                navGroup(title: "Browse", items: NavSection.browseItems(for: mode))
 
-                    // Group: System
-                    navGroup(title: "System", items: NavSection.systemItems)
-                }
-                .padding(.bottom, 8)
+                // Group: System
+                navGroup(title: "System", items: NavSection.systemItems)
             }
+            .padding(.bottom, 8)
 
             Spacer()
 

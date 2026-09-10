@@ -35,6 +35,8 @@ extension AppModel {
         // Rows for episodes the app is downloading right now win: they carry
         // live progress, and the stored row only knows about finished ones.
         var restored: [LibraryDownload] = []
+        var unnamedAniList: [Int64] = []
+        var unnamedCinema: [CinemaTitleKey] = []
         for row in rows {
             let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie
                 ? .tmdbMovie
@@ -48,11 +50,22 @@ extension AppModel {
                     && $0.episode == Int(row.episodeNumber)
             }
             guard !alreadyListed else { continue }
+            // The engine's row has a title only when the download was
+            // started by this build; a file the folder scan adopted, or one
+            // from before the table, has none, and the page grouped it under
+            // its number until a shelf happened to name it.
+            let title = row.title ?? registryTitle(catalog: row.catalog, id: row.catalogId)
+            if title == nil {
+                switch catalog {
+                case .anilist: unnamedAniList.append(row.catalogId)
+                case .tmdbMovie, .tmdbTv: unnamedCinema.append(CinemaTitleKey(catalog: catalog, id: row.catalogId))
+                }
+            }
             restored.append(
                 LibraryDownload(
                     catalogId: row.catalogId,
                     episode: Int(row.episodeNumber),
-                    title: row.title ?? "Media \(row.catalogId)",
+                    title: title ?? Self.placeholderTitle(row.catalogId),
                     // `knownCovers` is AniList's map alone; a film asked of it
                     // by bare id answers with whatever anime shares the number.
                     coverURL: registryCover(catalog: row.catalog, id: row.catalogId),
@@ -62,6 +75,46 @@ extension AppModel {
             )
         }
         libraryDownloads.append(contentsOf: restored)
+        resolveMissingTitles(unnamedAniList)
+        if !unnamedCinema.isEmpty {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for key in Set(unnamedCinema) {
+                    guard self.cinemaKnownTitles[key] == nil,
+                          let known = await self.cinemaTitle(catalog: key.catalog, id: key.id) else { continue }
+                    self.cinemaKnownTitles[key] = known.title
+                    if let cover = known.coverURL { self.cinemaKnownCovers[key] = cover }
+                }
+                self.applyResolvedDownloadTitles()
+            }
+        }
+    }
+
+    /// What a row draws until its title is known. One spelling, so the
+    /// rewrite below can tell a placeholder from a title.
+    nonisolated static func placeholderTitle(_ id: Int64) -> String { "Media \(id)" }
+
+    /// Renames the rows still carrying a placeholder once a lookup has
+    /// answered. Called from the title resolvers; a row's title is what the
+    /// Downloads page groups on, so the map alone changing would leave the
+    /// group heading on its number.
+    func applyResolvedDownloadTitles() {
+        var changed = false
+        var rows = libraryDownloads
+        for index in rows.indices where rows[index].title == Self.placeholderTitle(rows[index].catalogId) {
+            let row = rows[index]
+            let ffiCatalog: FfiCatalog = {
+                switch row.catalog {
+                case .tmdbMovie: return .tmdbMovie
+                case .tmdbTv: return .tmdbTv
+                case .anilist: return .anilist
+                }
+            }()
+            guard let title = registryTitle(catalog: ffiCatalog, id: row.catalogId) else { continue }
+            rows[index].title = title
+            changed = true
+        }
+        if changed { libraryDownloads = rows }
     }
 
     /// What the app can tell the engine about its own titles, for matching a

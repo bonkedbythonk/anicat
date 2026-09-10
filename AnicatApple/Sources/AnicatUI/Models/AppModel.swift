@@ -65,6 +65,14 @@ public final class AppModel {
     var activeLibraryTask: Task<Void, Never>?
     var activeSearchTask: Task<Void, Never>?
     public internal(set) var loadingCatalogId: Int64?
+    /// Bumped by every `loadDetail`/`openCinemaDetail` call. A deferred
+    /// extras task captures the value at its own start and checks it before
+    /// writing `cinemaExtras` back — `selectedMediaDetails?.id`/
+    /// `currentDetailCatalog` alone were not enough, since a same-id or
+    /// already-showing fast path can leave both unchanged while a new
+    /// catalog's load is already in flight, letting a stale Cinema task land
+    /// its season count on the anime page opened right after it.
+    var detailGeneration = 0
 
     public var engine: AnicatEngine?
     public var isInitialized = false
@@ -85,6 +93,46 @@ public final class AppModel {
     /// missing title), so the banner doesn't offer a button that would just
     /// fail the same way again.
     public var errorRetryAction: (() -> Void)?
+
+    /// A calm, self-dismissing line for something the app did on the
+    /// viewer's behalf -- "Episode 7 marked watched" -- with one action to
+    /// take it back. Distinct from `errorMessage`, which stays up until
+    /// dismissed and is drawn as a warning: an AniList write that happened
+    /// while the viewer was watching used to be a tick sound and nothing
+    /// else, so a mark on the wrong episode (a Next pressed to skip a recap)
+    /// was found the next day on the list page.
+    public var noticeMessage: String?
+    public var noticeAction: (label: String, run: @MainActor () -> Void)?
+    var noticeDismissTask: Task<Void, Never>?
+
+    /// Shows `message` for six seconds. A notice raised while one is up
+    /// replaces it and restarts the clock; without cancelling the earlier
+    /// dismiss, the first notice's timer took the second one down early.
+    public func showNotice(
+        _ message: String,
+        action: (label: String, run: @MainActor () -> Void)? = nil
+    ) {
+        noticeDismissTask?.cancel()
+        withAnimation(.snappy) {
+            noticeMessage = message
+            noticeAction = action
+        }
+        noticeDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.dismissNotice()
+        }
+    }
+
+    public func dismissNotice() {
+        noticeDismissTask?.cancel()
+        noticeDismissTask = nil
+        withAnimation(.snappy) {
+            noticeMessage = nil
+            noticeAction = nil
+        }
+    }
+
     public var isAniListDown: Bool = false
     private(set) var aniListFailureTimestamps: [Date] = []
     let aniListFailureThreshold = 3
@@ -381,6 +429,14 @@ public final class AppModel {
     /// the orphaned work on the other side of the FFI boundary stops
     /// instantly too.
     public var activeResolveTask: Task<Void, Never>?
+    /// The status-line poller `resolveAndPlay` runs beside its resolve; see
+    /// `cancelResolve` for why Cancel stops it directly.
+    var activeResolvePoller: Task<Void, Never>?
+    /// From a cinema page opening until its deferred extras fetch has
+    /// answered either way. `cinemaExtras == nil` alone cannot tell "not
+    /// yet" from "failed", and a series page waiting on it drew a spinner in
+    /// place of its episodes for good after one failed fetch.
+    public var isCinemaExtrasLoading = false
 
     var lastRecordedSecond: Int64 = -1
     /// Separate from `lastRecordedSecond`'s once-a-second gate: pausing and
@@ -391,6 +447,10 @@ public final class AppModel {
     // Guards the AniList auto-advance below to one attempt per episode
     // rather than once a second for the rest of the episode once past 85%.
     var hasAdvancedAniListForCurrentEpisode = false
+    /// Set by Undo on the watched notice for the episode still playing; see
+    /// `localProgressWriteAllowed`. Per episode session, like the flags
+    /// around it.
+    var watchedMarkUndoneForCurrentEpisode = false
     // Same idea, for auto-play-next: one attempt per episode once past the
     // near-end line below.
     var hasAutoAdvancedEpisode = false
@@ -398,6 +458,11 @@ public final class AppModel {
     // One speculative resolve of the next episode per episode session, see
     // `nextEpisodePreloadPct`.
     var hasPreloadedNextEpisode = false
+    /// Once per launch: see `preresolveUpNextIfIdle`.
+    var hasPreresolvedUpNext = false
+    /// That preresolve while it runs, so a play of the same episode can wait
+    /// for it rather than resolve beside it; see `resolveAndPlay`.
+    var preresolveInFlight: (catalogId: Int64, episode: Int64, task: Task<Void, Never>)?
     /// When the file currently loaded started playing, for the completion
     /// rules above. Reset with the other per-episode state.
     var playbackSessionStartedAt: Date?
@@ -745,6 +810,9 @@ public final class AppModel {
     var resolvedTitles: [Int64: String] = [:]
     var resolvedCovers: [Int64: URL] = [:]
     var pendingTitleLookups: Set<Int64> = []
+    /// Ids AniList answered "no such media" for under both types, this
+    /// session. See `resolveMissingTitles`.
+    var unresolvableTitleIds: Set<Int64> = []
     /// Same sourcing as `knownTitles`, for the Now Playing artwork of a
     /// title played without its page open.
     public internal(set) var knownCovers: [Int64: URL] = [:]
@@ -897,7 +965,7 @@ public final class AppModel {
             // on the first press of Play. `resolve` logs `session=...ms`;
             // before this it was the whole cold-start cost of the first play
             // of every app session, after it that number is ~0.
-            Task.detached(priority: .utility) { await coreEngine.warmUp() }
+            let warmUp = Task.detached(priority: .utility) { await coreEngine.warmUp() }
 
             // A no-op when Discord isn't running — the IPC connect just fails
             // and logs a warning on the Rust side.
@@ -936,12 +1004,23 @@ public final class AppModel {
             if appMode == .cinema, cinemaAvailable {
                 if cinemaShelves.isEmpty, !isCinemaLoading { await loadCinemaHome() }
                 await loadCinemaLibrary()
+                redirectHomeIfCinemaQueueEmpty()
             }
 
             let homeCacheAge = HomeCache.ageInSeconds()
             let homeCacheIsFresh = cachedHome != nil && homeCacheAge.map { $0 < Self.detailFreshnessWindow } == true
             if !homeCacheIsFresh {
                 await refreshAll(showLoading: cachedHome == nil)
+            }
+
+            // The evening's first play, moved off the cold path. After
+            // `refreshAll`, because on a launch with no home snapshot that is
+            // what fills the queue; after the warm-up, because a resolve
+            // before the librqbit session is up pays the DHT bootstrap it was
+            // meant to skip. Detached so a slow search never holds the launch.
+            Task.detached(priority: .utility) { [weak self] in
+                await warmUp.value
+                await self?.preresolveUpNextIfIdle()
             }
         } catch {
             self.errorMessage = "Failed to start Anicat Engine: \(error.localizedDescription)"
@@ -1079,7 +1158,10 @@ public final class AppModel {
         public var id: String { "\(catalog.rawValue)_\(catalogId)_\(episode)" }
         public let catalogId: Int64
         public let episode: Int
-        public let title: String
+        /// Mutable for one writer: a row restored from disk with no name in
+        /// hand carries "Media <id>" until the title lookup lands
+        /// (`applyResolvedDownloadTitles`).
+        public var title: String
         public let coverURL: URL?
         public var state: MediaDetailView.EpisodeDownloadState
         /// Which catalog the id belongs to. Playing a downloaded film under
@@ -1246,10 +1328,17 @@ public final class AppModel {
         return false
     }
 
-    /// Navigates to a specific section, closing any active playback, reader, or detail views.
+    /// Navigates to a specific section, closing any active reader or detail
+    /// views, and the player unless it is the mini-player.
     public func navigate(to section: SidebarView.NavSection) {
         shortcutsOpen = false
-        stopPlayback()
+        // The mini-player exists to keep watching while browsing, and a
+        // sidebar click already leaves it playing. The letter and number keys
+        // and the palette's "Go to" come through here instead, and stopped
+        // it: L behind the mini-player opened Library and ended the episode.
+        if !isPlayerMinimized {
+            stopPlayback()
+        }
         closeReader()
         // Before `clearDetail()`, and unconditional: the person page draws
         // over the detail page, so a section switch with a character page

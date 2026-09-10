@@ -269,6 +269,18 @@ struct PhonePlayerView: View {
                                     Text(Self.releaseDetail(release))
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundStyle(.secondary)
+                                    // The engine tries this one first on
+                                    // every play and never said so; a
+                                    // viewer choosing between rows should
+                                    // know which one already worked.
+                                    if release.name == controller.rememberedReleaseName {
+                                        Text("Played last time")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                                    }
                                 }
                                 Spacer(minLength: 8)
                                 if release.name == controller.currentReleaseName {
@@ -497,8 +509,20 @@ struct PhonePlayerView: View {
             ProgressView()
                 .progressViewStyle(.circular)
                 .tint(.white)
-            if let percent = controller.bufferingPercent {
+            // The engine's phase while a resolve is in flight (Next,
+            // Previous, a release switch), mpv's percentage otherwise. The
+            // seconds count comes in past 2s of resolve: a bare spinner for
+            // longer than that reads as frozen.
+            if let status = controller.resolveStatus {
+                Text(PlayerController.withElapsed(status, controller.resolveElapsedSeconds))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+            } else if let percent = controller.bufferingPercent {
                 Text("\(percent)%")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+            } else if let seconds = controller.resolveElapsedSeconds {
+                Text(PlayerController.withElapsed("Searching indexers", seconds))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
             }

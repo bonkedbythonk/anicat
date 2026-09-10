@@ -280,6 +280,9 @@ public struct MediaDetailView: View {
     /// season breakdown, the stills. Nil on an AniList page, which is what
     /// keeps the Details tab out of the bar there.
     public var cinemaExtras: CinemaExtras?
+    /// Whether `cinemaExtras` is still on its way. See
+    /// `AppModel.isCinemaExtrasLoading`.
+    public var isCinemaExtrasLoading: Bool = false
     /// The open cinema title's local list status, and how to change it.
     /// Local because AniList has no entry for a TMDB title -- this is the
     /// registry's own list, on this device.
@@ -418,6 +421,7 @@ public struct MediaDetailView: View {
         isLoading: Bool = false,
         tracksOnAniList: Bool = true,
         cinemaExtras: CinemaExtras? = nil,
+        isCinemaExtrasLoading: Bool = false,
         cinemaListStatus: String? = nil,
         chapterOfflineStates: [String: ChapterOfflineState] = [:],
         onDownloadChapter: ((MangaChapterItem) -> Void)? = nil,
@@ -468,6 +472,7 @@ public struct MediaDetailView: View {
         self.isLoading = isLoading
         self.tracksOnAniList = tracksOnAniList
         self.cinemaExtras = cinemaExtras
+        self.isCinemaExtrasLoading = isCinemaExtrasLoading
         self.cinemaListStatus = cinemaListStatus
         self.chapterOfflineStates = chapterOfflineStates
         self.onDownloadChapter = onDownloadChapter
@@ -1575,13 +1580,18 @@ public struct MediaDetailView: View {
     }
 
     /// The episode the primary button plays: the resume point if there is one,
-    /// else the first unwatched, else the first.
+    /// else the first unwatched aired episode, else the first.
     private var resumeTarget: EpisodeItem? {
         if let number = details.resumeEpisode,
            let match = episodes.first(where: { $0.number == number }) {
             return match
         }
-        return episodes.first(where: { !$0.isWatched }) ?? episodes.first
+        // Unfiltered "first unwatched" picked an announced-but-unaired
+        // episode as soon as everything aired so far was watched, offering
+        // "Play Episode 11" while only 10 existed to stream.
+        return episodes.first(where: { !$0.isWatched && $0.isAired })
+            ?? episodes.last(where: \.isAired)
+            ?? episodes.first
     }
 
     /// The recorded position the primary button would resume from, or nil
@@ -1621,7 +1631,13 @@ public struct MediaDetailView: View {
     }
 
     /// TMDB's season breakdown for the open title, empty for anything else.
-    private var seasons: [CinemaSeason] { cinemaExtras?.seasons ?? [] }
+    /// Gated on the catalog, not only on `cinemaExtras`: Back from a series
+    /// to an anime paints the anime's snapshot before the load that clears
+    /// `cinemaExtras` runs, and for that moment the anime page carried the
+    /// series' season picker and filtered its episodes by the series' ranges.
+    private var seasons: [CinemaSeason] {
+        details.mediaCatalog == .tmdbTv ? (cinemaExtras?.seasons ?? []) : []
+    }
 
     /// The absolute episode numbers one season covers.
     ///
@@ -1639,7 +1655,23 @@ public struct MediaDetailView: View {
         return start...(start + Int(season.episodeCount) - 1)
     }
 
+    /// TMDB's per-season breakdown (`cinemaExtras`) loads after the page is
+    /// already on screen (`AppModel+Cinema.swift`'s deferred extras task),
+    /// so there is a real window where a multi-season show's `seasons` is
+    /// still empty. Without this, `episodesForSelectedSeason` fell through
+    /// to the full cross-season list during that window and then "snapped"
+    /// down to one season's rows the instant `cinemaExtras` arrived --
+    /// looking like episodes were disappearing.
+    ///
+    /// Waits on the fetch, not on `cinemaExtras` itself: a failed fetch
+    /// leaves that nil for good, and a proxy error left the Episodes tab
+    /// spinning with nothing to play. After a failure the full list shows.
+    private var isAwaitingSeasonBreakdown: Bool {
+        details.mediaCatalog == .tmdbTv && cinemaExtras == nil && isCinemaExtrasLoading && !isSingleSitting
+    }
+
     private var episodesForSelectedSeason: [EpisodeItem] {
+        if isAwaitingSeasonBreakdown { return [] }
         guard seasons.count > 1 else { return episodes }
         let wanted = selectedSeason ?? defaultSeason
         let season = seasons.first { $0.number == wanted } ?? seasons[0]
@@ -1650,8 +1682,13 @@ public struct MediaDetailView: View {
     /// Which season the list is showing. Defaults to the one the resume
     /// position is in, so a show resumed at season 3 opens on season 3
     /// rather than on a first season finished months ago.
+    ///
+    /// From `resumeTarget`, the episode the Play button names, not from
+    /// `details.resumeEpisode`: the engine clears that once an episode
+    /// passes 85%, so after a season finale the list opened on the finished
+    /// season while the button offered the next season's first episode.
     private var defaultSeason: Int32 {
-        guard let resume = details.resumeEpisode else { return seasons.first?.number ?? 1 }
+        guard let resume = resumeTarget?.number else { return seasons.first?.number ?? 1 }
         for season in seasons where range(ofSeason: season).contains(resume) {
             return season.number
         }
@@ -1867,7 +1904,12 @@ public struct MediaDetailView: View {
             }
         }
         tabs.append(.characters)
-        if cinemaExtras != nil { tabs.append(.details) }
+        // cinemaExtras alone used to gate this: a stale write racing in from
+        // a just-left Cinema page's deferred extras task could still land it
+        // on an AniList page, and this was the only thing standing between
+        // that race and a wrong "N seasons" row on screen. tracksOnAniList
+        // is a second, independent check against the same failure mode.
+        if cinemaExtras != nil, !tracksOnAniList { tabs.append(.details) }
         // Relations and discussions are AniList's: a TMDB title has neither a
         // franchise graph nor a forum thread, so the two tabs would open on
         // an empty page saying nothing about why.
@@ -1883,7 +1925,12 @@ public struct MediaDetailView: View {
         switch tab {
         case .episodes:
             if episodes.isEmpty { return "EPISODES" }
-            return isSingleSitting ? "FILM" : "EPISODES (\(episodes.count))"
+            if isSingleSitting { return "FILM" }
+            if isAwaitingSeasonBreakdown { return "EPISODES" }
+            // The show-wide total read as a lie once the list under it
+            // started scoping to one TMDB season: "EPISODES (37)" over six
+            // rows for The Grand Tour's season 1. Count what's on screen.
+            return "EPISODES (\(episodesForSelectedSeason.count))"
         case .manga: return mangaChapters.isEmpty ? "CHAPTERS" : "CHAPTERS (\(mangaChapters.count))"
         case .characters: return characters.isEmpty ? "CAST & STAFF" : "CAST & STAFF (\(characters.count))"
         case .related:
@@ -2091,7 +2138,7 @@ public struct MediaDetailView: View {
                     resumeSeconds: details.resumeSeconds,
                     selectedViewMode: selectedViewMode,
                     downloadStates: downloadStates,
-                    isLoading: isLoading,
+                    isLoading: isLoading || isAwaitingSeasonBreakdown,
                     onPlayEpisode: { episode in startingPlayback { onPlayEpisode(episode) } },
                     onSetEpisodeWatched: onSetEpisodeWatched,
                     onLoadReleaseCandidates: onLoadReleaseCandidates,
@@ -2457,6 +2504,11 @@ private struct EpisodeListSection: View {
     @State private var serverPickerEpisode: MediaDetailView.EpisodeItem?
     @State private var isLoadingServers = false
     @State private var serverCandidates: [MediaDetailView.ReleaseCandidateItem] = []
+    // Which chunk groups are expanded, keyed by the group's first episode
+    // number. Seeded (see `.task` below) with the resume target's group --
+    // without that, a 366-episode entry like Bleach opened to 366 flat rows
+    // and the one the viewer actually wanted was a scroll away at the bottom.
+    @State private var expandedGroups: Set<Int> = []
 
     // Evaluated once per section body, not once per row, so a plain
     // computed property is enough. It was a `@State` cache that nothing
@@ -2465,7 +2517,26 @@ private struct EpisodeListSection: View {
         if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
             return match
         }
-        return episodes.first(where: { !$0.isWatched }) ?? episodes.first
+        return episodes.first(where: { !$0.isWatched && $0.isAired })
+            ?? episodes.last(where: \.isAired)
+            ?? episodes.first
+    }
+
+    /// AniList carries no arc/season/cour field for a single Media entry's
+    /// episode list (a franchise like Bleach models its later parts as
+    /// separate, PREQUEL/SEQUEL-linked entries instead), so there is no real
+    /// grouping to read -- only a synthetic chunk size to pick. 26 tracks a
+    /// two-cour season, which is long enough that a normal one-cour show
+    /// (≤13) or two-cour show (≤26) still renders as one flat list exactly
+    /// as before.
+    private static let groupChunkSize = 26
+
+    private var episodeGroups: [(firstNumber: Int, episodes: [MediaDetailView.EpisodeItem])]? {
+        guard episodes.count > Self.groupChunkSize else { return nil }
+        return stride(from: 0, to: episodes.count, by: Self.groupChunkSize).map { start in
+            let chunk = Array(episodes[start..<min(start + Self.groupChunkSize, episodes.count)])
+            return (chunk.first?.number ?? start, chunk)
+        }
     }
 
     private func morphSource(for episode: MediaDetailView.EpisodeItem) -> EpisodeMorphSource? {
@@ -2474,6 +2545,68 @@ private struct EpisodeListSection: View {
               playerSourceKey == MediaDetailView.playerMorphKey(catalogId: catalogId, episode: episode.number)
         else { return nil }
         return EpisodeMorphSource(key: playerSourceKey, namespace: playerNamespace)
+    }
+
+    @ViewBuilder
+    private func compactRows(for episodes: [MediaDetailView.EpisodeItem]) -> some View {
+        ForEach(episodes) { episode in
+            CompactEpisodeRow(
+                episode: episode,
+                isResumeTarget: episode.id == resumeTarget?.id,
+                resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
+                onPlay: { onPlayEpisode(episode) },
+                onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
+            )
+            .equatable()
+        }
+    }
+
+    @ViewBuilder
+    private func regularRows(for episodes: [MediaDetailView.EpisodeItem], downloadStates: [Int: MediaDetailView.EpisodeDownloadState]) -> some View {
+        ForEach(episodes) { episode in
+            EpisodeRow(
+                episode: episode,
+                isResumeTarget: episode.id == resumeTarget?.id,
+                resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
+                downloadState: downloadStates[episode.number] ?? .notStarted,
+                onPlay: { onPlayEpisode(episode) },
+                onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) },
+                onOpenServerPicker: {
+                    serverPickerEpisode = episode
+                    serverCandidates = []
+                    isLoadingServers = true
+                    Task {
+                        let found = await onLoadReleaseCandidates(episode.number)
+                        isLoadingServers = false
+                        serverCandidates = found
+                    }
+                },
+                onDownload: { onDownloadEpisode(episode) },
+                isServerPickerOpen: serverPickerEpisode?.id == episode.id,
+                // Only the open row sees the picker state:
+                // `EpisodeRow.==` compares both, so one picker
+                // loading re-rendered every row in the list.
+                isLoadingServers: serverPickerEpisode?.id == episode.id && isLoadingServers,
+                serverCandidates: serverPickerEpisode?.id == episode.id ? serverCandidates : [],
+                onCloseServerPicker: { serverPickerEpisode = nil },
+                onSelectServer: { name in
+                    serverPickerEpisode = nil
+                    onPlayWithRelease(episode, name)
+                },
+                // A stored property, not a closure: `EpisodeRow.==`
+                // excludes closures, so anything that gates the
+                // morph has to take part in that comparison or
+                // the row never re-renders when the key is set —
+                // the source would go untagged and the whole
+                // morph would silently do nothing.
+                morphSource: morphSource(for: episode)
+            )
+            .equatable()
+        }
+    }
+
+    private func groupLabel(firstNumber: Int, count: Int) -> String {
+        "EPISODES \(firstNumber)-\(firstNumber + count - 1)"
     }
 
     var body: some View {
@@ -2485,61 +2618,60 @@ private struct EpisodeListSection: View {
                 } else {
                     SumiEmptyState(headline: "No episodes found", detail: "Nothing was returned for this title.")
                 }
+            } else if let groups = episodeGroups {
+                LazyVStack(spacing: 8) {
+                    ForEach(groups, id: \.firstNumber) { group in
+                        DisclosureGroup(
+                            isExpanded: Binding(
+                                get: { expandedGroups.contains(group.firstNumber) },
+                                set: { isExpanded in
+                                    if isExpanded { expandedGroups.insert(group.firstNumber) }
+                                    else { expandedGroups.remove(group.firstNumber) }
+                                }
+                            )
+                        ) {
+                            if selectedViewMode == .compact {
+                                compactRows(for: group.episodes)
+                            } else {
+                                regularRows(for: group.episodes, downloadStates: downloadStates)
+                            }
+                        } label: {
+                            Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
+                                .font(.sumiMono(size: 11, weight: .semibold))
+                                .tracking(1)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                }
+                // Only the group holding the resume target opens by default,
+                // so a 366-episode entry doesn't land on 366 rows the viewer
+                // has to scroll through to find the one they wanted.
+                //
+                // Keyed on the list's first episode and the target rather
+                // than run once: this section outlives both. A series scoped
+                // to season 2 has groups keyed 27 and 53 that a season-1 seed
+                // never named, so the season opened fully collapsed; and a
+                // target that moved on (an episode finished with the page
+                // under the mini-player) sat inside a closed group. The owning
+                // group is added, not swapped in, so a group the viewer opened
+                // stays open.
+                .task(id: [episodes.first?.number ?? 0, resumeTarget?.number ?? 0]) {
+                    let target = resumeTarget?.number
+                    let owning = target.flatMap { number in
+                        groups.first { $0.episodes.contains { $0.number == number } }
+                    } ?? groups.first
+                    if let owning {
+                        expandedGroups.insert(owning.firstNumber)
+                    }
+                }
             } else if selectedViewMode == .compact {
                 LazyVStack(spacing: 4) {
-                    ForEach(episodes) { episode in
-                        CompactEpisodeRow(
-                            episode: episode,
-                            isResumeTarget: episode.id == resumeTarget?.id,
-                            resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
-                            onPlay: { onPlayEpisode(episode) },
-                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
-                        )
-                        .equatable()
-                    }
+                    compactRows(for: episodes)
                 }
             } else {
                 LazyVStack(spacing: 8) {
-                    ForEach(episodes) { episode in
-                        EpisodeRow(
-                            episode: episode,
-                            isResumeTarget: episode.id == resumeTarget?.id,
-                            resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
-                            downloadState: downloadStates[episode.number] ?? .notStarted,
-                            onPlay: { onPlayEpisode(episode) },
-                            onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) },
-                            onOpenServerPicker: {
-                                serverPickerEpisode = episode
-                                serverCandidates = []
-                                isLoadingServers = true
-                                Task {
-                                    let found = await onLoadReleaseCandidates(episode.number)
-                                    isLoadingServers = false
-                                    serverCandidates = found
-                                }
-                            },
-                            onDownload: { onDownloadEpisode(episode) },
-                            isServerPickerOpen: serverPickerEpisode?.id == episode.id,
-                            // Only the open row sees the picker state:
-                            // `EpisodeRow.==` compares both, so one picker
-                            // loading re-rendered every row in the list.
-                            isLoadingServers: serverPickerEpisode?.id == episode.id && isLoadingServers,
-                            serverCandidates: serverPickerEpisode?.id == episode.id ? serverCandidates : [],
-                            onCloseServerPicker: { serverPickerEpisode = nil },
-                            onSelectServer: { name in
-                                serverPickerEpisode = nil
-                                onPlayWithRelease(episode, name)
-                            },
-                            // A stored property, not a closure: `EpisodeRow.==`
-                            // excludes closures, so anything that gates the
-                            // morph has to take part in that comparison or
-                            // the row never re-renders when the key is set —
-                            // the source would go untagged and the whole
-                            // morph would silently do nothing.
-                            morphSource: morphSource(for: episode)
-                        )
-                        .equatable()
-                    }
+                    regularRows(for: episodes, downloadStates: downloadStates)
                 }
             }
         }

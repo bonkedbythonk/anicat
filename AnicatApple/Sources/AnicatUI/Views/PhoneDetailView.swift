@@ -189,7 +189,9 @@ struct PhoneDetailView: View {
             } catch is CancellationError {
                 // The viewer cancelled the "Finding a stream" overlay.
             } catch {
-                model.errorMessage = "Failed to play episode \(number): \(error.localizedDescription)"
+                // No "Failed to play episode N:" lead: `resolveAndPlay` throws a
+                // `PlaybackFailure` whose description is already the sentence.
+                model.errorMessage = error.localizedDescription
             }
         }
     }

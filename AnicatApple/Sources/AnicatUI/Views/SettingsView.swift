@@ -669,9 +669,13 @@ private struct PlaybackTabSection: View {
                     description: "Relative to the system output level. These play over a running episode, so the default sits low."
                 ) {
                     HStack(spacing: 12) {
+                        // Not in the tvOS SDK; this Settings page is the
+                        // Mac's and is not mounted on the TV.
+                        #if !os(tvOS)
                         Slider(value: $interfaceSoundVolume, in: 0...1)
                             .frame(width: 130)
                             .tint(SumiTheme.indigo)
+                        #endif
 
                         Text("\(Int(interfaceSoundVolume * 100))%")
                             .sumiTabularMono(size: 11)
@@ -1127,7 +1131,7 @@ private struct MaintenanceTabSection: View {
                 Text(Self.buildDescription)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(SumiTheme.foreground)
-                    .textSelection(.enabled)
+                    .sumiTextSelectable()
             }
 
             Divider()

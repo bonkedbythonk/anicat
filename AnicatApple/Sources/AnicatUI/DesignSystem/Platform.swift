@@ -39,6 +39,10 @@ public enum Platform {
         #if canImport(AppKit)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        #elseif os(tvOS)
+        // tvOS has no pasteboard. The one thing the app copies is a debug
+        // report, which Settings on the TV never offers.
+        _ = text
         #elseif canImport(UIKit)
         UIPasteboard.general.string = text
         #endif
@@ -55,12 +59,26 @@ public enum Platform {
         #endif
     }
 
+    /// True on Apple TV. Neither a pointer nor a touch screen: everything
+    /// is reached by moving focus with the Siri Remote, so hover, drag and
+    /// tap-to-reveal code paths are compiled out and the TV root
+    /// (`TVRootView`) is built around focus instead.
+    public static var isTV: Bool {
+        #if os(tvOS)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// The OS name the debug report prints. Hardcoding "macOS" there would
     /// have the iPhone build hand a support report claiming to come from a
     /// Mac, which is exactly the field a reader trusts without checking.
     public static var osName: String {
         #if os(macOS)
         return "macOS"
+        #elseif os(tvOS)
+        return "tvOS"
         #else
         return "iOS"
         #endif
@@ -72,6 +90,10 @@ public enum Platform {
     public static var deviceName: String {
         #if canImport(AppKit)
         return Host.current().localizedName ?? "MacBook"
+        #elseif os(tvOS)
+        // `ProcessInfo.hostName` answers "localhost" on tvOS, and the TV's
+        // Bonjour name is exactly what the phone and the Mac should see.
+        return UIDevice.current.name
         #elseif canImport(UIKit)
         // Not `UIDevice.current.name`: this is read as a default argument, so
         // a main-actor-isolated source would drag every caller of
@@ -84,15 +106,66 @@ public enum Platform {
 
 public extension View {
     /// Escape-to-dismiss for the overlays that own the whole screen.
-    /// `onExitCommand` is macOS-only and iOS has no keyboard shortcut layer
-    /// yet, so the modifier disappears there rather than every call site
-    /// growing an `#if`.
+    /// `onExitCommand` exists on macOS (Escape) and tvOS (the Menu / Back
+    /// button); iOS has no keyboard shortcut layer yet, so the modifier
+    /// disappears there rather than every call site growing an `#if`.
     @ViewBuilder
     func sumiExitCommand(perform action: @escaping () -> Void) -> some View {
-        #if os(macOS)
+        #if os(macOS) || os(tvOS)
         self.onExitCommand(perform: action)
         #else
         self
+        #endif
+    }
+}
+
+public extension View {
+    /// `textSelection(.enabled)` where the SDK has it. tvOS has nothing to
+    /// select with, and the modifier is not declared there.
+    @ViewBuilder
+    func sumiTextSelectable() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        self.textSelection(.enabled)
+        #endif
+    }
+
+    /// `onHover` where a pointer exists. A no-op on tvOS, where focus is the
+    /// only thing that moves and the modifier is not declared.
+    @ViewBuilder
+    func sumiOnHover(perform action: @escaping (Bool) -> Void) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        self.onHover(perform: action)
+        #endif
+    }
+
+    /// `keyboardShortcut` where there is a keyboard. Not declared on tvOS.
+    @ViewBuilder
+    func sumiKeyboardShortcut(_ key: KeyEquivalent, modifiers: EventModifiers = .command) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        self.keyboardShortcut(key, modifiers: modifiers)
+        #endif
+    }
+
+    /// A popover on the Mac and the phone; a sheet on the TV, which has no
+    /// anchored popovers at all. The Mac-shaped views that use this are not
+    /// mounted on the TV today, so the sheet is what keeps them compiling
+    /// rather than a design.
+    @ViewBuilder
+    func sumiPopover<Content: View>(
+        isPresented: Binding<Bool>,
+        arrowEdge: Edge = .top,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        #if os(tvOS)
+        self.sheet(isPresented: isPresented, content: content)
+        #else
+        self.popover(isPresented: isPresented, arrowEdge: arrowEdge, content: content)
         #endif
     }
 }

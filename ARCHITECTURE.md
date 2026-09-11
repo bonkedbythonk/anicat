@@ -10,15 +10,24 @@ inside the process.
 The Tauri/React app that preceded it, and the Python scraper that served it,
 were removed in September 2026; the `legacy/tauri` tag marks their last commit.
 
-`Package.swift` declares macOS 15 and iOS 18. Both products build: the macOS
-app through SwiftPM plus `scripts/package-anicat-macos-app.sh`, and the iPhone
-app through the `AnicatApple/project.yml` target that `xcodegen` generates.
-AppKit and UIKit differences live in `DesignSystem/Platform.swift` and a few
-`#if os` islands. The phone is not the Mac's layout on a smaller screen:
+`Package.swift` declares macOS 15, iOS 18 and tvOS 18. All three build: the
+macOS app through SwiftPM plus `scripts/package-anicat-macos-app.sh`, and the
+iPhone and Apple TV apps through the `AnicatiOS` and `AnicatTV` targets in
+`AnicatApple/project.yml` that `xcodegen` generates. AppKit and UIKit
+differences live in `DesignSystem/Platform.swift` and a few `#if os`
+islands. The phone is not the Mac's layout on a smaller screen:
 `RootTabView` gives it a tab bar and its own shelves, where the Mac has a
-200pt rail. Only the macOS build is released; there is no distributed `.ipa`.
+200pt rail. The TV is not the phone's layout on a bigger one either:
+`TVRootView`, `TVDetailView`, `TVPlayerView` and `TVSettingsView` (behind
+`#if os(tvOS)`) are the same four tabs rebuilt around focus and the Siri
+Remote -- `.card` buttons for posters, `focusSection` per shelf,
+`onMoveCommand` for seeking, `onExitCommand` for Menu. Anime and cinema
+only; no readers, no Schedule, Stats or History. What the tvOS SDK lacks
+(WebKit, `DragGesture`, `Slider`, haptics, the pasteboard, notification
+text) is gated at the few shared sites that used it. Only the macOS build
+is released; there is no distributed `.ipa` and no TV build outside Xcode.
 
-CI builds both on `macos-26`. The runner's Xcode is load-bearing rather than
+CI builds all three on `macos-26`. The runner's Xcode is load-bearing rather than
 incidental: on `macos-15` the older Swift refuses main-actor writes inside
 `queue: .main` callbacks that the newer one accepts, and `glassEffect` is
 absent from its SDK whatever `if #available` says.
@@ -190,10 +199,12 @@ lives here, and nothing here knows there is a UI.
 ## Build
 
 - `bash scripts/build-xcframework.sh` compiles `core/` for
-  `aarch64-apple-darwin`, `aarch64-apple-ios` and `aarch64-apple-ios-sim`,
-  generates the Swift bindings, and assembles
-  `AnicatApple/Frameworks/AnicatCore.xcframework`. Re-run after any change to
-  `core/src/ffi.rs`.
+  `aarch64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim`,
+  `aarch64-apple-tvos` and `aarch64-apple-tvos-sim`, generates the Swift
+  bindings, and assembles `AnicatApple/Frameworks/AnicatCore.xcframework`.
+  Re-run after any change to `core/src/ffi.rs`. The tvOS targets need a
+  full Xcode selected (or `DEVELOPER_DIR` pointing at one), since the
+  command line tools ship no AppleTVOS SDK.
 - `cd AnicatApple && swift build --product Anicat` builds the app;
   `AnicatApple/dev-run.sh` copies the binary into `dist/Anicat.app` and opens
   it, which is what gives the process Dock and Cmd-Tab presence.

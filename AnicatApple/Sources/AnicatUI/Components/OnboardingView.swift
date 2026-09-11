@@ -320,6 +320,10 @@ public struct OnboardingView: View {
                                 .onSubmit(connect)
                                 .disabled(isConnecting)
 
+                            // No pasteboard on tvOS, and no `PasteButton`.
+                            // Onboarding there is `TVSettingsView`'s account
+                            // section; this view only has to compile.
+                            #if !os(tvOS)
                             PasteButton(payloadType: String.self) { strings in
                                 guard let pasted = strings.first else { return }
                                 Task { @MainActor in
@@ -328,6 +332,7 @@ public struct OnboardingView: View {
                             }
                             .labelStyle(.iconOnly)
                             .buttonBorderShape(.capsule)
+                            #endif
 
                             Button(action: connect) {
                                 Group {

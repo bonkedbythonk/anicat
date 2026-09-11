@@ -75,8 +75,15 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
     /// posted, so a viewer who never has a new episode is never prompted.
     private func ensureAuthorized() async -> Bool {
         if let cached = cachedAuthorization() { return cached }
+        #if os(tvOS)
+        // A TV notification is a badge on the app icon and nothing more:
+        // `.alert` and `.sound` are not in the tvOS SDK's option set.
+        let options: UNAuthorizationOptions = [.badge]
+        #else
+        let options: UNAuthorizationOptions = [.alert, .sound, .badge]
+        #endif
         let granted = (try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            .requestAuthorization(options: options)) ?? false
         storeAuthorization(granted)
         return granted
     }
@@ -166,6 +173,13 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
     }
 
     private func post(identifier: String, title: String, body: String, coverURL: URL?, link: DeepLink) async {
+        #if os(tvOS)
+        // `UNMutableNotificationContent` has no title, body, sound or
+        // attachments on tvOS; the only thing a notification can do there
+        // is badge the icon, which `updateDockBadge` already handles.
+        _ = (identifier, title, body, coverURL, link)
+        return
+        #else
         guard await ensureAuthorized() else { return }
 
         let content = UNMutableNotificationContent()
@@ -182,8 +196,10 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         // rejected below one second, so there is nothing to gain from it.
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
+        #endif
     }
 
+    #if !os(tvOS)
     /// `UNNotificationAttachment` takes a file, not bytes, and the system
     /// *moves* the file into its own store — so this writes a fresh temp copy
     /// per notification rather than pointing at anything the image cache owns.
@@ -204,6 +220,7 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         guard (try? (data as Data).write(to: fileURL)) != nil else { return nil }
         return try? UNNotificationAttachment(identifier: identifier, url: fileURL, options: nil)
     }
+    #endif
 
     // MARK: - Once-only bookkeeping
 
@@ -235,9 +252,17 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        #if os(tvOS)
+        completionHandler([.badge])
+        #else
         completionHandler([.banner, .sound])
+        #endif
     }
 
+    // A tvOS notification cannot be tapped -- there is nothing to tap and no
+    // `UNNotificationResponse` in the SDK -- so the routing half of the
+    // delegate does not exist there.
+    #if !os(tvOS)
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -256,4 +281,5 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         // response has been taken, not that the app has finished acting on it.
         completionHandler()
     }
+    #endif
 }

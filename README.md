@@ -5,7 +5,7 @@
 
   <p>
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
-    <img src="https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20tvOS-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
@@ -233,7 +233,8 @@ from the trending catalog — they show the layout, not anyone's watch history.
 **Prerequisites:**
 
 - macOS 15 or later on Apple silicon, with Xcode's command line tools (Swift 6)
-- [Rust](https://rustup.rs/) stable, with the Apple targets: `rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim`
+- [Rust](https://rustup.rs/) stable, with the Apple targets: `rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim`
+- For the iPhone and Apple TV apps: a full Xcode install (the tvOS SDK does not ship with the command line tools) and [xcodegen](https://github.com/yonaskolb/XcodeGen)
 - No mpv install needed: libmpv and FFmpeg come from [MPVKit](https://github.com/mpvkit/MPVKit) as SwiftPM binary dependencies (about 1.7 GB of xcframeworks on first resolve)
 
 ```bash
@@ -261,6 +262,34 @@ cd core && cargo test --lib && cargo clippy --lib --tests -- -D warnings
 in `AnicatApple/dist/`; add `install` to replace `/Applications/Anicat.app`
 with it. `bash AnicatApple/dev-run.sh` rebuilds a debug copy in `dist/` and
 relaunches it, and never touches the installed one.
+
+<details>
+<summary>Apple TV</summary>
+
+The same package builds an Apple TV app. Only the macOS build is released;
+the TV app is run from Xcode onto a simulator or a TV on your own developer
+account, like the iPhone one.
+
+```bash
+cd AnicatApple
+xcodegen generate
+open Anicat.xcodeproj    # pick the AnicatTV scheme and an Apple TV destination
+```
+
+Or from the terminal, onto the tvOS Simulator:
+
+```bash
+cd AnicatApple && xcodegen generate && xcodebuild -project Anicat.xcodeproj -scheme AnicatTV -destination 'generic/platform=tvOS Simulator' ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+```
+
+What the TV has: Up Next, Library, Search and Settings, anime and cinema
+mode, and the same mpv player, driven by the Siri Remote (play/pause,
+left and right to seek, Menu to leave). Signing in to AniList happens on a
+phone or computer: the TV shows the address, and the token it hands back is
+typed in once. Manga, light novels, Schedule, Stats and History are not on
+the TV.
+
+</details>
 
 ---
 

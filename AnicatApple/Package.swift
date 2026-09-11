@@ -5,7 +5,14 @@ let package = Package(
     name: "AnicatApple",
     platforms: [
         .macOS(.v15),
-        .iOS(.v18)
+        .iOS(.v18),
+        // Apple TV. Same package, same engine; the TV-shaped root lives in
+        // `Views/TV*.swift` behind `#if os(tvOS)` and the app target is
+        // `AnicatTV` in project.yml. 18 to match iOS: both ship the same
+        // SwiftUI generation, and the focus APIs the TV root leans on
+        // (`focusSection`, `onMoveCommand`, the `.card` button style) have
+        // been there far longer.
+        .tvOS(.v18)
     ],
     products: [
         .executable(

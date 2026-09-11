@@ -460,11 +460,12 @@ struct AnicatApp: App {
 
 #else
 
-/// The iOS entry point. Nothing the macOS one does above has an iOS
-/// counterpart: there is no window to configure, no app delegate needed to
-/// pin the appearance (`.preferredColorScheme(.dark)` covers a UIKit scene,
-/// which resolves colours through SwiftUI's environment rather than an
-/// `NSAppearance`), and no menu bar to extend.
+/// The iOS and tvOS entry point. Nothing the macOS one does above has a
+/// counterpart on either: there is no window to configure, no app delegate
+/// needed to pin the appearance (`.preferredColorScheme(.dark)` covers a
+/// UIKit scene, which resolves colours through SwiftUI's environment rather
+/// than an `NSAppearance`), and no menu bar to extend. The two share the
+/// scene and differ only in the root they mount.
 
 @main
 struct AnicatApp: App {
@@ -482,7 +483,15 @@ struct AnicatApp: App {
             // `RootTabView`, not `RootView`: the desktop root opens with a
             // 200pt sidebar rail and a 1080pt minimum width, which on a
             // 402pt phone leaves the content column narrower than one poster.
-            ThemedRoot { RootTabView(model: model) }
+            // The TV gets `TVRootView`, the same four tabs rebuilt for a
+            // remote and a room; see its header for what it leaves out.
+            ThemedRoot {
+                #if os(tvOS)
+                TVRootView(model: model)
+                #else
+                RootTabView(model: model)
+                #endif
+            }
                 // The detail page's studio buttons and "More from" shelf
                 // reach the model through here rather than through
                 // `MediaDetailView.init`, whose one call site inside

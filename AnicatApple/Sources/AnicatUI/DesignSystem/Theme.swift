@@ -355,6 +355,12 @@ private struct SumiMenuPressable: ViewModifier {
     @State private var isPressed = false
 
     func body(content: Content) -> some View {
+        #if os(tvOS)
+        // No drag on a Siri Remote, and the focus engine already lifts and
+        // dims a focused control; a second press effect on top of that
+        // reads as a glitch.
+        content
+        #else
         content
             .scaleEffect(isPressed ? SumiPressFeedback.scale : 1.0)
             .opacity(isPressed ? SumiPressFeedback.opacity : 1.0)
@@ -364,6 +370,7 @@ private struct SumiMenuPressable: ViewModifier {
                     .onChanged { _ in isPressed = true }
                     .onEnded { _ in isPressed = false }
             )
+        #endif
     }
 }
 
@@ -444,7 +451,9 @@ public enum SumiHaptics {
         // was felt as three clicks per card, which the owner called out.
         // Trackpad feedback stays for the gestures that have no click of
         // their own: `AppHaptics.swipeThreshold`.
-        #elseif canImport(UIKit)
+        // `os(iOS)`, not `canImport(UIKit)`: tvOS imports UIKit and has no
+        // feedback generators.
+        #elseif os(iOS)
         let generator = UISelectionFeedbackGenerator()
         generator.selectionChanged()
         #endif

@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(CoreSpotlight)
 import CoreSpotlight
+#endif
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -32,10 +34,15 @@ extension AppModel {
         let key = "anicat_spotlight_purged_2026_09_08"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
+        // No Spotlight on tvOS, so nothing the indexer could have written.
+        // `os`, not `canImport`: the framework is importable there and its
+        // index class is not.
+        #if !os(tvOS)
         Task.detached(priority: .background) {
             guard CSSearchableIndex.isIndexingAvailable() else { return }
             try? await CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: ["library"])
         }
+        #endif
     }
 
     // MARK: - Deep links

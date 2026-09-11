@@ -64,7 +64,9 @@ public struct SyosetuReaderView: View {
                     .foregroundColor(SumiTheme.muted)
                 HStack {
                     TextField("https://ncode.syosetu.com/n2267be/", text: $urlField)
+                        #if !os(tvOS)
                         .textFieldStyle(.roundedBorder)
+                        #endif
                         .onSubmit(load)
                     SumiOutlineButton("Open", systemImage: "book", action: load)
                         .disabled(urlField.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -324,7 +326,7 @@ public struct SyosetuReaderView: View {
             }
             Spacer()
             SumiOutlineButton("Aa", systemImage: "textformat.size", action: { showTypography = true })
-                .popover(isPresented: $showTypography, arrowEdge: .bottom) {
+                .sumiPopover(isPresented: $showTypography, arrowEdge: .bottom) {
                     typographyPopover
                 }
             SumiOutlineButton("Chapters", systemImage: "list.bullet", action: { showToc = true })
@@ -374,7 +376,10 @@ public struct SyosetuReaderView: View {
                     .sumiTabularMono(size: 11)
                     .foregroundColor(SumiTheme.muted)
             }
+            // The reader is not on the TV; `Slider` is not in its SDK.
+            #if !os(tvOS)
             Slider(value: value, in: range, step: step)
+            #endif
         }
     }
 

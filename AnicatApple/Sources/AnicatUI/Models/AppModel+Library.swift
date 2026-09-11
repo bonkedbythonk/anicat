@@ -552,22 +552,29 @@ extension AppModel {
                 }
             }
 
-            await MainActor.run { [titles, covers, gone] in
-                guard let self else { return }
-                self.resolvedTitles.merge(titles) { _, new in new }
-                self.resolvedCovers.merge(covers) { _, new in new }
-                // Every id this pass took leaves `pending`, answered or not.
-                // A network failure (AniList down) is retried by the next
-                // pass, and the tail past the cap was never this pass's to
-                // hold. "No such media" under both types is not retried: an
-                // entry deleted from AniList 404'd on every `refreshAll` for
-                // as long as its History row lived.
-                self.pendingTitleLookups.subtract(wanted)
-                self.unresolvableTitleIds.formUnion(gone)
-                self.syncKnownTitles()
-                self.applyResolvedDownloadTitles()
-            }
+            // A call on the main-actor instance rather than `MainActor.run`
+            // with `self` captured: the run closure is `@Sendable`, and the
+            // tvOS toolchain (Swift 6.2) rejects sending a weak reference to
+            // a main-actor class through it, where the closure form used to
+            // be accepted.
+            await self?.applyResolvedTitles(titles: titles, covers: covers, gone: gone, wanted: wanted)
         }
+    }
+
+    /// The main-actor half of `resolveMissingTitles`.
+    private func applyResolvedTitles(titles: [Int64: String], covers: [Int64: URL], gone: [Int64], wanted: [Int64]) {
+        resolvedTitles.merge(titles) { _, new in new }
+        resolvedCovers.merge(covers) { _, new in new }
+        // Every id this pass took leaves `pending`, answered or not.
+        // A network failure (AniList down) is retried by the next
+        // pass, and the tail past the cap was never this pass's to
+        // hold. "No such media" under both types is not retried: an
+        // entry deleted from AniList 404'd on every `refreshAll` for
+        // as long as its History row lived.
+        pendingTitleLookups.subtract(wanted)
+        unresolvableTitleIds.formUnion(gone)
+        syncKnownTitles()
+        applyResolvedDownloadTitles()
     }
 
     enum TitleLookup: Sendable {

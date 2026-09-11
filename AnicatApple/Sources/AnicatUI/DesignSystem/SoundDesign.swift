@@ -413,7 +413,7 @@ public enum AppHaptics {
         guard isEnabled else { return }
         #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        #elseif canImport(UIKit)
+        #elseif os(iOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         #endif
     }
@@ -426,7 +426,7 @@ public enum AppHaptics {
         guard isEnabled else { return }
         #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        #elseif canImport(UIKit)
+        #elseif os(iOS)
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         #endif
     }

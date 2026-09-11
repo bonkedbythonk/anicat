@@ -189,7 +189,7 @@ public struct CommandPalette: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.sumiPressable)
-                        .onHover { hovering in
+                        .sumiOnHover { hovering in
                             guard hovering, Date().timeIntervalSince(keyboardMoveAt) > 0.4 else { return }
                             highlighted = index
                         }

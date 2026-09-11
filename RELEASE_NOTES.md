@@ -26,8 +26,8 @@ to Anime can still connect from Settings.
   2.35:1 film, the controls sit inside the lit bars instead of painting a
   scrim over them, and sideways mode no longer draws a black band over the
   top and bottom of the turned picture.
-- Anime4K runs on anime only. Films and series and any source of 1440 rows
-  or more play untouched; the player says so once when it opens them.
+- Anime4K runs on anime only; films and series play untouched. The player
+  toggle now says "Anime4K on" and "Anime4K off".
 - The keyboard backlight goes dark with the controls and stays lit while
   they are up.
 - The episode still shown while a stream connects dissolves into a soft

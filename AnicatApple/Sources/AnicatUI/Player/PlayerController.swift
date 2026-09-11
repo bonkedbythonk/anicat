@@ -113,27 +113,9 @@ public final class PlayerController {
     /// The playing title is a TMDB film or series, set by `AppModel` with
     /// the title. Anime4K's restore and upscale networks are trained on
     /// line art; over a photographed picture they sharpen skin and film
-    /// grain into ringing, so the chain is held off live action outright.
+    /// grain into ringing, so the chain runs on anime only. No resolution
+    /// gate beside it: anime does not ship above 1080p.
     public var isLiveAction: Bool = false
-
-    /// Sources at or above this many rows are not upscaled. The x2 chain on
-    /// 1440 rows is 2880, more than any Mac panel has, so the shaders were
-    /// burning GPU on a 4K film to draw a picture the display then scaled
-    /// back down. 1080p stays eligible: on a 3024x1964 MacBook panel it
-    /// is still short of native.
-    public static let upscalingSourceCeiling: Double = 1440
-
-    /// Why the shader chain is held off this file although upscaling is on,
-    /// or nil when it should run. `MpvSurface` re-reads it on every apply
-    /// and when the decoded size lands, which is after `FILE_LOADED`, so a
-    /// 4K file runs the chain for the frames before mpv reports its size.
-    public var upscalingHoldReason: String? {
-        if isLiveAction { return "live action" }
-        if let rows = decodedDisplayHeight, rows >= Self.upscalingSourceCeiling {
-            return "\(Int(rows))p source"
-        }
-        return nil
-    }
 
     /// Whether reaching the end of an episode should start the next one
     /// automatically. Read by `AppModel.handlePlaybackPositionChange`, set
@@ -652,13 +634,9 @@ public final class PlayerController {
         isAnime4KEnabled.toggle()
         UserDefaults.standard.set(isAnime4KEnabled, forKey: "anicat_gpu_upscaling")
         showControlsBriefly()
-        // Say when the toggle will not change the picture: "Upscaling on"
-        // over a 4K film that stays exactly as it was reads as broken.
-        if isAnime4KEnabled, let reason = upscalingHoldReason {
-            flashHUD("Anime4K off: \(reason)", symbol: "sparkles")
-        } else {
-            flashHUD(isAnime4KEnabled ? "Upscaling on" : "Upscaling off", symbol: "sparkles")
-        }
+        // "Anime4K", not "Upscaling": the name says where it applies, so a
+        // film staying as it was after "on" does not read as broken.
+        flashHUD(isAnime4KEnabled ? "Anime4K on" : "Anime4K off", symbol: "sparkles")
     }
 
     public func cycleAnime4K() {

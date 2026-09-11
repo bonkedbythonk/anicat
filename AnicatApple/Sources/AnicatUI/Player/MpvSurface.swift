@@ -902,9 +902,6 @@ public struct MpvSurface {
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
-        /// The hold reason the last apply saw, so the HUD card for it shows
-        /// once and not on every apply the SwiftUI update cycle makes.
-        private var lastAnime4KHoldReason: String?
         private var sidewaysSavedHwdec: String?
         /// The `sid` the viewer picked from the subtitle list, so a later
         /// Sub/Dub toggle re-applies it rather than running the language
@@ -1561,11 +1558,10 @@ public struct MpvSurface {
             // so nothing on iOS ever sends `glsl-shaders`.
             _ = enabled
             #else
-            // The toggle is the user's wish; the hold is the file's say.
-            // Compared after the hold so a 4K episode following a 1080p one
-            // clears the chain even though the toggle never moved.
-            let holdReason = controller.upscalingHoldReason
-            let wanted = enabled && holdReason == nil
+            // The toggle is the user's wish; anime-only is the file's say.
+            // Compared after both so a film following an episode clears the
+            // chain even though the toggle never moved.
+            let wanted = enabled && !controller.isLiveAction
             guard let mpv = mpv, wanted != lastAnime4KState else { return }
             lastAnime4KState = wanted
 
@@ -1577,19 +1573,11 @@ public struct MpvSurface {
             }
 
             mpv_set_property_string(mpv, "glsl-shaders", shaderString)
-            if let holdReason, enabled {
-                print("[libmpv] Anime4K held off: \(holdReason)")
-                // Once per reason, not per file: an evening of 4K episodes
-                // would otherwise open every one with the same card.
-                if holdReason != lastAnime4KHoldReason {
-                    controller.flashHUD("Anime4K off: \(holdReason)", symbol: "sparkles")
-                }
-            } else if shaderString.isEmpty {
-                print("[libmpv] Anime4K disabled")
+            if shaderString.isEmpty {
+                print(enabled ? "[libmpv] Anime4K off: live action" : "[libmpv] Anime4K disabled")
             } else {
                 print("[libmpv] Applied Anime4K 6-shader pipeline")
             }
-            lastAnime4KHoldReason = holdReason
             #endif
         }
 
@@ -2060,15 +2048,7 @@ public struct MpvSurface {
                             await MainActor.run { self.controller.decodedDisplayWidth = Double(w) }
                         } else if name == "video-params/dh", let data = prop.data {
                             let h = data.assumingMemoryBound(to: Int64.self).pointee
-                            await MainActor.run {
-                                self.controller.decodedDisplayHeight = Double(h)
-                                // The source's row count is what decides
-                                // the hold, and it lands here, after
-                                // `FILE_LOADED`; nothing else re-applies
-                                // until the next SwiftUI update, which a
-                                // playing picture does not trigger.
-                                self.applyAnime4K(enabled: self.controller.isAnime4KEnabled)
-                            }
+                            await MainActor.run { self.controller.decodedDisplayHeight = Double(h) }
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {

@@ -898,7 +898,8 @@ public struct RootView: View {
                 openingSourceKey: model.openingDetailSourceKey,
                 onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
                 onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
-                onBrowse: { model.currentNavSection = .search }
+                onBrowse: { model.currentNavSection = .search },
+                onRemove: { item in Task { await model.removeListEntry(of: item) } }
             )
             }
         case .novels:
@@ -919,7 +920,8 @@ public struct RootView: View {
                 // AniList/RanobeDB entries above have no linked text source
                 // yet (see `AppModel.SyosetuSession`'s comment) — this is the
                 // only way into a novel's actual chapter text today.
-                onOpenSyosetu: { model.openNovelReaderEntry() }
+                onOpenSyosetu: { model.openNovelReaderEntry() },
+                onRemove: { item in Task { await model.removeListEntry(of: item) } }
             )
             }
         case .history:

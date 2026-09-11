@@ -109,6 +109,12 @@ public struct ScheduleView: View {
     }
 
     public var body: some View {
+        // The same frame every other section draws in (see the home page in
+        // RootView): 40pt margins and the shared width cap. This page had
+        // 16pt margins and no cap, so its header sat 24pt further left than
+        // the shelves on the pages beside it and its rows ran the full width
+        // of a fullscreen window while theirs stopped.
+        GeometryReader { viewport in
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
                 // Header Row
@@ -224,7 +230,13 @@ public struct ScheduleView: View {
                     }
                 }
             }
+            .padding(.horizontal, 40 - SumiTheme.spaceMd)
+            .padding(.top, 40 - SumiTheme.spaceLg)
+            .padding(.bottom, 32 - SumiTheme.spaceLg)
             .padding(.vertical, SumiTheme.spaceLg)
+            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
         }
         .background(SumiTheme.background)
         .onAppear { recomputeGroups() }

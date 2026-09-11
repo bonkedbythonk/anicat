@@ -99,6 +99,12 @@ pub struct MediaSummary {
     /// Unix seconds at which the next episode airs, when one is scheduled.
     pub next_airing_at: Option<i64>,
     pub next_episode: Option<i32>,
+    /// The AniList list entry's own id, when the row came from the user's
+    /// list. `DeleteMediaListEntry` is keyed on it, and a shelf card is the
+    /// only place to remove a title whose media page AniList no longer
+    /// serves (a merged or deleted entry answers Not Found, so the detail
+    /// page with its own Remove never opens).
+    pub list_entry_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -4735,6 +4741,7 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
         list_status: entry.and_then(|e| e.status.clone()),
         user_score: entry.and_then(|e| e.score),
         updated_at: entry.and_then(|e| e.updated_at),
+        list_entry_id: entry.and_then(|e| e.id),
         next_airing_at: m.next_airing_episode.as_ref().and_then(|n| n.airing_at),
         next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
     }

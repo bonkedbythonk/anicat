@@ -609,6 +609,26 @@ extension AppModel {
         }
     }
 
+    /// Removes a shelf card's title from the list by its entry id, with no
+    /// detail page involved. For the entry whose media AniList no longer
+    /// serves: `loadDetail` answers "AniList: Not Found" for it, so the page
+    /// and its own Remove never open, and the row was stuck on the shelf.
+    public func removeListEntry(of item: MediaCard.Item) async {
+        guard let engine, let entryId = item.listEntryId else { return }
+        do {
+            try await engine.removeFromList(listEntryId: entryId)
+            await recordAniListSuccess()
+            mangaReading.removeAll { $0.id == item.id }
+            novelReading.removeAll { $0.id == item.id }
+            mangaPlanning.removeAll { $0.id == item.id }
+            novelPlanning.removeAll { $0.id == item.id }
+            refreshListsAfterEdit()
+        } catch {
+            await recordAniListFailure(error)
+            errorMessage = "Could not remove from AniList: \(error.localizedDescription)"
+        }
+    }
+
     /// Removes the open title from the signed-in user's list entirely.
     public func removeFromList() async {
         guard let engine, let details = selectedMediaDetails, let entryId = details.listEntryId else { return }

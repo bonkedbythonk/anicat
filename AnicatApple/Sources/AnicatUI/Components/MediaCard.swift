@@ -170,7 +170,10 @@ public struct MediaCard: View, Equatable {
                     // `.poster-tick` (index.css:549): 3px, an accent fill over a
                     // black 45% track. The track is what makes it legible on a
                     // bright poster — the fill alone vanishes into pale art.
-                    if let progress = item.progress, let total = item.totalEpisodesOrChapters, total > 0 {
+                    // Only once there is progress to show: at zero the track
+                    // alone was a dark strip along the bottom of every
+                    // Planning poster, read as a ledge the card never had.
+                    if let progress = item.progress, progress > 0, let total = item.totalEpisodesOrChapters, total > 0 {
                         let pct = min(max(CGFloat(progress) / CGFloat(total), 0), 1)
                         // scaleEffect instead of GeometryReader: this bar lives inside
                         // MediaCard, the most-instantiated view in the app, and a

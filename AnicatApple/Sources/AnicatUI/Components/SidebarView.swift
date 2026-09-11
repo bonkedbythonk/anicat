@@ -50,7 +50,6 @@ public struct SidebarView: View {
         public func shortcut(for mode: AppModel.AppMode) -> String? {
             if mode == .cinema {
                 switch self {
-                case .upNext: return "H"
                 case .manga: return "F"
                 case .novels: return "S"
                 case .library: return "L"
@@ -92,7 +91,9 @@ public struct SidebarView: View {
             // No Coming Soon: TMDB dates a season, not an episode, so there
             // is no calendar to build behind it -- its two rows belong in
             // Films and Series, which is where they now are.
-            case .cinema: return [.upNext, .manga, .novels, .library, .search, .history, .stats]
+            // No Home either: with the resume queue on Watching it was the
+            // Films and Series shelves a second time under a different word.
+            case .cinema: return [.manga, .novels, .library, .search, .history, .stats]
             }
         }
 
@@ -125,7 +126,6 @@ public struct SidebarView: View {
                 // F and S rather than M and N: the two cases carry cinema's
                 // own labels here, and nobody presses M for Films.
                 switch char.lowercased() {
-                case "h": return .upNext
                 case "f": return .manga
                 case "s": return .novels
                 case "l": return .library

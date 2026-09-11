@@ -15,6 +15,8 @@ struct CinemaHomeView: View {
     /// empty states are the same, and four files would be four copies of
     /// them drifting apart.
     enum Page {
+        /// Not in the rail since 6.0.2. Kept so the phone, which still has
+        /// an Up Next tab in cinema, can draw the queue over the shelves.
         case home
         /// One kind on its own, with the filter row defaulted to it -- the
         /// same split by kind the anime rail makes with Manga and Light
@@ -79,7 +81,7 @@ struct CinemaHomeView: View {
                         resultsGrid
                     }
                 } else if page == .home, !model.cinemaUpNext.isEmpty {
-                    upNext
+                    upNext(title: "Up Next")
                     ForEach(shelves) { shelf in
                         shelfRow(shelf)
                     }
@@ -340,10 +342,10 @@ struct CinemaHomeView: View {
     /// The resume queue, in the same component the anime home uses -- so a
     /// film picks up where it stopped with one press, instead of being found
     /// again through a shelf and a page.
-    private var upNext: some View {
+    private func upNext(title: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
-                Text("Up Next")
+                Text(title)
                     .font(.system(size: 15, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
@@ -380,6 +382,9 @@ struct CinemaHomeView: View {
                             coverURL: entry.thumbnailURL
                         )
                     }
+                },
+                onRemove: { entry in
+                    Task { await model.removeFromCinemaContinueWatching(id: entry.id) }
                 }
             )
         }
@@ -468,18 +473,35 @@ struct CinemaHomeView: View {
             }
             .padding(.vertical, 40)
         } else {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("CONTINUE WATCHING")
-                    .sumiTabularMono(size: 9.5, weight: .bold)
-                    .foregroundColor(SumiTheme.muted)
+            VStack(alignment: .leading, spacing: 24) {
+                // The resume rows first: one press picks a film up where it
+                // stopped. This queue headed the cinema Home until that page
+                // went; the grid under it is every title with a position.
+                if !model.cinemaUpNext.isEmpty {
+                    upNext(title: "Pick up where you left off")
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("CONTINUE WATCHING")
+                        .sumiTabularMono(size: 9.5, weight: .bold)
+                        .foregroundColor(SumiTheme.muted)
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)],
-                    alignment: .leading,
-                    spacing: 20
-                ) {
-                    ForEach(model.cinemaContinueWatching) { item in
-                        card(item, shelf: "cinemaWatching")
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)],
+                        alignment: .leading,
+                        spacing: 20
+                    ) {
+                        ForEach(model.cinemaContinueWatching) { item in
+                            card(item, shelf: "cinemaWatching")
+                                // Right-click, like the Finder: the card has no
+                                // spare corner for a control, and a hover "x"
+                                // next to the open chevron was two targets on
+                                // one poster.
+                                .contextMenu {
+                                    Button("Remove from Continue Watching") {
+                                        Task { await model.removeFromCinemaContinueWatching(id: item.id) }
+                                    }
+                                }
+                        }
                     }
                 }
             }

@@ -439,7 +439,11 @@ public enum SumiHaptics {
         guard now - lastFired > 0.08 else { return }
         lastFired = now
         #if os(macOS)
-        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .drawCompleted)
+        // Nothing on the Mac. A Force Touch trackpad already clicks on the
+        // press and again on the release; a `.levelChange` on top of that
+        // was felt as three clicks per card, which the owner called out.
+        // Trackpad feedback stays for the gestures that have no click of
+        // their own: `AppHaptics.swipeThreshold`.
         #elseif canImport(UIKit)
         let generator = UISelectionFeedbackGenerator()
         generator.selectionChanged()

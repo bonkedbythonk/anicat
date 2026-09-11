@@ -963,9 +963,13 @@ public final class AppModel {
             // cinema mode this is the page on screen, and AniList's five
             // calls are not what it is waiting for.
             if appMode == .cinema, cinemaAvailable {
-                if cinemaShelves.isEmpty, !isCinemaLoading { await loadCinemaHome() }
+                // Unconditional, render-then-refresh like the anime home: gated
+                // on `cinemaShelves.isEmpty` the restored snapshot was never
+                // refreshed, and a cache written during one bad TMDB minute
+                // (one row of eight) stayed the whole page for every launch after.
+                if !isCinemaLoading { await loadCinemaHome() }
                 await loadCinemaLibrary()
-                redirectHomeIfCinemaQueueEmpty()
+                redirectHomeInCinema()
             }
 
             let homeCacheAge = HomeCache.ageInSeconds()

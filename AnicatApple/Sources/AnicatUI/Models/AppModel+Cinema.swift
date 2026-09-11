@@ -90,7 +90,7 @@ extension AppModel {
         // cannot fill -- Manga in cinema, Coming Soon's cinema rows in anime.
         if !SidebarView.NavSection.browseItems(for: mode).contains(currentNavSection),
            !SidebarView.NavSection.systemItems.contains(currentNavSection) {
-            currentNavSection = .upNext
+            currentNavSection = mode == .cinema ? .manga : .upNext
         }
         // `clearDetail`, not `closeDetail`: the stacks hold pages from the
         // world being left, and a back step across modes is exactly the
@@ -98,22 +98,19 @@ extension AppModel {
         clearDetail()
         if mode == .cinema {
             Task {
-                if cinemaShelves.isEmpty { await loadCinemaHome() }
+                if !isCinemaLoading { await loadCinemaHome() }
                 await loadCinemaLibrary()
-                redirectHomeIfCinemaQueueEmpty()
+                redirectHomeInCinema()
             }
         }
         loadWatchStats()
     }
 
-    /// Cinema's Home is a continue-watching queue plus discovery shelves
-    /// underneath, mirroring anime's Up Next -- but Films/Series show those
-    /// same shelves too (Home draws from the same unfiltered
-    /// `cinemaShelves`), so with no queue Home has nothing on it that isn't
-    /// already duplicated verbatim on Films or Series. Land on Films instead
-    /// rather than show that duplicate.
-    func redirectHomeIfCinemaQueueEmpty() {
-        guard appMode == .cinema, currentNavSection == .upNext, cinemaUpNext.isEmpty else { return }
+    /// Cinema has no Home: it was the same shelves Films and Series draw,
+    /// under a resume queue that now heads the Watching page. A restored
+    /// or keyed `.upNext` lands on Films.
+    func redirectHomeInCinema() {
+        guard appMode == .cinema, currentNavSection == .upNext else { return }
         currentNavSection = .manga
     }
 
@@ -136,8 +133,11 @@ extension AppModel {
             for (index, kind) in kinds.enumerated() {
                 group.addTask {
                     do {
-                        return (index, try await engine.cinemaRow(kind: kind, page: 1), nil)
+                        let rows = try await engine.cinemaRow(kind: kind, page: 1)
+                        AppLog.write("cinema row \(kind): \(rows.count)")
+                        return (index, rows, nil)
                     } catch {
+                        AppLog.write("cinema row \(kind) failed: \(error)")
                         return (index, [], "\(error)")
                     }
                 }
@@ -159,6 +159,12 @@ extension AppModel {
                 )
             }
         }
+        // One line per load, always: a row that comes back empty is silent
+        // otherwise, and a page with one shelf of eight looked like a layout
+        // choice rather than seven failed requests.
+        AppLog.write("cinema home: " + kinds.map { kind in
+            "\(kind)=\(built.first { $0.id == kind }?.items.count ?? 0)"
+        }.joined(separator: " ") + (failure.map { " first failure: \($0)" } ?? ""))
         cinemaShelves = built
         // Only when nothing at all arrived: one retired endpoint out of eight
         // is not a page worth explaining away.
@@ -558,6 +564,22 @@ extension AppModel {
     /// season picker, which is the wrong thing to do to a page the viewer is
     /// already looking at. The TMDB detail is cached, so this is the
     /// registry's own progress and no request.
+    /// Forgets every local watch row of a title, which is what takes it off
+    /// Continue Watching and the resume queue: both are built from
+    /// `watchActivity`, and a row zeroed rather than deleted would stay in
+    /// the feed and the statistics as something watched.
+    public func removeFromCinemaContinueWatching(id: Int64) async {
+        guard let engine else { return }
+        let catalog: FfiCatalog = cinemaCatalog(forId: id) == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        await withCheckedContinuation { continuation in
+            engineIOQueue.async {
+                try? engine.clearProgressFrom(catalog: catalog, catalogId: id, episodeNumber: 1)
+                continuation.resume()
+            }
+        }
+        await loadCinemaLibrary()
+    }
+
     func refreshCinemaDetailAfterPlayback(id: Int64) async {
         guard let engine, currentDetailCatalog != .anilist,
               selectedMediaDetails?.id == id else { return }

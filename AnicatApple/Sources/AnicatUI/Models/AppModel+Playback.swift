@@ -1143,6 +1143,7 @@ extension AppModel {
             ?? (catalog == .anilist ? "Anime" : "Film")
         self.playerController.title = effectiveTitle
         self.playerController.episodeNumber = Int(episode)
+        self.playerController.isLiveAction = catalog != .anilist
         self.playerController.isPlaying = true
 
         guard let engine else {

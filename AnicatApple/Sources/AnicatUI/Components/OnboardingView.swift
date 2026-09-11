@@ -45,8 +45,12 @@ public struct OnboardingView: View {
 
     private static let authorizeURL = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")!
 
+    /// Mode before connect: AniList is the anime world's list, not the
+    /// app's login. With connect first, someone here for films was asked
+    /// for an AniList token as the very first thing and read the app as
+    /// anime-only before ever seeing that Cinema exists.
     private enum Step: Int, CaseIterable {
-        case connect, mode, watching, picture, alerts, look
+        case mode, connect, watching, picture, alerts, look
 
         var title: String {
             switch self {
@@ -81,11 +85,22 @@ public struct OnboardingView: View {
     /// build has no TMDB credential: offering Cinema there would land a first
     /// launch on eight shelves that cannot load, which is the same thing
     /// `AppModel.initialize` already refuses to restore into.
+    ///
+    /// The connect step is dropped when Cinema was picked: nothing in that
+    /// mode needs an AniList account (its list is local, its catalog is
+    /// TMDB), and Settings still offers the connection for whoever later
+    /// switches. Anime keeps it, since there the list is the app.
     private var steps: [Step] {
-        Step.allCases.filter { $0 != .mode || model.cinemaAvailable }
+        Step.allCases.filter { step in
+            switch step {
+            case .mode: return model.cinemaAvailable
+            case .connect: return model.appMode == .anime || model.isSignedIn
+            default: return true
+            }
+        }
     }
 
-    private var step: Step { steps.indices.contains(stepIndex) ? steps[stepIndex] : .connect }
+    private var step: Step { steps.indices.contains(stepIndex) ? steps[stepIndex] : .watching }
     private var isLastStep: Bool { stepIndex >= steps.count - 1 }
 
     public var body: some View {

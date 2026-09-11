@@ -187,6 +187,7 @@ extension AppModel {
 
         playerController.title = title
         playerController.episodeNumber = download.episode
+        playerController.isLiveAction = download.catalog != .anilist
         playerController.isPlaying = true
         // Same gate as `resolveAndPlay`: the outgoing file's last ticks are
         // not this episode's. Except when this very file is already loaded

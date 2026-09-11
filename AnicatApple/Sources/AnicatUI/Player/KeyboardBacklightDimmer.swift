@@ -190,9 +190,24 @@ public final class KeyboardBacklightDimmer {
     /// Any real input still brings the light back through the monitor
     /// installed by `beginWatching`.
     public func dimNow() {
+        chromeIsUp = false
         guard isWatching else { return }
         beginFade()
     }
+
+    /// The player's chrome came back. Restores like any input, and holds
+    /// the idle clock off until the chrome goes again.
+    public func noteChromeShown() {
+        chromeIsUp = true
+        noteUserActivity()
+    }
+
+    /// Whether the player's controls are on screen. While they are, the
+    /// idle clock does not dim: a pointer resting on the transport keeps
+    /// the chrome up indefinitely, and the keyboard going dark three
+    /// seconds in while the controls stayed lit was the two disagreeing
+    /// about whether the picture is being looked at.
+    private var chromeIsUp = true
 
     // MARK: - Watching
 
@@ -227,7 +242,7 @@ public final class KeyboardBacklightDimmer {
     }
 
     private func tick() {
-        guard isWatching, Date().timeIntervalSince(lastActivity) >= idleSeconds else { return }
+        guard isWatching, !chromeIsUp, Date().timeIntervalSince(lastActivity) >= idleSeconds else { return }
         beginFade()
     }
 

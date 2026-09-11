@@ -187,6 +187,25 @@ struct AmbientGlowTests {
         #expect(inset.right == 0)
     }
 
+    /// mpv draws subtitles at the bottom of the picture, which for a 2.35:1
+    /// scene in a 16:9 file is inside the burned-in bar. Read across the
+    /// whole row, every line of dialogue turned that bar into picture and the
+    /// bottom band collapsed to the window letterbox while it showed.
+    @Test("A subtitle line inside the encoded bar does not un-bar it")
+    func subtitleInsideTheBarIsIgnored() throws {
+        let barRows = 4, height = 36, width = 64
+        let (bytes, stride) = frame(width: width, height: height) { x, y in
+            let inBar = y < barRows || y >= height - barRows
+            // Two rows of white text across the middle 60% of the bottom bar.
+            let subtitle = y >= height - 3 && y < height - 1 && x >= 13 && x < 51
+            if subtitle { return (255, 255, 255) }
+            return inBar ? (0, 0, 0) : (200, 180, 160)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride))
+        #expect(inset.bottom == Double(barRows) / Double(height))
+        #expect(inset.top == Double(barRows) / Double(height))
+    }
+
     @Test("A picture that fills its frame reports no bars at all")
     func fullFrameHasNoInset() throws {
         let (bytes, stride) = frame(width: 64, height: 36) { _, _ in (120, 120, 120) }

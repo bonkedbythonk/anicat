@@ -110,7 +110,10 @@ public struct RootView: View {
 
                 // Dynamic Main Content Area
                 VStack(spacing: 0) {
-                    if model.isAniListDown {
+                    // Anime mode only: cinema tracks nothing on AniList, and
+                    // a film viewer with no account was told a service they
+                    // never use was down, on every launch of an outage.
+                    if model.isAniListDown, model.appMode == .anime {
                         HStack(spacing: 12) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(SumiTheme.warning)
@@ -760,7 +763,7 @@ public struct RootView: View {
         .onChange(of: model.playerController.areControlsVisible) { _, visible in
             guard model.activeStreamURL != nil else { return }
             if visible {
-                KeyboardBacklightDimmer.shared.noteUserActivity()
+                KeyboardBacklightDimmer.shared.noteChromeShown()
             } else {
                 KeyboardBacklightDimmer.shared.dimNow()
             }

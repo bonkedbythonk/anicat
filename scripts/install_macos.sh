@@ -17,6 +17,24 @@ if [ "$(uname -m)" != "arm64" ]; then
     exit 1
 fi
 
+# The bundle's LSMinimumSystemVersion is 15.0. On an older macOS the install
+# below succeeds and the app then refuses to open with a generic "cannot be
+# used on this version" dialog, which is a worse place to learn it than here.
+MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
+if [ "${MACOS_MAJOR:-0}" -lt 15 ]; then
+    echo "Anicat needs macOS 15 (Sequoia) or later; this Mac runs $(sw_vers -productVersion)."
+    exit 1
+fi
+
+# A standard (non-admin) account cannot write /Applications, and `rm -rf`
+# there fails after the download instead of before it. ~/Applications is
+# where macOS itself puts per-user apps and Launchpad/Spotlight index it too.
+if [ ! -w "$(dirname "$INSTALL_PATH")" ]; then
+    INSTALL_PATH="$HOME/Applications/$APP_NAME"
+    mkdir -p "$(dirname "$INSTALL_PATH")"
+    echo "/Applications is not writable by this account; installing to $INSTALL_PATH instead."
+fi
+
 echo "Step 1: Finding the latest version..."
 # Deliberately no python3 here. A stock macOS has no usable interpreter --
 # /usr/bin/python3 is a stub that prompts for a multi-GB Xcode Command Line
@@ -27,6 +45,23 @@ echo "Step 1: Finding the latest version..."
 DOWNLOAD_URL=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" \
     | grep -o "https://github.com/$REPO/releases/download/[^\"]*macos-arm64\.zip" \
     | head -n 1)
+
+if [ -z "$DOWNLOAD_URL" ]; then
+    # The API allows 60 anonymous requests an hour per public IP, shared by
+    # everyone behind the same NAT (a campus, an office, a CGNAT carrier), and
+    # a rate-limited answer is a JSON error with no asset in it. The web
+    # redirect for /releases/latest has no such limit and names the tag, and
+    # publish-release.sh names the asset from the version, so the URL can be
+    # rebuilt from the tag alone.
+    TAG="$(curl -sSI "https://github.com/$REPO/releases/latest" \
+        | grep -i '^location:' \
+        | grep -o '/releases/tag/v[0-9][^[:space:]]*' \
+        | sed 's|/releases/tag/||' \
+        | head -n 1)"
+    if [ -n "$TAG" ]; then
+        DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/Anicat-${TAG#v}-macos-arm64.zip"
+    fi
+fi
 
 if [ -z "$DOWNLOAD_URL" ]; then
     echo "Couldn't find a download link. The latest release might still be building."

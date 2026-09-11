@@ -458,6 +458,15 @@ extension AmbientGlow {
     /// picture, which errs towards a hairline rather than towards glow
     /// drawn over the frame.
     static let minimumBoundaryContrast = 40.0
+    /// A row is judged on this much of each end of it, never on its middle.
+    /// The sampler reads the composited drawable, and mpv draws subtitles
+    /// at the bottom of the *picture* -- which, for a 2.35:1 scene inside a
+    /// 16:9 file, is the burned-in bar. Scanning the whole row, every line
+    /// of dialogue turned the bar into picture: the bottom band collapsed
+    /// to the window's own letterbox while the line showed and snapped back
+    /// when it cleared. Subtitles are centred; a fifth of the width at each
+    /// end is clear of a two-line wrap at mpv's default margins.
+    static let rowEndFraction = 0.2
 
     /// The bars burned into `bytes`, a packed 32-bit thumbnail, as
     /// fractions of it. `nil` when the picture is too dark to tell — a
@@ -473,9 +482,13 @@ extension AmbientGlow {
         stride: Int
     ) -> AmbientContentInset? {
         guard width > 0, height > 0, bytes.count >= stride * height, stride >= width * 4 else { return nil }
+        // The columns a row is read on: `rowEndFraction` of each end, and
+        // at least one column per end so a very narrow probe still scans.
+        let endColumns = max(1, Int(Double(width) * rowEndFraction))
+        let rowColumns = Array(0..<min(endColumns, width)) + Array(max(endColumns, width - endColumns)..<width)
         func rowIsBar(_ y: Int) -> Bool {
             let base = y * stride
-            for x in 0..<width {
+            for x in rowColumns {
                 let p = base + x * 4
                 if bytes[p] > barLevel || bytes[p + 1] > barLevel || bytes[p + 2] > barLevel { return false }
             }
@@ -492,11 +505,11 @@ extension AmbientGlow {
         func rowLevel(_ y: Int) -> Double {
             let base = y * stride
             var total = 0
-            for x in 0..<width {
+            for x in rowColumns {
                 let p = base + x * 4
                 total += Int(max(bytes[p], max(bytes[p + 1], bytes[p + 2])))
             }
-            return Double(total) / Double(width)
+            return Double(total) / Double(rowColumns.count)
         }
         func columnLevel(_ x: Int) -> Double {
             let p0 = x * 4

@@ -65,6 +65,13 @@ public struct PlayerView: View {
     /// as the session does, so its `@State` resets when the player closes —
     /// one intro per session, which is what it is for.
     @State private var hasShownFirstFrame = false
+    /// The fly-in has arrived. From here until the first frame the still
+    /// is a blurred wash over the whole picture rect, not a card: the
+    /// card is a 1024px episode thumbnail, and held sharp in the middle
+    /// of a 3000px window for the length of the pre-buffer it read as a
+    /// low-quality banner the stream had opened on. Blurred and dimmed it
+    /// is the picture's colour, which is all it has to be.
+    @State private var flyInSettled = false
     #if os(macOS)
     /// The player's own key handling. See `PlayerKeyMonitor` for why it is a
     /// second monitor rather than more cases in `RootView.handleKeyDown`.
@@ -205,10 +212,20 @@ public struct PlayerView: View {
         var bottomOverlay: CGFloat { max(0, bottomGap - naturalBottom) }
     }
 
-    static func chromeGeometry(windowSize: CGSize, aspectRatio: Double?) -> ChromeGeometry {
+    /// `contentInset` is the bars burned into the frame itself, which the
+    /// window geometry cannot see. They count as letterbox here: a 2.35:1
+    /// scene in a 16:9 file on a 16:9 screen has no natural gap at all, so
+    /// the whole bar height was overlay and the controls' scrim painted
+    /// out the glow lit in the encoded bar every time the transport came
+    /// up -- the one moment it is being looked at.
+    static func chromeGeometry(
+        windowSize: CGSize,
+        aspectRatio: Double?,
+        contentInset: AmbientContentInset = .zero
+    ) -> ChromeGeometry {
         let videoRect = aspectFitRect(in: windowSize, aspectRatio: aspectRatio)
-        let naturalTop = max(0, videoRect.minY)
-        let naturalBottom = max(0, windowSize.height - videoRect.maxY)
+        let naturalTop = max(0, videoRect.minY) + (videoRect.height * contentInset.top).rounded()
+        let naturalBottom = max(0, windowSize.height - videoRect.maxY) + (videoRect.height * contentInset.bottom).rounded()
         return ChromeGeometry(
             videoRect: videoRect,
             naturalTop: naturalTop,
@@ -228,7 +245,14 @@ public struct PlayerView: View {
         // The video always gets the whole window; this is where it lands
         // once letterboxed, and where the chrome and the AniSkip pill lay
         // out against.
-        let geometry = Self.chromeGeometry(windowSize: windowSize, aspectRatio: controller.videoAspectRatio)
+        // The encoded bars only count while the glow is drawing in them;
+        // without it they are black on black and the last sampled inset
+        // would hold the chrome off the window's edge for nothing.
+        let geometry = Self.chromeGeometry(
+            windowSize: windowSize,
+            aspectRatio: controller.videoAspectRatio,
+            contentInset: glowFrame == nil ? .zero : controller.ambientContentInset
+        )
         let videoRect = geometry.videoRect
         let naturalTop = geometry.naturalTop
         let naturalBottom = geometry.naturalBottom
@@ -274,15 +298,20 @@ public struct PlayerView: View {
                 // the screen for the length of the pre-buffer, which reads
                 // as the stream having started badly rather than as
                 // something still loading.
-                .frame(width: Self.placeholderCardSize(in: windowSize).width,
-                       height: Self.placeholderCardSize(in: windowSize).height)
+                .frame(width: flyInSettled ? videoRect.width : Self.placeholderCardSize(in: windowSize).width,
+                       height: flyInSettled ? videoRect.height : Self.placeholderCardSize(in: windowSize).height)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: flyInSettled ? 0 : 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        .stroke(Color.white.opacity(flyInSettled ? 0 : 0.10), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.5), radius: 26, y: 10)
+                .shadow(color: .black.opacity(flyInSettled ? 0 : 0.5), radius: 26, y: 10)
+                // See `flyInSettled`. Blurred before it is clipped so the
+                // edges fade into the black around them rather than ending
+                // on a hard line; the blur runs only until the first frame.
+                .blur(radius: flyInSettled ? 56 : 0)
+                .opacity(flyInSettled ? 0.45 : 1)
                 .matchedGeometryEffect(id: morphSource.key, in: morphSource.namespace)
                 // Same reasoning as the detail page's poster:
                 // matchedGeometryEffect only animates the frame, so without
@@ -382,7 +411,7 @@ public struct PlayerView: View {
                     // Below the still's card while one is up, centred when
                     // there is none — printed over the card, the spinner sat
                     // on the artwork it is meant to be waiting beneath.
-                    .offset(y: isFlyingIn
+                    .offset(y: isFlyingIn && !flyInSettled
                             ? Self.placeholderCardSize(in: windowSize).height / 2 + 34
                             : 0)
                     .transition(.opacity)
@@ -454,7 +483,13 @@ public struct PlayerView: View {
                             // blurred picture and the labels vanished.
                             chromeGround
                                 .frame(height: naturalTop)
-                            if topGap > naturalTop, controller.areControlsVisible {
+                            // Not while the picture is on its side: a 9:16
+                            // picture in a 16:10 window has no natural gap,
+                            // so the whole bar was scrim, and 78% black over
+                            // the top and bottom of the turned picture read
+                            // as the chrome growing a black background.
+                            // `chromeLegibility` carries the labels there.
+                            if topGap > naturalTop, controller.areControlsVisible, controller.sidewaysState == 0 {
                                 LinearGradient(
                                     colors: [Color.black.opacity(0.78), Color.black.opacity(0)],
                                     startPoint: .top,
@@ -480,7 +515,7 @@ public struct PlayerView: View {
                     .frame(maxWidth: .infinity)
                     .background(alignment: .bottom) {
                         VStack(spacing: 0) {
-                            if bottomGap > naturalBottom, controller.areControlsVisible {
+                            if bottomGap > naturalBottom, controller.areControlsVisible, controller.sidewaysState == 0 {
                                 LinearGradient(
                                     colors: [Color.black.opacity(0), Color.black.opacity(0.82)],
                                     startPoint: .top,
@@ -632,6 +667,19 @@ public struct PlayerView: View {
                 if !audioTracks.isEmpty || !subtitleTracks.isEmpty { return }
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 if Task.isCancelled { return }
+            }
+        }
+        // The card holds still for the length of the morph (the app's
+        // `.smooth` spring settles in about half a second) and then
+        // dissolves into the wash. Not on `firstFrameLanded`: that is the
+        // moment the whole placeholder goes, and the point is what shows
+        // during the seconds before it.
+        .task {
+            guard morphSource != nil, !reduceMotion else { return }
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard !Task.isCancelled, !hasShownFirstFrame else { return }
+            withAnimation(.easeInOut(duration: 0.7)) {
+                flyInSettled = true
             }
         }
         .onChange(of: firstFrameLanded) { _, landed in

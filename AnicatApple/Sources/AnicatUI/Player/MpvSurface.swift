@@ -2037,12 +2037,21 @@ public struct MpvSurface {
                                 self.controller.duration = dur
                                 self.controller.onPositionChange?(self.controller.currentTime, dur)
                             }
-                        } else if name == "video-out-params/dw", let data = prop.data {
-                            let w = data.assumingMemoryBound(to: Int64.self).pointee
-                            await MainActor.run { self.controller.videoDisplayWidth = Double(w) }
-                        } else if name == "video-out-params/dh", let data = prop.data {
-                            let h = data.assumingMemoryBound(to: Int64.self).pointee
-                            await MainActor.run { self.controller.videoDisplayHeight = Double(h) }
+                        } else if name == "video-out-params/dw" || name == "video-out-params/dh", prop.data != nil {
+                            // Both read now, as one pair, whichever of the two
+                            // fired. mpv reports them as two events, and between
+                            // them the aspect was the new width over the old
+                            // height: the letterbox gap recomputed from that and
+                            // the controls' scrim jumped onto the picture for a
+                            // frame ("de fade springt omhoog", a tester's words).
+                            let w = self.stringProperty("video-out-params/dw").flatMap(Double.init) ?? 0
+                            let h = self.stringProperty("video-out-params/dh").flatMap(Double.init) ?? 0
+                            if w > 0, h > 0 {
+                                await MainActor.run {
+                                    self.controller.videoDisplayWidth = w
+                                    self.controller.videoDisplayHeight = h
+                                }
+                            }
                         } else if name == "video-params/dw", let data = prop.data {
                             let w = data.assumingMemoryBound(to: Int64.self).pointee
                             await MainActor.run { self.controller.decodedDisplayWidth = Double(w) }

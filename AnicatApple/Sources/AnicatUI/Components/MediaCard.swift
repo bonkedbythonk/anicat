@@ -41,6 +41,9 @@ public struct MediaCard: View, Equatable {
         public let hasNewEpisode: Bool
         public let playlistReason: String?
         public let catalog: CardCatalog?
+        /// The AniList list entry behind this card, when it is on the
+        /// viewer's list. What a shelf's "Remove from list" deletes by.
+        public var listEntryId: Int64? = nil
 
         public init(
             id: Int64,
@@ -52,7 +55,8 @@ public struct MediaCard: View, Equatable {
             totalEpisodesOrChapters: Int? = nil,
             hasNewEpisode: Bool = false,
             playlistReason: String? = nil,
-            catalog: CardCatalog? = nil
+            catalog: CardCatalog? = nil,
+            listEntryId: Int64? = nil
         ) {
             self.id = id
             self.title = title
@@ -64,6 +68,7 @@ public struct MediaCard: View, Equatable {
             self.hasNewEpisode = hasNewEpisode
             self.playlistReason = playlistReason
             self.catalog = catalog
+            self.listEntryId = listEntryId
         }
     }
 

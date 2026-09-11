@@ -318,7 +318,8 @@ extension AppModel {
             hasNewEpisode: {
                 guard let p = progress, let r = released else { return false }
                 return s.listStatus == "CURRENT" && p < r
-            }()
+            }(),
+            listEntryId: s.listEntryId
         )
     }
 

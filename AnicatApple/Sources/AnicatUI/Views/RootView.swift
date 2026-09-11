@@ -742,12 +742,12 @@ public struct RootView: View {
     private var sectionBody: some View {
         switch model.currentNavSection {
         case .upNext:
-            // Cinema mode replaces the home page rather than adding rows to
-            // it: an AniList id and a TMDB id are different numbers for
-            // different titles, and a shelf holding both could not say which
-            // detail page a card opens.
+            // Cinema has no home page: an AniList id and a TMDB id are
+            // different numbers for different titles, and its own Home was
+            // the Films and Series shelves again. `redirectHomeInCinema`
+            // moves the section on; this is the frame in between.
             if model.appMode == .cinema {
-                CinemaHomeView(model: model, namespace: cardNamespace, page: .home, focusSearchOnAppear: false)
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .films, focusSearchOnAppear: false)
             } else {
                 // Its own View struct, not a computed property here: `homeView`
                 // used to inline into this 1198-line body, so any one shelf's
@@ -763,9 +763,9 @@ public struct RootView: View {
             }
         case .schedule:
             if model.appMode == .cinema {
-                // Not in cinema's rail any more; reachable only by a stale
-                // restored section, and Home is the honest landing for it.
-                CinemaHomeView(model: model, namespace: cardNamespace, page: .home, focusSearchOnAppear: false)
+                // Not in cinema's rail; reachable only by a stale restored
+                // section, and Films is the landing for it.
+                CinemaHomeView(model: model, namespace: cardNamespace, page: .films, focusSearchOnAppear: false)
             } else {
             ScheduleView(
                 items: model.scheduleItems,
@@ -898,7 +898,8 @@ public struct RootView: View {
                 openingSourceKey: model.openingDetailSourceKey,
                 onSelect: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
                 onRead: { openDetailFor(id: $0.id, title: $0.title, coverURL: $0.coverImageURL, isManga: true, sourceKey: $1) },
-                onBrowse: { model.currentNavSection = .search }
+                onBrowse: { model.currentNavSection = .search },
+                onRemove: { item in Task { await model.removeListEntry(of: item) } }
             )
             }
         case .novels:
@@ -919,7 +920,8 @@ public struct RootView: View {
                 // AniList/RanobeDB entries above have no linked text source
                 // yet (see `AppModel.SyosetuSession`'s comment) — this is the
                 // only way into a novel's actual chapter text today.
-                onOpenSyosetu: { model.openNovelReaderEntry() }
+                onOpenSyosetu: { model.openNovelReaderEntry() },
+                onRemove: { item in Task { await model.removeListEntry(of: item) } }
             )
             }
         case .history:

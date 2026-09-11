@@ -59,6 +59,9 @@ public struct ReadingView: View {
     /// catalog entries that carry no linked text source, not the way into the
     /// section. Nil on the manga tab, where it has no meaning.
     let onOpenSyosetu: (() -> Void)?
+    /// Right-click "Remove from list" on the reading and planning shelves.
+    /// The trending shelf is not the viewer's list and gets no menu.
+    let onRemove: ((MediaCard.Item) -> Void)?
 
     public init(
         config: Config,
@@ -71,7 +74,8 @@ public struct ReadingView: View {
         onSelect: @escaping (MediaCard.Item, String?) -> Void,
         onRead: @escaping (MediaCard.Item, String?) -> Void,
         onBrowse: @escaping () -> Void,
-        onOpenSyosetu: (() -> Void)? = nil
+        onOpenSyosetu: (() -> Void)? = nil,
+        onRemove: ((MediaCard.Item) -> Void)? = nil
     ) {
         self.config = config
         self.reading = reading
@@ -84,6 +88,7 @@ public struct ReadingView: View {
         self.onRead = onRead
         self.onBrowse = onBrowse
         self.onOpenSyosetu = onOpenSyosetu
+        self.onRemove = onRemove
     }
 
     /// Only titles with progress belong in the resume queue. A "reading" entry
@@ -141,7 +146,7 @@ public struct ReadingView: View {
             if !reading.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     SumiSectionHeader(config.readingShelf, trailing: "\(reading.count) titles")
-                    shelf(reading, shelfKey: "reading-shelf")
+                    shelf(reading, shelfKey: "reading-shelf", removable: true)
                 }
                 .padding(.top, 20)
             }
@@ -152,7 +157,7 @@ public struct ReadingView: View {
             if !planning.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     SumiSectionHeader(config.planningShelf, trailing: "\(planning.count) titles")
-                    shelf(planning, shelfKey: "reading-planning")
+                    shelf(planning, shelfKey: "reading-planning", removable: true)
                 }
                 .padding(.top, 20)
             }
@@ -201,7 +206,7 @@ public struct ReadingView: View {
         .padding(.top, 24)
     }
 
-    private func shelf(_ items: [MediaCard.Item], shelfKey: String) -> some View {
+    private func shelf(_ items: [MediaCard.Item], shelfKey: String, removable: Bool = false) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 16) {
                 ForEach(items) { item in
@@ -211,6 +216,15 @@ public struct ReadingView: View {
                     ) { onSelect(item, "\(shelfKey):\(item.id)") }
                         .frame(width: 180)
                         .sumiShelfEdge()
+                        // The one way off the list for a title whose page
+                        // AniList no longer serves: a merged or deleted
+                        // entry answers Not Found, so the page's own Remove
+                        // is never reached.
+                        .contextMenu {
+                            if removable, let onRemove, item.listEntryId != nil {
+                                Button("Remove from list", role: .destructive) { onRemove(item) }
+                            }
+                        }
                 }
             }
             .padding(.vertical, 4)

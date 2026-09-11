@@ -27,6 +27,26 @@ final class AppearanceLock: NSObject, NSApplicationDelegate {
         // over a light ground.
         ThemeStore.shared.applyToNativeChrome()
         _ = ScrollPocketWorkaround.disableScrollPocketsOnce
+        // A `Window` scene does not always open at launch: after a kill or a
+        // crash (no clean quit to record the window as open) the app came up
+        // with the menu bar icon, the log's first line and nothing else, until
+        // a Dock click sent it the reopen event. Reproduced three times in a
+        // row on 2026-09-11 after `pkill`. The same event, sent to ourselves
+        // once the scene had its chance, is what a Dock click would do.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let hasMainWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+            guard !hasMainWindow else { return }
+            AppLog.write("launch opened no window; sending reopen to self")
+            let target = NSAppleEventDescriptor.currentProcess()
+            let event = NSAppleEventDescriptor(
+                eventClass: AEEventClass(kCoreEventClass),
+                eventID: AEEventID(kAEReopenApplication),
+                targetDescriptor: target,
+                returnID: AEReturnID(kAutoGenerateReturnID),
+                transactionID: AETransactionID(kAnyTransactionID)
+            )
+            _ = try? event.sendEvent(options: [.noReply], timeout: 1)
+        }
     }
 }
 

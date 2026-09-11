@@ -52,6 +52,10 @@ public struct UpNextQueueView: View {
     public let playerSourceKey: String?
     public let onSelect: (QueueEntry) -> Void
     public let onPlay: (QueueEntry) -> Void
+    /// Right-click "Remove", when the queue can forget a row. Cinema's
+    /// queue is local watch history and can; the anime queue is the
+    /// AniList list and cannot, so it passes nothing and gets no menu.
+    public let onRemove: ((QueueEntry) -> Void)?
 
     /// The one place the Up Next form of the key is spelled — the play call
     /// site sets it and the row below compares against it.
@@ -65,7 +69,8 @@ public struct UpNextQueueView: View {
         playerNamespace: Namespace.ID? = nil,
         playerSourceKey: String? = nil,
         onSelect: @escaping (QueueEntry) -> Void,
-        onPlay: @escaping (QueueEntry) -> Void
+        onPlay: @escaping (QueueEntry) -> Void,
+        onRemove: ((QueueEntry) -> Void)? = nil
     ) {
         self.items = items
         self.namespace = namespace
@@ -73,6 +78,7 @@ public struct UpNextQueueView: View {
         self.playerSourceKey = playerSourceKey
         self.onSelect = onSelect
         self.onPlay = onPlay
+        self.onRemove = onRemove
     }
 
     private func morphSource(for entry: QueueEntry) -> EpisodeMorphSource? {
@@ -105,6 +111,11 @@ public struct UpNextQueueView: View {
                     onSelect: { onSelect(entry) },
                     onPlay: { onPlay(entry) }
                 )
+                .contextMenu {
+                    if let onRemove {
+                        Button("Remove from Continue Watching") { onRemove(entry) }
+                    }
+                }
 
                 if index < items.count - 1 {
                     // A `Divider` draws its own system separator colour and

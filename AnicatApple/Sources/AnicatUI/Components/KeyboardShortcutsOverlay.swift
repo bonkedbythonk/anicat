@@ -69,7 +69,7 @@ public struct KeyboardShortcutsOverlay: View {
                 ShortcutItem(id: "palette", label: "Command palette", keys: ["⌘", "K"]),
                 ShortcutItem(id: "search", label: "Quick search", keys: ["/"]),
                 ShortcutItem(id: "sections", label: "Jump to section (1–9)", keys: ["1", "–", "9"]),
-                ShortcutItem(id: "home", label: "Up Next", keys: ["H"]),
+                ShortcutItem(id: "home", label: "Anime", keys: ["H"]),
                 ShortcutItem(id: "library", label: "Library", keys: ["L"]),
                 ShortcutItem(id: "manga", label: "Manga", keys: ["M"]),
                 ShortcutItem(id: "novels", label: "Light Novels", keys: ["N"]),

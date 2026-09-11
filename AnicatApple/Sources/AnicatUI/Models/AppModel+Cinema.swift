@@ -85,11 +85,12 @@ extension AppModel {
         guard mode != appMode else { return }
         guard mode == .anime || cinemaAvailable else { return }
         appMode = mode
-        // A section the new mode does not have would leave the rail with
-        // nothing highlighted and the content column on a page that mode
-        // cannot fill -- Manga in cinema, Coming Soon's cinema rows in anime.
-        if !SidebarView.NavSection.browseItems(for: mode).contains(currentNavSection),
-           !SidebarView.NavSection.systemItems.contains(currentNavSection) {
+        // Always the new mode's first page, not "keep the section if the new
+        // mode has it": the two rails share cases (Films is the Manga case,
+        // Series the Light Novels case), so a switch back from Films landed
+        // on Manga -- a page the viewer never chose. Settings and Downloads
+        // are the same in both worlds and stay.
+        if !SidebarView.NavSection.systemItems.contains(currentNavSection) {
             currentNavSection = mode == .cinema ? .manga : .upNext
         }
         // `clearDetail`, not `closeDetail`: the stacks hold pages from the

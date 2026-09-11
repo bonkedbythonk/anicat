@@ -32,7 +32,7 @@ public struct SidebarView: View {
             case (.manga, .cinema): return "Films"
             case (.novels, .cinema): return "Series"
             case (.library, .cinema): return "Watching"
-            case (.upNext, _): return "Up Next"
+            case (.upNext, _): return "Anime"
             case (.schedule, _): return "Schedule"
             case (.library, _): return "Library"
             case (.manga, _): return "Manga"

@@ -218,6 +218,23 @@ public struct PlayerView: View {
     /// the whole bar height was overlay and the controls' scrim painted
     /// out the glow lit in the encoded bar every time the transport came
     /// up -- the one moment it is being looked at.
+    /// The encoded bars the chrome may lay out against: only a bar deep
+    /// enough to be a real letterbox. The detector reads a dark strip at
+    /// the edge of a 16:9 scene as a bar of a row or two, and the chrome
+    /// following that shot to shot would be the scrim hopping on and off
+    /// the picture. A 2.35:1 scene in a 16:9 file is 12% top and bottom;
+    /// 4% is well under that and well over noise.
+    static let chromeInsetFloor = 0.04
+
+    static func chromeInset(_ inset: AmbientContentInset) -> AmbientContentInset {
+        AmbientContentInset(
+            top: inset.top >= chromeInsetFloor ? inset.top : 0,
+            bottom: inset.bottom >= chromeInsetFloor ? inset.bottom : 0,
+            left: 0,
+            right: 0
+        )
+    }
+
     static func chromeGeometry(
         windowSize: CGSize,
         aspectRatio: Double?,
@@ -251,7 +268,7 @@ public struct PlayerView: View {
         let geometry = Self.chromeGeometry(
             windowSize: windowSize,
             aspectRatio: controller.videoAspectRatio,
-            contentInset: glowFrame == nil ? .zero : controller.ambientContentInset
+            contentInset: glowFrame == nil ? .zero : Self.chromeInset(controller.ambientContentInset)
         )
         let videoRect = geometry.videoRect
         let naturalTop = geometry.naturalTop
@@ -530,6 +547,10 @@ public struct PlayerView: View {
                     .allowsHitTesting(controller.areControlsVisible)
                 }
                 .animation(.smooth, value: controller.areControlsVisible)
+                // A gap that changes (the aspect landing, an encoded bar
+                // found) glides rather than jumps: the bars sit on the
+                // picture's edge and a one-frame hop there reads as a glitch.
+                .animation(.smooth, value: geometry)
                 .transition(Self.chromeTransition)
 
                 // Skip pill / auto-skip flash (bottom right). Kept floating

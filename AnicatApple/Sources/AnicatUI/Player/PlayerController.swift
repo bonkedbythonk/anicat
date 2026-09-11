@@ -285,6 +285,12 @@ public final class PlayerController {
     /// with this taken off, so the bands light the encoded bars too instead
     /// of stopping at the window's own letterbox.
     public private(set) var ambientContentInset: AmbientContentInset = .zero
+    /// The bars the chrome lays out against: `ambientContentInset` after
+    /// `PlayerView.ChromeInsetHold`, so a dark shot does not move the
+    /// controls' scrim. The glow keeps the raw inset; on a black shot the
+    /// bands it lights are black either way.
+    public private(set) var chromeContentInset: AmbientContentInset = .zero
+    private var chromeInsetHold = PlayerView.ChromeInsetHold()
     /// Monotonic, never reset: it is the cross-fade's identity, and a
     /// counter that restarted per episode would make the first frame of a
     /// new episode compare equal to the last of the old one and swap with no
@@ -299,6 +305,9 @@ public final class PlayerController {
         ambientFrameCount += 1
         ambientFrame = AmbientFrame(id: ambientFrameCount, image: image)
         ambientContentInset = inset
+        if chromeInsetHold.offer(inset, at: CACurrentMediaTime()) {
+            chromeContentInset = chromeInsetHold.current
+        }
         ambientSource = .frame
     }
 
@@ -322,6 +331,8 @@ public final class PlayerController {
         // about it, and left in place they held the bands off the window's
         // own letterbox edge.
         ambientContentInset = .zero
+        chromeInsetHold.reset()
+        chromeContentInset = .zero
         guard let ambientStill else {
             ambientFrame = nil
             ambientSource = .none

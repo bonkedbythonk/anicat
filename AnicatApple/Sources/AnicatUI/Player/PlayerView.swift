@@ -225,14 +225,69 @@ public struct PlayerView: View {
     /// the picture. A 2.35:1 scene in a 16:9 file is 12% top and bottom;
     /// 4% is well under that and well over noise.
     static let chromeInsetFloor = 0.04
+    /// The deepest letterbox a real film has: 2.76:1 (Ben-Hur) in a 16:9
+    /// file is 18% top and bottom. The detector goes to 40% because the
+    /// glow wants the fade case caught; the chrome does not, and a 40%
+    /// "bar" is a dark shot with the subject in the middle.
+    static let chromeInsetCeiling = 0.2
+    /// A letterbox is centred, so its two bars are the same height. A
+    /// scene on black (a hand reaching out of the dark, one line of
+    /// dialogue on a black cut) is bar on one edge only, or bars of two
+    /// different heights, and that is what put the controls' scrim
+    /// halfway up the picture in the tester's report.
+    static let chromeInsetAsymmetry = 0.02
 
     static func chromeInset(_ inset: AmbientContentInset) -> AmbientContentInset {
-        AmbientContentInset(
-            top: inset.top >= chromeInsetFloor ? inset.top : 0,
-            bottom: inset.bottom >= chromeInsetFloor ? inset.bottom : 0,
-            left: 0,
-            right: 0
-        )
+        let letterbox = inset.top >= chromeInsetFloor && inset.bottom >= chromeInsetFloor
+            && inset.top <= chromeInsetCeiling && inset.bottom <= chromeInsetCeiling
+            && abs(inset.top - inset.bottom) <= chromeInsetAsymmetry
+        return letterbox ? AmbientContentInset(top: inset.top, bottom: inset.bottom, left: 0, right: 0) : .zero
+    }
+
+    /// The inset the chrome lays out against, changed only once the
+    /// detector has reported the same thing for `holdSeconds`. The shape
+    /// rule alone still let a dark shot with symmetric black at the top
+    /// and bottom move the scrim for the length of that shot; a film's
+    /// letterbox is there for two hours and can afford to wait a second
+    /// and a half, while a shot on black rarely holds that long.
+    struct ChromeInsetHold {
+        static let holdSeconds = 1.5
+        /// Refinement jitter on a steady bar: the boundary row's blend
+        /// moves the reading by a hundredth or so between samples.
+        static let tolerance = 0.01
+
+        private(set) var current: AmbientContentInset = .zero
+        private var pending: AmbientContentInset = .zero
+        private var pendingSince: TimeInterval?
+
+        private static func same(_ a: AmbientContentInset, _ b: AmbientContentInset) -> Bool {
+            abs(a.top - b.top) <= tolerance && abs(a.bottom - b.bottom) <= tolerance
+        }
+
+        /// Feeds one sample; returns whether `current` changed.
+        @discardableResult
+        mutating func offer(_ inset: AmbientContentInset, at now: TimeInterval) -> Bool {
+            let candidate = PlayerView.chromeInset(inset)
+            if Self.same(candidate, current) {
+                pendingSince = nil
+                return false
+            }
+            if let since = pendingSince, Self.same(candidate, pending) {
+                guard now - since >= Self.holdSeconds else { return false }
+                current = candidate
+                pendingSince = nil
+                return true
+            }
+            pending = candidate
+            pendingSince = now
+            return false
+        }
+
+        mutating func reset() {
+            current = .zero
+            pending = .zero
+            pendingSince = nil
+        }
     }
 
     static func chromeGeometry(
@@ -268,7 +323,7 @@ public struct PlayerView: View {
         let geometry = Self.chromeGeometry(
             windowSize: windowSize,
             aspectRatio: controller.videoAspectRatio,
-            contentInset: glowFrame == nil ? .zero : Self.chromeInset(controller.ambientContentInset)
+            contentInset: glowFrame == nil ? .zero : controller.chromeContentInset
         )
         let videoRect = geometry.videoRect
         let naturalTop = geometry.naturalTop

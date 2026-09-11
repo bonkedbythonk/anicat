@@ -592,4 +592,52 @@ struct AnicatUITests {
         #expect(fourThree.videoRect.height == 1080)
         #expect(fourThree.topOverlay == PlayerView.minTopBarHeight)
     }
+    // The tester's screenshot: a hand reaching out of black, the bottom 40%
+    // of the frame read as a bar and the controls' scrim drawn from 59% of
+    // the window down over the picture. A letterbox is two bars of one
+    // height, no deeper than 2.76:1; anything else is a dark shot and the
+    // chrome must not move for it.
+    @Test("Player chrome takes only a symmetric, film-deep encoded letterbox")
+    @MainActor
+    func testChromeInsetShapeRule() {
+        let darkShot = AmbientContentInset(top: 0, bottom: 0.4, left: 0, right: 0)
+        #expect(PlayerView.chromeInset(darkShot) == .zero)
+        let lopsided = AmbientContentInset(top: 0.05, bottom: 0.12, left: 0, right: 0)
+        #expect(PlayerView.chromeInset(lopsided) == .zero)
+        let tooDeep = AmbientContentInset(top: 0.3, bottom: 0.3, left: 0, right: 0)
+        #expect(PlayerView.chromeInset(tooDeep) == .zero)
+        let hairline = AmbientContentInset(top: 0.01, bottom: 0.01, left: 0, right: 0)
+        #expect(PlayerView.chromeInset(hairline) == .zero)
+        let scope = AmbientContentInset(top: 0.12, bottom: 0.125, left: 0.03, right: 0.03)
+        #expect(PlayerView.chromeInset(scope) == AmbientContentInset(top: 0.12, bottom: 0.125, left: 0, right: 0))
+    }
+
+    // Thirty samples a second reach the hold; a bar has to be reported for
+    // a second and a half before the scrim moves, and a shot that passes
+    // the shape rule for less than that leaves it where it was.
+    @Test("Player chrome inset waits out a passing shot")
+    @MainActor
+    func testChromeInsetHold() {
+        var hold = PlayerView.ChromeInsetHold()
+        let scope = AmbientContentInset(top: 0.12, bottom: 0.12, left: 0, right: 0)
+        #expect(hold.offer(scope, at: 0) == false)
+        #expect(hold.offer(scope, at: 1.0) == false)
+        #expect(hold.current == .zero)
+        #expect(hold.offer(scope, at: 1.6) == true)
+        #expect(hold.current == scope)
+        // Refinement jitter on the same bar is not a new reading.
+        #expect(hold.offer(AmbientContentInset(top: 0.125, bottom: 0.118, left: 0, right: 0), at: 2.0) == false)
+        #expect(hold.current == scope)
+        // A one-second shot on black: back to the bar before the hold runs out.
+        let black = AmbientContentInset(top: 0.2, bottom: 0.2, left: 0, right: 0)
+        #expect(hold.offer(black, at: 3.0) == false)
+        #expect(hold.offer(black, at: 4.0) == false)
+        #expect(hold.offer(scope, at: 4.1) == false)
+        #expect(hold.current == scope)
+        // Its timer restarted: black again is a fresh candidate.
+        #expect(hold.offer(black, at: 4.2) == false)
+        #expect(hold.offer(black, at: 5.6) == false)
+        #expect(hold.offer(black, at: 5.8) == true)
+        #expect(hold.current == black)
+    }
 }

@@ -20,7 +20,8 @@ struct ReadingShelvesTests {
             userScore: nil,
             updatedAt: nil,
             nextAiringAt: nil,
-            nextEpisode: nil
+            nextEpisode: nil,
+            listEntryId: nil
         )
     }
 

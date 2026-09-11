@@ -333,7 +333,8 @@ struct RealDataWiringTests {
             userScore: nil,
             updatedAt: nil,
             nextAiringAt: nil,
-            nextEpisode: nil
+            nextEpisode: nil,
+            listEntryId: nil
         )
         let card = AppModel.card(releasingMangaSummary)
         #expect(card.isManga == true)

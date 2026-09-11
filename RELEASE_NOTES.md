@@ -1,96 +1,62 @@
-## Anicat 6.0.0
+## Anicat 6.0.1
 
-Anicat is now a native macOS app. The Tauri/React app that every release up
-to 5.8.0 shipped has been replaced by a SwiftUI and AppKit front end over a
-headless Rust engine, joined by UniFFI, with libmpv drawn straight into the
-window through Metal. This is a rewrite, not an update: there is no web view
-and no sidecar process left in the app.
+The first update to the native app. Cinema mode is the headline: it no longer
+asks for an AniList account, and it is on by default in every build.
+
+### Cinema without AniList
+
+Setup now asks where to start before anything else. Pick Cinema and the
+AniList step is skipped: films and series come from TMDB, your watchlist is
+kept on the device, and nothing in that mode needs an account. The "AniList is
+down" banner stays in Anime mode, where it belongs. Anyone who later switches
+to Anime can still connect from Settings.
+
+### Player
+
+- Closing the player now refreshes Resume and Up Next straight away, and the
+  audio stops with the picture instead of running a second past the close.
+- Resume works after a rewatch of an earlier episode, and Undo on "marked
+  watched" restores the progress and the list status, not one less.
+- The resolving card names the release it is connecting to and counts the
+  seconds; a play from the Up Next shelf gets next, previous, auto-next and
+  the preload like a play from the page does.
+- The mini-player picture no longer sticks at 320x180 in the corner of the
+  full player after a resize while playing.
+- Ambient glow: a subtitle line no longer collapses the bottom band on a
+  2.35:1 film, the controls sit inside the lit bars instead of painting a
+  scrim over them, and sideways mode no longer draws a black band over the
+  top and bottom of the turned picture.
+- Anime4K runs on anime only. Films and series and any source of 1440 rows
+  or more play untouched; the player says so once when it opens them.
+- The keyboard backlight goes dark with the controls and stays lit while
+  they are up.
+- The episode still shown while a stream connects dissolves into a soft
+  colour wash instead of sitting as a small card in the middle of the screen.
+- The info menu fits the window, Sub/Dub can go and find a release in the
+  other language, and an unaired episode is no longer somewhere Next can go.
+- Closing the player can no longer leave a second, frozen window behind.
+
+### Cinema
+
+- Genre, year and sort filters live in Search, and the grid pages itself.
+- The phone's Films and TV segment loads, and three ways a stream could
+  report the wrong thing are fixed.
+- The TMDB proxy is the default in every build, so cinema mode cannot go
+  missing from a build that forgot to set it.
+
+### Feedback
+
+Warmer sounds, and haptics that actually fire on a trackpad.
+
+### Installer
+
+The one-line installer refuses macOS 14 and older up front (the app needs
+macOS 15), falls back to `~/Applications` on an account that cannot write
+`/Applications`, and no longer depends on the GitHub API's per-address
+request limit to find the download.
 
 ### Upgrading from 5.x
 
-Your AniList account carries over — the app reads the token the 5.x build
-left in `~/Library/Application Support/Anicat/config.toml`, and your library,
-progress and scores come back from AniList itself on first sync.
-
-Do not use the 5.x app's own Update button for this one. It will find the
-disk image and install it, but it copies the new app *over* the old bundle
-instead of replacing it, so the retired app's files stay inside -- measured at
-245 MB against 102 MB, with `codesign` then reporting the bundle's seal
-invalid. Open the `.dmg` from this page and drag Anicat to Applications
-yourself instead; that replaces the app cleanly. The 5.x app is retired either
-way and nothing further is coming for it.
-
-**The one-line installer is the easiest way in.** Paste this into Terminal:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash
-```
-
-It downloads this release, installs it and opens it, and clears the quarantine
-flag on the way so macOS does not block the app. Installing the `.dmg` by hand
-works too, but then macOS refuses to open it once and you have to click Open
-Anyway at the bottom of System Settings > Privacy & Security. Right-clicking
-the app and choosing Open does *not* work any more -- Apple removed that
-shortcut in Sequoia.
-
-There is nothing to uninstall first. Both versions are called Anicat, carry
-the same bundle identifier and install to `/Applications/Anicat.app`, so 6.0.0
-replaces the 5.x app in place. What it does not replace is the 5.x data, and
-the retired web view's cache alone is around 90 MB. To see what is left and
-move it to the Trash:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/cleanup_legacy_macos.sh
-bash cleanup_legacy_macos.sh
-```
-
-It lists everything with its size and asks before moving anything, and it
-leaves your token, your 6.0.0 library and your downloads alone.
-
-Local-only data does not carry over. The engine uses a new database
-(`registry.sqlite`) and does not read the 5.x `registry.db`, so the local
-watch log, saved downloads, per-title audio and subtitle preferences, and
-manual search-title overrides start empty. The old `registry.db`,
-`registry.json` and `covers/` in that folder are unused by 6.0.0 and can be
-deleted. Leave `config.toml` alone — 6.0.0 still keeps your token there.
-
-### What is new
-
-- **Playback in-window.** libmpv renders into the app's own Metal layer at
-  the display's refresh rate — no second window, no browser video element.
-  Anime4K upscaling, AniSkip intro and outro skip, resume position, a corner
-  mini-player, and auto-next with the following episode resolved at 75% of
-  the current one.
-- **Faster starts.** Candidates from SubsPlease, AnimeTosho, Nyaa and SeaDex
-  are gathered in one wave rather than in phases, the best two are raced, and
-  the release that won an episode is remembered and tried first next time.
-  Measured resolve time: 2750ms cold, 955ms for a remembered release, 798ms
-  from a complete cached file.
-- **Films and TV** — the TMDB catalog plays as well as browses. A film is
-  matched on title and year and an episode on SxxEyy, neither of which the
-  anime search has a notion of, so they take their own path into the same
-  player.
-- **Manga reader** — single page, two-page spread, vertical scroll, RTL and
-  LTR, with MangaDex first and MangaKatana filling in titles MangaDex has
-  matched but cannot serve.
-- **Light novel reader** for official volumes and for Syosetu web novels,
-  with typography controls and per-chapter progress. A volume can be kept for
-  offline reading and exported as an EPUB.
-- **Downloads and History** — keep an episode for offline playback, with a
-  local watch log you can open, prune or clear.
-- **Continuity** — Handoff of playback and reading between Macs, and Bonjour
-  discovery of other instances.
-- **Keyboard-driven** — a command palette, shortcuts for every view, and a
-  built-in cheat sheet on `?`.
-
-Full feature list in the [README](https://github.com/bonkedbythonk/anicat#features).
-
-### Known limits
-
-- Apple silicon only, macOS 15 or later. There is no Intel build.
-- Light novels come from one source for official volumes and Syosetu for web
-  novels; other novel sites are not ported yet.
-- macOS only for now. An iPhone build exists, with a phone layout of its own,
-  but it is not part of this release: an iPhone installs apps from outside the
-  App Store only through a sideloading tool on a computer, and on a free Apple
-  ID the result stops working after a week.
+Same as 6.0.0: the AniList token carries over from `config.toml`, do not use
+the 5.x app's own Update button, and `scripts/cleanup_legacy_macos.sh` lists
+the retired app's leftover data.

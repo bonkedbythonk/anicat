@@ -46,7 +46,7 @@ targets:
       path: Generated/Info.plist
       properties:
         CFBundleDisplayName: Anicat
-        CFBundleShortVersionString: 6.0.0
+        CFBundleShortVersionString: 6.0.1
         CFBundleVersion: "1"
         # Playback must survive the screen locking or the app leaving the
         # foreground; without this the audio session is torn down the moment

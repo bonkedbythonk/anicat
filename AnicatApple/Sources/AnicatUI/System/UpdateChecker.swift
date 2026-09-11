@@ -10,12 +10,13 @@ import Foundation
 /// needs -- `scripts/publish-release.sh` tags `v<version>` and attaches
 /// `Anicat-<version>-macos-arm64.zip`, so the tag alone says what is out.
 ///
-/// Deliberately not Sparkle. That would want an EdDSA signing key, an
-/// appcast to host and a Developer ID identity to validate against, and this
-/// build is ad-hoc or development signed -- the framework's own checks would
-/// reject the very zip it was pointed at. Opening the release page and
-/// letting the viewer replace the app is honest about what the distribution
-/// actually is.
+/// Deliberately not Sparkle, and not a self-replacing updater of our own: the
+/// owner chose the one-line installer (`scripts/install_macos.sh`) as the
+/// update path in 2026-09. Not because the ad-hoc signature rules Sparkle out
+/// -- its validator accepts an update on an EdDSA signature alone when the
+/// host has no Developer ID (read from `SUUpdateValidator`, never tried
+/// here) -- but because a signing key, an appcast and an updater's failure
+/// modes are more than this distribution wants to carry.
 public enum UpdateChecker {
     public struct Release: Sendable, Equatable {
         /// Tag with the leading `v` stripped, so it compares against

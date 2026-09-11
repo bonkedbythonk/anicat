@@ -138,11 +138,15 @@ fi
 echo "Step 4: Opening Anicat..."
 open "$INSTALL_PATH"
 
-echo ""
-echo "================================="
-echo "   Anicat is ready!"
-echo "================================="
-echo ""
+# Quoted delimiter: unquoted, the backslash ending the ears line is a line
+# continuation, and the cat printed as "/\_/   ( ^.^ )" with no ears row.
+cat <<'EOF'
+
+    /\_/\
+   ( ^.^ )   Anicat is ready!
+    > ^ <
+
+EOF
 echo "The app should open now."
 echo "If not, open your Applications folder and click Anicat."
 echo ""

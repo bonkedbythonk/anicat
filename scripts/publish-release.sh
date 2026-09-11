@@ -80,7 +80,13 @@ fi
     echo "Easiest, and it clears the quarantine flag for you so macOS does not"
     echo "block the app -- paste into Terminal:"
     echo
-    echo '    `curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash`'
+    # A fenced block, never an indented one with backticks inside: indented
+    # code renders its backticks literally, a copy took them along, and zsh
+    # ran the installer as a command substitution and then tried to execute
+    # its output ("zsh: command not found: Step"). 6.0.0 and 6.0.1 shipped so.
+    echo '```bash'
+    echo 'curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash'
+    echo '```'
     echo
     echo "By hand: open the .dmg and drag Anicat to Applications (the .zip holds"
     echo "the same app). macOS then refuses to open it once -- click Done, then"

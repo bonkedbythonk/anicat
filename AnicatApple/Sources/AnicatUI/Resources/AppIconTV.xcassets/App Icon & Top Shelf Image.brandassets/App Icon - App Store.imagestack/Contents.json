@@ -1,4 +1,4 @@
 {
   "info" : { "author" : "xcode", "version" : 1 },
-  "layers" : [ { "filename" : "Front.imagestacklayer" } ]
+  "layers" : [ { "filename" : "Front.imagestacklayer" }, { "filename" : "Back.imagestacklayer" } ]
 }

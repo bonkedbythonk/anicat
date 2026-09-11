@@ -221,6 +221,9 @@ struct AnicatApp: App {
     @NSApplicationDelegateAdaptor(AppearanceLock.self) private var appearanceLock
 
     init() {
+        // Before anything else: the engine installs its logger in
+        // `AppModel()` below, and the file has to be in place by then.
+        AppLog.start()
         // AppKit reads the class flag when a scroll view is created, so the
         // patch has to land before the first scene builds its views.
         _ = ResponsiveScrollingPatch.applyOnce
@@ -448,6 +451,7 @@ struct AnicatApp: App {
     @State private var model: AppModel
 
     init() {
+        AppLog.start()
         let model = AppModel()
         _model = State(initialValue: model)
         model.registerAsShared()

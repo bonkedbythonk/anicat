@@ -179,6 +179,7 @@ public struct SettingsView: View {
         .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
         .init(label: "Current version", card: "Updates", tab: .advanced),
         .init(label: "Copy Debug Report", card: "Logs & Debugging", tab: .advanced),
+        .init(label: "Reveal Log File", card: "Logs & Debugging", tab: .advanced),
         .init(label: "Clear Local Registry", card: "System Maintenance", tab: .advanced),
         .init(label: "Reset Onboarding", card: "System Maintenance", tab: .advanced),
     ]
@@ -1173,7 +1174,7 @@ private struct MaintenanceTabSection: View {
         SettingsCard(title: "Logs & Debugging") {
             Button {
                 let report = """
-                Anicat Version: 1.0.0 (Native Apple Silicon ARM64)
+                Anicat Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")
                 Platform: \(Platform.osName) \(ProcessInfo.processInfo.operatingSystemVersionString)
                 Architecture: arm64
                 Signed In: \(isSignedIn)
@@ -1210,6 +1211,32 @@ private struct MaintenanceTabSection: View {
             }
             .buttonStyle(.sumiPressable)
 
+            #if os(macOS)
+            // The file, not its contents: a log is attached to a report,
+            // not read in a settings pane, and Finder is the way to attach.
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([AppLog.fileURL])
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 13))
+                    Text("Reveal Log File")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(SumiTheme.foreground.opacity(0.85))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(SumiTheme.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+            #endif
+
             // Environment Snapshot. No live log stream is wired up in the
             // native build — this used to be five hardcoded strings
             // dressed up as a log window; only the sign-in line was ever
@@ -1219,6 +1246,9 @@ private struct MaintenanceTabSection: View {
                 Text("Signed in: \(isSignedIn ? "yes" : "no")")
                 Text("Anime4K upscaling: \(gpuUpscaling ? "enabled" : "disabled")")
                 Text("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+                Text("Log: \(AppLog.fileURL.path)")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             .font(.system(size: 10.5, design: .monospaced))
             .foregroundColor(SumiTheme.muted)

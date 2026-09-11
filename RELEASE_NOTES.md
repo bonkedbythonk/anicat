@@ -48,6 +48,13 @@ to Anime can still connect from Settings.
 
 Warmer sounds, and haptics that actually fire on a trackpad.
 
+### Logging
+
+The app now keeps a log at `~/Library/Logs/Anicat/anicat.log`, one per
+launch with the three before it kept, holding the engine's resolve timings,
+mpv's messages and the app's own lines. Settings > Advanced > Reveal Log
+File opens it in Finder; attach it to a bug report.
+
 ### Installer
 
 The one-line installer refuses macOS 14 and older up front (the app needs

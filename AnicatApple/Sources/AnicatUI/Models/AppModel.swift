@@ -112,6 +112,17 @@ public final class AppModel {
         _ message: String,
         action: (label: String, run: @MainActor () -> Void)? = nil
     ) {
+        // Not over the picture. The 85% mark lands mid-episode by design,
+        // and a card in the corner of the film for six seconds is the app
+        // talking during the one stretch it should not. It is held until
+        // the player closes or is minimized, where the corner is chrome
+        // again; Undo still works then, since it restores a stored
+        // progress rather than "one less".
+        if activeStreamURL != nil, !isPlayerMinimized {
+            pendingNotice = (message, action)
+            return
+        }
+        pendingNotice = nil
         noticeDismissTask?.cancel()
         withAnimation(.snappy) {
             noticeMessage = message
@@ -124,7 +135,21 @@ public final class AppModel {
         }
     }
 
+    /// A notice raised while the full-size player was up. One slot, not a
+    /// queue: a second mark during the same sitting replaces the first,
+    /// and the earlier one is on the list page like any other.
+    var pendingNotice: (message: String, action: (label: String, run: @MainActor () -> Void)?)?
+
+    /// Shows the held notice once the picture is out of the way. Called
+    /// from `isPlayerMinimized`'s observer and from `stopPlayback`.
+    func flushPendingNotice() {
+        guard let pending = pendingNotice, activeStreamURL == nil || isPlayerMinimized else { return }
+        pendingNotice = nil
+        showNotice(pending.message, action: pending.action)
+    }
+
     public func dismissNotice() {
+        pendingNotice = nil
         noticeDismissTask?.cancel()
         noticeDismissTask = nil
         withAnimation(.snappy) {
@@ -282,7 +307,9 @@ public final class AppModel {
     /// impossible, since `PlayerView` rendered unconditionally over
     /// everything whenever `activeStreamURL` was non-nil regardless of which
     /// section was actually selected underneath.
-    public var isPlayerMinimized: Bool = false
+    public var isPlayerMinimized: Bool = false {
+        didSet { if isPlayerMinimized { flushPendingNotice() } }
+    }
 
     /// Which episode thumbnail this play was started from, as
     /// "episode:<catalogId>:<number>" for a detail-page row or

@@ -35,6 +35,8 @@ to Anime can still connect from Settings.
 - The info menu fits the window, Sub/Dub can go and find a release in the
   other language, and an unaired episode is no longer somewhere Next can go.
 - Closing the player can no longer leave a second, frozen window behind.
+- The "Episode N marked watched" receipt no longer appears over the picture.
+  It waits until the player is closed or minimized, and Undo still works then.
 
 ### Cinema
 

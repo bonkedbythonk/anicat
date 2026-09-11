@@ -1018,6 +1018,8 @@ extension AppModel {
             playFeedback(.playerClose)
         }
         self.isPlayerMinimized = false
+        // The "marked watched" receipt held back while the picture was up.
+        flushPendingNotice()
         // Leaving the key set would keep the row it names tagged as a
         // `matchedGeometryEffect` source for the rest of the session, so the
         // *next* play — one started from somewhere with no row at all — would

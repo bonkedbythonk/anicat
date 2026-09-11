@@ -8,13 +8,12 @@ public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
 
-    /// How far above the window's bottom edge the notice and resolving-card
-    /// stack sits. Clear of the mini-player, which is parked in that corner,
-    /// and above the full-size player's bottom bar: at a flat 24pt the notice
-    /// for an 85% auto-advance landed on the transport controls of the
-    /// episode being watched. The bar's minimum height, since its real height
-    /// follows a letterbox this view does not measure; a deeper letterbox
-    /// makes the bar taller than this.
+    /// How far above the window's bottom edge the resolving card sits.
+    /// Clear of the mini-player, which is parked in that corner, and above
+    /// the full-size player's bottom bar: at a flat 24pt a card raised
+    /// during an auto-next landed on the transport controls. The bar's
+    /// minimum height, since its real height follows a letterbox this view
+    /// does not measure; a deeper letterbox makes the bar taller than this.
     private var cornerStackBottomInset: CGFloat {
         guard model.activeStreamURL != nil else { return 24 }
         if model.isPlayerMinimized { return 24 + PlayerView.miniSize.height + 12 }
@@ -533,55 +532,12 @@ public struct RootView: View {
             // screen for something this routine (every single play press
             // shows it, if only for a moment) read as far more alarming than
             // it is, and blocked seeing/using anything else while it waited.
-            //
-            // Notice, the error banner's quieter sibling, shares the card's
-            // stack: a line for something the app did on its own ("Episode 7
-            // marked watched") and one action to take it back. Bottom-trailing
-            // rather than the error's top slot, so the two never stack, and no
-            // warning colour anywhere on it -- a receipt, not an alarm. As two
-            // layers at one inset the card sat exactly on the notice and hid
-            // its Undo whenever an auto-next resolve began inside the notice's
-            // six seconds. The inset lifts both clear of the mini-player,
-            // which is parked in that same corner and covered them otherwise.
             // Behind an `if`, not an always-present stack: this layer can sit
             // zIndex 70 over the full-size player and its event catcher, and
             // it should be there only while it has something to show.
-            if model.noticeMessage != nil || model.resolveStartedAt != nil {
+            if model.resolveStartedAt != nil {
                 VStack(alignment: .trailing, spacing: 10) {
                     Spacer()
-                    if let notice = model.noticeMessage {
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle")
-                                .foregroundColor(SumiTheme.muted)
-                                .font(.system(size: 13))
-                            Text(notice)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                                .lineLimit(1)
-                            if let action = model.noticeAction {
-                                Button(action: action.run) {
-                                    Text(action.label)
-                                        .sumiTabularMono(size: 11.5)
-                                        .foregroundColor(SumiTheme.indigo)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.sumiPressable)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.3), radius: 10, y: 3)
-                        .onTapGesture { model.dismissNotice() }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
                     if let startedAt = model.resolveStartedAt {
                         ResolvingStreamCard(
                             startedAt: startedAt,

@@ -94,70 +94,6 @@ public final class AppModel {
     /// fail the same way again.
     public var errorRetryAction: (() -> Void)?
 
-    /// A calm, self-dismissing line for something the app did on the
-    /// viewer's behalf -- "Episode 7 marked watched" -- with one action to
-    /// take it back. Distinct from `errorMessage`, which stays up until
-    /// dismissed and is drawn as a warning: an AniList write that happened
-    /// while the viewer was watching used to be a tick sound and nothing
-    /// else, so a mark on the wrong episode (a Next pressed to skip a recap)
-    /// was found the next day on the list page.
-    public var noticeMessage: String?
-    public var noticeAction: (label: String, run: @MainActor () -> Void)?
-    var noticeDismissTask: Task<Void, Never>?
-
-    /// Shows `message` for six seconds. A notice raised while one is up
-    /// replaces it and restarts the clock; without cancelling the earlier
-    /// dismiss, the first notice's timer took the second one down early.
-    public func showNotice(
-        _ message: String,
-        action: (label: String, run: @MainActor () -> Void)? = nil
-    ) {
-        // Not over the picture. The 85% mark lands mid-episode by design,
-        // and a card in the corner of the film for six seconds is the app
-        // talking during the one stretch it should not. It is held until
-        // the player closes or is minimized, where the corner is chrome
-        // again; Undo still works then, since it restores a stored
-        // progress rather than "one less".
-        if activeStreamURL != nil, !isPlayerMinimized {
-            pendingNotice = (message, action)
-            return
-        }
-        pendingNotice = nil
-        noticeDismissTask?.cancel()
-        withAnimation(.snappy) {
-            noticeMessage = message
-            noticeAction = action
-        }
-        noticeDismissTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled else { return }
-            self?.dismissNotice()
-        }
-    }
-
-    /// A notice raised while the full-size player was up. One slot, not a
-    /// queue: a second mark during the same sitting replaces the first,
-    /// and the earlier one is on the list page like any other.
-    var pendingNotice: (message: String, action: (label: String, run: @MainActor () -> Void)?)?
-
-    /// Shows the held notice once the picture is out of the way. Called
-    /// from `isPlayerMinimized`'s observer and from `stopPlayback`.
-    func flushPendingNotice() {
-        guard let pending = pendingNotice, activeStreamURL == nil || isPlayerMinimized else { return }
-        pendingNotice = nil
-        showNotice(pending.message, action: pending.action)
-    }
-
-    public func dismissNotice() {
-        pendingNotice = nil
-        noticeDismissTask?.cancel()
-        noticeDismissTask = nil
-        withAnimation(.snappy) {
-            noticeMessage = nil
-            noticeAction = nil
-        }
-    }
-
     public var isAniListDown: Bool = false
     private(set) var aniListFailureTimestamps: [Date] = []
     let aniListFailureThreshold = 3
@@ -307,9 +243,7 @@ public final class AppModel {
     /// impossible, since `PlayerView` rendered unconditionally over
     /// everything whenever `activeStreamURL` was non-nil regardless of which
     /// section was actually selected underneath.
-    public var isPlayerMinimized: Bool = false {
-        didSet { if isPlayerMinimized { flushPendingNotice() } }
-    }
+    public var isPlayerMinimized: Bool = false
 
     /// Which episode thumbnail this play was started from, as
     /// "episode:<catalogId>:<number>" for a detail-page row or
@@ -474,10 +408,6 @@ public final class AppModel {
     // Guards the AniList auto-advance below to one attempt per episode
     // rather than once a second for the rest of the episode once past 85%.
     var hasAdvancedAniListForCurrentEpisode = false
-    /// Set by Undo on the watched notice for the episode still playing; see
-    /// `localProgressWriteAllowed`. Per episode session, like the flags
-    /// around it.
-    var watchedMarkUndoneForCurrentEpisode = false
     // Same idea, for auto-play-next: one attempt per episode once past the
     // near-end line below.
     var hasAutoAdvancedEpisode = false

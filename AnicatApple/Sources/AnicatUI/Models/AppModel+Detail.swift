@@ -655,12 +655,7 @@ extension AppModel {
             let progress = Int(details.listProgress ?? 0)
             guard progress < episode else { return }
             guard !contiguousOnly || episode <= progress + 1 else { return }
-            let previousStatus = details.listStatus
             await setEpisodeWatched(episode, watched: true)
-            // `setEpisodeWatched` reports nothing back and shows its own
-            // error banner on failure; the notice is raised on the same
-            // optimistic footing the checkbox itself is drawn on.
-            noticeWatched(catalogId: catalogId, episode: episode, previousProgress: progress, previousStatus: previousStatus)
             return
         }
         guard let engine else { return }
@@ -687,7 +682,6 @@ extension AppModel {
             )
             await recordAniListSuccess()
             refreshListsAfterEdit()
-            noticeWatched(catalogId: catalogId, episode: episode, previousProgress: listed, previousStatus: detail.listStatus)
         } catch {
             await recordAniListFailure(error)
         }
@@ -713,79 +707,6 @@ extension AppModel {
                 runtimeMinutes: ep.runtimeMinutes,
                 isAired: ep.isAired
             )
-        }
-    }
-
-    /// "Episode N marked watched", with Undo. Only the playback path raises
-    /// it: the checkbox is the viewer's own click and needs no receipt.
-    private func noticeWatched(catalogId: Int64, episode: Int, previousProgress: Int, previousStatus: String?) {
-        showNotice(
-            "Episode \(episode) marked watched",
-            action: ("Undo", { [weak self] in
-                guard let self else { return }
-                Task {
-                    await self.undoPlaybackWatchedMark(
-                        catalogId: catalogId,
-                        episode: episode,
-                        previousProgress: previousProgress,
-                        previousStatus: previousStatus
-                    )
-                }
-            })
-        )
-    }
-
-    /// Takes back the 85% auto-advance for one episode by putting the list
-    /// entry back to the progress and status it had before, not to N-1. The
-    /// mark is not always a step of one -- without `contiguousOnly` a list
-    /// at 3 goes to 7, and N-1 left it at 6 -- and on a final episode it
-    /// also set COMPLETED, which a progress write alone left in place.
-    ///
-    /// `hasAdvancedAniListForCurrentEpisode` is deliberately left set: the
-    /// player is still past 85% of this episode, and clearing the flag
-    /// would let the very next position tick mark it watched again.
-    public func undoPlaybackWatchedMark(
-        catalogId: Int64,
-        episode: Int,
-        previousProgress: Int,
-        previousStatus: String?
-    ) async {
-        dismissNotice()
-        guard let engine else { return }
-        // Before the clear below, which is queued behind any tick already on
-        // `engineIOQueue`: from here on, ticks past the watched line are not
-        // written back (`localProgressWriteAllowed`).
-        if currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == Int64(episode) {
-            watchedMarkUndoneForCurrentEpisode = true
-        }
-        // The local watch row as well, on both paths, as the checkbox's own
-        // un-check does: see `setEpisodeWatched` for the row past 85% that
-        // pinned the box checked whatever AniList said.
-        await withCheckedContinuation { continuation in
-            engineIOQueue.async {
-                try? engine.clearProgressFrom(catalog: .anilist, catalogId: catalogId, episodeNumber: Int64(episode))
-                continuation.resume()
-            }
-        }
-        if let details = selectedMediaDetails, details.id == catalogId {
-            // The checkbox's own instant flip; without it the boxes on the
-            // open page stayed checked until the mutation and re-fetch landed.
-            markEpisodesWatchedOptimistically(upTo: previousProgress)
-            await updateListEntry(status: previousStatus, progress: Int64(previousProgress))
-            return
-        }
-        do {
-            try await engine.updateListEntry(
-                catalogId: catalogId,
-                status: previousStatus,
-                score: nil,
-                progress: Int64(previousProgress)
-            )
-            await recordAniListSuccess()
-            refreshListsAfterEdit()
-        } catch {
-            await recordAniListFailure(error)
-            errorMessage = "Could not undo on AniList: \(error.localizedDescription)"
         }
     }
 

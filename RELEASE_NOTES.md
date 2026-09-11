@@ -15,8 +15,7 @@ to Anime can still connect from Settings.
 
 - Closing the player now refreshes Resume and Up Next straight away, and the
   audio stops with the picture instead of running a second past the close.
-- Resume works after a rewatch of an earlier episode, and Undo on "marked
-  watched" restores the progress and the list status, not one less.
+- Resume works after a rewatch of an earlier episode.
 - The resolving card names the release it is connecting to and counts the
   seconds; a play from the Up Next shelf gets next, previous, auto-next and
   the preload like a play from the page does.
@@ -35,8 +34,8 @@ to Anime can still connect from Settings.
 - The info menu fits the window, Sub/Dub can go and find a release in the
   other language, and an unaired episode is no longer somewhere Next can go.
 - Closing the player can no longer leave a second, frozen window behind.
-- The "Episode N marked watched" receipt no longer appears over the picture.
-  It waits until the player is closed or minimized, and Undo still works then.
+- The "Episode N marked watched" card is gone. The mark still happens at 85%,
+  quietly; the list page is where to correct it.
 
 ### Cinema
 

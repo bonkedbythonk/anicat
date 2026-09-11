@@ -25,18 +25,6 @@ extension AppModel {
         playerController.resolveElapsedSeconds = nil
     }
 
-    /// Whether a position may be written to the local watch row. False only
-    /// past the watched line of an episode whose automatic mark the viewer
-    /// undid: every write there sets the row's sticky `completed` flag again,
-    /// and an Undo at 21:00 of 23:37 was taken back by the tick a second
-    /// later -- AniList went back to 5 while the page kept episode 6 checked
-    /// and offered episode 7. Below the line positions are written as usual,
-    /// so a viewer who undid the mark and rewound still resumes from there.
-    func localProgressWriteAllowed(stopTime: Int64, duration: Int64) -> Bool {
-        guard watchedMarkUndoneForCurrentEpisode, duration > 0 else { return true }
-        return Double(stopTime) / Double(duration) * 100 < Self.watchedThresholdPct
-    }
-
     // These four dedup flags only mean anything scoped to "the episode
     // currently loaded" — `resolveAndPlay` resets them for the episode
     // starting, `stopPlayback` for the one ending. They used to be reset by
@@ -52,7 +40,6 @@ extension AppModel {
         hasAdvancedAniListForCurrentEpisode = false
         hasAutoAdvancedEpisode = false
         hasPreloadedNextEpisode = false
-        watchedMarkUndoneForCurrentEpisode = false
         playbackSessionStartedAt = Date()
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
@@ -220,9 +207,7 @@ extension AppModel {
         // front of the read; written inline on this actor instead, a tick
         // queued a moment ago could land after it and rewind the switch to
         // wherever that tick had been.
-        // Same gate as the tick's: a release switch after an Undo past the
-        // watched line would otherwise write the mark straight back.
-        if resumeAt > 0, localProgressWriteAllowed(stopTime: resumeAt, duration: duration) {
+        if resumeAt > 0 {
             await withCheckedContinuation { continuation in
                 engineIOQueue.async {
                     try? engine.recordProgress(
@@ -851,7 +836,6 @@ extension AppModel {
             ?? (currentPlaybackCatalog == .tmdbMovie ? title : "")
         let totalEpisodes = Int64(selectedMediaDetails?.episodeCount ?? 0)
         let catalog = currentPlaybackCatalog
-        let recordsProgress = localProgressWriteAllowed(stopTime: stopTime, duration: dur)
         // Read here rather than inside the closure: the queue runs behind
         // whatever a stalled Discord write is doing, so a value read there
         // is the setting as of whenever that unblocks, not as of this tick.
@@ -870,15 +854,13 @@ extension AppModel {
                 )
             }
             if secondChanged {
-                if recordsProgress {
-                    try? engine.recordProgress(
-                        catalog: catalog,
-                        catalogId: catalogId,
-                        episodeNumber: episode,
-                        stopTime: stopTime,
-                        duration: dur
-                    )
-                }
+                try? engine.recordProgress(
+                    catalog: catalog,
+                    catalogId: catalogId,
+                    episodeNumber: episode,
+                    stopTime: stopTime,
+                    duration: dur
+                )
                 if !isPaused, discordEnabled {
                     engine.discordSetPresence(
                         title: title,
@@ -984,17 +966,14 @@ extension AppModel {
             let rawStop = Int64(playerController.currentTime)
             let stopTime = dur > 0 ? min(rawStop, dur) : rawStop
             let catalog = currentPlaybackCatalog
-            let recordsProgress = localProgressWriteAllowed(stopTime: stopTime, duration: dur)
             engineIOQueue.async {
-                if recordsProgress {
-                    try? engine.recordProgress(
-                        catalog: catalog,
-                        catalogId: catalogId,
-                        episodeNumber: episode,
-                        stopTime: stopTime,
-                        duration: dur
-                    )
-                }
+                try? engine.recordProgress(
+                    catalog: catalog,
+                    catalogId: catalogId,
+                    episodeNumber: episode,
+                    stopTime: stopTime,
+                    duration: dur
+                )
                 engine.discordClearPresence()
             }
         } else if let engine {
@@ -1018,8 +997,6 @@ extension AppModel {
             playFeedback(.playerClose)
         }
         self.isPlayerMinimized = false
-        // The "marked watched" receipt held back while the picture was up.
-        flushPendingNotice()
         // Leaving the key set would keep the row it names tagged as a
         // `matchedGeometryEffect` source for the rest of the session, so the
         // *next* play — one started from somewhere with no row at all — would

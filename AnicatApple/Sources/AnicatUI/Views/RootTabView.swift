@@ -78,54 +78,11 @@ public struct RootTabView: View {
             // pre-buffered, all before there is a frame to show. The desktop
             // has raised this card since its play path was written; the phone
             // never did.
-            //
-            // The same receipt `RootView` draws bottom-trailing shares the
-            // card's stack above the tab bar: at one inset, drawn as two
-            // layers, the card covered the notice and its Undo. The notice
-            // stays out while the player covers the screen: an auto-advance
-            // fires while the episode is full screen, and the phone player's
-            // own chrome is where a line drawn over video would have to be
-            // designed for; here it waits for the close.
-            let showsNotice = model.noticeMessage != nil && model.activeStreamURL == nil
             // Behind an `if` for the same reason as the desktop's: this layer
             // is above the player's zIndex and should exist only while it has
             // something on it.
-            if showsNotice || model.resolveStartedAt != nil {
+            if model.resolveStartedAt != nil {
                 VStack(spacing: 10) {
-                    if showsNotice, let notice = model.noticeMessage {
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle")
-                                .foregroundColor(SumiTheme.muted)
-                                .font(.system(size: 13))
-                            Text(notice)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            if let action = model.noticeAction {
-                                Button(action: action.run) {
-                                    Text(action.label)
-                                        .sumiTabularMono(size: 11.5)
-                                        .foregroundColor(SumiTheme.indigo)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.sumiPressable)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.3), radius: 10, y: 3)
-                        .onTapGesture { model.dismissNotice() }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
                     if let startedAt = model.resolveStartedAt {
                         // `cancelResolve`, not a bare task cancel: it also stops
                         // the status poller, which otherwise wrote the line back
@@ -144,7 +101,6 @@ public struct RootTabView: View {
             }
         }
         .animation(.snappy, value: model.resolveStartedAt)
-        .animation(.snappy, value: model.noticeMessage)
         .tint(SumiTheme.indigo)
         // A deep link (`anicat://title/<id>`) and a notification tap both go
         // straight to `openDetail` on the model, with no row tapped to have

@@ -54,6 +54,11 @@ struct PhoneSettingsView: View {
             storage
             notifications
             cinema
+            Section("About") {
+                AcknowledgementsButton {
+                    Text("Acknowledgements")
+                }
+            }
         }
         .scrollContentBackground(.hidden)
         .background(SumiTheme.background)

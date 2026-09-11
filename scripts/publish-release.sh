@@ -34,6 +34,14 @@ if git -C "$ROOT" rev-parse "$TAG" >/dev/null 2>&1; then
     exit 1
 fi
 
+# Before the build, not after: the notices file is compiled into the bundle, so
+# a stale one found after packaging means packaging again. It goes stale
+# whenever Cargo.lock changes, and nothing else would notice. The fetch first
+# because the generator reads license files out of the cargo registry, and on
+# a machine that has not built this lock file yet they are not there.
+(cd "$ROOT/core" && cargo fetch --locked)
+python3 "$ROOT/scripts/generate-third-party-notices.py" --check
+
 # Ad-hoc, never the machine's own identity. The package script auto-detects an
 # "Apple Development" certificate when none is given, and that signature carries
 # the developer's name, email and Team ID into a zip anybody can `codesign -dv`.

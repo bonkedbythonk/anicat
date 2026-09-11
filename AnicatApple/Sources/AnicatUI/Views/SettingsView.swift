@@ -178,6 +178,7 @@ public struct SettingsView: View {
         .init(label: "Offline manga limit", card: "Storage", tab: .advanced),
         .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
         .init(label: "Current version", card: "Updates", tab: .advanced),
+        .init(label: "Acknowledgements", card: "Licenses", tab: .advanced),
         .init(label: "Copy Debug Report", card: "Logs & Debugging", tab: .advanced),
         .init(label: "Reveal Log File", card: "Logs & Debugging", tab: .advanced),
         .init(label: "Clear Local Registry", card: "System Maintenance", tab: .advanced),
@@ -1168,6 +1169,17 @@ private struct MaintenanceTabSection: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
+        }
+
+        SettingsCard(title: "Licenses", description: "Anicat is free software under the GPL, version 3.") {
+            SettingField(
+                label: "Acknowledgements",
+                description: "The licenses of the libraries, fonts and shaders this app is built with, and where their source is."
+            ) {
+                AcknowledgementsButton {
+                    Text("View")
+                }
+            }
         }
 
         // Logs & Debugging Card

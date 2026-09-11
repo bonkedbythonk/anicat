@@ -907,7 +907,10 @@ public final class PlayerController {
             // volume nudge. Moving the pointer brings it straight back, so
             // the cost of being too eager is one mouse twitch; the cost of
             // being too slow is chrome over the picture on every interaction.
-            #if os(iOS)
+            // The TV gets the phone's 5s too: a remote press summons the
+            // chrome from across the room, and 2s is gone before the eye
+            // has found the scrubber.
+            #if os(iOS) || os(tvOS)
             try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
             #else
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s

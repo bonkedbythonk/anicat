@@ -1,9 +1,10 @@
-# The iOS app target. SwiftPM cannot emit an iOS `.app` — it builds
-# frameworks and command-line executables only — so the phone build needs an
-# Xcode project even though every line of source it compiles already lives in
-# this package. Generated with `xcodegen generate` rather than committed:
-# a hand-edited .xcodeproj is 3000 lines of unreviewable XML that conflicts
-# on every branch, and there is nothing in it a human should be authoring.
+# The iOS and tvOS app targets. SwiftPM cannot emit an iOS or tvOS `.app` —
+# it builds frameworks and command-line executables only — so the phone and
+# TV builds need an Xcode project even though every line of source they
+# compile already lives in this package. Generated with `xcodegen generate`
+# rather than committed: a hand-edited .xcodeproj is 3000 lines of
+# unreviewable XML that conflicts on every branch, and there is nothing in
+# it a human should be authoring.
 #
 # The macOS app does NOT come through here. It is still
 # `swift build --product Anicat` plus scripts/package-anicat-macos-app.sh;
@@ -13,6 +14,7 @@ options:
   bundleIdPrefix: com.anicat
   deploymentTarget:
     iOS: "18.0"
+    tvOS: "18.0"
   createIntermediateGroups: true
 
 packages:
@@ -117,4 +119,68 @@ targets:
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # The Apple TV app. Same entry file and the same two package products as
+  # the phone; `AnicatApp.swift` mounts `TVRootView` under `#if os(tvOS)`.
+  AnicatTV:
+    type: application
+    platform: tvOS
+    sources:
+      - path: Sources/AnicatApp
+      # tvOS icons are layered image stacks plus a Top Shelf image, in a
+      # `.brandassets` catalog rather than an `.appiconset`. Generated from
+      # the same 1024px art as the iOS icon (single layer, on the Ink
+      # ground) so the platforms cannot drift. Outside the SwiftPM
+      # resources for the same reason the iOS icon is: actool has to
+      # compile it into the app, not into a resource bundle.
+      - path: Sources/AnicatUI/Resources/AppIconTV.xcassets
+    dependencies:
+      - package: AnicatApple
+        product: AnicatUI
+      - package: AnicatApple
+        product: AnicatCoreKit
+    info:
+      path: Generated/Info-tvOS.plist
+      properties:
+        CFBundleDisplayName: Anicat
+        CFBundleShortVersionString: 6.0.1
+        CFBundleVersion: "1"
+        # Playback keeps going while another app has the screen? No: a TV
+        # has no pocket. What the audio background mode buys here is that
+        # the AVAudioSession survives the app being sent to the background
+        # by a Siri interruption, which is the same session teardown the
+        # phone hits on lock.
+        UIBackgroundModes:
+          - audio
+        # See the iOS target: librqbit talks to peers on the local subnet
+        # and BonjourDiscovery advertises `_anicat-stream._tcp`; tvOS
+        # refuses both silently without the declaration.
+        NSLocalNetworkUsageDescription: >-
+          Anicat finds other Anicat instances on your network and connects to
+          nearby peers while streaming.
+        NSBonjourServices:
+          - _anicat-stream._tcp
+        ITSAppUsesNonExemptEncryption: false
+        # The literal URL, not ${ANICAT_TMDB_PROXY}; see the iOS target.
+        ANICATTMDBProxy: https://anicat-tmdb.anicat.workers.dev
+        # `anicat://title/<id>` reaches the TV the same way it reaches the
+        # phone. Handoff does not exist on tvOS, so no activity types.
+        CFBundleURLTypes:
+          - CFBundleURLName: Anicat
+            CFBundleURLSchemes: [anicat]
+        # The Ink palette is the one the TV is drawn for; a light system
+        # appearance on a television reads as a white wall. Themes that
+        # carry a light side are still selectable in Settings, which
+        # `ThemedRoot` applies through SwiftUI's own colour scheme.
+        UIUserInterfaceStyle: Dark
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.tv
+        # Apple TV only.
+        TARGETED_DEVICE_FAMILY: "3"
+        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
 

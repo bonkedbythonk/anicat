@@ -1097,7 +1097,7 @@ public struct PlayerView: View {
                     .buttonStyle(.sumiPressable)
                     .help("Episodes")
                     .accessibilityLabel("Episodes")
-                    .popover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
+                    .sumiPopover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
                         episodeListMenu
                     }
                 }
@@ -1116,7 +1116,7 @@ public struct PlayerView: View {
                 .buttonStyle(.sumiPressable)
                 .help("Info & Options")
                 .accessibilityLabel("Info & Options")
-                .popover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
+                .sumiPopover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
                     infoMenu
                 }
             }
@@ -1726,6 +1726,9 @@ private struct PlayerBottomBar: View {
             .frame(maxHeight: .infinity)
             .animation(.snappy(duration: 0.22), value: scrubberIsLive)
             .contentShape(Rectangle())
+            // No drag on tvOS; `TVPlayerView` seeks from the remote's ring
+            // and never mounts this scrubber.
+            #if !os(tvOS)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -1746,6 +1749,7 @@ private struct PlayerBottomBar: View {
                         controller.seek(to: target)
                     }
             )
+            #endif
             #if os(macOS)
             .onContinuousHover { phase in
                 switch phase {
@@ -1869,12 +1873,16 @@ private struct PlayerBottomBar: View {
                     .help(controller.isMuted ? "Unmute (M)" : "Mute (M)")
                     .accessibilityLabel(controller.isMuted ? "Unmute (M)" : "Mute (M)")
 
+                    // `Slider` is not in the tvOS SDK; the TV's volume is
+                    // the television's own.
+                    #if !os(tvOS)
                     Slider(value: Binding(
                             get: { controller.isMuted ? 0 : controller.volume },
                             set: { controller.setVolume($0) }
                         ), in: 0...1)
                     .frame(width: 80)
                     .tint(SumiTheme.indigo)
+                    #endif
                 }
 
                 // Upscaling (Anime4K)

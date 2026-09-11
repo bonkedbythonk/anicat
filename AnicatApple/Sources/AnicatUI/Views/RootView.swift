@@ -449,7 +449,7 @@ public struct RootView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(SumiTheme.foreground)
                             .lineLimit(2)
-                            .textSelection(.enabled)
+                            .sumiTextSelectable()
 
                         Spacer()
 

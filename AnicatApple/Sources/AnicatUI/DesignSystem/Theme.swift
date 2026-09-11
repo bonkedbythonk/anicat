@@ -355,6 +355,12 @@ private struct SumiMenuPressable: ViewModifier {
     @State private var isPressed = false
 
     func body(content: Content) -> some View {
+        #if os(tvOS)
+        // No drag on a Siri Remote, and the focus engine already lifts and
+        // dims a focused control; a second press effect on top of that
+        // reads as a glitch.
+        content
+        #else
         content
             .scaleEffect(isPressed ? SumiPressFeedback.scale : 1.0)
             .opacity(isPressed ? SumiPressFeedback.opacity : 1.0)
@@ -364,6 +370,7 @@ private struct SumiMenuPressable: ViewModifier {
                     .onChanged { _ in isPressed = true }
                     .onEnded { _ in isPressed = false }
             )
+        #endif
     }
 }
 
@@ -440,7 +447,7 @@ public enum SumiHaptics {
         lastFired = now
         #if os(macOS)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .drawCompleted)
-        #elseif canImport(UIKit)
+        #elseif os(iOS)
         let generator = UISelectionFeedbackGenerator()
         generator.selectionChanged()
         #endif

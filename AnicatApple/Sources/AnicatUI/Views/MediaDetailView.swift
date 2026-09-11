@@ -638,7 +638,7 @@ public struct MediaDetailView: View {
                             .contentShape(Capsule())
                         }
                         .buttonStyle(.sumiPressable)
-                        .keyboardShortcut(.escape, modifiers: [])
+                        .sumiKeyboardShortcut(.escape, modifiers: [])
                     }
                     .frame(width: width)
                 }
@@ -1762,7 +1762,7 @@ public struct MediaDetailView: View {
                 .lineSpacing(4.5)
                 .foregroundColor(SumiTheme.foreground.opacity(0.8))
                 .lineLimit(isSynopsisExpanded ? nil : 3)
-                .textSelection(.enabled)
+                .sumiTextSelectable()
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
@@ -2621,6 +2621,23 @@ private struct EpisodeListSection: View {
             } else if let groups = episodeGroups {
                 LazyVStack(spacing: 8) {
                     ForEach(groups, id: \.firstNumber) { group in
+                        // `DisclosureGroup` is not in the tvOS SDK. This page
+                        // is not mounted on the TV (`TVDetailView` is); the
+                        // flat fallback only keeps it compiling there.
+                        #if os(tvOS)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
+                                .font(.sumiMono(size: 11, weight: .semibold))
+                                .tracking(1)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                            if selectedViewMode == .compact {
+                                compactRows(for: group.episodes)
+                            } else {
+                                regularRows(for: group.episodes, downloadStates: downloadStates)
+                            }
+                        }
+                        #else
                         DisclosureGroup(
                             isExpanded: Binding(
                                 get: { expandedGroups.contains(group.firstNumber) },
@@ -2642,6 +2659,7 @@ private struct EpisodeListSection: View {
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 4)
                         }
+                        #endif
                     }
                 }
                 // Only the group holding the resume target opens by default,
@@ -3411,7 +3429,7 @@ private struct EpisodeRow: View, Equatable {
             .buttonStyle(.sumiPressable)
             .help("Stream Servers")
             .padding(.top, 3)
-            .popover(isPresented: Binding(
+            .sumiPopover(isPresented: Binding(
                 get: { isServerPickerOpen },
                 set: { if !$0 { onCloseServerPicker() } }
             ), arrowEdge: .top) {

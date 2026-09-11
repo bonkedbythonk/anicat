@@ -66,7 +66,13 @@ struct VisualEffectView: NSViewRepresentable {
 /// stand-in for AppKit's `.sidebar` and, like it, follows light/dark itself.
 struct VisualEffectView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIVisualEffectView {
+        #if os(tvOS)
+        // tvOS has only the pre-13 blur styles; `.regular` is the one that
+        // follows light and dark itself the way `.systemThinMaterial` does.
+        UIVisualEffectView(effect: UIBlurEffect(style: .regular))
+        #else
         UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+        #endif
     }
 
     func updateUIView(_ view: UIVisualEffectView, context: Context) {}

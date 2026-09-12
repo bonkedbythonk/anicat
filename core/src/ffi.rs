@@ -46,7 +46,8 @@ type FfiResult<T> = Result<T, AnicatError>;
 
 /// Which upstream catalog an id belongs to. Mirrors `db::Catalog`; kept as its
 /// own type so the FFI shape is not hostage to an internal enum's ordering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FfiCatalog {
     Anilist,
     TmdbMovie,
@@ -77,7 +78,7 @@ impl From<FfiCatalog> for Catalog {
 }
 
 /// One catalog entry, flattened to what a list row actually draws.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct MediaSummary {
     pub catalog: FfiCatalog,
     pub catalog_id: i64,
@@ -204,7 +205,7 @@ impl From<crate::reader::syosetu::NovelChapterContent> for NovelChapterContent {
 
 /// See `torrent::ResolveProgress`. Polled by the player while a play
 /// starts; the key fields let it ignore the slot a preload is writing.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct ResolveProgress {
     pub catalog: FfiCatalog,
     pub catalog_id: i64,
@@ -216,7 +217,8 @@ pub struct ResolveProgress {
     pub bytes_per_second: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResolvePhase {
     Remembered,
     Searching,
@@ -235,7 +237,7 @@ impl From<crate::torrent::ResolvePhase> for ResolvePhase {
     }
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct StreamHandle {
     /// What the player opens: a loopback range URL served by this engine. The
     /// file on disk is sparse while the torrent downloads, so a path would
@@ -247,7 +249,7 @@ pub struct StreamHandle {
 }
 
 /// One watch, for the History view's activity chart.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct ActivityRow {
     pub catalog: FfiCatalog,
     pub catalog_id: i64,
@@ -257,7 +259,7 @@ pub struct ActivityRow {
 }
 
 /// The signed-in AniList user and their lifetime totals.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct ViewerProfile {
     pub name: String,
     pub avatar_url: Option<String>,
@@ -276,7 +278,7 @@ pub struct ViewerProfile {
 }
 
 /// A neighbouring entry in a franchise, for the detail page's season chain.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct RelatedTitle {
     pub catalog_id: i64,
     pub title: String,
@@ -291,7 +293,7 @@ pub struct RelatedTitle {
 /// therefore synthesized from the count and enriched from that list where it
 /// lines up, which is why `title` falls back to "Episode N" rather than the
 /// row going missing.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct EpisodeRow {
     pub number: i32,
     pub title: String,
@@ -540,7 +542,7 @@ pub struct FfiReadingRow {
 }
 
 /// One row of the local list.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiLocalEntry {
     pub catalog: FfiCatalog,
     pub catalog_id: i64,
@@ -569,7 +571,7 @@ pub struct FfiCharacter {
     pub voice_actor_image_url: Option<String>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiRelation {
     pub catalog_id: i64,
     pub relation_type: String,
@@ -580,7 +582,7 @@ pub struct FfiRelation {
     pub average_score: Option<i32>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiRecommendation {
     pub catalog_id: i64,
     pub title: String,
@@ -709,7 +711,7 @@ pub struct FfiStaffDetail {
 }
 
 /// A studio credited on a title, as the detail page links to it.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiStudioRef {
     pub id: i64,
     pub name: String,
@@ -807,7 +809,7 @@ pub struct FfiThreadDetail {
 }
 
 /// Everything the detail page draws.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct MediaDetail {
     pub catalog_id: i64,
     /// MyAnimeList's id for this same title, when AniList has the mapping.
@@ -864,7 +866,7 @@ pub struct MediaDetail {
     pub is_favourite: bool,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct WatchProgress {
     pub episode_number: i64,
     pub stop_time: i64,
@@ -873,7 +875,7 @@ pub struct WatchProgress {
 
 /// The audio and subtitle tracks chosen for one title. Languages, not track
 /// indexes — see the `title_track_prefs` migration for why.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct FfiTrackPreference {
     pub audio_lang: Option<String>,
     pub subtitle_lang: Option<String>,
@@ -977,14 +979,14 @@ impl From<crate::torrent::EpisodeDownloadStatus> for FfiDownloadStatus {
 /// `torrent::TorrentChoice` — a separate type because that one is a plain
 /// crate-internal struct with no uniffi derive, and adding one there would
 /// pull uniffi into a module that has no other reason to know about FFI.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiTorrentChoice {
     pub name: String,
     pub seeders: u64,
     pub is_dub: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct SearchFilters {
     pub genre: Option<String>,
     pub year: Option<i32>,

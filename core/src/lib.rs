@@ -13,7 +13,9 @@ pub mod media;
 pub mod reader;
 pub mod torrent;
 
-mod ffi;
+// Public for server/, which calls the engine as a Rust crate rather than
+// through bindings; private, every type it returns was unnameable there.
+pub mod ffi;
 
 pub use db::{Catalog, Registry};
 pub use media::MediaKey;

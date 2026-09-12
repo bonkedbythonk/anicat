@@ -2,41 +2,1182 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Anicat</title>
 <style>
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
-  td { padding: .15rem .75rem .15rem 0; vertical-align: top; }
+  :root {
+    color-scheme: dark;
+    --bg: #111214;
+    --panel: #1b1c20;
+    --panel-2: #24262b;
+    --line: #33363d;
+    --text: #e8e8ea;
+    --muted: #9a9ca3;
+    --accent: #6ea8ff;
+    --accent-text: #0b1220;
+    --danger: #ff7a7a;
+    --ok: #7ad49a;
+    --focus: #ffcc4d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg: #f5f5f7;
+      --panel: #ffffff;
+      --panel-2: #ececf0;
+      --line: #d6d7dc;
+      --text: #17181b;
+      --muted: #5d6068;
+      --accent: #1f5fd1;
+      --accent-text: #ffffff;
+      --danger: #b3261e;
+      --ok: #1e7a44;
+      --focus: #b36b00;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* Class rules below set display, which would otherwise beat the hidden
+     attribute and leave an empty now-playing bar on screen. */
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-width: 0;
+    padding-bottom: 5rem;
+  }
+  a { color: var(--accent); }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: .35rem .75rem; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text], input[type=search], select, textarea {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem;
+  }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  code, pre, textarea.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: 12.5px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; padding: .6rem 1.5rem;
+  }
+  header.top .brand { font-weight: 700; font-size: 16px; margin-right: .25rem; }
+  .segment { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .segment button { border: 0; border-radius: 0; background: transparent; }
+  .segment button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); }
+  nav.tabs { display: flex; gap: .25rem; }
+  nav.tabs a {
+    color: var(--text); text-decoration: none; padding: .35rem .7rem; border-radius: 6px;
+  }
+  nav.tabs a[aria-current=page] { background: var(--panel-2); }
+  nav.tabs a:hover { background: var(--panel); }
+  header.top .spacer { flex: 1; }
+
+  main { max-width: 1280px; margin: 0 auto; padding: 1rem 1.5rem; }
+  h1 { font-size: 22px; margin: .25rem 0 .75rem; }
+  h2 { font-size: 16px; margin: 1.5rem 0 .6rem; }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem;
+  }
+  .banner {
+    background: var(--panel); border-bottom: 1px solid var(--line); padding: .6rem 1.5rem;
+    display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center;
+  }
+  .codebox { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .codebox code {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem;
+    overflow-x: auto; white-space: nowrap; max-width: 100%;
+  }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem .9rem;
+  }
+  .poster-card { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+  .poster-card a.poster-link { color: inherit; text-decoration: none; display: block; border-radius: 8px; }
+  .poster {
+    width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px; background: var(--panel-2);
+    display: block;
+  }
+  .poster-card .name {
+    font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .poster-card .sub { font-size: 12px; color: var(--muted); }
+  .poster-card .actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .poster-card .actions button { padding: .2rem .55rem; font-size: 12px; }
+
+  .detail { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; }
+  .detail .poster { max-width: 220px; }
+  .detail .meta { display: flex; flex-wrap: wrap; gap: .25rem .9rem; color: var(--muted); margin-bottom: .6rem; }
+  .detail .synopsis { max-width: 70ch; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .75rem 0; }
+  .episodes {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .6rem;
+  }
+  .ep {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .55rem .7rem;
+    display: flex; flex-direction: column; gap: .3rem;
+  }
+  .ep.watched { opacity: .72; }
+  .ep .ep-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ep .bar { height: 3px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+  .ep .bar > span { display: block; height: 100%; background: var(--accent); }
+  .ep .ep-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .ep .ep-actions button { padding: .15rem .5rem; font-size: 12px; }
+  .tag { font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 .35rem; color: var(--muted); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30;
+    display: flex; align-items: center; justify-content: center; padding: 1rem;
+  }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(640px, 100%);
+    max-height: 85vh; display: flex; flex-direction: column;
+  }
+  .modal header { padding: .8rem 1rem; border-bottom: 1px solid var(--line); display: flex; gap: 1rem; align-items: center; }
+  .modal header h3 { margin: 0; font-size: 15px; flex: 1; }
+  .modal .body { padding: .8rem 1rem; overflow: auto; }
+  .release-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .release-list button {
+    width: 100%; text-align: left; display: flex; gap: .75rem; align-items: center; background: var(--panel);
+  }
+  .release-list .rel-name { flex: 1; overflow-wrap: anywhere; }
+
+  .toast {
+    position: fixed; right: 1rem; bottom: 4.75rem; z-index: 40; max-width: 420px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem;
+    box-shadow: 0 6px 24px rgba(0,0,0,.3);
+  }
+
+  .nowplaying {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel);
+    border-top: 1px solid var(--line); padding: .55rem 1.5rem; display: flex; gap: 1rem; align-items: center;
+  }
+  .nowplaying .np-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nowplaying .np-text { flex: 1; min-width: 0; }
+
+  .signin { max-width: 560px; margin: 2rem auto; display: flex; flex-direction: column; gap: .8rem; }
+  .signin input { width: 100%; }
+  .settings { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; }
+  .settings textarea { width: 100%; min-height: 12rem; }
+
+  @media (max-width: 900px) {
+    header.top { padding: .5rem 1rem; }
+    main { padding: .75rem 1rem; }
+    .detail { grid-template-columns: 150px 1fr; gap: 1rem; }
+    .detail .poster { max-width: 150px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  }
 </style>
 </head>
 <body>
-<h1>Anicat</h1>
-<p>Placeholder page. The real one replaces this file.</p>
-<table>
-  <tr><td><code>POST /api/search</code></td><td>{query, kind: "anime"|"cinema", filters?, page?, limit?}</td></tr>
-  <tr><td><code>GET /api/trending</code></td><td>?format&amp;limit</td></tr>
-  <tr><td><code>GET /api/discover</code></td><td>?status&amp;season&amp;season_year&amp;limit</td></tr>
-  <tr><td><code>GET /api/cinema/rows</code></td><td>row kinds</td></tr>
-  <tr><td><code>GET /api/cinema/row/{kind}</code></td><td>?page</td></tr>
-  <tr><td><code>GET /api/cinema/{id}</code></td><td>?catalog=tmdb_movie|tmdb_tv</td></tr>
-  <tr><td><code>GET /api/cinema/list</code></td><td>?status</td></tr>
-  <tr><td><code>POST /api/cinema/list</code></td><td>{catalog, catalog_id, status|null}</td></tr>
-  <tr><td><code>GET /api/user-list</code></td><td>?status (needs sign-in)</td></tr>
-  <tr><td><code>GET /api/media/{id}</code></td><td>AniList detail</td></tr>
-  <tr><td><code>GET /api/progress/{id}</code></td><td>?episode&amp;catalog</td></tr>
-  <tr><td><code>GET /api/activity</code></td><td>?limit</td></tr>
-  <tr><td><code>POST /api/play</code></td><td>{catalog?, catalog_id, episode, title?, prefer_dub?, chosen_name?, from_start?}</td></tr>
-  <tr><td><code>POST /api/stop</code></td><td>release the pin, pause downloads</td></tr>
-  <tr><td><code>GET /api/resolve-progress/{catalog}/{id}/{episode}</code></td><td>null when idle</td></tr>
-  <tr><td><code>GET /api/releases</code></td><td>?catalog&amp;catalog_id&amp;episode&amp;title&amp;prefer_dub</td></tr>
-  <tr><td><code>POST /api/track-preference</code></td><td>{catalog?, catalog_id, audio_lang, subtitle_lang, subtitle_title}</td></tr>
-  <tr><td><code>POST /api/watched</code></td><td>{catalog?, catalog_id, episode}</td></tr>
-  <tr><td><code>DELETE /api/list/{entry}</code></td><td>AniList list entry id</td></tr>
-  <tr><td><code>GET /api/cache</code>, <code>DELETE /api/cache</code></td><td>stream cache size, purge</td></tr>
-  <tr><td><code>POST /api/token</code></td><td>{token|null}</td></tr>
-  <tr><td><code>GET /api/viewer</code></td><td>signed-in state and profile</td></tr>
-  <tr><td><code>GET /api/version</code></td><td>current, latest, update_available</td></tr>
-  <tr><td><code>GET /api/debug-report</code></td><td>plain text</td></tr>
-</table>
-<p>Errors: <code>{"error": "...", "anilist_down": bool}</code>.</p>
+<div id="update-banner" class="banner" hidden></div>
+<header class="top">
+  <span class="brand">Anicat</span>
+  <div class="segment" role="group" aria-label="Catalog">
+    <button type="button" data-mode="anime">Anime</button>
+    <button type="button" data-mode="cinema">Films and TV</button>
+  </div>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#/" data-tab="home">Up Next</a>
+    <a href="#/library" data-tab="library">Library</a>
+    <a href="#/search" data-tab="search">Search</a>
+  </nav>
+  <span class="spacer"></span>
+  <nav class="tabs" aria-label="Settings">
+    <a href="#/settings" data-tab="settings">Settings</a>
+  </nav>
+</header>
+<main id="view" tabindex="-1"></main>
+<div id="nowplaying" class="nowplaying" hidden></div>
+<div id="overlay-root"></div>
+
+<script>
+"use strict";
+
+// ---- constants --------------------------------------------------------------
+
+const SIGNIN_URL = "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token";
+const INSTALL_COMMAND = "irm https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_windows.ps1 | iex";
+// Same 85% the server replays from the start past, and the player marks
+// watched at. A resume offered above it lands in the credits.
+const RESUME_LIMIT = 0.85;
+const ANIME_STATUSES = ["CURRENT", "REPEATING", "PAUSED", "PLANNING", "COMPLETED", "DROPPED"];
+const CINEMA_STATUSES = ["CURRENT", "PLANNING", "COMPLETED", "DROPPED"];
+const STATUS_LABELS = {
+  CURRENT: "Watching", REPEATING: "Rewatching", PAUSED: "Paused",
+  PLANNING: "Planning", COMPLETED: "Completed", DROPPED: "Dropped",
+};
+const PHASE_LABELS = {
+  remembered: "Trying the release that played last time",
+  searching: "Searching for releases",
+  connecting: "Connecting to peers",
+  buffering: "Buffering",
+};
+
+// ---- storage ----------------------------------------------------------------
+
+// Private windows and some browser settings throw on any access to
+// localStorage; the page must still run with nothing remembered.
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* not persisted */ } },
+  del(key) { try { localStorage.removeItem(key); } catch { /* not persisted */ } },
+};
+
+const state = {
+  mode: store.get("anicat_mode") === "cinema" ? "cinema" : "anime",
+  signedIn: false,
+  profile: null,
+  viewerError: null,
+  playerRouteMissing: false,
+  renderToken: 0,
+};
+
+// ---- helpers ----------------------------------------------------------------
+
+class ApiFailure extends Error {
+  constructor(status, message, anilistDown) {
+    super(message);
+    this.status = status;
+    this.anilistDown = anilistDown;
+  }
+}
+
+async function api(method, path, body) {
+  const init = { method, headers: {} };
+  if (body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch(path, init);
+  } catch (e) {
+    throw new ApiFailure(0, "The Anicat server is not answering. Is it still running?", false);
+  }
+  if (res.status === 204) return null;
+  const type = res.headers.get("Content-Type") || "";
+  if (!type.includes("application/json")) {
+    const text = await res.text();
+    if (!res.ok) throw new ApiFailure(res.status, text || res.statusText, false);
+    return text;
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new ApiFailure(res.status, (data && data.error) || res.statusText, !!(data && data.anilist_down));
+  }
+  return data;
+}
+
+function errorText(e) {
+  if (e instanceof ApiFailure && e.anilistDown) {
+    return "AniList is having an outage; signed-in features may still work.";
+  }
+  return (e && e.message) || String(e);
+}
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === null || v === undefined || v === false) continue;
+      if (k === "class") node.className = v;
+      else if (k === "text") node.textContent = v;
+      else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v === true ? "" : String(v));
+    }
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+
+function clock(seconds) {
+  if (seconds === null || seconds === undefined || !isFinite(seconds)) return "--:--";
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+function bytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// AniList synopses are HTML. Parsed into an inert document (scripts never
+// run there, images never load), then rebuilt keeping only text, <br> and
+// <i>; nothing from the source reaches innerHTML.
+function sanitizedSynopsis(html) {
+  const out = document.createDocumentFragment();
+  if (!html) return out;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const walk = (src, dst) => {
+    for (const node of src.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        dst.append(document.createTextNode(node.textContent));
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const name = node.nodeName.toLowerCase();
+        if (name === "br") dst.append(document.createElement("br"));
+        else if (name === "i" || name === "em") { const i = document.createElement("i"); walk(node, i); dst.append(i); }
+        else if (name !== "script" && name !== "style") walk(node, dst);
+      }
+    }
+  };
+  walk(doc.body, out);
+  return out;
+}
+
+async function mapLimited(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      try { results[i] = await fn(items[i], i); } catch (e) { results[i] = { error: e }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function isCinema(catalog) { return catalog === "tmdb_movie" || catalog === "tmdb_tv"; }
+
+// Detail responses are fetched again by Up Next, Library and the title page;
+// a short-lived memo keeps one navigation from asking twice.
+const detailMemo = new Map();
+function fetchDetail(catalog, id, fresh) {
+  const key = `${catalog}:${id}`;
+  if (!fresh && detailMemo.has(key)) return detailMemo.get(key);
+  const p = catalog === "anilist"
+    ? api("GET", `/api/media/${id}`)
+    : api("GET", `/api/cinema/${id}?catalog=${catalog}`);
+  detailMemo.set(key, p);
+  p.catch(() => detailMemo.delete(key));
+  setTimeout(() => detailMemo.delete(key), 60_000);
+  return p;
+}
+
+function titleHref(catalog, id) { return `#/title/${catalog}/${id}`; }
+
+function preferDub(catalog, id) { return store.get(`anicat_dub_${catalog}_${id}`) === "1"; }
+
+function copyText(text, fallbackHost) {
+  const fallback = () => {
+    fallbackHost.replaceChildren(
+      el("p", { class: "muted", text: "Copying was not allowed. Select the text below and copy it by hand." }),
+      el("textarea", { class: "mono", readonly: true, rows: 12, style: "width:100%" }, text),
+    );
+    const ta = fallbackHost.querySelector("textarea");
+    ta.focus();
+    ta.select();
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(() => true, () => { fallback(); return false; });
+  }
+  fallback();
+  return Promise.resolve(false);
+}
+
+function toast(message, isError) {
+  const root = document.getElementById("overlay-root");
+  const node = el("div", { class: "toast" + (isError ? " error" : ""), role: "status" }, message);
+  root.append(node);
+  setTimeout(() => node.remove(), isError ? 7000 : 3500);
+}
+
+// ---- cards ------------------------------------------------------------------
+
+function posterCard(item, opts = {}) {
+  const href = titleHref(item.catalog, item.catalog_id);
+  const img = item.cover_image
+    ? el("img", { class: "poster", src: item.cover_image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
+    : el("div", { class: "poster" });
+  return el("div", { class: "poster-card" },
+    el("a", { class: "poster-link", href, "aria-label": item.title }, img),
+    el("a", { class: "name", href, style: "color:inherit;text-decoration:none" }, item.title),
+    opts.sub ? el("div", { class: "sub" }, opts.sub) : null,
+    opts.actions ? el("div", { class: "actions" }, opts.actions) : null,
+  );
+}
+
+function summarySub(item) {
+  const bits = [];
+  if (item.catalog === "tmdb_movie") bits.push("Film");
+  else if (item.catalog === "tmdb_tv") bits.push("Series");
+  else if (item.format) bits.push(item.format.replace(/_/g, " "));
+  // TMDB rows report a film as one episode; only AniList counts mean anything.
+  if (item.episodes && item.catalog === "anilist") bits.push(`${item.episodes} ep`);
+  if (item.progress) bits.push(`seen ${item.progress}`);
+  return bits.join(" / ");
+}
+
+function gridOf(items, opts) {
+  if (!items.length) return el("p", { class: "muted", text: "Nothing here." });
+  return el("div", { class: "grid" }, items.map((it) => posterCard(it, opts ? opts(it) : { sub: summarySub(it) })));
+}
+
+async function section(host, title, loader) {
+  const body = el("div", {}, el("p", { class: "muted", text: "Loading..." }));
+  host.append(el("section", {}, el("h2", {}, title), body));
+  try {
+    const content = await loader();
+    body.replaceChildren(content);
+  } catch (e) {
+    body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+  }
+}
+
+// ---- playback ---------------------------------------------------------------
+
+let resolving = false;
+
+async function play({ catalog, catalogId, episode, title, chosenName, fromStart }) {
+  if (resolving) { toast("A play is already starting."); return; }
+  resolving = true;
+  const dub = preferDub(catalog, catalogId);
+  const root = document.getElementById("overlay-root");
+  const phase = el("p", { text: "Starting..." });
+  const detail = el("p", { class: "muted" });
+  const closeBtn = el("button", { type: "button", text: "Hide", onclick: () => overlay.remove() });
+  const overlay = el("div", { class: "overlay" },
+    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Starting playback" },
+      el("header", {}, el("h3", {}, `${title || "Episode"}, episode ${episode}`), closeBtn),
+      el("div", { class: "body" }, phase, detail),
+    ));
+  root.append(overlay);
+  closeBtn.focus();
+
+  let done = false;
+  const poll = async () => {
+    while (!done) {
+      try {
+        const p = await api("GET", `/api/resolve-progress/${catalog}/${catalogId}/${episode}`);
+        if (!done && p) {
+          phase.textContent = PHASE_LABELS[p.phase] || p.phase;
+          const bits = [];
+          if (p.release) bits.push(p.release);
+          if (p.candidates) bits.push(`${p.candidates} candidates`);
+          if (p.attempt) bits.push(`attempt ${p.attempt}`);
+          if (p.bytes_per_second) bits.push(`${bytes(p.bytes_per_second)}/s`);
+          detail.textContent = bits.join(" / ");
+        }
+      } catch { /* the play call reports the real failure */ }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  };
+  poll();
+
+  try {
+    await api("POST", "/api/play", {
+      catalog, catalog_id: catalogId, episode, title: title || null,
+      prefer_dub: dub, chosen_name: chosenName || null, from_start: !!fromStart,
+    });
+    done = true;
+    overlay.remove();
+    toast("Playing in mpv.");
+    state.playerRouteMissing = false;
+    pollPlayer();
+  } catch (e) {
+    done = true;
+    phase.textContent = "Could not start playback.";
+    phase.className = "error";
+    detail.textContent = errorText(e);
+    closeBtn.textContent = "Close";
+  } finally {
+    resolving = false;
+  }
+}
+
+function openReleases({ catalog, catalogId, episode, title }) {
+  const root = document.getElementById("overlay-root");
+  const body = el("div", { class: "body" }, el("p", { class: "muted", text: "Searching the indexers..." }));
+  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const closeBtn = el("button", { type: "button", text: "Close", onclick: close });
+  const overlay = el("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) close(); } },
+    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Choose release" },
+      el("header", {}, el("h3", {}, `Choose release: episode ${episode}`), closeBtn),
+      body,
+    ));
+  root.append(overlay);
+  document.addEventListener("keydown", onKey);
+  closeBtn.focus();
+
+  const dub = preferDub(catalog, catalogId);
+  const qs = new URLSearchParams({ catalog, catalog_id: catalogId, episode, prefer_dub: dub });
+  if (title) qs.set("title", title);
+  api("GET", `/api/releases?${qs}`).then((data) => {
+    const rows = (data && data.releases) || [];
+    if (!rows.length) {
+      body.replaceChildren(el("p", { class: "muted", text: "No releases found for this episode." }));
+      return;
+    }
+    body.replaceChildren(el("ul", { class: "release-list" }, rows.map((r) =>
+      el("li", {}, el("button", {
+        type: "button",
+        onclick: () => { close(); play({ catalog, catalogId, episode, title, chosenName: r.name }); },
+      },
+        el("span", { class: "rel-name" }, r.name),
+        r.name === data.remembered ? el("span", { class: "tag ok", text: "last played" }) : null,
+        r.is_dub ? el("span", { class: "tag", text: "dub" }) : null,
+        el("span", { class: "muted", text: `${r.seeders} seeders` }),
+      )))));
+  }, (e) => {
+    body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+  });
+}
+
+// ---- now playing ------------------------------------------------------------
+
+let playerTimer = null;
+
+async function pollPlayer() {
+  clearTimeout(playerTimer);
+  const bar = document.getElementById("nowplaying");
+  // A 404 means this server has no player route yet. Polling on would put a
+  // failed request in the console every two seconds; a successful play
+  // clears the flag and polling starts again.
+  if (state.playerRouteMissing) { bar.hidden = true; return; }
+  if (document.visibilityState === "visible") {
+    try {
+      const p = await api("GET", "/api/player");
+      renderPlayer(p);
+    } catch (e) {
+      bar.hidden = true;
+      if (e instanceof ApiFailure && e.status === 404) { state.playerRouteMissing = true; return; }
+    }
+  }
+  playerTimer = setTimeout(pollPlayer, 2000);
+}
+
+function renderPlayer(p) {
+  const bar = document.getElementById("nowplaying");
+  if (!p || !p.active) { bar.hidden = true; return; }
+  const title = p.title || "Playing";
+  const href = p.catalog && p.catalog_id ? titleHref(p.catalog, p.catalog_id) : null;
+  const bits = [];
+  if (p.episode !== null && p.episode !== undefined && p.catalog !== "tmdb_movie") bits.push(`Episode ${p.episode}`);
+  bits.push(`${clock(p.position)} / ${clock(p.duration)}`);
+  if (p.paused) bits.push("paused");
+  if (p.next_ready) bits.push("next episode ready");
+  bar.replaceChildren(
+    el("div", { class: "np-text" },
+      href ? el("a", { class: "np-title", href, style: "color:inherit" }, title) : el("div", { class: "np-title" }, title),
+      el("div", { class: "muted" }, bits.join(" / ")),
+    ),
+    el("button", { type: "button", text: "Stop", onclick: stopPlayer }),
+  );
+  bar.hidden = false;
+}
+
+async function stopPlayer() {
+  try {
+    await api("POST", "/api/player/stop");
+  } catch (e) {
+    if (e instanceof ApiFailure && e.status === 404) {
+      try { await api("POST", "/api/stop"); } catch (e2) { toast(errorText(e2), true); }
+    } else {
+      toast(errorText(e), true);
+    }
+  }
+  document.getElementById("nowplaying").hidden = true;
+  pollPlayer();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") pollPlayer();
+});
+
+// ---- views ------------------------------------------------------------------
+
+function signInPrompt() {
+  return el("div", { class: "card" },
+    el("p", {}, "Sign in to AniList to see your list, Up Next and to sync what you watch."),
+    el("a", { href: "#/signin" }, "Sign in"),
+  );
+}
+
+async function viewSignIn(host) {
+  const input = el("input", { type: "text", placeholder: "Paste the token or the whole address", "aria-label": "AniList token", autocomplete: "off", spellcheck: "false" });
+  const status = el("p", { class: "muted" });
+  const submit = el("button", { type: "submit", class: "primary", text: "Sign in" });
+  const form = el("form", {
+    class: "card signin",
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const token = extractToken(input.value);
+      if (!token) { status.className = "error"; status.textContent = "That does not contain a token."; return; }
+      submit.disabled = true;
+      status.className = "muted";
+      status.textContent = "Checking with AniList...";
+      try {
+        const r = await api("POST", "/api/token", { token });
+        state.signedIn = !!r.signed_in;
+        state.profile = r.profile || null;
+        state.viewerError = null;
+        store.del("anicat_skip_signin");
+        location.hash = "#/";
+      } catch (e) {
+        status.className = "error";
+        status.textContent = e instanceof ApiFailure && e.anilistDown ? errorText(e) : `AniList refused the token: ${errorText(e)}`;
+      } finally {
+        submit.disabled = false;
+      }
+    },
+  },
+    el("h1", {}, "Sign in to AniList"),
+    el("p", {}, "Anime lists and progress sync with your AniList account. Films and TV work without one."),
+    el("ol", {},
+      el("li", {}, el("a", { href: SIGNIN_URL, target: "_blank", rel: "noopener noreferrer" }, "Open AniList sign-in"), " and approve Anicat."),
+      el("li", {}, "AniList shows a page whose address contains access_token=. Copy the token, or the whole address, and paste it here."),
+    ),
+    input,
+    el("div", { class: "toolbar" },
+      submit,
+      el("button", { type: "button", text: "Skip, Films and TV only", onclick: () => {
+        store.set("anicat_skip_signin", "1");
+        setMode("cinema");
+        location.hash = "#/";
+      } }),
+    ),
+    status,
+  );
+  host.append(form);
+  input.focus();
+}
+
+function extractToken(raw) {
+  const text = (raw || "").trim();
+  if (!text) return null;
+  const m = text.match(/access_token=([^&\s#]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  // A bare token has no spaces and no URL punctuation.
+  if (/^[A-Za-z0-9._\-]+$/.test(text)) return text;
+  return null;
+}
+
+async function viewHome(host, token) {
+  if (state.mode === "anime") {
+    host.append(el("h1", {}, state.signedIn ? "Up Next" : "Anime"));
+    if (!state.signedIn) {
+      host.append(signInPrompt());
+    } else {
+      await section(host, "Continue watching", () => upNextAnime());
+    }
+    if (token !== state.renderToken) return;
+    section(host, "Trending", async () => gridOf(await api("GET", "/api/trending?limit=24")));
+    section(host, "Airing now", async () => gridOf(await api("GET", "/api/discover?status=RELEASING&limit=24")));
+  } else {
+    host.append(el("h1", {}, "Up Next"));
+    await section(host, "Continue watching", () => upNextCinema());
+    if (token !== state.renderToken) return;
+    let kinds = [];
+    try {
+      kinds = await api("GET", "/api/cinema/rows");
+    } catch (e) {
+      host.append(el("p", { class: "error", text: errorText(e) }));
+      return;
+    }
+    if (token !== state.renderToken) return;
+    for (const kind of kinds) {
+      section(host, rowLabel(kind), async () => gridOf(await api("GET", `/api/cinema/row/${encodeURIComponent(kind)}`)));
+    }
+  }
+}
+
+function rowLabel(kind) {
+  const s = String(kind).replace(/[_-]+/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// One card per title, newest watch first. A title whose last episode stopped
+// short of the watched line resumes it; one that finished it offers the next.
+async function upNextFrom(rows, wantCinema) {
+  const seen = new Map();
+  for (const r of rows) {
+    if (isCinema(r.catalog) !== wantCinema) continue;
+    const key = `${r.catalog}:${r.catalog_id}`;
+    if (!seen.has(key)) seen.set(key, r);
+  }
+  const latest = [...seen.values()].slice(0, 12);
+  const cards = await mapLimited(latest, 4, async (r) => {
+    const [detail, prog] = await Promise.all([
+      fetchDetail(r.catalog, r.catalog_id),
+      api("GET", `/api/progress/${r.catalog_id}?episode=${r.episode_number}&catalog=${r.catalog}`),
+    ]);
+    const fraction = prog && prog.duration > 0 ? prog.stop_time / prog.duration : 0;
+    const resumable = prog && prog.stop_time > 0 && fraction < RESUME_LIMIT;
+    let episode = r.episode_number;
+    if (!resumable) {
+      episode = r.episode_number + 1;
+      const row = (detail.episodes || []).find((e) => e.number === episode);
+      if (r.catalog === "tmdb_movie" || !row || !row.is_aired) return null;
+    }
+    return { detail, catalog: r.catalog, episode, resumable, at: resumable ? prog.stop_time : 0 };
+  });
+  return cards.filter((c) => c && !c.error).sort((a, b) => (b.resumable ? 1 : 0) - (a.resumable ? 1 : 0));
+}
+
+function upNextGrid(cards, extra) {
+  const items = cards.map((c) => posterCard(
+    { catalog: c.catalog, catalog_id: c.detail.catalog_id, title: c.detail.title, cover_image: c.detail.cover_image },
+    {
+      sub: c.resumable
+        ? `${c.catalog === "tmdb_movie" ? "Resume" : `Resume episode ${c.episode}`} at ${clock(c.at)}`
+        : `Next: episode ${c.episode}`,
+      actions: el("button", { type: "button", text: c.resumable ? "Resume" : "Play", onclick: () =>
+        play({ catalog: c.catalog, catalogId: c.detail.catalog_id, episode: c.episode, title: c.detail.title }) }),
+    }));
+  const all = items.concat(extra || []);
+  if (!all.length) return el("p", { class: "muted", text: "Nothing in progress. Start something from the rows below or Search." });
+  return el("div", { class: "grid" }, all);
+}
+
+async function upNextAnime() {
+  const [activity, current] = await Promise.all([
+    api("GET", "/api/activity?limit=200"),
+    api("GET", "/api/user-list?status=CURRENT").catch(() => []),
+  ]);
+  const cards = await upNextFrom(activity, false);
+  const shown = new Set(cards.map((c) => c.detail.catalog_id));
+  // Titles watching on AniList with nothing played on this machine yet.
+  const extra = current
+    .filter((m) => !shown.has(m.catalog_id))
+    .filter((m) => !m.episodes || (m.progress || 0) < m.episodes)
+    .map((m) => {
+      const episode = (m.progress || 0) + 1;
+      return posterCard(m, {
+        sub: `Next: episode ${episode}`,
+        actions: el("button", { type: "button", text: "Play", onclick: () =>
+          play({ catalog: "anilist", catalogId: m.catalog_id, episode, title: m.title }) }),
+      });
+    });
+  return upNextGrid(cards, extra);
+}
+
+async function upNextCinema() {
+  const activity = await api("GET", "/api/activity?limit=200");
+  return upNextGrid(await upNextFrom(activity, true));
+}
+
+async function viewLibrary(host, token) {
+  host.append(el("h1", {}, "Library"));
+  if (state.mode === "anime") {
+    if (!state.signedIn) { host.append(signInPrompt()); return; }
+    for (const status of ANIME_STATUSES) {
+      if (token !== state.renderToken) return;
+      section(host, STATUS_LABELS[status], async () => gridOf(await api("GET", `/api/user-list?status=${status}`)));
+    }
+  } else {
+    let entries;
+    try {
+      entries = await api("GET", "/api/cinema/list");
+    } catch (e) {
+      host.append(el("p", { class: "error", text: errorText(e) }));
+      return;
+    }
+    if (!entries.length) {
+      host.append(el("p", { class: "muted", text: "Your films and TV list is empty. Add titles from their page." }));
+      return;
+    }
+    for (const status of CINEMA_STATUSES.concat([...new Set(entries.map((e) => e.status))].filter((s) => !CINEMA_STATUSES.includes(s)))) {
+      const group = entries.filter((e) => e.status === status);
+      if (!group.length) continue;
+      section(host, STATUS_LABELS[status] || rowLabel(status.toLowerCase()), async () => {
+        const details = await mapLimited(group, 4, (e) => fetchDetail(e.catalog, e.catalog_id));
+        return gridOf(group.map((e, i) => {
+          const d = details[i];
+          return d && !d.error
+            ? { catalog: e.catalog, catalog_id: e.catalog_id, title: d.title, cover_image: d.cover_image, format: d.format }
+            : { catalog: e.catalog, catalog_id: e.catalog_id, title: `Unavailable (${e.catalog} ${e.catalog_id})`, cover_image: "" };
+        }), (it) => ({ sub: it.catalog === "tmdb_tv" ? "Series" : "Film" }));
+      });
+    }
+  }
+}
+
+async function viewSearch(host, token, query) {
+  const input = el("input", { type: "search", value: query || "", placeholder: state.mode === "anime" ? "Search anime" : "Search films and TV", "aria-label": "Search", style: "flex:1;min-width:0" });
+  const form = el("form", { class: "toolbar", onsubmit: (ev) => {
+    ev.preventDefault();
+    const q = input.value.trim();
+    location.hash = q ? `#/search/${encodeURIComponent(q)}` : "#/search";
+  } }, input, el("button", { type: "submit", class: "primary", text: "Search" }));
+  // Explicit, not left to implicit form submission: a key event synthesized
+  // by automation (CDP without a text payload) never submits the form, and
+  // Enter then did nothing at all.
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); form.requestSubmit(); }
+  });
+  host.append(el("h1", {}, state.mode === "anime" ? "Search anime" : "Search films and TV"), form);
+  input.focus();
+  if (!query) return;
+  await section(host, `Results for "${query}"`, async () =>
+    gridOf(await api("POST", "/api/search", { query, kind: state.mode === "anime" ? "anime" : "cinema", limit: 30 })));
+}
+
+async function viewTitle(host, token, catalog, id) {
+  if (!["anilist", "tmdb_movie", "tmdb_tv"].includes(catalog) || !/^\d+$/.test(id)) {
+    host.append(el("p", { class: "error", text: "Unknown title address." }));
+    return;
+  }
+  const catalogId = Number(id);
+  const loading = el("p", { class: "muted", text: "Loading..." });
+  host.append(loading);
+  let d;
+  try {
+    d = await fetchDetail(catalog, catalogId, true);
+  } catch (e) {
+    loading.replaceWith(el("p", { class: "error", text: errorText(e) }));
+    return;
+  }
+  if (token !== state.renderToken) return;
+  loading.remove();
+  document.title = `${d.title} - Anicat`;
+
+  const meta = [d.format && d.format.replace(/_/g, " "), d.year, d.status && rowLabel(d.status.toLowerCase()), d.studio,
+    d.average_score ? `${d.average_score}%` : null, d.episode_count && catalog !== "tmdb_movie" ? `${d.episode_count} episodes` : null,
+    d.genres && d.genres.length ? d.genres.slice(0, 4).join(", ") : null].filter(Boolean);
+
+  const toolbar = el("div", { class: "toolbar" });
+  const info = el("div", {},
+    el("h1", {}, d.title),
+    d.romaji_title && d.romaji_title !== d.title ? el("div", { class: "muted" }, d.romaji_title) : null,
+    el("div", { class: "meta" }, meta.map((m) => el("span", {}, m))),
+    el("p", { class: "synopsis" }, sanitizedSynopsis(d.synopsis)),
+    toolbar,
+  );
+  const poster = d.cover_image
+    ? el("img", { class: "poster", src: d.cover_image, alt: "", referrerpolicy: "no-referrer" })
+    : el("div", { class: "poster" });
+  host.append(el("div", { class: "detail" }, el("div", {}, poster), info));
+
+  const title = d.title;
+  const episodes = d.episodes || [];
+
+  if (catalog === "anilist") {
+    // Sub/Dub is a per-title preference sent with every play and release
+    // search; the audio language is recorded too so the player picks the
+    // matching track inside a dual-audio release.
+    const dubBtn = el("button", { type: "button" });
+    const syncDub = () => {
+      const on = preferDub(catalog, catalogId);
+      dubBtn.textContent = on ? "Audio: Dub" : "Audio: Sub";
+      dubBtn.setAttribute("aria-pressed", String(on));
+    };
+    dubBtn.addEventListener("click", async () => {
+      const on = !preferDub(catalog, catalogId);
+      store.set(`anicat_dub_${catalog}_${catalogId}`, on ? "1" : "0");
+      syncDub();
+      try {
+        await api("POST", "/api/track-preference", on
+          ? { catalog, catalog_id: catalogId, audio_lang: "eng", subtitle_lang: null, subtitle_title: null }
+          : { catalog, catalog_id: catalogId, audio_lang: "jpn", subtitle_lang: "eng", subtitle_title: null });
+      } catch (e) { toast(errorText(e), true); }
+    });
+    syncDub();
+    toolbar.append(dubBtn);
+  }
+
+  if (catalog === "tmdb_movie") {
+    const film = episodes[0];
+    const resume = d.resume_episode === 1 && d.resume_seconds > 0 ? d.resume_seconds : 0;
+    toolbar.prepend(...[
+      el("button", { type: "button", class: "primary", text: resume ? `Resume at ${clock(resume)}` : "Play",
+        onclick: () => play({ catalog, catalogId, episode: 1, title }) }),
+      resume ? el("button", { type: "button", text: "Play from start", onclick: () => play({ catalog, catalogId, episode: 1, title, fromStart: true }) }) : null,
+      el("button", { type: "button", text: "Choose release", onclick: () => openReleases({ catalog, catalogId, episode: 1, title }) }),
+      film && !film.is_watched ? el("button", { type: "button", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, 1) }) : null,
+    ].filter(Boolean));
+  } else if (d.resume_episode) {
+    const row = episodes.find((e) => e.number === d.resume_episode);
+    if (row && row.is_aired) {
+      toolbar.prepend(el("button", { type: "button", class: "primary",
+        text: d.resume_seconds > 0 ? `Resume episode ${d.resume_episode} at ${clock(d.resume_seconds)}` : `Play episode ${d.resume_episode}`,
+        onclick: () => play({ catalog, catalogId, episode: d.resume_episode, title }) }));
+    }
+  } else if (episodes.length && episodes[0].is_aired) {
+    toolbar.prepend(el("button", { type: "button", class: "primary", text: "Play episode " + episodes[0].number,
+      onclick: () => play({ catalog, catalogId, episode: episodes[0].number, title }) }));
+  }
+
+  if (catalog === "anilist" && d.list_entry_id) {
+    toolbar.append(el("button", { type: "button", class: "danger", text: "Remove from list", onclick: async () => {
+      if (!confirm(`Remove "${title}" from your AniList list?`)) return;
+      try {
+        await api("DELETE", `/api/list/${d.list_entry_id}`);
+        toast("Removed from your list.");
+        render();
+      } catch (e) { toast(errorText(e), true); }
+    } }));
+  }
+  if (catalog === "anilist" && d.list_status) {
+    toolbar.append(el("span", { class: "tag" }, STATUS_LABELS[d.list_status] || d.list_status));
+  }
+
+  if (isCinema(catalog)) {
+    const select = el("select", { "aria-label": "List status" },
+      el("option", { value: "" }, "Not on list"),
+      CINEMA_STATUSES.map((s) => el("option", { value: s }, STATUS_LABELS[s])));
+    toolbar.append(select);
+    api("GET", "/api/cinema/list").then((rows) => {
+      const hit = rows.find((r) => r.catalog === catalog && r.catalog_id === catalogId);
+      select.value = hit ? hit.status : "";
+    }, () => {});
+    select.addEventListener("change", async () => {
+      try {
+        await api("POST", "/api/cinema/list", { catalog, catalog_id: catalogId, status: select.value || null });
+        toast(select.value ? `Saved as ${STATUS_LABELS[select.value]}.` : "Removed from your list.");
+      } catch (e) { toast(errorText(e), true); }
+    });
+  }
+
+  if (catalog === "tmdb_movie") return;
+
+  host.append(el("h2", {}, "Episodes"));
+  if (!episodes.length) {
+    host.append(el("p", { class: "muted", text: "No episodes listed." }));
+    return;
+  }
+  const grid = el("div", { class: "episodes" });
+  host.append(grid);
+  const cells = new Map();
+  for (const ep of episodes) {
+    const pos = el("span", { class: "muted" });
+    const cell = el("div", { class: "ep" + (ep.is_watched ? " watched" : "") },
+      el("div", { class: "ep-title", title: ep.title }, `${ep.number}. ${ep.title}`),
+      el("div", { class: "muted", style: "display:flex;gap:.5rem;flex-wrap:wrap;align-items:center" },
+        ep.is_watched ? el("span", { class: "tag ok", text: "watched" }) : null,
+        !ep.is_aired ? el("span", { class: "tag", text: ep.air_date ? `airs ${ep.air_date}` : "not aired" }) : null,
+        ep.runtime_minutes ? el("span", {}, `${ep.runtime_minutes} min`) : null,
+        pos,
+      ),
+      ep.progress_percent > 0 && !ep.is_watched
+        ? el("div", { class: "bar" }, el("span", { style: `width:${Math.min(100, ep.progress_percent).toFixed(1)}%` }))
+        : null,
+      el("div", { class: "ep-actions" },
+        el("button", { type: "button", text: "Play", disabled: !ep.is_aired,
+          onclick: () => play({ catalog, catalogId, episode: ep.number, title }) }),
+        el("button", { type: "button", text: "Choose release", disabled: !ep.is_aired,
+          onclick: () => openReleases({ catalog, catalogId, episode: ep.number, title }) }),
+        !ep.is_watched && ep.is_aired
+          ? el("button", { type: "button", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, ep.number) })
+          : null,
+      ),
+    );
+    cells.set(ep.number, pos);
+    grid.append(cell);
+  }
+  // Exact resume positions for the episodes that have one. The detail's
+  // percent is enough for the bar; the clock needs the recorded seconds.
+  const started = episodes.filter((e) => e.progress_percent > 0 && !e.is_watched).slice(0, 40);
+  mapLimited(started, 4, async (ep) => {
+    const p = await api("GET", `/api/progress/${catalogId}?episode=${ep.number}&catalog=${catalog}`);
+    if (p && p.stop_time > 0 && token === state.renderToken) {
+      cells.get(ep.number).textContent = `stopped at ${clock(p.stop_time)}`;
+    }
+  });
+}
+
+async function markWatched(catalog, catalogId, episode) {
+  try {
+    const r = await api("POST", "/api/watched", { catalog, catalog_id: catalogId, episode });
+    toast(r && r.anilist_synced ? "Marked watched and synced to AniList." : "Marked watched.");
+    render();
+  } catch (e) {
+    toast(errorText(e), true);
+  }
+}
+
+async function viewSettings(host, token) {
+  host.append(el("h1", {}, "Settings"));
+  const wrap = el("div", { class: "settings" });
+  host.append(wrap);
+
+  const account = el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "AniList account"));
+  if (state.signedIn) {
+    account.append(
+      el("p", {}, state.profile ? `Signed in as ${state.profile.name}.` : "Signed in."),
+      state.viewerError ? el("p", { class: "error" }, state.viewerError) : null,
+      el("button", { type: "button", text: "Sign out", onclick: async () => {
+        if (!confirm("Sign out of AniList on this computer?")) return;
+        try {
+          await api("POST", "/api/token", { token: null });
+          state.signedIn = false;
+          state.profile = null;
+          render();
+        } catch (e) { toast(errorText(e), true); }
+      } }),
+    );
+  } else {
+    account.append(el("p", {}, "Not signed in. Films and TV work without an account."),
+      el("a", { href: "#/signin" }, "Sign in to AniList"));
+  }
+  wrap.append(account);
+
+  const cacheText = el("p", { class: "muted", text: "Measuring..." });
+  const clearBtn = el("button", { type: "button", class: "danger", text: "Clear cache", onclick: async () => {
+    if (!confirm("Delete every downloaded episode in the stream cache? Anything playing will stop.")) return;
+    clearBtn.disabled = true;
+    try {
+      const r = await api("DELETE", "/api/cache");
+      cacheText.textContent = `Stream cache: ${bytes(r.bytes)}`;
+    } catch (e) { toast(errorText(e), true); }
+    clearBtn.disabled = false;
+  } });
+  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Storage"), cacheText, clearBtn));
+  api("GET", "/api/cache").then((r) => { cacheText.textContent = `Stream cache: ${bytes(r.bytes)}`; },
+    (e) => { cacheText.textContent = errorText(e); cacheText.className = "error"; });
+
+  const reportHost = el("div");
+  const copyBtn = el("button", { type: "button", text: "Copy debug report", onclick: async () => {
+    copyBtn.disabled = true;
+    try {
+      const text = await api("GET", "/api/debug-report");
+      if (await copyText(text, reportHost)) toast("Debug report copied.");
+    } catch (e) { toast(errorText(e), true); }
+    copyBtn.disabled = false;
+  } });
+  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Support"),
+    el("p", {}, "The debug report holds the version, settings summary and the last log lines. Nothing is sent anywhere; paste it where you report the problem."),
+    copyBtn, reportHost));
+
+  const versionText = el("p", { class: "muted", text: "Checking..." });
+  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Version"), versionText));
+  api("GET", "/api/version").then((v) => {
+    versionText.textContent = v.update_available && v.latest
+      ? `Anicat ${v.current}. Version ${v.latest} is available.`
+      : `Anicat ${v.current}. Up to date.`;
+  }, (e) => { versionText.textContent = errorText(e); });
+}
+
+// ---- router -----------------------------------------------------------------
+
+function setMode(mode, keepRoute) {
+  state.mode = mode;
+  store.set("anicat_mode", mode);
+  for (const b of document.querySelectorAll("[data-mode]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  }
+  if (!keepRoute) {
+    const tab = currentRoute().tab;
+    // A title page belongs to one catalog; switching lands on that mode's home.
+    if (tab === "title") location.hash = "#/";
+    else render();
+  }
+}
+
+function currentRoute() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  const tab = parts[0] || "home";
+  return { tab, parts };
+}
+
+async function render() {
+  const token = ++state.renderToken;
+  const { tab, parts } = currentRoute();
+  // A bookmark to a cinema title opened while the switch is on Anime (or the
+  // reverse) follows the title rather than showing it under the wrong tabs.
+  if (tab === "title" && ["anilist", "tmdb_movie", "tmdb_tv"].includes(parts[1])) {
+    const wantMode = isCinema(parts[1]) ? "cinema" : "anime";
+    if (state.mode !== wantMode) setMode(wantMode, true);
+  }
+  const host = document.getElementById("view");
+  host.replaceChildren();
+  document.title = "Anicat";
+  for (const a of document.querySelectorAll("nav.tabs a")) {
+    const active = a.dataset.tab === tab;
+    if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+  const libraryTab = document.querySelector('[data-tab="library"]');
+  libraryTab.hidden = state.mode === "anime" && !state.signedIn;
+  document.querySelector('[data-tab="home"]').textContent =
+    state.mode === "anime" && !state.signedIn ? "Home" : "Up Next";
+
+  try {
+    switch (tab) {
+      case "home": await viewHome(host, token); break;
+      case "library": await viewLibrary(host, token); break;
+      case "search": await viewSearch(host, token, parts[1] ? decodeURIComponent(parts[1]) : ""); break;
+      case "title": await viewTitle(host, token, parts[1], parts[2]); break;
+      case "settings": await viewSettings(host, token); break;
+      case "signin": await viewSignIn(host, token); break;
+      default: host.append(el("p", { class: "error", text: "Page not found." }), el("a", { href: "#/" }, "Go home"));
+    }
+  } catch (e) {
+    if (token === state.renderToken) host.append(el("p", { class: "error", text: errorText(e) }));
+  }
+}
+
+// ---- version banner ---------------------------------------------------------
+
+async function checkVersion() {
+  let v;
+  try { v = await api("GET", "/api/version"); } catch { return; }
+  if (!v || !v.update_available || !v.latest) return;
+  if (store.get("anicat_update_dismissed") === v.latest) return;
+  const banner = document.getElementById("update-banner");
+  const copyHost = el("div", { style: "flex-basis:100%" });
+  banner.replaceChildren(
+    el("span", {}, `Anicat ${v.latest} is out. Run the install command again to update.`),
+    el("div", { class: "codebox" },
+      el("code", {}, INSTALL_COMMAND),
+      el("button", { type: "button", text: "Copy", onclick: async () => {
+        if (await copyText(INSTALL_COMMAND, copyHost)) toast("Install command copied.");
+      } }),
+    ),
+    v.page_url ? el("a", { href: v.page_url, target: "_blank", rel: "noopener noreferrer" }, "Release notes") : null,
+    el("span", { class: "spacer", style: "flex:1" }),
+    el("button", { type: "button", text: "Dismiss", onclick: () => {
+      store.set("anicat_update_dismissed", v.latest);
+      banner.hidden = true;
+    } }),
+    copyHost,
+  );
+  banner.hidden = false;
+}
+
+// ---- boot -------------------------------------------------------------------
+
+async function boot() {
+  for (const b of document.querySelectorAll("[data-mode]")) {
+    b.addEventListener("click", () => { if (b.dataset.mode !== state.mode) setMode(b.dataset.mode); });
+  }
+  setMode(state.mode, true);
+  try {
+    const v = await api("GET", "/api/viewer");
+    state.signedIn = !!v.signed_in;
+    state.profile = v.profile || null;
+  } catch (e) {
+    // The viewer route only calls AniList when a token is stored, so an
+    // error here means signed in with AniList unreachable, not signed out.
+    state.signedIn = true;
+    state.viewerError = errorText(e);
+  }
+  window.addEventListener("hashchange", render);
+  if (!state.signedIn && store.get("anicat_skip_signin") !== "1" && !location.hash.startsWith("#/title")) {
+    location.hash = "#/signin";
+  }
+  render();
+  checkVersion();
+  pollPlayer();
+}
+
+boot();
+</script>
 </body>
 </html>

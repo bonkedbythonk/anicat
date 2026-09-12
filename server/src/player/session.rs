@@ -102,6 +102,8 @@ pub async fn start(
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("could not start mpv at {}: {e}", binary.display()))?;
+    #[cfg(windows)]
+    bind_to_server_lifetime(&child);
 
     let (ipc, mut events) = match IpcClient::connect(&endpoint, || matches!(child.try_wait(), Ok(None))).await {
         Ok(pair) => pair,
@@ -487,3 +489,36 @@ fn remove_socket(endpoint: &std::path::Path) {
 /// A named pipe goes away with its last handle; there is no file to remove.
 #[cfg(windows)]
 fn remove_socket(_endpoint: &std::path::Path) {}
+
+/// Puts mpv in a job object that dies with this process. `kill_on_drop` only
+/// runs when the server unwinds normally; Task Manager, a crash, or the
+/// installer's `Stop-Process` end the server without dropping anything, and
+/// mpv would stay open on a stream whose server is gone. The job handle is
+/// deliberately leaked: closing it is what kills the children, and the OS
+/// closes it when this process exits, however it exits.
+#[cfg(windows)]
+fn bind_to_server_lifetime(child: &tokio::process::Child) {
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    let Some(process) = child.raw_handle() else { return };
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            log::warn!("[player] could not create a job object; mpv may outlive a crashed server");
+            return;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 || AssignProcessToJobObject(job, process as _) == 0 {
+            log::warn!("[player] could not bind mpv to the server's lifetime; mpv may outlive a crashed server");
+        }
+    }
+}

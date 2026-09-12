@@ -33,11 +33,11 @@ const PREFERRED_PORT: u16 = 47111;
 /// Successors tried when the preferred port is taken.
 const PORT_FALLBACKS: u16 = 10;
 
-/// Longest the single-instance probe waits on a port. `/api/version` in a
-/// running instance can make its once-a-day GitHub request inline, so this
-/// is not a loopback round trip; a port that accepts and never answers is
-/// something else's and must not stall the launch either.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Longest the single-instance probe waits on a port. `/api/health` answers
+/// without touching the network, so this is a loopback round trip; a port
+/// that accepts and never answers is something else's and must not stall
+/// the launch.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Cap on `player.stop()` during shutdown. It waits on mpv to exit, and a
 /// wedged mpv otherwise holds Quit forever with the icon already gone.
@@ -154,7 +154,7 @@ fn main() {
                 runtime.block_on(serve(state, listener, async move {
                     tokio::select! {
                         _ = quit_rx => {}
-                        _ = tokio::signal::ctrl_c() => {}
+                        _ = terminate() => {}
                     }
                 }));
                 stopped.notify();
@@ -167,9 +167,31 @@ fn main() {
 
     // Headless: `ANICAT_NO_TRAY=1`, a session with no display, or a platform
     // without a tray. Ctrl-C is the only way out.
-    runtime.block_on(serve(state, listener, async {
+    runtime.block_on(serve(state, listener, terminate()));
+}
+
+/// Ctrl-C, and on unix SIGTERM too. A SIGTERM used to end the process without
+/// running `serve`'s shutdown, and `kill_on_drop` never fires when nothing is
+/// dropped: mpv stayed open reading from a range server that was gone.
+async fn terminate() {
+    #[cfg(unix)]
+    {
+        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
         let _ = tokio::signal::ctrl_c().await;
-    }));
+    }
 }
 
 /// Serves until `stop` resolves, then stops the player and drains. The one
@@ -223,7 +245,7 @@ pub fn open_browser(port: u16) {
 /// The port of an Anicat server already running in the fallback range, if
 /// any. Every port is asked at once: a free port refuses immediately, and a
 /// foreign one that hangs costs `PROBE_TIMEOUT` once rather than per port.
-/// The answer must have our `/api/version` shape; a port that merely
+/// The answer must have our `/api/health` shape; a port that merely
 /// accepts belongs to something else, and the scan in `bind` steps over it.
 async fn running_instance() -> Option<u16> {
     let client = reqwest::Client::builder()
@@ -234,9 +256,9 @@ async fn running_instance() -> Option<u16> {
     let probes = (PREFERRED_PORT..=PREFERRED_PORT + PORT_FALLBACKS).map(|port| {
         let client = client.clone();
         async move {
-            let url = format!("http://127.0.0.1:{port}/api/version");
+            let url = format!("http://127.0.0.1:{port}/api/health");
             let body: serde_json::Value = client.get(url).send().await.ok()?.json().await.ok()?;
-            is_version_shape(&body).then_some(port)
+            is_our_health(&body).then_some(port)
         }
     });
     let found = futures_join_all(probes).await;
@@ -244,9 +266,8 @@ async fn running_instance() -> Option<u16> {
     found.into_iter().flatten().min()
 }
 
-fn is_version_shape(body: &serde_json::Value) -> bool {
-    body.get("current").is_some_and(|v| v.is_string())
-        && body.get("update_available").is_some_and(|v| v.is_boolean())
+fn is_our_health(body: &serde_json::Value) -> bool {
+    body.get("app").and_then(|v| v.as_str()) == Some("anicat")
 }
 
 /// A join over the probes without pulling in `futures` for one call.
@@ -279,16 +300,13 @@ async fn bind() -> Option<(tokio::net::TcpListener, u16)> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_version_shape;
+    use super::is_our_health;
     use serde_json::json;
 
     #[test]
-    fn version_shape_is_ours_only() {
-        assert!(is_version_shape(&json!({
-            "current": "6.0.1", "latest": null, "page_url": null,
-            "update_available": false, "checked_at": 0
-        })));
-        assert!(!is_version_shape(&json!({ "version": "1.0" })));
-        assert!(!is_version_shape(&json!({ "current": 6, "update_available": false })));
+    fn health_shape_is_ours_only() {
+        assert!(is_our_health(&json!({ "app": "anicat", "version": "6.0.1" })));
+        assert!(!is_our_health(&json!({ "version": "1.0" })));
+        assert!(!is_our_health(&json!({ "app": "something-else" })));
     }
 }

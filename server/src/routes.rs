@@ -41,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cache", get(cache_bytes).delete(purge_cache))
         .route("/api/token", post(set_token))
         .route("/api/viewer", get(viewer))
+        .route("/api/health", get(health))
         .route("/api/version", get(version))
         .route("/api/debug-report", get(debug_report))
         .with_state(state)
@@ -457,6 +458,13 @@ async fn viewer(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 }
 
 // ---- support ----------------------------------------------------------------
+
+/// What the single-instance probe asks. `/api/version` can make the daily
+/// GitHub request inline, so probing it let a second launch wait out that
+/// request, time out, and start a second engine on the same registry.
+async fn health() -> Json<Value> {
+    Json(json!({ "app": "anicat", "version": crate::version::current() }))
+}
 
 async fn version(State(s): State<AppState>) -> Json<Value> {
     Json(json!(crate::version::check(&s.http, &s.data_dir).await))

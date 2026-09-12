@@ -883,11 +883,6 @@ async function viewTitle(host, token, catalog, id) {
       const on = !preferDub(catalog, catalogId);
       store.set(`anicat_dub_${catalog}_${catalogId}`, on ? "1" : "0");
       syncDub();
-      try {
-        await api("POST", "/api/track-preference", on
-          ? { catalog, catalog_id: catalogId, audio_lang: "eng", subtitle_lang: null, subtitle_title: null }
-          : { catalog, catalog_id: catalogId, audio_lang: "jpn", subtitle_lang: "eng", subtitle_title: null });
-      } catch (e) { toast(errorText(e), true); }
     });
     syncDub();
     toolbar.append(dubBtn);

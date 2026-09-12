@@ -1,0 +1,33 @@
+[package]
+name = "anicat-server"
+# Not the app's version. `bump-version.sh` rewrites version.txt and core's
+# manifest, never this file; the binary reads version.txt at compile time
+# (see `version.rs`), so a bump cannot leave the server reporting the last
+# release.
+version = "0.0.0"
+license = "GPL-3.0-only"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "anicat"
+path = "src/main.rs"
+
+[dependencies]
+anicat-core = { path = "../core" }
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Same feature set as core. With default features reqwest enables native-tls
+# for the whole crate graph, which moves core's own clients off rustls; see
+# the librqbit comment in core/Cargo.toml for what that broke.
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+log = "0.4"
+dirs = "6"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }

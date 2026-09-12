@@ -177,3 +177,6 @@ AnicatApple/.build-device/
 .clinerules/
 .cursor/
 .windsurf/
+
+# Windows server crate (server/), its own target like core/
+server/target/

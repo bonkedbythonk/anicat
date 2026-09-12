@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Anicat</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+  td { padding: .15rem .75rem .15rem 0; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Anicat</h1>
+<p>Placeholder page. The real one replaces this file.</p>
+<table>
+  <tr><td><code>POST /api/search</code></td><td>{query, kind: "anime"|"cinema", filters?, page?, limit?}</td></tr>
+  <tr><td><code>GET /api/trending</code></td><td>?format&amp;limit</td></tr>
+  <tr><td><code>GET /api/discover</code></td><td>?status&amp;season&amp;season_year&amp;limit</td></tr>
+  <tr><td><code>GET /api/cinema/rows</code></td><td>row kinds</td></tr>
+  <tr><td><code>GET /api/cinema/row/{kind}</code></td><td>?page</td></tr>
+  <tr><td><code>GET /api/cinema/{id}</code></td><td>?catalog=tmdb_movie|tmdb_tv</td></tr>
+  <tr><td><code>GET /api/cinema/list</code></td><td>?status</td></tr>
+  <tr><td><code>POST /api/cinema/list</code></td><td>{catalog, catalog_id, status|null}</td></tr>
+  <tr><td><code>GET /api/user-list</code></td><td>?status (needs sign-in)</td></tr>
+  <tr><td><code>GET /api/media/{id}</code></td><td>AniList detail</td></tr>
+  <tr><td><code>GET /api/progress/{id}</code></td><td>?episode&amp;catalog</td></tr>
+  <tr><td><code>GET /api/activity</code></td><td>?limit</td></tr>
+  <tr><td><code>POST /api/play</code></td><td>{catalog?, catalog_id, episode, title?, prefer_dub?, chosen_name?, from_start?}</td></tr>
+  <tr><td><code>POST /api/stop</code></td><td>release the pin, pause downloads</td></tr>
+  <tr><td><code>GET /api/resolve-progress/{catalog}/{id}/{episode}</code></td><td>null when idle</td></tr>
+  <tr><td><code>GET /api/releases</code></td><td>?catalog&amp;catalog_id&amp;episode&amp;title&amp;prefer_dub</td></tr>
+  <tr><td><code>POST /api/track-preference</code></td><td>{catalog?, catalog_id, audio_lang, subtitle_lang, subtitle_title}</td></tr>
+  <tr><td><code>POST /api/watched</code></td><td>{catalog?, catalog_id, episode}</td></tr>
+  <tr><td><code>DELETE /api/list/{entry}</code></td><td>AniList list entry id</td></tr>
+  <tr><td><code>GET /api/cache</code>, <code>DELETE /api/cache</code></td><td>stream cache size, purge</td></tr>
+  <tr><td><code>POST /api/token</code></td><td>{token|null}</td></tr>
+  <tr><td><code>GET /api/viewer</code></td><td>signed-in state and profile</td></tr>
+  <tr><td><code>GET /api/version</code></td><td>current, latest, update_available</td></tr>
+  <tr><td><code>GET /api/debug-report</code></td><td>plain text</td></tr>
+</table>
+<p>Errors: <code>{"error": "...", "anilist_down": bool}</code>.</p>
+</body>
+</html>

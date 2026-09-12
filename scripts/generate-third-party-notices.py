@@ -3,11 +3,20 @@
 
     python3 scripts/generate-third-party-notices.py          # rewrite the file
     python3 scripts/generate-third-party-notices.py --check  # exit 1 if stale
+    python3 scripts/generate-third-party-notices.py --output PATH  # write elsewhere
 
-The Rust half comes from `cargo metadata` over core/Cargo.lock, so a dependency
-change is picked up by running this again. The native half (MPVKit's prebuilt
-libraries) is the table below and has to be edited by hand when MPVKit moves:
-nothing in SwiftPM's resolution says what license a binary target is under.
+The Rust half comes from `cargo metadata` over core/Cargo.lock and
+server/Cargo.lock (the Windows build's crate), so a dependency change in
+either is picked up by running this again. The native half is two hand-kept
+tables: MPVKit's prebuilt libraries for the Apple builds, and the mpv.exe the
+Windows zip carries. Nothing in SwiftPM's resolution or in a prebuilt mpv.exe
+says what license a binary is under.
+
+One file serves every target: the Windows packaging script copies this same
+output into its zip. So a change to server/Cargo.lock, or to the mpv pinned in
+scripts/package-anicat-windows.ps1, makes the committed file stale, and
+publish-release.sh's `--check` then refuses to build the Mac release until it
+is regenerated and committed.
 
 No network access. Every text not found in the local cargo registry is kept in
 scripts/third-party-licenses/, so a release worktree reproduces the file byte
@@ -25,10 +34,16 @@ TEXTS = os.path.join(ROOT, "scripts", "third-party-licenses")
 UI_RESOURCES = os.path.join(ROOT, "AnicatApple", "Sources", "AnicatUI", "Resources")
 OUT = os.path.join(UI_RESOURCES, "Legal", "THIRD_PARTY_NOTICES.txt")
 
-# Both, because the iPhone build links the same engine for another target and
+# Per lock file, the targets that lock file ships for. Both Apple targets for
+# core, because the iPhone build links the same engine for another target and
 # a platform-gated dependency present on only one of them would otherwise be
-# missing from the notices of that one.
-TARGETS = ["aarch64-apple-darwin", "aarch64-apple-ios"]
+# missing from the notices of that one. The server crate ships only as the
+# Windows exe; it also runs on a Mac for development, but nothing built there
+# is distributed, and naming darwin here would list crates no zip contains.
+LOCKFILES = [
+    ("core", ["aarch64-apple-darwin", "aarch64-apple-ios"]),
+    ("server", ["x86_64-pc-windows-msvc"]),
+]
 
 # When a crate offers a choice ("MIT OR Apache-2.0"), the alternative taken is
 # the one ranked first here. MIT first because its text is a few lines and
@@ -223,6 +238,75 @@ NATIVE = [
     },
 ]
 
+# mpv.exe in the Windows zip: shinchiro's tagged release build of mpv 0.41.0
+# (mpv-0.41.0-x86_64.7z, pinned by hash in scripts/package-anicat-windows.ps1).
+# All of it is linked statically into the one exe, except d3dcompiler_43.dll,
+# which the archive carries beside it.
+#
+# How this list was derived, and how to re-derive it on an mpv bump: the
+# binary's own feature list (`strings mpv.exe | grep 'List of enabled'`) for
+# what mpv links, and the `--enable-lib*` flags in shinchiro's
+# packages/ffmpeg.cmake for what FFmpeg links. That repository's packages/
+# directory is its build system's whole package set and names libraries this
+# exe does not contain, so it is not the source. The builds take each
+# library's git head at build time and record no per-library version, hence
+# the archive's build date where a version would go.
+_WIN_BUILD = "(shinchiro build of 2025-12-25)"
+WINDOWS_NATIVE = [
+    {"name": 'mpv', "version": "0.41.0", "license": 'GPL-2.0-or-later (built with gpl); linked with the FFmpeg below, the executable as a whole is GPL-3.0-or-later', "source": ['https://github.com/mpv-player/mpv/tree/v0.41.0', 'https://github.com/shinchiro/mpv-winbuild-cmake'], "texts": ['mpv-Copyright.txt']},
+    {"name": 'FFmpeg', "version": _WIN_BUILD, "license": 'GPL-3.0-or-later (built with --enable-gpl --enable-version3)', "source": ['https://github.com/FFmpeg/FFmpeg', 'https://github.com/shinchiro/mpv-winbuild-cmake/blob/master/packages/ffmpeg.cmake'], "texts": ['FFmpeg-LICENSE.md']},
+    {"name": 'x264', "version": _WIN_BUILD, "license": 'GPL-2.0-or-later', "source": ['https://code.videolan.org/videolan/x264'], "texts": []},
+    {"name": 'x265', "version": _WIN_BUILD, "license": 'GPL-2.0-or-later', "source": ['https://bitbucket.org/multicoreware/x265_git'], "texts": []},
+    {"name": 'Rubber Band Library', "version": _WIN_BUILD, "license": 'GPL-2.0-or-later', "source": ['https://github.com/breakfastquay/rubberband'], "texts": []},
+    {"name": 'libdvdnav and libdvdread', "version": _WIN_BUILD, "license": 'GPL-2.0-or-later', "source": ['https://code.videolan.org/videolan/libdvdnav', 'https://code.videolan.org/videolan/libdvdread'], "texts": []},
+    {"name": 'libbluray', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://code.videolan.org/videolan/libbluray'], "texts": []},
+    {"name": 'libplacebo', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://github.com/haasn/libplacebo'], "texts": []},
+    {"name": 'FriBidi', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://github.com/fribidi/fribidi'], "texts": []},
+    {"name": 'libsoxr', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://sourceforge.net/projects/soxr/'], "texts": []},
+    {"name": 'libssh', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://www.libssh.org'], "texts": []},
+    {"name": 'libzvbi', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://github.com/zapping-vbi/zvbi'], "texts": []},
+    {"name": 'LAME', "version": _WIN_BUILD, "license": 'LGPL-2.0-or-later (LGPL-2.1 taken)', "source": ['https://lame.sourceforge.io'], "texts": []},
+    {"name": 'OpenAL Soft', "version": _WIN_BUILD, "license": 'LGPL-2.0-or-later (LGPL-2.1 taken)', "source": ['https://github.com/kcat/openal-soft'], "texts": []},
+    {"name": 'uchardet', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later (offered as MPL-1.1, GPL-2.0-or-later or LGPL-2.1-or-later; LGPL-2.1 taken)', "source": ['https://gitlab.freedesktop.org/uchardet/uchardet'], "texts": []},
+    {"name": 'VapourSynth script interface (the runtime is not included)', "version": _WIN_BUILD, "license": 'LGPL-2.1-or-later', "source": ['https://github.com/vapoursynth/vapoursynth'], "texts": []},
+    {"name": 'libass', "version": _WIN_BUILD, "license": 'ISC', "source": ['https://github.com/libass/libass'], "texts": ['libass-COPYING.txt']},
+    {"name": 'FreeType', "version": _WIN_BUILD, "license": 'FreeType License (offered as FTL or GPL-2.0; FTL taken)', "source": ['https://gitlab.freedesktop.org/freetype/freetype'], "note": 'Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved.', "texts": ['FreeType-FTL.txt']},
+    {"name": 'HarfBuzz', "version": _WIN_BUILD, "license": 'MIT ("Old MIT")', "source": ['https://github.com/harfbuzz/harfbuzz'], "texts": ['HarfBuzz-COPYING.txt']},
+    {"name": 'Fontconfig', "version": _WIN_BUILD, "license": 'HPND-style (see text)', "source": ['https://gitlab.freedesktop.org/fontconfig/fontconfig'], "texts": ['fontconfig-COPYING.txt']},
+    {"name": 'libunibreak', "version": _WIN_BUILD, "license": 'Zlib', "source": ['https://github.com/adah1972/libunibreak'], "texts": ['libunibreak-LICENCE.txt']},
+    {"name": 'dav1d', "version": _WIN_BUILD, "license": 'BSD-2-Clause', "source": ['https://code.videolan.org/videolan/dav1d'], "texts": ['dav1d-COPYING.txt']},
+    {"name": 'libaom', "version": _WIN_BUILD, "license": 'BSD-2-Clause', "source": ['https://aomedia.googlesource.com/aom'], "texts": ['aom-LICENSE.txt']},
+    {"name": 'SVT-AV1', "version": _WIN_BUILD, "license": 'BSD-3-Clause-Clear', "source": ['https://gitlab.com/AOMediaCodec/SVT-AV1'], "texts": ['SVT-AV1-LICENSE.md']},
+    {"name": 'libvpx', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://chromium.googlesource.com/webm/libvpx'], "texts": ['libvpx-LICENSE.txt']},
+    {"name": 'libwebp', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://chromium.googlesource.com/webm/libwebp'], "texts": ['libwebp-COPYING.txt']},
+    {"name": 'libjxl', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/libjxl/libjxl'], "texts": ['libjxl-LICENSE.txt']},
+    {"name": 'Opus', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/xiph/opus'], "texts": ['opus-COPYING.txt']},
+    {"name": 'Vorbis and Ogg', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/xiph/vorbis', 'https://github.com/xiph/ogg'], "texts": ['vorbis-COPYING.txt']},
+    {"name": 'Speex', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/xiph/speex'], "texts": ['speex-COPYING.txt']},
+    {"name": 'libopenmpt', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/OpenMPT/openmpt'], "texts": ['libopenmpt-LICENSE.txt']},
+    {"name": 'libmodplug', "version": _WIN_BUILD, "license": 'Public domain', "source": ['https://github.com/Konstanty/libmodplug'], "texts": []},
+    {"name": 'libbs2b', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://sourceforge.net/projects/bs2b/'], "texts": []},
+    {"name": 'libmysofa', "version": _WIN_BUILD, "license": 'BSD-3-Clause', "source": ['https://github.com/hoene/libmysofa'], "texts": ['libmysofa-LICENSE.txt']},
+    {"name": 'libaribcaption', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://github.com/xqq/libaribcaption'], "texts": ['libaribcaption-LICENSE.txt']},
+    {"name": 'libxml2', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://gitlab.gnome.org/GNOME/libxml2'], "texts": ['libxml2-Copyright.txt']},
+    {"name": 'Intel VPL dispatcher (libvpl)', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://github.com/intel/libvpl'], "texts": ['libvpl-LICENSE.txt']},
+    {"name": 'SRT', "version": _WIN_BUILD, "license": 'MPL-2.0', "source": ['https://github.com/Haivision/srt'], "texts": []},
+    {"name": 'OpenSSL', "version": _WIN_BUILD, "license": 'Apache-2.0', "source": ['https://github.com/openssl/openssl'], "texts": []},
+    {"name": 'Little CMS', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://github.com/mm2/Little-CMS'], "texts": ['LittleCMS-LICENSE.txt']},
+    {"name": 'zimg', "version": _WIN_BUILD, "license": 'WTFPL', "source": ['https://github.com/sekrit-twc/zimg'], "texts": ['zimg-COPYING.txt']},
+    {"name": 'libjpeg-turbo', "version": _WIN_BUILD, "license": 'IJG AND BSD-3-Clause AND Zlib', "source": ['https://github.com/libjpeg-turbo/libjpeg-turbo'], "note": 'This software is based in part on the work of the Independent JPEG Group.', "texts": ['libjpeg-turbo-LICENSE.md']},
+    {"name": 'libarchive', "version": _WIN_BUILD, "license": 'BSD-2-Clause', "source": ['https://github.com/libarchive/libarchive'], "texts": ['libarchive-COPYING.txt']},
+    {"name": 'zlib', "version": _WIN_BUILD, "license": 'Zlib', "source": ['https://github.com/madler/zlib'], "texts": ['zlib-LICENSE.txt']},
+    {"name": 'SDL2 (gamepad input)', "version": _WIN_BUILD, "license": 'Zlib', "source": ['https://github.com/libsdl-org/SDL'], "texts": ['SDL2-LICENSE.txt']},
+    {"name": 'LuaJIT', "version": _WIN_BUILD, "license": 'MIT', "source": ['https://github.com/LuaJIT/LuaJIT'], "texts": ['LuaJIT-COPYRIGHT.txt']},
+    {"name": 'MuJS', "version": _WIN_BUILD, "license": 'ISC', "source": ['https://codeberg.org/ccxvii/mujs'], "texts": ['mujs-COPYING.txt']},
+    {"name": 'shaderc, with glslang and SPIRV-Tools', "version": _WIN_BUILD, "license": 'Apache-2.0; glslang under the licenses reproduced here', "source": ['https://github.com/google/shaderc', 'https://github.com/KhronosGroup/glslang', 'https://github.com/KhronosGroup/SPIRV-Tools'], "texts": ['glslang-LICENSE.txt']},
+    {"name": 'SPIRV-Cross', "version": _WIN_BUILD, "license": 'Apache-2.0', "source": ['https://github.com/KhronosGroup/SPIRV-Cross'], "texts": []},
+    {"name": 'Vulkan loader and headers', "version": _WIN_BUILD, "license": 'Apache-2.0', "source": ['https://github.com/KhronosGroup/Vulkan-Loader'], "texts": []},
+    {"name": 'd3dcompiler_43.dll', "version": "June 2010 DirectX SDK", "license": "Microsoft DirectX SDK redistributable, shipped unmodified as shinchiro's archive carries it", "source": ['https://www.microsoft.com/en-us/download/details.aspx?id=6812'], "texts": []},
+    {"name": 'mpv-winbuild-cmake (build scripts)', "version": _WIN_BUILD, "license": 'GPL-3.0', "source": ['https://github.com/shinchiro/mpv-winbuild-cmake'], "texts": []},
+]
+
 FULL_TEXTS = [
     ("GNU General Public License, version 3", os.path.join(ROOT, "LICENSE")),
     ("GNU Lesser General Public License, version 2.1", os.path.join(TEXTS, "LGPL-2.1.txt")),
@@ -284,41 +368,51 @@ def rank(license_id):
     return PREFERENCE.index(license_id) if license_id in PREFERENCE else len(PREFERENCE)
 
 
+def reachable(crate_dir, target, packages):
+    meta = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target],
+        cwd=os.path.join(ROOT, crate_dir),
+    ))
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    packages.update({p["id"]: p for p in meta["packages"]})
+    stack, seen = [meta["resolve"]["root"]], set()
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        for dep in nodes[node]["deps"]:
+            # Normal dependencies only. Build scripts and dev-dependencies
+            # never reach the shipped binary.
+            if any(kind["kind"] is None for kind in dep["dep_kinds"]):
+                stack.append(dep["pkg"])
+    return seen
+
+
 def crate_closure():
-    ids, packages, root_name = set(), {}, None
-    for target in TARGETS:
-        meta = json.loads(subprocess.check_output(
-            ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target],
-            cwd=os.path.join(ROOT, "core"),
-        ))
-        nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
-        root = meta["resolve"]["root"]
-        packages.update({p["id"]: p for p in meta["packages"]})
-        root_name = packages[root]["name"]
-        stack, seen = [root], set()
-        while stack:
-            node = stack.pop()
-            if node in seen:
-                continue
-            seen.add(node)
-            for dep in nodes[node]["deps"]:
-                # Normal dependencies only. Build scripts and dev-dependencies
-                # never reach the shipped binary.
-                if any(kind["kind"] is None for kind in dep["dep_kinds"]):
-                    stack.append(dep["pkg"])
-        ids |= seen
+    packages, unique = {}, {}
+    for crate_dir, targets in LOCKFILES:
+        for target in targets:
+            for i in reachable(crate_dir, target, packages):
+                pkg = packages[i]
+                # Path crates (anicat-core, anicat-server) are ours and have no
+                # source. Keyed by name and version, not package id: the two
+                # lock files resolve from different directories, and the ids of
+                # their shared crates are equal only while both happen to agree
+                # on every source string.
+                if pkg["source"] is not None:
+                    unique.setdefault((pkg["name"], pkg["version"]), pkg)
     # Sorted, because the first crate in a group decides which copy of a
     # shared text is printed, and a set's order changes with every process.
     # Unsorted, two runs back to back printed differently indented copies of
     # the Apache license and `--check` failed on an unchanged lock file.
-    crates = [packages[i] for i in ids if packages[i]["name"] != root_name]
-    return sorted(crates, key=lambda p: (p["name"], p["version"]))
+    return [unique[k] for k in sorted(unique)]
 
 
 def crate_texts(pkg):
     directory = os.path.dirname(pkg["manifest_path"])
     if not os.path.isdir(directory):
-        sys.exit(f"{pkg['name']} {pkg['version']} is not in the cargo registry; run `cargo fetch --locked` in core/ first")
+        sys.exit(f"{pkg['name']} {pkg['version']} is not in the cargo registry; run `cargo fetch --locked` in core/ and server/ first")
     files = sorted(f for f in os.listdir(directory) if LICENSE_FILE.match(f) and os.path.isfile(os.path.join(directory, f)))
     expr = pkg.get("license") or ""
     chosen = min(spdx_alternatives(expr), key=lambda alt: sorted(rank(i) for i in alt)) if expr else frozenset()
@@ -359,6 +453,16 @@ def anime4k_notice():
     sys.exit("no Anime4K shader carries its MIT header any more")
 
 
+def add_library(add, lib):
+    add("\n" + rule(f"{lib['name']} {lib['version']}", "-"))
+    add(f"License: {lib['license']}")
+    add("Source: " + "\n        ".join(lib["source"]))
+    if lib.get("note"):
+        add(lib["note"])
+    for text in lib["texts"]:
+        add("\n" + read(os.path.join(TEXTS, text)))
+
+
 def build():
     out = []
     add = out.append
@@ -369,7 +473,7 @@ Generated by scripts/generate-third-party-notices.py. Edit that script or
 scripts/third-party-licenses/, never this file.
 
 Anicat is free software, licensed under the GNU General Public License,
-version 3 (full text in section 5). Its source code, at the exact revision of
+version 3 (full text in section 6). Its source code, at the exact revision of
 every release (each release is a git tag), is at
 https://github.com/bonkedbythonk/anicat.
 
@@ -386,17 +490,18 @@ inside those prebuilt frameworks that MPVKit does not list separately are
 covered by the license text reproduced for the library that includes them.
 System libraries the app links from macOS or iOS itself (libc++, zlib,
 libxml2, libbz2, libiconv, expat) are part of the operating system and not
-distributed with Anicat.""")
+distributed with Anicat.
+
+Section 1 is the player in the Apple builds and section 5 the player in the
+Windows zip; each ships only with its own platform, as do the fonts and
+shaders in sections 2 and 3. Corresponding source for section 5: the mpv
+release tag and shinchiro's mpv-winbuild-cmake build scripts linked there,
+which fetch every library from the upstream listed with it. The same issue
+tracker applies if any of that becomes unavailable.""")
 
     add("\n\n" + rule("1. Native libraries (MPVKit 1.0.0, MPVKit-GPL product)"))
     for lib in NATIVE:
-        add("\n" + rule(f"{lib['name']} {lib['version']}", "-"))
-        add(f"License: {lib['license']}")
-        add("Source: " + "\n        ".join(lib["source"]))
-        if lib.get("note"):
-            add(lib["note"])
-        for text in lib["texts"]:
-            add("\n" + read(os.path.join(TEXTS, text)))
+        add_library(add, lib)
 
     add("\n\n" + rule("2. Fonts"))
     add("\nGeist and IBM Plex Mono, under the SIL Open Font License, version 1.1.\n")
@@ -408,7 +513,7 @@ distributed with Anicat.""")
     add("the rest carry this notice:\n")
     add(anime4k_notice())
 
-    add("\n\n" + rule("4. Rust crates (the engine, core/Cargo.lock)"))
+    add("\n\n" + rule("4. Rust crates (core/Cargo.lock, and server/Cargo.lock for Windows)"))
     add("\nWhere a crate offers a choice of licenses, the one reproduced is the one taken.")
     groups = {}
     for pkg in crate_closure():
@@ -424,7 +529,11 @@ distributed with Anicat.""")
         add("")
         add("\n\n".join(group["texts"]))
 
-    add("\n\n" + rule("5. Full license texts"))
+    add("\n\n" + rule("5. mpv.exe (Windows zip only, shinchiro build of mpv 0.41.0)"))
+    for lib in WINDOWS_NATIVE:
+        add_library(add, lib)
+
+    add("\n\n" + rule("6. Full license texts"))
     for title, path in FULL_TEXTS:
         add("\n" + rule(title, "-") + "\n")
         add(read(path))
@@ -433,17 +542,23 @@ distributed with Anicat.""")
 
 
 def main():
+    args = sys.argv[1:]
+    out = OUT
+    if "--output" in args:
+        # To try a change without overwriting the committed file, which is the
+        # one --check compares against and the one both packagers ship.
+        out = os.path.abspath(args[args.index("--output") + 1])
     text = build()
-    if "--check" in sys.argv[1:]:
+    if "--check" in args:
         current = read(OUT) + "\n" if os.path.exists(OUT) else ""
         if current != text:
             sys.exit(f"{os.path.relpath(OUT, ROOT)} is stale: run python3 scripts/generate-third-party-notices.py and commit it")
         print("third-party notices up to date")
         return
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
         f.write(text)
-    print(f"wrote {os.path.relpath(OUT, ROOT)} ({len(text) // 1024} KB, {len(text.splitlines())} lines)")
+    print(f"wrote {out} ({len(text) // 1024} KB, {len(text.splitlines())} lines)")
 
 
 if __name__ == "__main__":

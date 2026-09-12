@@ -114,6 +114,6 @@ jobs:
         with:
           workspaces: server -> target
 
-      - name: cargo build --release
+      - name: cargo build --release --locked
         working-directory: server
-        run: cargo build --release
+        run: cargo build --release --locked

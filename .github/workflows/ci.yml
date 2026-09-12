@@ -90,3 +90,30 @@ jobs:
       # Not `swift test`: several suites call the live AniList API and fail
       # outright during its outages, which would make CI red for reasons
       # unrelated to the change.
+
+  windows:
+    name: Windows server
+    # Compile only, no tests: it exists so a change made and checked on a Mac
+    # cannot break the Windows build unseen. Cross-compiling from macOS dies
+    # in aws-lc-sys's C build (tried 2026-09-12), so a Mac session has no
+    # other way to find out. The toolchain matches
+    # scripts/setup-windows-dev.ps1; the runner image already carries the
+    # Build Tools and CMake.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # aws-lc-sys (librqbit's rust-tls) assembles with NASM on Windows and
+      # the image does not ship it; without it the build stops in
+      # aws-lc-sys before any Rust compiles.
+      - uses: ilammy/setup-nasm@v1
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+
+      - name: cargo build --release
+        working-directory: server
+        run: cargo build --release

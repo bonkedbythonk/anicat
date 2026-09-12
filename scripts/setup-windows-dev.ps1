@@ -1,0 +1,118 @@
+# setup-windows-dev.ps1 - installs what `cd server; cargo build --release`
+# needs on a fresh Windows 10/11 machine, and nothing else.
+#
+# Usage, from a normal (non-admin) PowerShell in the repo root:
+#   powershell -ExecutionPolicy Bypass -File scripts\setup-windows-dev.ps1
+#
+# Safe to run again: every step checks first and says whether it installed
+# something or found it already there. winget may still raise a UAC prompt
+# for the Build Tools and CMake installers; that is the installer asking,
+# not this script.
+#
+# This is also the description of the toolchain the CI `windows` job
+# installs. Change one, change the other.
+#
+# Why each piece is here:
+#   rustup           the Rust toolchain, on the MSVC target.
+#   VS Build Tools   link.exe and the Windows SDK. Rust's MSVC target cannot
+#                    link without them, and aws-lc-sys (pulled in by
+#                    librqbit's rust-tls feature) compiles C with cl.exe.
+#   CMake            aws-lc-sys falls back to a CMake build on some targets.
+#   NASM             aws-lc-sys assembles its x86_64 crypto with NASM on
+#                    Windows. Without it the build stops in aws-lc-sys
+#                    before a line of Rust compiles.
+
+$ErrorActionPreference = 'Stop'
+
+$done = New-Object System.Collections.Generic.List[string]
+
+function Write-Step($message) {
+    Write-Host "==> $message"
+    $done.Add($message) | Out-Null
+}
+
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Error "winget is not available. Install 'App Installer' from the Microsoft Store, then run this again."
+}
+
+# `winget list --id X --exact` exits non-zero when the package is absent.
+# Output is discarded; only the exit code is read.
+function Test-WingetPackage($id) {
+    winget list --id $id --exact --accept-source-agreements *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Install-WingetPackage($id, $label, [string[]]$extraArgs = @()) {
+    if (Test-WingetPackage $id) {
+        Write-Step "$label already installed ($id)"
+        return
+    }
+    Write-Host "Installing $label ($id)..."
+    $wingetArgs = @('install', '--id', $id, '--exact', '--silent',
+        '--accept-package-agreements', '--accept-source-agreements') + $extraArgs
+    & winget @wingetArgs
+    # winget returns non-zero for "already installed, no upgrade available"
+    # on some versions, so a failure is re-checked rather than trusted.
+    if ($LASTEXITCODE -ne 0 -and -not (Test-WingetPackage $id)) {
+        Write-Error "winget failed to install $id (exit code $LASTEXITCODE)."
+    }
+    Write-Step "$label installed ($id)"
+}
+
+# 1. Visual Studio 2022 Build Tools with the C++ workload. Without
+#    --override the installer adds only the bare shell, with no compiler
+#    and no linker, and the Rust build fails at the first link.
+Install-WingetPackage 'Microsoft.VisualStudio.2022.BuildTools' 'Visual Studio 2022 Build Tools (C++ workload)' @(
+    '--override', '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+)
+
+# 2. CMake and NASM.
+Install-WingetPackage 'Kitware.CMake' 'CMake'
+Install-WingetPackage 'NASM.NASM' 'NASM'
+
+# The NASM installer does not put itself on PATH, and aws-lc-sys looks for
+# `nasm` on PATH only. Added to the *user* PATH, which needs no admin.
+$nasmDirs = @(
+    (Join-Path $env:ProgramFiles 'NASM'),
+    (Join-Path $env:LOCALAPPDATA 'bin\NASM')
+) | Where-Object { Test-Path (Join-Path $_ 'nasm.exe') }
+if ($nasmDirs) {
+    $nasmDir = $nasmDirs[0]
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $userPath) { $userPath = '' }
+    if (($userPath -split ';') -notcontains $nasmDir) {
+        [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $nasmDir).TrimStart(';'), 'User')
+        Write-Step "added $nasmDir to the user PATH"
+    } else {
+        Write-Step "NASM already on the user PATH ($nasmDir)"
+    }
+    if (($env:Path -split ';') -notcontains $nasmDir) { $env:Path += ";$nasmDir" }
+} else {
+    Write-Warning "nasm.exe not found under Program Files or LocalAppData; add its folder to PATH by hand."
+}
+
+# 3. rustup, then the MSVC stable toolchain as the default.
+$cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+$rustup = Join-Path $cargoBin 'rustup.exe'
+if (Test-Path $rustup) {
+    Write-Step "rustup already installed ($rustup)"
+} else {
+    Install-WingetPackage 'Rustlang.Rustup' 'rustup'
+}
+# A shell opened before the install does not see ~/.cargo/bin yet.
+if (($env:Path -split ';') -notcontains $cargoBin) { $env:Path += ";$cargoBin" }
+if (-not (Test-Path $rustup)) {
+    Write-Error "rustup.exe is not at $rustup after installing. Open a new PowerShell and run this again."
+}
+
+& $rustup default stable-msvc
+if ($LASTEXITCODE -ne 0) { Write-Error "rustup default stable-msvc failed." }
+Write-Step "rustup default is stable-msvc"
+
+Write-Host ""
+Write-Host "Done. What happened:"
+foreach ($line in $done) { Write-Host "  - $line" }
+Write-Host ""
+Write-Host "Open a NEW PowerShell (so PATH changes apply), then:"
+Write-Host "  cd server"
+Write-Host "  cargo build --release"

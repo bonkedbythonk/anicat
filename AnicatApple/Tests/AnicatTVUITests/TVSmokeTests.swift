@@ -179,6 +179,54 @@ final class TVSmokeTests: XCTestCase {
         XCTAssertTrue(player.exists || app.buttons["Dismiss"].exists, "neither a player nor a failure for the second title")
     }
 
+    /// Backgrounds the app mid-playback with the Home button, brings it
+    /// back, then leaves the player. A debug build traps if the mpv
+    /// coordinator is released off the main thread while running.
+    func testPlayerSurvivesBackgrounding() {
+        remote.press(.down)
+        sleep(1)
+        remote.press(.down)
+        sleep(1)
+        remote.press(.select)
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20))
+        sleep(2)
+        remote.press(.select)
+        let player = app.descendants(matching: .any)["tv.player"]
+        XCTAssertTrue(player.waitForExistence(timeout: 90), "no player")
+        sleep(8)
+        XCUIDevice.shared.press(.home)
+        sleep(4)
+        XCTAssertNotEqual(app.state, .notRunning, "app died in the background")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "app did not come back to the front")
+        sleep(3)
+        snapshot("after-background")
+        // Chrome up, chrome down, then out.
+        remote.press(.select)
+        sleep(2)
+        remote.press(.menu)
+        sleep(2)
+        remote.press(.menu)
+        sleep(3)
+        XCTAssertNotEqual(app.state, .notRunning, "app died leaving the player")
+        XCTAssertFalse(player.exists)
+        // And once more into the player and straight to Home while the
+        // stream is still opening.
+        remote.press(.select)
+        sleep(1)
+        remote.press(.select)
+        sleep(3)
+        XCUIDevice.shared.press(.home)
+        sleep(4)
+        XCTAssertNotEqual(app.state, .notRunning, "app died in the background during a resolve")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "app did not come back to the front")
+        sleep(5)
+        XCTAssertNotEqual(app.state, .notRunning, "app died after backgrounding during a resolve")
+        snapshot("after-background-2")
+    }
+
     private func snapshot(_ name: String) {
         let shot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: shot)

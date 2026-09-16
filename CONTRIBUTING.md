@@ -51,8 +51,6 @@ Stale bindings link fine and then call the wrong symbols at runtime, so rerun
 
 Run the checks CI runs:
 
-Run the checks CI runs:
-
 ```bash
 cd core && cargo test --lib && cargo clippy --lib --tests -- -D warnings
 cd AnicatApple && swift build --product Anicat && swift test

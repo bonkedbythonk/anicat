@@ -1337,9 +1337,15 @@ public final class AppModel {
         // sidebar click already leaves it playing. The letter and number keys
         // and the palette's "Go to" come through here instead, and stopped
         // it: L behind the mini-player opened Library and ended the episode.
+        #if os(iOS)
+        // The phone has a mini-player for exactly this: a quick action
+        // during an episode should shrink it, not end it.
+        if activeStreamURL != nil { isPlayerMinimized = true }
+        #else
         if !isPlayerMinimized {
             stopPlayback()
         }
+        #endif
         closeReader()
         // Before `clearDetail()`, and unconditional: the person page draws
         // over the detail page, so a section switch with a character page

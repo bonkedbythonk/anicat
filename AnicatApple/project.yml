@@ -124,12 +124,6 @@ targets:
             UIApplicationShortcutItemIconSymbolName: macbook.and.iphone
             UIApplicationShortcutItemUserInfo:
               url: anicat://remote
-    # The App Group the widgets read the snapshot from. A personal (free)
-    # team cannot sign an App Group; if automatic signing refuses, drop the
-    # `entitlements` lines from both targets and the widgets show their
-    # placeholders while everything else keeps working.
-    entitlements:
-      path: Entitlements/AnicatiOS.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios
@@ -155,11 +149,10 @@ targets:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) ANICAT_XCODE
 
 
-  # The widget extension: three home-screen widgets (Up Next, Airing Today,
-  # Continue Reading) and the two Live Activities (a download, the Mac's
-  # playback while the phone is its remote). It reads only the snapshot
-  # the app writes into the App Group and fetches covers itself; it does
-  # not link the engine or the UI package.
+  # The widget extension: the two Live Activities (a download, the Mac's
+  # playback while the phone is its remote). No home-screen widgets: those
+  # need an App Group, and an App Group needs a paid team. It does not link
+  # the engine or the UI package.
   AnicatWidgets:
     type: app-extension
     platform: iOS
@@ -174,8 +167,6 @@ targets:
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-    entitlements:
-      path: Entitlements/AnicatWidgets.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios.widgets

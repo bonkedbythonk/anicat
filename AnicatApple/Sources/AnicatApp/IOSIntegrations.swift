@@ -5,13 +5,12 @@
 #if os(iOS) && ANICAT_XCODE
 import ActivityKit
 import SwiftUI
-import WidgetKit
 import AnicatUI
 
-/// The phone-only system surfaces that need the model and the shared
-/// widget types at once: the widget snapshot and the Live Activities.
+/// The phone-only system surface that needs the model and the shared
+/// activity types at once: the Live Activities.
 ///
-/// In the app target rather than in `AnicatUI` because `WidgetSnapshot`
+/// In the app target rather than in `AnicatUI` because the attributes
 /// and the `ActivityAttributes` are compiled into the widget extension
 /// too, and the extension cannot depend on the UI package. A zero-sized
 /// view, like `SystemIntegrationObserver`, so the observation re-evaluates
@@ -24,12 +23,6 @@ struct IOSIntegrations: View {
         Color.clear
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
-            .onChange(of: model.systemIntegrationSignature, initial: true) { _, _ in
-                WidgetSnapshotWriter.write(from: model)
-            }
-            .onChange(of: model.scheduleItems.count) { _, _ in
-                WidgetSnapshotWriter.write(from: model)
-            }
             .onChange(of: model.downloadSignature, initial: true) { _, _ in
                 LiveActivityBridge.shared.syncDownloads(model.libraryDownloads)
             }
@@ -46,39 +39,6 @@ struct IOSIntegrations: View {
     private var remoteSignature: String {
         let s = remote.state
         return "\(remote.status == .connected)|\(s.hasPlayback)|\(s.isPlaying)|\(s.title)|\(s.episodeNumber)|\(Int(s.currentTime / 15))|\(Int(s.duration))"
-    }
-}
-
-/// Writes what the three widgets draw. Nothing happens without the App
-/// Group container: a build signed without the entitlement (a personal
-/// team, or CI) resolves no container, and the widgets show their
-/// placeholders rather than the app failing.
-enum WidgetSnapshotWriter {
-    @MainActor
-    static func write(from model: AppModel) {
-        guard AnicatWidgetShared.snapshotURL != nil else { return }
-        let upNext = model.upNextItems.prefix(6).map {
-            WidgetSnapshot.UpNextEntry(
-                id: $0.id, title: $0.title, episode: $0.nextEpisodeOrChapter,
-                coverURL: $0.thumbnailURL?.absoluteString, isNew: $0.hasNewEpisode)
-        }
-        let airing = model.scheduleItems.prefix(40).map {
-            WidgetSnapshot.AiringEntry(
-                id: $0.id, title: $0.title, episode: $0.episodeNumber, airingAt: $0.airingAt,
-                coverURL: $0.coverImageURL?.absoluteString, isWatching: $0.isWatching)
-        }
-        let reading = model.mangaReading.filter { ($0.progress ?? 0) > 0 }.prefix(6).map {
-            WidgetSnapshot.ReadingEntry(
-                id: $0.id, title: $0.title, nextChapter: ($0.progress ?? 0) + 1,
-                coverURL: $0.coverImageURL?.absoluteString)
-        }
-        let snapshot = WidgetSnapshot(upNext: Array(upNext), airing: Array(airing), reading: Array(reading))
-        do {
-            try snapshot.save()
-            WidgetCenter.shared.reloadAllTimelines()
-        } catch {
-            AppLog.write("[widgets] snapshot write failed: \(error.localizedDescription)")
-        }
     }
 }
 

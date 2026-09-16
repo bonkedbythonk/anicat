@@ -190,6 +190,19 @@ public struct RootTabView: View {
         .onChange(of: model.isPlayerMinimized) { _, minimized in
             OrientationLock.apply(playerOpen: model.activeStreamURL != nil && !minimized)
         }
+        // A quick action, a widget or `anicat://section/<name>` lands in
+        // `AppModel.navigate(to:)`, which only the Mac's sidebar used to
+        // read. The phone's tabs are their own state, so the Search quick
+        // action reached the model and the screen did not move.
+        .onChange(of: model.currentNavSection) { _, section in
+            switch section {
+            case .upNext: tab = .upNext
+            case .library: tab = .library
+            case .manga, .novels: tab = .read
+            case .search: tab = .search
+            case .schedule, .history, .stats, .downloads, .settings: tab = .more
+            }
+        }
         .animation(.sumi(.page), value: model.personPageStack.count)
         .animation(.sumi(.page), value: model.openCinemaPersonId)
         .tint(SumiTheme.indigo)
@@ -1047,6 +1060,8 @@ private struct SearchTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
     @State private var query = ""
+    /// `anicat://search?q=` and the Search quick action write
+    /// `model.searchQuery`; the field here is local, so it has to follow.
     /// Kept here rather than in the engine: a search someone typed on this
     /// phone is not catalog data and has no business in the registry that
     /// syncs a watch history.
@@ -1082,6 +1097,8 @@ private struct SearchTab: View {
                         }
                     }
 
+                    searchField
+
                     if model.appMode == .anime {
                         activeFilterChips
                     }
@@ -1111,17 +1128,15 @@ private struct SearchTab: View {
             // `.searchable` gives the system field, Cancel button and the
             // scroll-to-reveal behaviour for free. The desktop's command
             // palette has no iOS counterpart and is not reproduced.
-            .searchable(text: $query, prompt: filters.placeholder)
-            .onSubmit(of: .search) {
-                remember(query)
-                Task { await runSearch() }
-            }
             // `.task(id:)` is the debounce: a keystroke cancels the sleep
             // of the previous one, so only the pause after typing searches.
             .task(id: query) {
                 try? await Task.sleep(for: Self.debounce)
                 guard !Task.isCancelled else { return }
                 await runSearch()
+            }
+            .onChange(of: model.searchQuery) { _, incoming in
+                if !incoming.isEmpty, incoming != query { query = incoming }
             }
             .onChange(of: filters) { _, _ in
                 Task { await runSearch() }
@@ -1132,6 +1147,46 @@ private struct SearchTab: View {
             }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
+    }
+
+    /// A field of our own, not `.searchable`: that one lives in the
+    /// navigation bar, and the tab roots hide the bar (see `TabHeader`), so
+    /// the phone shipped a Search tab with no visible way to type into it.
+    /// Scroll-to-reveal did not help either, since there was no bar to
+    /// reveal.
+    @ViewBuilder
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(SumiTheme.muted)
+            TextField(filters.placeholder, text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .font(.system(size: 16))
+                .foregroundStyle(SumiTheme.foreground)
+                .onSubmit {
+                    remember(query)
+                    Task { await runSearch() }
+                }
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(SumiTheme.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(SumiTheme.border, lineWidth: 1))
+        .padding(.horizontal, 16)
     }
 
     /// One place decides what a search means, for the debounce, the submit

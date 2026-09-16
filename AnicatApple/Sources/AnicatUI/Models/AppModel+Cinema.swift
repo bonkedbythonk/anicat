@@ -90,9 +90,16 @@ extension AppModel {
         // Series the Light Novels case), so a switch back from Films landed
         // on Manga -- a page the viewer never chose. Settings and Downloads
         // are the same in both worlds and stay.
+        // Mac only. The phone's tabs mean the same thing in both modes
+        // (the header segment is there precisely so a switch inside
+        // Library leaves you in Library), and since RootTabView started
+        // following `currentNavSection` for quick actions, this line made
+        // the Anime / Films & TV segment jump to the Up Next tab.
+        #if os(macOS)
         if !SidebarView.NavSection.systemItems.contains(currentNavSection) {
             currentNavSection = mode == .cinema ? .manga : .upNext
         }
+        #endif
         // `clearDetail`, not `closeDetail`: the stacks hold pages from the
         // world being left, and a back step across modes is exactly the
         // mixing this switch is supposed to prevent.

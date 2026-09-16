@@ -40,6 +40,9 @@ fi
 # because the generator reads license files out of the cargo registry, and on
 # a machine that has not built this lock file yet they are not there.
 (cd "$ROOT/core" && cargo fetch --locked)
+# server/ too: the notices cover the Windows crate, whose Windows-only crates a
+# Mac that has only built core has never downloaded.
+(cd "$ROOT/server" && cargo fetch --locked)
 python3 "$ROOT/scripts/generate-third-party-notices.py" --check
 
 # Ad-hoc, never the machine's own identity. The package script auto-detects an
@@ -70,7 +73,7 @@ else
     {
         echo "## Anicat $VERSION"
         echo
-        echo "Native macOS build (Apple silicon, macOS 15 or later)."
+        echo "Native macOS build (Apple silicon, macOS 15 or later), and a best-effort Windows build."
         echo
         echo "### Changes"
         echo
@@ -100,6 +103,16 @@ fi
     echo "the same app). macOS then refuses to open it once -- click Done, then"
     echo "System Settings > Privacy & Security > Open Anyway. Right-clicking the"
     echo "app and choosing Open has not worked since macOS Sequoia."
+    echo
+    # The Windows zip is not built here: the release-windows workflow starts on
+    # the tag pushed below and attaches it to this release a few minutes later.
+    echo "Windows 10 or 11 (64-bit), best effort -- paste into PowerShell:"
+    echo
+    echo '```powershell'
+    echo 'irm https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_windows.ps1 | iex'
+    echo '```'
+    echo
+    echo "If Windows SmartScreen warns, choose More info, then Run anyway."
     if [ -f "$IPA" ]; then
         echo
         echo "The .ipa is the iPhone build. iPhones install only from the App Store"

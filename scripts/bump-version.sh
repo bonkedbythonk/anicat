@@ -47,8 +47,11 @@ awk -v v="$NEW_VERSION" '
 grep -q "CFBundleShortVersionString: $NEW_VERSION" AnicatApple/project.yml || { echo "AnicatApple/project.yml was not updated" >&2; exit 1; }
 echo "[3/3] AnicatApple/project.yml  -> $NEW_VERSION"
 
-# Cargo records the crate version in the lock file too.
+# Cargo records the crate version in the lock file too -- in the server's lock
+# as well, which depends on core by path. A stale one there fails the notices
+# generator's `cargo metadata --locked` and so refuses the release.
 (cd core && cargo update -p anicat-core --offline >/dev/null 2>&1 || cargo update -p anicat-core >/dev/null)
+(cd server && cargo update -p anicat-core --offline >/dev/null 2>&1 || cargo update -p anicat-core >/dev/null)
 
 echo ""
 echo "All files bumped to $NEW_VERSION."

@@ -1,0 +1,118 @@
+name: Release (Windows)
+
+# Builds the Windows zip and attaches it to the release for the pushed tag.
+# The Mac half of a release is cut on the owner's Mac by publish-release.sh,
+# which pushes the tag and then creates the release; this workflow starts on
+# that tag push, so the two meet at `gh release upload` below.
+#
+# workflow_dispatch builds the same zip from any ref and keeps it as a
+# workflow artifact instead, for trying a build without a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  # gh release upload. Nothing else is written.
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancelled: a second run for the same tag is a re-run, and killing
+  # the first mid-upload leaves a half-written asset on the release.
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package and upload
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      # Read by the server crate at compile time (option_env!). Without it the
+      # build succeeds and Films and TV is simply missing from the page, which
+      # is why a tag build refuses to run without it below.
+      ANICAT_TMDB_PROXY: ${{ vars.ANICAT_TMDB_PROXY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release zip without the proxy is a release with a whole catalog
+      # silently gone, and it would be the one the installer hands out.
+      - name: Check release inputs
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if [ -z "$ANICAT_TMDB_PROXY" ]; then
+            echo "::error::Repository variable ANICAT_TMDB_PROXY is not set (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+          # The zip is named from version.txt and install_windows.ps1 rebuilds
+          # its URL from the tag when the API is rate limited, so the two must
+          # agree or that fallback downloads a 404.
+          version="$(tr -d '[:space:]' < version.txt)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version.txt ($version)."
+            exit 1
+          fi
+
+      # Same toolchain as ci.yml's windows job, which documents why each piece
+      # is there; scripts/setup-windows-dev.ps1 is the local equivalent.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # aws-lc-sys assembles with NASM on Windows and the image lacks it.
+      - uses: ilammy/setup-nasm@v1
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+
+      # The packaging script reuses a cached mpv archive when its hash still
+      # matches. Keyed on the script, which holds the pin, so a bump misses
+      # the cache. Saves depending on SourceForge's mirrors for every re-run.
+      - uses: actions/cache@v4
+        with:
+          path: dist/cache/*.7z
+          key: mpv-${{ hashFiles('scripts/package-anicat-windows.ps1') }}
+
+      # pwsh, the runner's PowerShell 7. 7-Zip is preinstalled on the image.
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package-anicat-windows.ps1
+
+      # Every run, not only workflow_dispatch: if the release never appears
+      # below, the tag's zip is still recoverable from the run instead of
+      # needing a rebuild.
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anicat-windows-x64
+          path: dist/Anicat-*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Upload to the release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          zip="$(ls dist/Anicat-*-windows-x64.zip)"
+          # publish-release.sh pushes the tag before it runs `gh release
+          # create`, and on a manual release someone may create it by hand
+          # later still, so the release can be missing when this step starts.
+          # Uploading to a missing release fails outright. `gh release view`
+          # also finds a draft by its tag, which is what the Mac side creates
+          # by default. 20 minutes, then fail loudly rather than drop the zip.
+          deadline=$(( $(date +%s) + 20 * 60 ))
+          until gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::No release for $tag after 20 minutes. Create it, then re-run this job, or attach the anicat-windows-x64 artifact from this run by hand."
+              exit 1
+            fi
+            echo "Release $tag does not exist yet; waiting 30s"
+            sleep 30
+          done
+          # --clobber: a re-run replaces the asset instead of failing on the
+          # name already being taken.
+          gh release upload "$tag" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Uploaded $(basename "$zip") to $tag"

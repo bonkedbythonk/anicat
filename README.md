@@ -8,7 +8,7 @@
 
   <p>
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
-    <img src="https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
@@ -45,6 +45,7 @@ lists, progress and scores stay right without you touching them.
 ## Table of Contents
 
 - [Install](#install)
+- [Windows](#windows)
 - [Setting it up](#setting-it-up)
 - [Features](#features)
 - [Screenshots](#screenshots)
@@ -128,6 +129,33 @@ release. Please report what you find with the
 template, including the version and the log it asks for. The nightly is the
 release marked Pre-release on the
 [Releases page](https://github.com/bonkedbythonk/anicat/releases).
+
+---
+
+## Windows
+
+There is a Windows build too, for Windows 10 or 11 (64-bit). It runs the same
+engine as the Mac app, so it finds and plays the same things, but the rest is
+simpler: Anicat sits in the system tray, its page opens in your browser, and
+episodes play in [mpv](https://mpv.io), which comes bundled. Anime and films
+and TV only, no reading. It is best effort and gets less testing than the Mac
+app; if something breaks, the log is at `%APPDATA%\Anicat\anicat.log`, and
+Settings on Anicat's page has a button that copies a debug report to paste
+into an [issue](https://github.com/bonkedbythonk/anicat/issues).
+
+Open **PowerShell** (Start menu, type `powershell`), paste this line, and press
+Enter:
+
+```powershell
+irm https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_windows.ps1 | iex
+```
+
+It installs Anicat for your account only (no administrator needed), adds it
+to the Start menu and opens it. Run the same line again to update. The zip it
+installs is also on the [Releases page](https://github.com/bonkedbythonk/anicat/releases)
+for anyone who would rather unpack it by hand. Windows SmartScreen may warn
+the first time, because the program is not signed with a paid certificate:
+choose More info, then Run anyway.
 
 ---
 
